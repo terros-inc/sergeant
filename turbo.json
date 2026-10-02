@@ -10,8 +10,11 @@
     }
   },
   "tasks": {
+    "//#check-file-size": {
+      "cache": false
+    },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": ["^lint", "//#check-file-size"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"]

@@ -18,6 +18,8 @@
   runner) depend only on contracts; the `app` package (`@terros/sergeant`) wires them, and nothing
   depends on it. Packages export their TypeScript source directly (`.ts` imports, no build step).
 - Tests live next to the source they test as `*.test.ts`, never in a separate `test/` folder.
+- Keep files small: a source or test file over 300 lines is a refactor target, and over 600 lines
+  fails CI (`pnpm check-file-size`, run by `turbo run lint`). Split along a natural seam; no allowlist.
 
 ## Simplicity principle
 
