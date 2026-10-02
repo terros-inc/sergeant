@@ -57,6 +57,11 @@ const createComment = `
 `;
 const commentById = `query SergeantCommentById($id: String!) { comment(id: $id) { id } }`;
 const viewerQuery = `query SergeantViewer { viewer { id name } }`;
+const clearDelegate = `
+  mutation SergeantUndelegate($id: String!) {
+    issueUpdate(id: $id, input: { delegateId: null }) { success }
+  }
+`;
 const delegatedQuery = `
   query SergeantDelegated($agent: ID!, $after: String) {
     issues(first: 100, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { nin: ["completed", "canceled"] } } }) {
@@ -113,6 +118,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   viewer(): Promise<{ id: string; name: string }>;
   /** Identifiers of the open issues (not completed or canceled) delegated to `agentUserId`. */
   delegatedIssues(agentUserId: string): Promise<string[]>;
+  /** Removes the issue's delegate: a human's cancel (`sgt task cancel`). Idempotent. */
+  undelegate(issueId: string): Promise<void>;
 } {
   if (!options.apiKey) throw new Error("Linear API key is required");
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -263,6 +270,11 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         after = issues.pageInfo.hasNextPage ? issues.pageInfo.endCursor : null;
       } while (after);
       return identifiers;
+    },
+
+    async undelegate(issueId) {
+      const { issueUpdate } = await request(clearDelegate, { id: issueId }, z.object({ issueUpdate: z.object({ success: z.boolean() }) }));
+      if (!issueUpdate.success) throw new Error("Linear issueUpdate did not succeed");
     },
   };
 }

@@ -5,17 +5,20 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { RepoSlug } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
+import { apiHandler } from "./api.ts";
+import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
-import { runLoop } from "./loop.ts";
+import { runLoop, Wake, type LoopResult } from "./loop.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
 // existing loop (loop.ts), at most `maxTasks` at a time. Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
-// when those changed, so no webhook is needed. Nothing is kept but each task's own `state.json`: a
-// loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
+// when those changed, so no webhook is needed. Nothing is kept but each task's own `state.json` and a
+// recorded API cancel not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
 // delegated, and a restarted process rereads everything and continues, repeating some work. One
 // process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
+// The same server answers the loopback client API (api.ts) that the `sgt` CLI uses.
 
 export type ServiceOptions = {
   enrolledRepositories: RepoSlug[];
@@ -38,6 +41,8 @@ export type ServiceDeps = Ports & {
   reasoner: Reasoner;
   /** Open issues delegated to the V2 agent, by identifier. */
   delegatedIssues: () => Promise<string[]>;
+  /** Removes the issue's delegation to the V2 agent: a human's cancel through the API. */
+  undelegate?: (issueId: string) => Promise<void>;
 };
 
 export type Service = {
@@ -55,12 +60,21 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const active = new Map<string, Promise<void>>();
   // When and how each task loop last ended: a slot goes to the issue that waited longest, and an
   // unchanged ending (an idle task readmitted every intake, say) is not logged again.
-  const ended = new Map<string, { at: number; outcome: string }>();
+  const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string }>();
   let lastIntake: { at: string; error?: string } | undefined;
+  // The open issues delegated to the V2 agent at the last intake, and each task's wake (API).
+  let delegated: string[] = [];
+  const wakes = new Map<string, Wake>();
+  const wakeOf = (issueId: string) => {
+    const wake = wakes.get(issueId) ?? new Wake();
+    wakes.set(issueId, wake);
+    return wake;
+  };
 
   const admit = (issueId: string) => {
     if (active.has(issueId)) return;
-    let outcome = "failed";
+    let outcome: LoopResult["outcome"] | "failed" = "failed";
+    let detail = "";
     const loop = runLoop(
       {
         issueId,
@@ -70,27 +84,54 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
         log: (line) => log(`${issueId}: ${line}`),
         signal: abort.signal,
+        wake: wakeOf(issueId),
       },
       deps,
     )
       .then(
         (result) => {
-          outcome = result.outcome;
+          ({ outcome, detail } = result);
           if (ended.get(issueId)?.outcome !== outcome) log(`${issueId}: loop ended ${outcome}: ${result.detail}`);
         },
         // A failed iteration ends the loop; the next intake admits it again.
-        (e: Error) => log(`${issueId}: loop failed, retrying on a later intake: ${e.message}`),
+        (e: Error) => log(`${issueId}: loop failed, retrying on a later intake: ${(detail = e.message)}`),
       )
       .finally(() => {
         if (active.get(issueId) === loop) active.delete(issueId);
-        ended.set(issueId, { at: Date.now(), outcome });
+        ended.set(issueId, { at: Date.now(), outcome, detail });
       });
     active.set(issueId, loop);
   };
 
+  // A task cancel recorded through the API and not yet confirmed (cancel.ts): driven at once, again
+  // at every intake until the runner confirms its runs stopped, and so after a restart too, whether or
+  // not the issue is still delegated. One step per task at a time, so a request's own drive is the one
+  // that answers it; it is not held to the task limit.
+  const closing = new Map<string, Promise<unknown>>();
+  const serialized = <T>(ref: string, step: () => Promise<T>): Promise<T> => {
+    const next = (closing.get(ref) ?? Promise.resolve()).catch(() => {}).then(step);
+    closing.set(ref, next);
+    void next
+      .finally(() => {
+        if (closing.get(ref) === next) closing.delete(ref);
+        // The task's loop, polled now, finds its delegation gone and ends.
+        if (active.has(ref)) wakeOf(ref).interrupt();
+      })
+      .catch(() => {});
+    return next;
+  };
+  const drive = (ref: string) => driveCancel(opts.stateDir, ref, deps, log);
+
   const intake = async () => {
-    const waiting = [...new Set(await deps.delegatedIssues())].filter((id) => !active.has(id));
-    waiting.sort((a, b) => (ended.get(a)?.at ?? 0) - (ended.get(b)?.at ?? 0));
+    for (const ref of await pendingCancels(opts.stateDir)) {
+      await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
+    }
+    delegated = [...new Set(await deps.delegatedIssues())];
+    if (abort.signal.aborted) return;
+    const waiting = delegated.filter((id) => !active.has(id));
+    // A woken task first, then the one that waited longest.
+    const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
+    waiting.sort((a, b) => woken(a) - woken(b) || (ended.get(a)?.at ?? 0) - (ended.get(b)?.at ?? 0));
     for (const issueId of waiting.slice(0, Math.max(0, maxTasks - active.size))) admit(issueId);
   };
 
@@ -108,6 +149,33 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   })();
 
+  const api = apiHandler({
+    stateDir: opts.stateDir,
+    enrolledRepositories: opts.enrolledRepositories,
+    deps,
+    log,
+    loop: (ref) => {
+      if (active.has(ref)) return { status: "active" };
+      const end = ended.get(ref);
+      if (end) return { status: end.outcome, detail: end.detail };
+      return delegated.includes(ref) ? { status: "queued" } : undefined;
+    },
+    known: () => [...new Set([...active.keys(), ...delegated])],
+    async wake(ref) {
+      wakeOf(ref).request();
+      if (active.has(ref)) return "active";
+      await intake();
+      if (active.has(ref)) return "admitted";
+      if (delegated.includes(ref)) return "queued";
+      wakes.delete(ref);
+      return "not_delegated";
+    },
+    cancelTask: (ref, req) =>
+      serialized(ref, async () => {
+        await recordCancel(opts.stateDir, ref, req, deps);
+        return drive(ref);
+      }),
+  });
   const server =
     opts.port === undefined
       ? undefined
@@ -121,7 +189,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
             const detail = req.url === "/status" && { stopping: abort.signal.aborted, tasks: [...active.keys()], lastIntake };
             res.end(JSON.stringify({ ok, ...detail }));
           } else {
-            res.writeHead(404).end();
+            api(req, res);
           }
         });
   if (server) await new Promise<void>((resolve) => server.listen(opts.port, opts.host ?? "127.0.0.1", resolve));
@@ -133,6 +201,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       abort.abort();
       await intakeLoop;
       await Promise.all(active.values());
+      await Promise.allSettled(closing.values());
       if (server) await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
       await release();
     },

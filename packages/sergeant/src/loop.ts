@@ -38,7 +38,7 @@ import { approvedHead, auditDrawn, implementerOf, type ReviewFacts, reviewFacts 
 // deliberately temporary local store (`state.json`) lets a restarted loop resume; Linear, GitHub, and
 // the runner's own run records stay the authority for everything else.
 
-const State = z.object({
+const TaskState = z.object({
   issueId: z.string(),
   startedAt: z.iso.datetime(),
   turns: z.number().int(),
@@ -81,7 +81,8 @@ const State = z.object({
   /** Per finished review: the later-known facts its last `reviews.jsonl` line carried. */
   reviewsRecorded: z.record(z.string(), z.string()).default({}),
 });
-type State = z.infer<typeof State>;
+export type TaskState = z.infer<typeof TaskState>;
+type State = TaskState;
 
 export type LoopOptions = {
   issueId: string;
@@ -108,6 +109,8 @@ export type LoopOptions = {
   log?: (line: string) => void;
   /** Ends the loop at its next poll, never mid-turn: the service stopping. */
   signal?: AbortSignal;
+  /** A human asking for a turn now (`sgt task wake`). */
+  wake?: Wake;
 };
 
 export type LoopResult = {
@@ -118,7 +121,7 @@ export type LoopResult = {
 export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reasoner }): Promise<LoopResult> {
   const log = opts.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
   const pollMs = (opts.pollSeconds ?? 60) * 1000;
-  const wait = (ms: number) => pause(ms, opts.signal);
+  const wait = (ms: number) => (opts.wake ? opts.wake.sleep(ms, opts.signal) : pause(ms, opts.signal));
   const files = {
     state: join(opts.dir, "state.json"),
     turns: join(opts.dir, "turns.jsonl"),
@@ -307,7 +310,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     const fingerprint = fingerprintOf(situation);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
-    if (running.length > 0 || fingerprint === state.lastFingerprint) {
+    if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
       if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
         return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMinutes)} minutes` };
@@ -317,6 +320,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     if (state.turns >= (opts.maxTurns ?? 12)) return { outcome: "turn_limit", detail: `${state.turns} turns taken` };
+    if (opts.wake) opts.wake.pending = false;
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);
     const { turn, outcomes } = await takeTurn(situation, ports);
@@ -544,14 +548,48 @@ async function observeCompletion(
 
 /** The task's state, or a new task starting now with `window`; a task's stored window always wins. */
 async function loadState(file: string, issueId: string, window: BudgetWindow): Promise<State> {
-  const raw = await readFile(file, "utf8").catch(() => undefined);
   const budget = { window, grants: [] };
-  if (raw === undefined) return State.parse({ issueId, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget });
-  const stored = JSON.parse(raw) as { budget?: object };
-  // A task saved before it had a window adopts the one it is resumed with, once.
-  const state = State.parse({ ...stored, budget: { ...budget, ...stored.budget } });
+  const state =
+    (await readTaskState(file, window)) ??
+    TaskState.parse({ issueId, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget });
   if (state.issueId !== issueId) throw new Error(`${file} belongs to ${state.issueId}, not ${issueId}`);
   return state;
+}
+
+/** A task's saved `state.json`, if it has one. */
+export async function readTaskState(file: string, window: BudgetWindow = DEFAULT_BUDGET): Promise<TaskState | undefined> {
+  const raw = await readFile(file, "utf8").catch(() => undefined);
+  if (raw === undefined) return undefined;
+  const stored = JSON.parse(raw) as { budget?: object };
+  // A task saved before it had a window adopts the one it is resumed with, once.
+  return TaskState.parse({ ...stored, budget: { window, grants: [], ...stored.budget } });
+}
+
+/**
+ * A human's request that a task take a turn now (`sgt task wake`, 11 §2). It ends the loop's current
+ * wait, and the next poll takes a turn even if nothing changed. It skips no hold: running work, an open
+ * question, an exhausted budget, and the turn limit still apply. Only in memory: lost on a restart.
+ */
+export class Wake {
+  /** A turn is owed; cleared when the loop takes one. */
+  pending = false;
+  #interrupt = new AbortController();
+
+  request(): void {
+    this.pending = true;
+    this.interrupt();
+  }
+
+  /** Ends the current wait, or the next one if the loop is not waiting. */
+  interrupt(): void {
+    this.#interrupt.abort();
+  }
+
+  async sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    const interrupt = this.#interrupt;
+    await pause(ms, signal ? AbortSignal.any([signal, interrupt.signal]) : interrupt.signal);
+    if (interrupt.signal.aborted) this.#interrupt = new AbortController();
+  }
 }
 
 /** Sleeps, cut short when `signal` aborts. */

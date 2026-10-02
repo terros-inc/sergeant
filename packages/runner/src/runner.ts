@@ -292,6 +292,15 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       }
       await finish(meta, { runId, role: meta.role, status: "canceled", provider: PROVIDER, model: meta.model, report: null }, {});
     },
+
+    async report(runId) {
+      // Only an ended run's: `report.md` is copied out of the workspace as the run finalizes.
+      if (!(await readRecord(runId))) return undefined;
+      return readFile(join(paths(runId).dir, "report.md"), "utf8").catch((e: NodeJS.ErrnoException) => {
+        if (e.code === "ENOENT") return undefined;
+        throw e;
+      });
+    },
   };
 }
 
