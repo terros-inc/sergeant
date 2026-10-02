@@ -19,6 +19,7 @@ walking skeleton:
 | `packages/runner` (`@terros/sergeant-runner`) | Local primary worker and fresh-context reviewer (UNF-705) |
 | `packages/sergeant` (`@terros/sergeant`) | The app: executes proposed actions through the Gate against the ports, and the polling loop for one explicitly selected, V2-delegated issue that files follow-up issues, can ask a human and wait for the reply, posts one outcome comment after the merge, records review telemetry and audits a sample of skipped reviews, and stays within a task budget (UNF-706, UNF-724, UNF-727, UNF-728, UNF-729, UNF-730); and the long-running service that runs that loop for every delegated issue (UNF-719), with its loopback client API (UNF-713) |
 | `packages/cli` (`@terros/sergeant-cli`) | `sgt`, a thin client of that API (UNF-714) |
+| `packages/mcp` (`@terros/sergeant-mcp`) | `sgt-mcp`, a read-only MCP server over stdio, another thin client of that API (TECH-4940) |
 
 The architecture is designed in pseudocode in [`docs/design/`](docs/design/README.md) (draft 3).
 Code here implements only the parts a ticket asks for. [`AGENTS.md`](AGENTS.md) is the guide for
@@ -222,6 +223,19 @@ the hosted instance until client login exists (UNF-718), forward its loopback po
 aws ssm start-session --target <instance id> --document-name AWS-StartPortForwardingSession \
   --parameters '{"portNumber":["8080"],"localPortNumber":["18080"]}'
 SGT_API_URL=http://127.0.0.1:18080 sgt task list
+```
+
+### The MCP server
+
+`sgt-mcp` (TECH-4940) gives MCP clients the read-only half of `sgt` over stdio: `task_list`,
+`task_show(ref)`, `run_list(task?)`, `run_show(run)`, `run_report(run)`, and `health`. Each tool is
+one GET to the same client API, and returns the API's JSON unchanged as structured content (errors
+as `{"error":{"code","message"}}` tool errors). It cannot wake or cancel anything. It reaches the API
+exactly as `sgt` does (`--api`, else `SGT_API_URL`, else `http://127.0.0.1:8080`, through the SSM
+port-forward for the hosted instance). Register it with a client as a stdio server:
+
+```json
+{ "mcpServers": { "sergeant": { "command": "node", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "http://127.0.0.1:18080"] } } }
 ```
 
 ### UNF-724 live check (after UNF-720)
