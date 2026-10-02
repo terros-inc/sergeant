@@ -6,14 +6,16 @@ import { FiledFollowup } from "./situation.ts";
 
 // The client API (11 §2, UNF-713): what `serve` answers on `/v1` and the `sgt` CLI reads. The server
 // validates request bodies with these schemas and the CLI validates responses with them, so the two
-// cannot drift silently. Only a minimal slice exists: task and run reads, wake, and cancel.
+// cannot drift silently. Only a minimal slice exists: task and run reads, wake, and cancel. Every
+// `/v1` call but `GET /v1/auth/config` names its caller: a Linear user's OAuth token as a bearer
+// (`sgt login`), or, only where `serve --trust-loopback` allows it, an operator on the host itself.
 
 /** A Linear issue identifier, the only task reference there is yet. */
 export const TaskRef = z.string().regex(/^[A-Z][A-Z0-9]*-\d+$/, "expected a Linear issue identifier such as UNF-123");
 export type TaskRef = z.infer<typeof TaskRef>;
 
 export const ApiError = z.object({
-  error: z.object({ code: z.enum(["bad_request", "not_found", "forbidden", "conflict", "unavailable"]), message: z.string() }),
+  error: z.object({ code: z.enum(["bad_request", "unauthorized", "not_found", "forbidden", "conflict", "unavailable"]), message: z.string() }),
 });
 export type ApiError = z.infer<typeof ApiError>;
 
@@ -99,10 +101,17 @@ export const CancelRunRequest = z.strictObject({ reason: z.string().optional() }
 export const CancelRunResponse = z.object({ runId: RunId, task: TaskRef, status: RunSummary.shape.status });
 export type CancelRunResponse = z.infer<typeof CancelRunResponse>;
 
+/** What `sgt login` needs to start a Linear OAuth login: public, served without a caller. */
+export const LoginConfig = z.object({ linear: z.object({ clientId: z.string().min(1) }) });
+export type LoginConfig = z.infer<typeof LoginConfig>;
+
 export const WhoAmI = z.object({
-  /** Nobody until client auth exists (UNF-718): the API answers loopback callers only. */
-  user: z.null(),
-  auth: z.literal("loopback"),
+  /** `linear`: the caller's own Linear OAuth token. `loopback`: an operator on the host (`serve --trust-loopback`). */
+  auth: z.enum(["linear", "loopback"]),
+  /** The Linear user; null for a loopback operator. */
+  user: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable(),
+  /** One of the installation's configured approvers; a loopback operator always is. */
+  approver: z.boolean(),
   enrolledRepositories: z.array(RepoSlug),
 });
 export type WhoAmI = z.infer<typeof WhoAmI>;

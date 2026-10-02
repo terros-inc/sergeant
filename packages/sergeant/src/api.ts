@@ -11,6 +11,7 @@ import {
   type ApiError,
   type CancelRunResponse,
   type CancelTaskResponse,
+  type LoginConfig,
   type RepoSlug,
   type RunDetail,
   type RunList,
@@ -24,6 +25,7 @@ import {
   type WhoAmI,
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
+import { CallerRefused, callerName, type Caller } from "./auth.ts";
 import { budgetStatus } from "./budget.ts";
 import { CancelConflict, cancelRun, runIdsOf, type CancelProgress } from "./cancel.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
@@ -37,10 +39,12 @@ import type { ServiceDeps } from "./service.ts";
 // restart; a run cancel is the runner's own confirmed cancel. Nothing here reasons, merges, or starts
 // work.
 //
-// No client authentication exists yet (UNF-718), so `/v1` answers only a caller on this host: a
-// loopback peer, naming a loopback Host (so a DNS-rebound page cannot reach it), not relayed by a
-// proxy, and posting JSON (so a cross-site form cannot). Anything else is refused, whatever interface
-// `serve` listens on or whatever a proxy in front of it forwards.
+// Every call but `GET /v1/auth/config` (what `sgt login` needs to start) names its caller (auth.ts)
+// and fails closed without one: a Linear user's own access token as a bearer, checked against Linear
+// on every call, or, only under `serve --trust-loopback`, an operator on this host: a loopback peer
+// with no token, naming a loopback Host (so a DNS-rebound page cannot pass), and not relayed by a
+// proxy (so the hosted proxy's callers cannot). Posts must be JSON, so a cross-site form cannot post.
+// Approvers are told apart (`Caller.approver`); no action here is theirs alone yet.
 
 export type ApiControl = {
   stateDir: string;
@@ -53,8 +57,14 @@ export type ApiControl = {
   known(): string[];
   /** Owes the task a turn now: `not_delegated` when there is no loop to run it. */
   wake(ref: TaskRef): Promise<WakeResponse["woke"] | "not_delegated">;
-  /** Records the task's cancel and drives it now (cancel.ts); throws `CancelConflict` when it is not Sergeant's. */
-  cancelTask(ref: TaskRef, req: z.infer<typeof CancelTaskRequest>): Promise<CancelProgress>;
+  /** Records the task's cancel by `by` and drives it now (cancel.ts); throws `CancelConflict` when it is not Sergeant's. */
+  cancelTask(ref: TaskRef, req: z.infer<typeof CancelTaskRequest>, by: string): Promise<CancelProgress>;
+  /** Resolves a bearer token to its caller (auth.ts); absent when the installation configures no `humans`. */
+  callerOf?: (accessToken: string) => Promise<Caller>;
+  /** The Linear OAuth app's public client id, served to `sgt login`. */
+  linearClientId?: string;
+  /** A loopback caller with no token is an operator (`serve --trust-loopback`). */
+  trustLoopback?: boolean;
 };
 
 type Reply = { status: number; json?: unknown; markdown?: string };
@@ -99,25 +109,27 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname.split("/").slice(1);
   if (path[0] !== "v1") return { status: 404 };
-  const forwarded = req.headers.forwarded !== undefined || req.headers["x-forwarded-for"] !== undefined;
-  if (!LOOPBACK_PEER.has(req.socket.remoteAddress ?? "") || !LOOPBACK_HOST.test(req.headers.host ?? "") || forwarded) {
-    throw new Refusal(403, "forbidden", "the Sergeant API answers only callers on its own host until client authentication exists (UNF-718)");
-  }
   const get = req.method === "GET";
   const post = req.method === "POST";
   const [, noun, id, verb] = path;
   if (path.length > 4 || (!get && !post)) throw notFound(url.pathname);
 
+  if (noun === "auth" && id === "config" && verb === undefined && get) {
+    if (!ctl.linearClientId) throw new Refusal(404, "not_found", "this Sergeant has no Linear login configured (installation config `humans`)");
+    return ok({ linear: { clientId: ctl.linearClientId } } satisfies LoginConfig);
+  }
+  const caller = await callerOf(req, ctl);
   if (noun === "whoami" && get && id === undefined) {
-    return ok({ user: null, auth: "loopback", enrolledRepositories: ctl.enrolledRepositories } satisfies WhoAmI);
+    const user = caller.kind === "linear" ? caller.user : null;
+    return ok({ auth: caller.kind, user, approver: caller.approver, enrolledRepositories: ctl.enrolledRepositories } satisfies WhoAmI);
   }
   if (noun === "tasks") {
     if (id === undefined && get) return ok(await listTasks(ctl));
     if (id === undefined) throw notFound(url.pathname);
     const ref = parse(TaskRef, id);
     if (verb === undefined && get) return ok(await showTask(ctl, ref));
-    if (verb === "wake" && post) return ok(await wakeTask(ctl, ref, parse(WakeRequest, await body(req))));
-    if (verb === "cancel" && post) return ok(await cancelTask(ctl, ref, parse(CancelTaskRequest, await body(req))));
+    if (verb === "wake" && post) return ok(await wakeTask(ctl, ref, parse(WakeRequest, await body(req)), caller));
+    if (verb === "cancel" && post) return ok(await cancelTask(ctl, ref, parse(CancelTaskRequest, await body(req)), caller));
   }
   if (noun === "runs") {
     if (id === undefined && get) return ok(await listRuns(ctl, url.searchParams.get("task")));
@@ -125,9 +137,27 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
     const runId = parse(RunId, id);
     if (verb === undefined && get) return ok(await showRun(ctl, runId));
     if (verb === "report" && get) return { status: 200, markdown: await runReport(ctl, runId) };
-    if (verb === "cancel" && post) return ok(await cancelRunOf(ctl, runId, parse(CancelRunRequest, await body(req))));
+    if (verb === "cancel" && post) return ok(await cancelRunOf(ctl, runId, parse(CancelRunRequest, await body(req)), caller));
   }
   throw notFound(url.pathname);
+}
+
+async function callerOf(req: IncomingMessage, ctl: ApiControl): Promise<Caller> {
+  const authorization = req.headers.authorization;
+  if (authorization !== undefined) {
+    const token = /^Bearer (\S+)$/.exec(authorization)?.[1];
+    if (!token) throw new Refusal(401, "unauthorized", "send the Linear login as `Authorization: Bearer <access token>`");
+    if (!ctl.callerOf) throw new Refusal(401, "unauthorized", "this Sergeant has no Linear login configured (installation config `humans`)");
+    return ctl.callerOf(token).catch((e: Error) => {
+      if (e instanceof CallerRefused) throw new Refusal(e.status, e.status === 401 ? "unauthorized" : "forbidden", e.message);
+      throw new Refusal(503, "unavailable", `cannot check the caller's Linear login: ${e.message}`);
+    });
+  }
+  const forwarded = req.headers.forwarded !== undefined || req.headers["x-forwarded-for"] !== undefined;
+  if (ctl.trustLoopback && LOOPBACK_PEER.has(req.socket.remoteAddress ?? "") && LOOPBACK_HOST.test(req.headers.host ?? "") && !forwarded) {
+    return { kind: "loopback", approver: true };
+  }
+  throw new Refusal(401, "unauthorized", "the Sergeant API needs your Linear login: run `sgt login`");
 }
 
 const ok = (json: unknown): Reply => ({ status: 200, json });
@@ -225,10 +255,10 @@ async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetail> {
   };
 }
 
-async function wakeTask(ctl: ApiControl, ref: TaskRef, req: z.infer<typeof WakeRequest>): Promise<WakeResponse> {
+async function wakeTask(ctl: ApiControl, ref: TaskRef, req: z.infer<typeof WakeRequest>, caller: Caller): Promise<WakeResponse> {
   const woke = await ctl.wake(ref);
   if (woke === "not_delegated") throw new Refusal(409, "conflict", `${ref} is not delegated to Sergeant's agent, so it has no loop to wake`);
-  ctl.log(`${ref}: woken through the API (${woke})${req.reason ? `: ${req.reason}` : ""}`);
+  ctl.log(`${ref}: woken through the API by ${callerName(caller)} (${woke})${req.reason ? `: ${req.reason}` : ""}`);
   return { ref, woke };
 }
 
@@ -236,9 +266,9 @@ async function wakeTask(ctl: ApiControl, ref: TaskRef, req: z.infer<typeof WakeR
  * The human's cancel (cancel.ts): recorded before anything changes, then driven now. A cancel whose
  * runs the runner has not yet confirmed stopped answers with them, and `serve` keeps driving it.
  */
-async function cancelTask(ctl: ApiControl, ref: TaskRef, req: z.infer<typeof CancelTaskRequest>): Promise<CancelTaskResponse> {
+async function cancelTask(ctl: ApiControl, ref: TaskRef, req: z.infer<typeof CancelTaskRequest>, caller: Caller): Promise<CancelTaskResponse> {
   await findTask(ctl, ref);
-  const progress = await ctl.cancelTask(ref, req).catch((e: Error) => {
+  const progress = await ctl.cancelTask(ref, req, callerName(caller)).catch((e: Error) => {
     if (e instanceof CancelConflict) throw new Refusal(409, "conflict", e.message);
     throw new Refusal(503, "unavailable", `the cancel of ${ref} is not done; once recorded, Sergeant keeps retrying it: ${e.message}`);
   });
@@ -292,9 +322,9 @@ async function runReport(ctl: ApiControl, runId: RunId): Promise<string> {
 }
 
 /** The runner's confirmed cancel, noted on the issue (cancel.ts). */
-async function cancelRunOf(ctl: ApiControl, runId: RunId, req: z.infer<typeof CancelRunRequest>): Promise<CancelRunResponse> {
+async function cancelRunOf(ctl: ApiControl, runId: RunId, req: z.infer<typeof CancelRunRequest>, caller: Caller): Promise<CancelRunResponse> {
   const task = await ownerOf(ctl, runId);
-  const run = await cancelRun(task, runId, req.reason, ctl.deps, ctl.log).catch((e: Error) => {
+  const run = await cancelRun(task, runId, { reason: req.reason, by: callerName(caller) }, ctl.deps, ctl.log).catch((e: Error) => {
     throw new Refusal(503, "unavailable", `cancel of ${runId} not confirmed, retry: ${e.message}`);
   });
   return { runId, task, status: run.status };

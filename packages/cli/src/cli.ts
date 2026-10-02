@@ -4,6 +4,7 @@ import {
   ApiError,
   CancelRunResponse,
   CancelTaskResponse,
+  LoginConfig,
   RunDetail,
   RunList,
   TaskDetail,
@@ -14,16 +15,20 @@ import {
   type TaskSummary,
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
+import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
 
 // `sgt`, a thin client of the Sergeant 2 API (11 §7, UNF-714): it sends one request per command and
 // prints the answer, concise by default and the API's own JSON with `--json`. Every decision is the
-// server's. There is no client authentication yet (UNF-718): the API answers only callers on its own
-// host, so the one profile is local, reached on the hosted instance through an SSM port-forward.
+// server's. `sgt login` signs the human in with their own Linear login (login.ts), kept per API URL and
+// sent as a bearer on every call; the server checks it against Linear and refuses anything else.
 
 export const DEFAULT_API = "http://127.0.0.1:8080";
 
 export const USAGE = `usage: sgt [--api <url>] [--json] <command>
 
+  login                              sign in with your Linear account (opens a browser)
+  logout                             forget this machine's login for the API
+  whoami                             who the API takes you for
   task list                          tasks Sergeant knows, with status, turns, and runs
   task show <UNF-123>                one task: issue, budget, runs, recent turns
   task wake <UNF-123> [--reason …]   take a turn now
@@ -32,20 +37,23 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   run show <run>
   run report <run>                   the run's raw Markdown report
   run cancel <run> [--reason …]
-  whoami
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
-one through an SSM port-forward). --json prints the API's JSON unchanged, errors included.`;
+one through an SSM port-forward). Each API URL has its own login. --json prints the API's JSON
+unchanged, errors included.`;
 
 export type Io = {
   env: Record<string, string | undefined>;
   out: (text: string) => void;
   err: (text: string) => void;
   fetch?: typeof globalThis.fetch;
+  /** Shows the human a URL in their browser (`sgt login`); it is printed either way. */
+  openUrl?: (url: string) => void;
 };
 
 type Flags = { reason?: string | undefined; task?: string | undefined };
-type Context = { api: string; json: boolean; io: Io; flags: Flags };
+/** `token`: the Linear access token sent as the caller's bearer, when signed in. */
+type Context = { api: string; json: boolean; io: Io; flags: Flags; token?: string | undefined };
 type Command = { args: number; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
 
 class Usage extends Error {}
@@ -124,16 +132,50 @@ const commands: Record<string, Command> = {
       print(ctx, res, () => `${res.runId} (${res.task}) ${res.status === "canceled" ? "canceled" : `already ${res.status}`}`);
     },
   },
+  login: {
+    args: 0,
+    run: async (ctx) => {
+      const { linear } = await call(ctx, "GET", "/v1/auth/config", LoginConfig);
+      const credential = await linearLogin({
+        clientId: linear.clientId,
+        env: ctx.io.env,
+        fetch: ctx.io.fetch ?? globalThis.fetch,
+        open: (url) => {
+          ctx.io.err(`Sign in to Sergeant at ${ctx.api} with Linear. If no browser opens, visit:\n  ${url}\n`);
+          ctx.io.openUrl?.(url);
+        },
+      }).catch((e: Error) => fail(ctx, "unauthorized", e.message));
+      // Kept only once the API accepts it: a login it refuses would fail every later command.
+      const me = await call({ ...ctx, token: credential.accessToken }, "GET", "/v1/whoami", WhoAmI);
+      await saveCredential(ctx.io.env, ctx.api, credential);
+      print(ctx, me, () => `signed in to ${ctx.api} as ${caller(me)}`);
+    },
+  },
+  logout: {
+    args: 0,
+    run: async (ctx) => {
+      const signedOut = (await loadCredential(ctx.io.env, ctx.api)) !== undefined;
+      if (signedOut) await saveCredential(ctx.io.env, ctx.api, undefined);
+      print(ctx, { api: ctx.api, signedOut }, () =>
+        signedOut
+          ? `signed out of ${ctx.api} on this machine; to end the login at Linear too, revoke the Sergeant app in your Linear account settings`
+          : `not signed in to ${ctx.api}`,
+      );
+    },
+  },
   whoami: {
     args: 0,
     run: async (ctx) => {
       const me = await call(ctx, "GET", "/v1/whoami", WhoAmI);
-      print(ctx, me, () =>
-        [`api ${ctx.api}: local profile, no client login yet (the API answers callers on its own host)`, `enrolled ${me.enrolledRepositories.join(", ") || "none"}`].join("\n"),
-      );
+      print(ctx, me, () => [`api ${ctx.api}: ${caller(me)}`, `enrolled ${me.enrolledRepositories.join(", ") || "none"}`].join("\n"));
     },
   },
 };
+
+const caller = (me: WhoAmI) =>
+  me.user ? `${me.user.name} <${me.user.email}>${me.approver ? ", an approver" : ""}` : "an operator on the Sergeant host (serve --trust-loopback)";
+
+const ONE_WORD = ["login", "logout", "whoami"];
 
 /** Runs one `sgt` invocation; returns the exit code: 0 ok, 1 the API refused or failed, 2 usage. */
 export async function main(argv: string[], io: Io): Promise<number> {
@@ -155,7 +197,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       io.out(`${USAGE}\n`);
       return values.help ? 0 : 2;
     }
-    const name = positionals[0] === "whoami" ? "whoami" : positionals.slice(0, 2).join(" ");
+    const name = ONE_WORD.includes(positionals[0] ?? "") ? (positionals[0] ?? "") : positionals.slice(0, 2).join(" ");
     const command = commands[name];
     if (!command) throw new Usage(`unknown command: ${positionals.join(" ")}`);
     const args = positionals.slice(name.split(" ").length);
@@ -164,7 +206,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");
-    await command.run({ api, json, io, flags }, args);
+    const ctx: Context = { api, json, io, flags };
+    if (name !== "login" && name !== "logout") {
+      ctx.token = await currentToken(io.env, api, io.fetch ?? globalThis.fetch).catch((e: Error) => fail(ctx, "unauthorized", e.message));
+    }
+    await command.run(ctx, args);
     return 0;
   } catch (e) {
     if (e instanceof Failure) return 1;
@@ -178,11 +224,13 @@ export async function main(argv: string[], io: Io): Promise<number> {
 /** One API call; a refusal, an unreachable API, or a response outside the contract ends the command. */
 async function request(ctx: Context, method: "GET" | "POST", path: string, body?: object): Promise<string> {
   const fetchFn = ctx.io.fetch ?? globalThis.fetch;
-  const res = await fetchFn(`${ctx.api}${path}`, {
-    method,
-    ...(body && { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
-  }).catch((e: Error) =>
-    fail(ctx, "unavailable", `cannot reach the Sergeant API at ${ctx.api} (${(e.cause as Error | undefined)?.message ?? e.message}). Is serve running there? For the hosted instance, open the SSM port-forward first (v2/README.md).`),
+  const url = new URL(`${ctx.api}${path}`);
+  if (ctx.token && url.protocol !== "https:" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
+    fail(ctx, "bad_request", `refusing to send your Linear login to ${url.host} without HTTPS`);
+  }
+  const headers = { ...(body && { "Content-Type": "application/json" }), ...(ctx.token && { Authorization: `Bearer ${ctx.token}` }) };
+  const res = await fetchFn(url, { method, headers, ...(body && { body: JSON.stringify(body) }) }).catch((e: Error) =>
+    fail(ctx, "unavailable", `cannot reach the Sergeant API at ${ctx.api} (${(e.cause as Error | undefined)?.message ?? e.message}). Is serve running there? For the hosted instance, open the SSM port-forward first (README.md).`),
   );
   const text = await res.text();
   if (res.ok) return text;

@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { RepoSlug } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
+import { isLoopbackHost, type Caller } from "./auth.ts";
 import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import { runLoop, Wake, type LoopResult } from "./loop.ts";
@@ -19,7 +20,7 @@ import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 // recorded API cancel not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
 // delegated, and a restarted process rereads everything and continues, repeating some work. One
 // process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
-// The same server answers the loopback client API (api.ts) that the `sgt` CLI uses.
+// The same server answers the client API (api.ts) that the `sgt` CLI uses.
 
 export type ServiceOptions = {
   enrolledRepositories: RepoSlug[];
@@ -39,6 +40,10 @@ export type ServiceOptions = {
   webhookSecrets?: { linear?: string; github?: string };
   /** The least time between two webhook wakes of one task loop, or of intake (`Wake.nudge`). */
   webhookGapSeconds?: number;
+  /** Who may call the client API with a Linear login, and the client id `sgt login` uses (auth.ts). */
+  humans?: { callerOf: (accessToken: string) => Promise<Caller>; linearClientId: string };
+  /** Trusts a loopback caller with no login as an operator: for development on one machine, refused unless `host` is loopback. */
+  trustLoopback?: boolean;
   log?: (line: string) => void;
 };
 
@@ -58,6 +63,7 @@ export type Service = {
 };
 
 export async function startService(opts: ServiceOptions, deps: ServiceDeps): Promise<Service> {
+  if (opts.trustLoopback && !isLoopbackHost(opts.host ?? "127.0.0.1")) throw new Error(`--trust-loopback is refused on a non-loopback --host (${opts.host})`);
   const log = opts.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
   const release = await lockStateDir(opts.stateDir);
   const maxTasks = opts.maxTasks ?? 2;
@@ -182,11 +188,13 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       wakes.delete(ref);
       return "not_delegated";
     },
-    cancelTask: (ref, req) =>
+    cancelTask: (ref, req, by) =>
       serialized(ref, async () => {
-        await recordCancel(opts.stateDir, ref, req, deps);
+        await recordCancel(opts.stateDir, ref, { ...req, by }, deps);
         return drive(ref);
       }),
+    ...(opts.humans && { callerOf: opts.humans.callerOf, linearClientId: opts.humans.linearClientId }),
+    trustLoopback: opts.trustLoopback ?? false,
   });
   // A webhook ends the wait of each loop watching what it names, and runs an intake for a delegated
   // issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at

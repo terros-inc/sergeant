@@ -18,6 +18,8 @@ import type { ServiceDeps } from "./service.ts";
 const CancelIntent = z.object({
   reason: z.string(),
   requestId: z.string(),
+  /** Who asked (auth.ts `callerName`); absent on a cancel recorded before callers were named. */
+  by: z.string().optional(),
   at: z.iso.datetime(),
   /** The task's runs when its delegation was gone: set once the Linear step is done. */
   runIds: z.array(RunId).optional(),
@@ -51,14 +53,14 @@ async function readIntent(stateDir: string, ref: string): Promise<CancelIntent |
  * Records the cancel of a task: refused for an issue delegated to someone else, and kept as it was
  * when one is already recorded, so a repeat posts nothing more. The caller then drives it.
  */
-export async function recordCancel(stateDir: string, ref: TaskRef, req: { reason: string; requestId?: string | undefined }, deps: ServiceDeps): Promise<void> {
+export async function recordCancel(stateDir: string, ref: TaskRef, req: { reason: string; requestId?: string | undefined; by: string }, deps: ServiceDeps): Promise<void> {
   if (!deps.undelegate) throw new Error("this Sergeant cannot remove a delegation");
   if (await readIntent(stateDir, ref)) return;
   const { issue } = await deps.linear.readConversation(ref);
   if (issue.delegate && issue.delegate.id !== deps.agentUserId) {
     throw new CancelConflict(`${ref} is delegated to ${issue.delegate.name}, not Sergeant's agent`);
   }
-  const intent: CancelIntent = { reason: req.reason, requestId: req.requestId ?? randomUUID(), at: new Date().toISOString() };
+  const intent: CancelIntent = { reason: req.reason, requestId: req.requestId ?? randomUUID(), by: req.by, at: new Date().toISOString() };
   await mkdir(taskDir(stateDir, ref), { recursive: true });
   await writeFile(intentFile(stateDir, ref), JSON.stringify(intent, null, 2));
 }
@@ -86,10 +88,10 @@ export async function driveCancel(stateDir: string, ref: string, deps: ServiceDe
       await deps.linear.postComment({
         issueId: issue.id,
         key: `cancel:${issue.id}:${intent.requestId}`,
-        body: `Sergeant stopped working on this issue at an operator's request: ${intent.reason}\n\nIts delegation is removed and any running work is canceled. Delegate the issue to Sergeant again to resume.`,
+        body: `Sergeant stopped working on this issue at the request of ${intent.by ?? "an operator"}: ${intent.reason}\n\nIts delegation is removed and any running work is canceled. Delegate the issue to Sergeant again to resume.`,
       });
       undelegated = true;
-      log(`${ref}: canceled through the API: ${intent.reason}`);
+      log(`${ref}: canceled through the API by ${intent.by ?? "an operator"}: ${intent.reason}`);
     }
     // Undelegated, the task's loop starts nothing more (the executor re-checks before each start), and
     // a start already past that check finished under the task's lock (service.ts) before this drive
@@ -112,19 +114,25 @@ export async function driveCancel(stateDir: string, ref: string, deps: ServiceDe
 
 /**
  * The runner's own cancel, which returns only once the run is stopped. A note on the issue first says
- * a human canceled it, so the task's next turn knows not to simply start it again; it is posted once
+ * who canceled it, so the task's next turn knows not to simply start it again; it is posted once
  * per run, so a retry after an unconfirmed cancel adds nothing.
  */
-export async function cancelRun(task: TaskRef, runId: RunId, reason: string | undefined, deps: ServiceDeps, log: (line: string) => void): Promise<RunRecord> {
+export async function cancelRun(
+  task: TaskRef,
+  runId: RunId,
+  { reason, by }: { reason: string | undefined; by: string },
+  deps: ServiceDeps,
+  log: (line: string) => void,
+): Promise<RunRecord> {
   const before = await deps.runner.status(runId);
   if (before.status !== "running") return before;
   const { issue } = await deps.linear.readConversation(task);
   await deps.linear.postComment({
     issueId: issue.id,
     key: `cancel-run:${runId}`,
-    body: `An operator canceled Sergeant's ${before.role} run \`${runId}\`${reason ? `: ${reason}` : "."}`,
+    body: `Sergeant's ${before.role} run \`${runId}\` was canceled by ${by}${reason ? `: ${reason}` : "."}`,
   });
   await deps.runner.cancel(runId);
-  log(`${task}: run ${runId} canceled through the API${reason ? `: ${reason}` : ""}`);
+  log(`${task}: run ${runId} canceled through the API by ${by}${reason ? `: ${reason}` : ""}`);
   return deps.runner.status(runId);
 }

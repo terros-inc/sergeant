@@ -65,6 +65,20 @@ export const InstallationConfig = z.strictObject({
   modelTokenSecret: SecretRef,
   /** The installation's human commit identity; never an agent's. */
   gitIdentity: z.strictObject({ name: z.string().min(1), email: z.email() }),
+  /**
+   * Who may use the client API and `sgt` (TECH-4938), each signing in with their own Linear login.
+   * Absent, the API accepts no Linear caller, only `serve --trust-loopback`'s operator on the host.
+   */
+  humans: z
+    .strictObject({
+      /** The installation's Linear OAuth app's client id. Public: served to `sgt login`, never a secret. */
+      linearClientId: z.string().min(1),
+      /** Keys of the Linear teams whose active members may use the API. */
+      teams: z.array(z.string().min(1)).min(1),
+      /** Linear user ids of the approvers; they may use the API whatever their teams. */
+      approvers: z.array(z.string().min(1)).default([]),
+    })
+    .optional(),
   review: z
     .strictObject({
       /** The fraction of merged heads that skipped fresh review which get a nonblocking audit review (06 §8). */
@@ -97,6 +111,8 @@ export type Installation = {
   linear: LinearPort & { delegatedIssues(agentUserId: string): Promise<string[]>; undelegate(issueId: string): Promise<void> };
   /** The V2 agent's Linear user, verified against the token. */
   agentUserId: string;
+  /** The Linear workspace the agent is in: the only one whose users may call the API. */
+  linearOrganizationId: string;
   /** The worker App's GitHub login: only a PR it opened is ever this task's (M2). */
   workerLogin: string;
   github: GitHubPort;
@@ -142,6 +158,7 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
   return {
     linear,
     agentUserId,
+    linearOrganizationId: viewer.organizationId,
     workerLogin,
     github: createGitHubPort({
       token: cachedToken(() => controlPlaneApp.mint({ repositories })),
