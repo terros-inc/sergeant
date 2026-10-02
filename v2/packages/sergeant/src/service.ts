@@ -27,9 +27,9 @@ export type ServiceOptions = {
   /** Each task loop's poll interval, and how long it stays with nothing changing and nothing running. */
   pollSeconds?: number;
   idleMinutes?: number;
-  /** Port for `GET /health`; omitted, no server. 0 picks a free one. */
+  /** Port for `GET /health` and `GET /status`; omitted, no server. 0 picks a free one. */
   port?: number;
-  /** Interface `GET /health` listens on: loopback unless set. */
+  /** Interface the server listens on: loopback unless set. Never publish `/status`. */
   host?: string;
   log?: (line: string) => void;
 };
@@ -112,9 +112,14 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     opts.port === undefined
       ? undefined
       : createServer((req, res) => {
-          if (req.method === "GET" && req.url === "/health") {
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ ok: true, stopping: abort.signal.aborted, tasks: [...active.keys()], lastIntake }));
+          // `/health` is the one path the host's proxy publishes, so it says only whether serve is
+          // healthy: not stopping, and its latest intake succeeded. Task ids and intake errors are
+          // private, served on `/status` to loopback only.
+          const ok = !abort.signal.aborted && !lastIntake?.error;
+          if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
+            res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
+            const detail = req.url === "/status" && { stopping: abort.signal.aborted, tasks: [...active.keys()], lastIntake };
+            res.end(JSON.stringify({ ok, ...detail }));
           } else {
             res.writeHead(404).end();
           }

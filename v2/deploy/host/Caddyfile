@@ -1,0 +1,14 @@
+# HTTPS for the permanent endpoint (certificate from Let's Encrypt over HTTP-01), installed by
+# install.sh. Only serve's /health is exposed; serve itself listens on loopback.
+{
+	admin off
+}
+
+__HOSTNAME__ {
+	handle /health {
+		reverse_proxy 127.0.0.1:8080
+	}
+	handle {
+		respond 404
+	}
+}

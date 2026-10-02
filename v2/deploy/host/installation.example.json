@@ -1,0 +1,16 @@
+{
+  "secrets": { "awsRegion": "us-west-2" },
+  "linear": {
+    "tokenSecret": "sergeant/example/linear-agent-token",
+    "agentUserId": "00000000-0000-0000-0000-000000000000"
+  },
+  "github": {
+    "controlPlaneApp": { "appId": 1000001, "installationId": 2000001, "privateKeySecret": "sergeant/example/control-plane-app-private-key" },
+    "workerApp": { "appId": 1000002, "installationId": 2000002, "privateKeySecret": "sergeant/example/worker-app-private-key" }
+  },
+  "repositories": {
+    "example-org/example-repo": { "mergeMethod": "squash" }
+  },
+  "modelTokenSecret": "sergeant/example/model-token",
+  "gitIdentity": { "name": "Example Human", "email": "human@example.com" }
+}

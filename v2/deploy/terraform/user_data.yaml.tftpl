@@ -1,0 +1,15 @@
+#cloud-config
+# First boot of the Sergeant 2 host (main.tf). Identifiers only: no secret is in user data.
+# No default login user: the host is reached only through SSM, and uid 1000 is the service's (install.sh).
+users: []
+write_files:
+  - path: /etc/sergeant/host.env
+    permissions: "0644"
+    content: |
+      ${indent(6, host_env)}
+  - path: /usr/local/sbin/sergeant-update
+    permissions: "0755"
+    content: |
+      ${indent(6, update_script)}
+runcmd:
+  - [/usr/local/sbin/sergeant-update, "${initial_ref}"]
