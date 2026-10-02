@@ -1,0 +1,20 @@
+{
+  "name": "sergeant",
+  "private": true,
+  "packageManager": "pnpm@10.9.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "oxlint": "^1.86.0",
+    "turbo": "^2.11.6",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  }
+}

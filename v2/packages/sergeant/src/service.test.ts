@@ -1,0 +1,186 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { afterEach, expect, test, vi } from "vitest";
+import type { Conversation } from "@terros/sergeant-contracts";
+import { startService, type ServiceDeps } from "./service.ts";
+
+// The service must make progress with nobody waking a task: every delegated issue gets its turns
+// without exceeding the task limit, a failed poll is retried rather than ending the service, and a
+// restarted process rereads each task and takes a new turn only where Linear changed.
+
+const agent = { id: "agent-v2", name: "Sergeant" };
+const issues = ["UNF-1", "UNF-2", "UNF-3"];
+
+let dir = "";
+const children: ChildProcess[] = [];
+afterEach(async () => {
+  for (const c of children.splice(0)) c.kill("SIGKILL");
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("works every delegated issue unattended within the task limit, and resumes after a restart", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const live = new Map<string, Conversation>(
+    issues.map((id) => [
+      id,
+      {
+        issue: { id: `i-${id}`, identifier: id, url: `https://linear.app/x/issue/${id}`, title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [] },
+        humanComments: [],
+        agentComments: [],
+      },
+    ]),
+  );
+  const turns: { issue: string; comments: number }[] = [];
+  const logs: string[] = [];
+  let inTurn = 0;
+  let maxInTurn = 0;
+  let intakeFailures = 1;
+  let readFailures = 1;
+
+  const deps: ServiceDeps = {
+    agentUserId: agent.id,
+    workerLogin: "sergeant-worker[bot]",
+    delegatedIssues: async () => {
+      if (intakeFailures-- > 0) throw new Error("Linear is down");
+      return issues;
+    },
+    linear: {
+      readConversation: async (id) => {
+        if (id === "UNF-2" && readFailures-- > 0) throw new Error("Linear timed out");
+        return live.get(id) ?? Promise.reject(new Error(`no ${id}`));
+      },
+      postComment: async () => {},
+      createFollowupIssue: async () => ({ identifier: "UNF-9", url: "https://linear.app/x/issue/UNF-9" }),
+    },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
+    reasoner: {
+      async turn(situation) {
+        maxInTurn = Math.max(maxInTurn, ++inTurn);
+        await sleep(20);
+        inTurn--;
+        turns.push({ issue: situation.conversation.issue.identifier, comments: situation.conversation.humanComments.length });
+        return { output: { summary: "nothing to do yet", actions: [] }, model: "m", promptVersion: "p" };
+      },
+    },
+  };
+  const start = () =>
+    startService(
+      { enrolledRepositories: ["o/r"], stateDir: dir, maxTasks: 2, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 0, port: 0, log: (l) => logs.push(l) },
+      deps,
+    );
+
+  const first = await start();
+  await vi.waitFor(() => expect(new Set(turns.map((t) => t.issue))).toEqual(new Set(issues)), { timeout: 5_000 });
+  const health = await fetch(`http://127.0.0.1:${first.port}/health`);
+  expect(health.status).toBe(200);
+  expect(await health.json()).toMatchObject({ ok: true, lastIntake: { at: expect.any(String) } });
+  await first.stop();
+
+  // Three tasks admitted together would overlap in their first turns; only two may run at once.
+  expect(maxInTurn).toBe(2);
+  // Each issue got exactly one turn: an unchanged task readmitted on a later intake takes none.
+  expect(turns.map((t) => t.issue).sort()).toEqual(issues);
+  expect(logs).toContainEqual(expect.stringContaining("intake failed, retrying next interval: Linear is down"));
+  expect(logs).toContainEqual(expect.stringContaining("UNF-2: loop failed, retrying on a later intake: Linear timed out"));
+
+  // A human comments while the process is down; the restarted process rereads every task and takes a
+  // turn only for the one that changed.
+  const unf1 = live.get("UNF-1");
+  if (!unf1) throw new Error("unreachable");
+  live.set("UNF-1", { ...unf1, humanComments: [{ id: "c1", author: { id: "u1", name: "Human" }, createdAt: "2026-10-02T06:01:00.000Z", updatedAt: "2026-10-02T06:01:00.000Z", body: "Also update the README." }] });
+  const second = await start();
+  await vi.waitFor(() => expect(turns).toHaveLength(4), { timeout: 5_000 });
+  await sleep(100);
+  await second.stop();
+  expect(turns.slice(3)).toEqual([{ issue: "UNF-1", comments: 1 }]);
+});
+
+/** Fakes for one delegated issue whose turns hold for `turnMs`, counting turns in flight. */
+function oneIssue(ids: string[], turnMs: number) {
+  const conversation: Conversation = {
+    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [] },
+    humanComments: [],
+    agentComments: [],
+  };
+  const counts = { turns: 0, inTurn: 0, maxInTurn: 0 };
+  const deps: ServiceDeps = {
+    agentUserId: agent.id,
+    workerLogin: "sergeant-worker[bot]",
+    delegatedIssues: async () => ids,
+    linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
+    reasoner: {
+      async turn() {
+        counts.turns++;
+        counts.maxInTurn = Math.max(counts.maxInTurn, ++counts.inTurn);
+        await sleep(turnMs);
+        counts.inTurn--;
+        return { output: { summary: "nothing to do yet", actions: [] }, model: "m", promptVersion: "p" };
+      },
+    },
+  };
+  return { deps, counts };
+}
+
+const options = () => ({ enrolledRepositories: ["o/r" as const], stateDir: dir, maxTasks: 2, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 60, log: () => {} });
+
+test("an issue listed twice in one intake still runs one turn at a time", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const { deps, counts } = oneIssue(["UNF-1", "UNF-1"], 50);
+  const service = await startService(options(), deps);
+  await vi.waitFor(() => expect(counts.turns).toBe(1), { timeout: 5_000 });
+  await sleep(100);
+  await service.stop();
+  expect(counts).toMatchObject({ turns: 1, maxInTurn: 1 });
+});
+
+test("a second service on the same state directory is refused until the first stops", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const { deps, counts } = oneIssue(["UNF-1"], 50);
+  const first = await startService(options(), deps);
+  await expect(startService(options(), deps)).rejects.toThrow(`(pid ${process.pid}) already serves`);
+  await vi.waitFor(() => expect(counts.turns).toBe(1), { timeout: 5_000 });
+  await first.stop();
+  expect(counts.maxInTurn).toBe(1);
+  await (await startService(options(), deps)).stop();
+});
+
+// Separate processes started together, each holding the service if it gets it: exactly one does,
+// both on a fresh state directory and on one a killed holder left its lock files in.
+test("of processes racing for one state directory, exactly one serves it, even over a killed holder's lock", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const script = `
+    import { existsSync } from "node:fs";
+    import { setTimeout as sleep } from "node:timers/promises";
+    import { startService } from ${JSON.stringify(new URL("./service.ts", import.meta.url).href)};
+    const [stateDir, go] = process.argv.slice(1);
+    while (!existsSync(go)) await sleep(5);
+    await startService({ enrolledRepositories: [], stateDir, intakeSeconds: 3600, log: () => {} }, { delegatedIssues: async () => [] }).then(
+      () => console.log("serving"),
+      (e) => (console.log("refused", e.message), process.exit(0)),
+    );
+    setInterval(() => {}, 1000);`;
+  const race = async (n: number, go: string) => {
+    const racers = Array.from({ length: n }, () => spawn(process.execPath, ["--input-type=module", "-e", script, dir, go]));
+    children.push(...racers);
+    const said = racers.map((c) => new Promise<string>((resolve) => c.stdout.once("data", (d: Buffer) => resolve(d.toString()))));
+    await writeFile(go, "");
+    const lines = await Promise.all(said);
+    return { serving: racers.filter((_, i) => lines[i]!.startsWith("serving")), lines };
+  };
+
+  const fresh = await race(16, join(dir, "go-1"));
+  expect(fresh.serving, fresh.lines.join("")).toHaveLength(1);
+  const killed = new Promise((resolve) => fresh.serving[0]!.once("exit", resolve));
+  fresh.serving[0]!.kill("SIGKILL");
+  await killed;
+
+  const afterCrash = await race(16, join(dir, "go-2"));
+  expect(afterCrash.lines.join("")).toMatch(/refused/);
+  expect(afterCrash.serving, afterCrash.lines.join("")).toHaveLength(1);
+}, 30_000);

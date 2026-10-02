@@ -1,0 +1,245 @@
+# 07 — Linear contract
+
+Linear is the durable brief and the human-visible history. Sergeant leans on it heavily: the issue
+says what to do, comments carry questions, answers, and summaries, attachments say which PRs belong
+to the issue, relations carry blockers and follow-ups, delegation says who is responsible, and the
+Done state (usually set by GitHub automation) says the work landed.
+
+Linear stays **concise and useful to humans**. Detailed briefs, reports, transcripts, and Situation
+Reports go to S3; operational logs go to CloudWatch (02 §5). Linear gets summaries and links.
+
+## 1. What Linear owns
+
+| Linear holds | Sergeant's use |
+|---|---|
+| Issue title, description, acceptance section | the brief, copied verbatim into worker and review briefs |
+| Comments (top-level and threads) | human instructions, answers, discussion; Sergeant's concise updates and questions |
+| Delegation (`delegate` = Sergeant's app user) | intake: delegated means "Sergeant is responsible" |
+| Workflow state | started when work begins; Done/Canceled close the task |
+| Relations: blocked by, blocks, related, parent/children | admission waits on blockers; follow-ups are linked |
+| Attachments (GitHub PR links) | **which PRs belong to the task** (08 §4) |
+| Labels | `sergeant:hold` stops merges and new run starts (§12) |
+
+Sergeant never stores a copy of any of these beyond a display cache of the identifier.
+
+## 2. Identity
+
+Sergeant acts in Linear as its own app user (Linear's agent model: issues are *delegated* to it,
+`actor = app`), with the installation's OAuth credential held only in the control-plane zone. Humans
+authenticate to `sgt` with their own Linear identity (ADR-0024/0028, kept). Workers have no Linear
+access.
+
+## 3. What Sergeant posts
+
+| Moment | Comment | Notes |
+|---|---|---|
+| First turn, when work starts | 2–5 lines: what Sergeant understood, the plan at outcome level, which repositories | Skipped for trivial tasks where the PR will say everything |
+| A question for a human | the question (§4) | the only kind that creates a human wait |
+| A genuine blocker Sergeant cannot resolve | what is blocked, what would unblock it | e.g. a required live check no one can run |
+| Budget exhausted | the budget ask (§6) | |
+| Outcome | 2–6 lines: what landed (PR links), known gaps, follow-ups filed, anything a human should check | posted when the work lands or for a non-code outcome |
+| Answers to human comments | when the comment asked something Sergeant can answer | |
+| Post-merge audit findings | one comment listing blocking findings and a report link (06 §8) | guardrail, rare |
+| Stopped | one line when Sergeant stops because of undelegation, cancellation, or `release_task`, listing open PRs | |
+
+Never posted: per-run or per-push updates, CI results, review start/finish notices, raw markers,
+internal ids, transcripts. Linear already shows linked PRs and their status in the issue, so
+"opened PR #12" comments are not needed.
+
+Comments carry no visible markers. Idempotency uses client-supplied comment ids (02 §6; verified as
+`14` V1).
+
+## 4. Questions, answers, and the human wait
+
+**Asking.** `ask_human` posts:
+
+```
+**Question for you** — <one-line question>
+
+<why only a human can decide this, in 1–3 sentences>
+
+Options:
+1. <option> — <consequence>
+2. <option> — <consequence>
+
+Sergeant recommends **1** because <reason>. Reply in your own words; a number is fine.
+```
+
+A blocking question becomes the task's `HumanWait` (01): one at a time. Non-blocking questions are
+asked the same way but create no wait.
+
+**Answering.** Humans answer however they like: a top-level comment or a thread reply, a number, a
+label, a paragraph with the choice on the last line, requested changes plus a choice. Every new or
+edited human comment wakes the task. Sergeant reads it in the next turn; when it reads a reply as the
+answer, the turn's decision names it (`answeredQuestion`, with its interpretation) and the human wait
+clears only then.
+
+**Never silent** (UNF-663, UNF-674, UNF-698). If a reply is ambiguous, Sergeant asks one short
+clarifying question and the wait stays open. Sergeant keeps no per-comment record. Instead, every Linear
+change wakes a turn that sees every human comment, and merges and completion carry the conversation
+revision the proposing turn saw: if a comment or edit arrived since, the Gate refuses and a fresh turn
+decides (M10, X5). A human's "stop" therefore can never be overtaken by a merge decided before it
+(03 §5).
+
+**Reminders.** After `humanWait.remindAfterHours` without an answer, Sergeant is woken to decide
+whether to re-ask more simply, mention someone, continue with its recommendation where that is safe
+and reversible, or leave it.
+
+**Withdrawal.** If the question stops mattering, Sergeant withdraws it with a one-line note.
+
+**Who may answer.** Any human member of the team (not bots or integrations). Budget extensions and
+review waivers need an approver (§6, 06 §6). Firstmate posting through the captain's account counts
+as the captain.
+
+## 5. Intake and admission
+
+A guardrail admits an issue when **all** of these hold (deterministic):
+
+1. its delegate is Sergeant's app user;
+2. its team is in `linear.allowedTeamIds`;
+3. its workflow state type is not completed or canceled;
+4. no open task exists for it;
+5. every issue it is blocked by is completed or canceled;
+6. open tasks < `limits.maxOpenTasks`;
+7. the installation is not paused.
+
+Issues that fail only (5), (6), or (7) stay queued in Linear and are re-checked on every intake pass,
+highest Linear priority first, then oldest delegation. No comment is posted for queueing;
+`sgt task list --queued` shows them with the reason.
+
+Delegation arrives by webhook; a reconcile poll (every 2 minutes, and at startup) catches anything
+missed (S1 ADR-0040's "nothing missed while down", kept). The same poll recomputes each open task's
+conversation revision and wakes the task when it differs from the revision its last completed turn saw,
+so a missed comment webhook or a failed turn never leaves human input unread (03 §5).
+
+On admission the task row is created with the default budget and an empty repository set, and the
+task is woken with `admitted`. The issue moves to the team's first `started` state when the first
+worker starts.
+
+## 6. Budget asks and grants
+
+When the budget is exhausted, Sergeant asks (`ask_human` with `purpose: budget_extension`), or, if it
+cannot, a guardrail posts a fixed version:
+
+```
+**Budget reached** — about 2h of active work used (about $26 of model spend so far, as reported).
+
+Done: <what landed or is ready>. Remaining: <what is left>. PRs: <links with CI/review state>.
+Sergeant recommends **one more window (+2h / +$25)** because <reason>.
+Reply to extend (an approver), or say stop.
+```
+
+An approver's reply that Sergeant reads as an extension becomes `grant_budget`, citing the comment;
+the Gate checks the author and that the comment is newer than the ask (03 §7, K1–K4).
+`sgt task grant` does the same from the CLI.
+
+## 7. Completion: PRs, automation, and Done
+
+In our repositories, merging the PR **is** completing the issue: Linear's GitHub integration moves the
+issue to Done when a PR whose description carries a closing reference (`Fixes UNF-123`, the UNF-697
+convention) is merged. Sergeant designs around that rather than duplicating it.
+
+**Verified 2026-10-02 (UNF-704).** A sandbox PR in a private
+repository carried both
+`Fixes UNF-721` and `Part of UNF-722`. Opening it moved both issues from Backlog to In Progress and
+created `sourceType=github` attachments: `linkKind=closes` for `Fixes`, and
+`linkKind=contributes` for `Part of`. On merge, the `Fixes` issue moved to Done while the `Part of`
+issue stayed In Progress; both attachments changed to `status=merged` with the merge timestamp.
+The temporary file was removed by
+a follow-up PR, and the probe issues were archived. No compensating completion machinery is needed.
+
+- **Single-PR task.** The worker's PR carries `Fixes <IDENTIFIER>`. Sergeant merges it (or a human
+  does, where the repository's merge policy is `human`). Automation moves the issue to Done. Intake
+  sees the issue closed, a guardrail closes the task as `done`, and Sergeant's outcome comment (if
+  any) is the last thing it posts.
+- **Multi-PR task.** Only the PR whose merge completes the work carries `Fixes <IDENTIFIER>`; the
+  others carry `Part of <IDENTIFIER>`, which links without closing. The worker reports this per PR
+  (`closesIssue`), and Sergeant checks it against the PR body before merging (M9, 08 §7). Sergeant
+  merges the non-closing PRs first, in the worker's `mergeOrder`, and the closing PR last. Reasoning
+  decides whether all required work landed by reading the issue, the reports, and the review verdicts;
+  the only deterministic checks are the merge rules.
+- **Repository without automation**, or a non-code outcome (an investigation, a decision, "no change
+  needed"): Sergeant uses `mark_complete`, which posts the outcome and moves the issue to the team's
+  first completed state (X1, X4, X5).
+- **Issue marked Done while work remains** (a human closed it, or a closing PR merged early): the
+  human's or automation's state wins. A guardrail closes the task as `done`, cancels any active runs,
+  and posts one line listing still-open linked PRs. Reopening the issue starts a new episode (§9).
+
+Whether Linear moves an issue with several closing PRs only after all of them merge does not matter
+to this design, because non-final PRs never carry the closing reference.
+
+## 8. Cancellation and undelegation
+
+Handled by guardrails, even while paused, as one closing action whose steps run in order (03 §10):
+cancellation is requested for every active run, delegation is removed where applicable, a note is
+posted, and the task row closes last, so a crash midway can never let the issue be re-admitted with a
+fresh budget.
+
+| Human does | Sergeant does |
+|---|---|
+| Removes Sergeant as delegate | cancel active runs; close the task `canceled (undelegated)`; one-line note with open PRs |
+| Moves the issue to a canceled state | same, `canceled (issue canceled)` |
+| `sgt task cancel UNF-123` | same, plus removes Sergeant's delegation so the issue is not re-admitted |
+| Comments "stop" / "pause this" / "never mind" | Sergeant's reasoning interprets it: `release_task`, or cancel the worker and wait |
+
+Open PRs are left open; the note lists them and humans decide. Branches are left in place.
+
+## 9. Reopening and re-delegation
+
+A closed task is never resumed. If the issue is reopened (moved back to a non-completed state while
+still delegated) or delegated again, intake admits a **new episode**: a new task row with a fresh
+budget. Its first turn sees the whole comment history, earlier PRs (attachments), and Sergeant's own
+earlier summaries, and continues from there.
+
+## 10. Humans editing the issue while work is active
+
+An edit or comment wakes the task; the Situation Report includes a diff of the description and marks new
+comments. Sergeant decides:
+
+- a cosmetic edit: nothing;
+- a clarification or added requirement: `send_run` to the primary worker with the new text verbatim,
+  or, if the worker cannot take messages, a successor with a fresh brief;
+- a change to what the issue requires after a review: a new review of the current head against the new
+  text, because earlier verdicts were against the old text;
+- a change that invalidates the work: cancel the worker, say so in a short comment, and start again.
+
+Before a merge or `mark_complete`, the Gate re-reads the issue and its comments (M10, X5). If the
+conversation revision changed after the proposing turn's snapshot, the action is refused and a fresh
+turn decides with the new text in front of it. There is no locking: a comment arriving in the
+second between that read and GitHub's merge is an accepted race (captain, 2026-10-02).
+
+## 11. Follow-up issues
+
+Only Sergeant creates issues; workers suggest them (`followups[]`). Sergeant creates one when the
+work is a separate outcome, or when out-of-scope work was discovered that someone should do.
+
+- Same team, linked to the origin (`related`, or `blocked_by` when it must wait).
+- Description: why it exists, what was learned, a link back. Written to stand alone.
+- Delegated to Sergeant only when `followups.autoDelegate` is on; otherwise left for human triage.
+- Limits: `maxPerTask` and `maxDepth` (F1–F3); deduplicated by Sergeant's semantic key (02 §6).
+
+Multi-repository work does not need follow-ups: one worker handles all repositories in the task's set
+(S1's UNF-625 machinery is not needed).
+
+## 12. Relations, blockers, and the hold label
+
+- **Blocked at admission**: not admitted until blockers resolve (§5).
+- **Blocker added mid-task**: a fact in the Situation Report. Sergeant decides whether to pause the
+  worker, continue, or ask.
+- **`sergeant:hold` label** on the issue: the Gate refuses `start_worker`, `start_reviewer`, and
+  `merge_pr` (G4, M8) until it is removed. Running work continues unless Sergeant cancels it. A cheap
+  deterministic brake for humans that does not need a comment.
+
+## 13. Optional: agent activity panel
+
+Linear's agent platform can show an agent's activity (thoughts, actions) on the issue without
+comments. If available, Sergeant may publish turn summaries there, keeping comments for §3's moments.
+Not required by this design; recorded as `14` V3.
+
+## 14. When Linear is unavailable
+
+- Intake and reconcile retry with backoff.
+- A turn whose issue fact is `unavailable` is skipped and retried with backoff: there is no point
+  reasoning without the brief.
+- Linear effects fail and are retried by the Effector; abandoned ones surface to Sergeant later.
+- Runs keep working; GitHub-side facts keep flowing.

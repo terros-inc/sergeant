@@ -1,0 +1,29 @@
+{
+  "name": "@terros/sergeant",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Sergeant 2 app: executes proposed actions through the Gate, the per-task loop, and the long-running service. Nothing depends on it.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "canary": "node src/canary.ts",
+    "live-check": "node src/live-check.ts",
+    "serve": "node src/serve.ts"
+  },
+  "dependencies": {
+    "@terros/sergeant-contracts": "workspace:*",
+    "@terros/sergeant-github": "workspace:*",
+    "@terros/sergeant-linear": "workspace:*",
+    "@terros/sergeant-reasoning": "workspace:*",
+    "@terros/sergeant-runner": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
+  }
+}

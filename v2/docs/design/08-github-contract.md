@@ -1,0 +1,165 @@
+# 08 — GitHub contract
+
+GitHub is the source of truth for code, branches, PRs, CI results, required checks, and the hard
+merge boundary (rulesets). The worker does all ordinary git and PR mechanics. Sergeant reads facts,
+links PRs to the Linear issue, and merges under the Gate's rules.
+
+## 1. Two GitHub identities per installation
+
+| App | Held by | Permissions on enrolled repos | Used for |
+|---|---|---|---|
+| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, nothing else |
+| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, checks: read, actions: read, metadata: read. Reviewers: read-only | pushing branches, opening and updating PRs, reading CI logs |
+
+Why two: the default-branch ruleset must let Sergeant merge and must stop a worker from pushing to
+or merging into the default branch. The worker's contents write would let it merge its own green PR,
+so the ruleset requires an approving review: GitHub never lets a PR's author approve it, and only the
+control-plane App supplies that approval, inside the gated merge (§7). The worker therefore needs a
+different actor from the one that approves and merges. Neither App has administration, secrets,
+environments, deployments, `workflows`, or `actions: write` (which could dispatch workflows)
+permissions.
+
+## 2. Repository enrollment
+
+Enrollment is configuration (`sgt config repo add <slug> --purpose ... --merge-policy ...`). Before a
+repository is enabled, the operator confirms this checklist (`sgt doctor repo <slug>` checks what it
+can through the API):
+
+1. Both Apps are installed on the repository.
+2. The default branch has a ruleset that requires a PR, required status checks, and at least one
+   approving review, and the worker App is **not** a bypass actor. (The worker App authors the PR
+   and so cannot approve it; only the control-plane App's gated approval, §7, lets the merge
+   through.)
+3. Required checks run the repository's full automated suite (CI is the test gate, S1 ADR-0041).
+   A repository with no required checks cannot be merged by Sergeant (M5).
+4. **No production secret is reachable by workflows that run for pull requests or non-default
+   branches.** Worker-authored code runs in CI. Production deploy credentials belong in protected
+   environments that only default-branch workflows with approval can use (09 §5).
+5. The Linear GitHub integration is connected, so a merged PR with `Fixes <IDENTIFIER>` closes the
+   issue (07 §7).
+6. `mergePolicy` is set deliberately: `sergeant` or `human`. **If merging to the default branch
+   deploys to production, merging is a production action** and the policy is `human` (09 §5; settled,
+   `14` §A).
+7. Optionally, `alwaysReviewPaths` for paths where a skip should never be accepted (CI config,
+   infrastructure, auth).
+
+## 3. Branches
+
+Runner-owned. Convention, stated in the worker rules (05 §3):
+`sergeant/<IDENTIFIER>-<short-slug>`, one per repository per task. The convention helps humans and
+candidate discovery (§4). It is not used for authority. Workers never push to default branches
+(enforced by the ruleset) and force-push only their own branches.
+
+## 4. Which PRs belong to a task
+
+**The Linear issue's GitHub PR attachments are the association.** They are human-visible and
+human-editable, and survive loss of the ledger.
+
+- **Worker-reported PRs**: when a report names a PR, a guardrail links it (Linear attachment) if the
+  PR exists, its repository is in the task's set, and its author is the worker App (05 §6).
+- **Candidates**: open PRs in the task's repositories whose branch follows the convention for this
+  issue, or whose body references the identifier, but which are not linked, appear in the
+  Situation Report as `candidatePrs`. Sergeant links them with `link_pr` if they belong.
+- **Human-attached PRs**: a human attaching a PR in Linear links it. A human removing the attachment
+  unlinks it. Sergeant respects both.
+- `unlink_pr` removes a PR Sergeant decided does not belong (abandoned approach, superseded PR).
+
+Routing GitHub webhooks to tasks uses an in-memory index from PR to task, built at startup from
+open tasks' attachments and updated on every link and unlink. A webhook for an unknown PR is
+dropped; the reconcile poll covers it.
+
+## 5. Multiple PRs per task
+
+No special orchestration. Each PR has its own CI, its own head, and its own review disposition. The
+worker says how they relate (`note`, `mergeOrder`) and which one closes the issue (`closesIssue`).
+Sergeant merges in that order, and checks that only the last one to merge carries the closing
+reference (M9, 07 §7).
+
+## 6. CI facts
+
+FactReader reads, for each linked PR's head SHA:
+
+- the required checks for the PR's base branch (from rulesets and branch protection);
+- check runs and commit statuses for that exact SHA;
+- an `overall` summary: `passed` (every required check succeeded), `failed` (any required check
+  failed or was cancelled), `pending`, `missing` (a required check has not reported at all yet), or
+  `not_run_conflict` (the PR conflicts with its base, so GitHub does not run `pull_request` CI).
+
+`missing` and `not_run_conflict` are never reported as failures (S1 retro F1: "no CI" read as "CI
+failed" sent a $3 rethink at an unrelated file). For failed checks, `get_ci` returns names, URLs,
+and a bounded log tail, enough for Sergeant to brief a worker. The worker reads full logs itself
+(`actions: read`). Sergeant never re-runs CI; a worker retriggers by pushing.
+
+## 7. Merging
+
+`merge_pr(repo, number, expectedHeadSha)` (carrying the proposing turn's `conversationRevision`, 03 §5) is
+allowed only when every rule holds, checked against
+live GitHub and Linear facts at execution time:
+
+| Rule | Check |
+|---|---|
+| M1 | the repository is in the task's set, enrolled, enabled, and its `mergePolicy` is `sergeant` |
+| M2 | the PR is linked to the task's issue |
+| M3 | the PR is open and not a draft |
+| M4 | the PR's live head SHA equals `expectedHeadSha` |
+| M5 | the base branch has at least one required check, and every required check passed on `expectedHeadSha` |
+| M6 | a `ReviewDisposition` exists for this PR at `expectedHeadSha` and still passes D1–D6 against the evidence recorded by now (06 §6) |
+| M7 | GitHub reports the PR mergeable (`clean`, or `unstable` when only non-required checks failed) |
+| M8 | no `sergeant:hold` label on the issue or the PR, and no outstanding human "changes requested" review on the PR |
+| M9 | if any other PR linked to the task is still open, this PR's body does not carry a closing reference to the issue |
+| M10 | re-read Linear: the current conversation revision (issue title and description, and every human comment's id and `updatedAt`) equals the `conversationRevision` the proposing turn saw. Otherwise refuse and wake the task, so a fresh turn decides with the new input in front of it (no locking; a comment arriving in the instant between this read and the merge is an accepted race) |
+| M11 | no run of the task is running, including one started earlier in the same turn; and once a merge succeeds, no later action in that turn executes |
+
+Plus G1–G3 (not paused, task open, PR belongs to the task). Budget exhaustion does not block a merge:
+merging spends nothing, and landing finished work is the cheapest way to stop.
+
+Each M rule exists for a material risk: M1, M3–M7 and M9 for an unreviewed, red, or wrong-head merge
+(L1, and L2 where a merge deploys); M2 so only this task's PRs are merged; M8 and M10 so a human's hold,
+requested changes, edit, or comment that no turn has seen is never overtaken (L4); M11 so a merged
+task leaves no live worker, reviewer, or follow-up started after it (L3).
+
+Execution: once M1–M11 and G1–G3 pass, the control-plane App submits an `APPROVE` review with
+`commit_id = expectedHeadSha`, then immediately calls GitHub's merge endpoint with
+`sha = expectedHeadSha` and the repository's `mergeMethod`. A failed approval stops the merge. A head
+that moved in between is refused by GitHub (M4 again). On a retry, "already merged at that SHA"
+counts as success. The merged SHA goes in the action result. The Linear issue's Done state follows from
+automation, not from Sergeant (07 §7).
+
+Where `mergePolicy` is `human`, Sergeant gets the PR ready (green, reviewed, disposition recorded),
+says so in Linear once if useful, and waits. A human merge triggers automation as usual.
+
+## 8. Moved bases and conflicts
+
+Facts in the Situation Report: `behindBy`, `mergeable`, `mergeableState`, and `not_run_conflict` CI.
+The worker owns rebasing and conflict resolution (05 §3). Sergeant decides when it matters:
+
+- a running worker: `send_run("main moved and PR #12 now conflicts; rebase it")`;
+- no running worker: start one (or continue the last) with the conflict as its objective;
+- after the rebase, the worker's report says whether the conflict resolution was material
+  (`sinceReviewedSha`), which decides whether another review is needed (06 §3);
+- a conflict that needs product judgment comes back as a question.
+
+Sergeant does not rebase, merge main into branches, or resolve anything itself.
+
+## 9. Webhooks and reconciliation
+
+Webhooks (`pull_request`, `pull_request_review`, `check_suite`, `check_run`, `status`, `push`)
+are verified by signature and translated into wake reasons for the owning task. Nothing else happens
+on a webhook. A reconcile poll every 5 minutes refreshes facts for linked PRs of open tasks, so a
+missed webhook delays a turn but loses nothing.
+
+## 10. Humans on GitHub
+
+- **A human pushes to a worker's PR**: the new head has no worker recommendation. Sergeant starts a
+  reviewer, or an approver waives (06 §3).
+- **A human requests changes**: M8 blocks merge; Sergeant sends the review to the worker.
+- **A human merges or closes a PR**: a fact. A merge with a closing reference completes the issue
+  through automation.
+- **A human approves**: informative; it does not replace the fresh-review disposition unless an
+  approver waives it explicitly in Linear.
+
+## 11. What Sergeant never does on GitHub
+
+Push code, create branches, open PRs, rebase, resolve conflicts, comment on PRs, approve a PR other
+than as the first step of its gated merge (§7), change settings, rulesets, secrets, or workflows, or
+dispatch workflows.

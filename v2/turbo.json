@@ -1,0 +1,22 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "agentGuidance": false,
+  "boundaries": {
+    "tags": {
+      "contracts": { "dependencies": { "allow": [] } },
+      "adapter": { "dependencies": { "allow": ["contracts"] } },
+      "app": { "dependents": { "allow": [] } }
+    }
+  },
+  "tasks": {
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^typecheck"]
+    }
+  }
+}
