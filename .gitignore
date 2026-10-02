@@ -1,19 +1,11 @@
-# Leftovers from Sergeant 1 (Rust) checkouts, kept ignored so build output, local databases, and
-# Terraform state or variables are never committed by accident.
-/target/
-/dist/
-**/*.rs.bk
-*.sqlite
-*.sqlite-journal
-*.sqlite-wal
-*.sqlite-shm
+node_modules/
+.turbo/
+.env.local
+
+# Terraform state and variables are never committed.
 **/.terraform/
-**/.terraform.lock.hcl.bak
 *.tfstate
 *.tfstate.*
 *.tfvars
 crash.log
 crash.*.log
-.sergeant-eval/
-
-.env.local

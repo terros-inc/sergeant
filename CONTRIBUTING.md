@@ -1,8 +1,7 @@
 # Contributing to Sergeant
 
 Thanks for your interest in contributing. This document covers the normal branch/PR contribution
-flow. For the project's working rules, see [`AGENTS.md`](AGENTS.md) and
-[`v2/AGENTS.md`](v2/AGENTS.md).
+flow. For the project's working rules, see [`AGENTS.md`](AGENTS.md).
 
 ## Getting the code
 
@@ -17,8 +16,8 @@ git checkout -b my-change
 
 ## Building and testing locally
 
-Sergeant is a TypeScript workspace in `v2/`. It requires Node.js 24 (`v2/.nvmrc`) and pnpm, pinned
-via `packageManager` (`corepack enable`). From `v2/`, run the same checks CI runs:
+Sergeant is a TypeScript workspace. It requires Node.js 24 (`.nvmrc`) and pnpm, pinned via
+`packageManager` (`corepack enable`). From the repository root, run the same checks CI runs:
 
 ```bash
 pnpm install
@@ -34,8 +33,8 @@ on every edit.
 
 1. Push your branch and open a pull request against `main`.
 2. Describe what changed and why; link any related issue if one exists.
-3. Make sure CI is green — `.github/workflows/v2.yml` runs the checks above on every pull request
-   that touches `v2/`.
+3. Make sure CI is green — `.github/workflows/v2.yml` runs the checks above on every pull
+   request.
 4. Respond to review feedback with additional commits on the same branch; there's no need to
    force-push or squash until a maintainer asks for it.
 
