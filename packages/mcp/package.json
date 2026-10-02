@@ -1,0 +1,24 @@
+{
+  "name": "@terros/sergeant-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "sgt-mcp: a read-only MCP server over stdio, a thin client of the Sergeant 2 API (TECH-4940). Depends only on contracts.",
+  "type": "module",
+  "bin": {
+    "sgt-mcp": "./src/sgt-mcp.ts"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.3.0",
+    "@terros/sergeant-contracts": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.3.0",
+    "vitest": "^5.0.3"
+  }
+}

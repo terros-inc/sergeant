@@ -13,7 +13,7 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | Webhooks | Linear, GitHub | provider signatures | public listener |
 | Runner API | runner adapters and the agents inside runs | run token | loopback (local adapters); not exposed for cloud adapters (§4) |
 | Sergeant's tools | Sergeant's reasoning | in-process | — (03 §4) |
-| MCP | — | — | not in v1; a read-only MCP server for other agents (e.g. Firstmate) is a possible later addition |
+| MCP | other agents (ChatGPT, Firstmate) | host access, like the internal API | stdio, a read-only client of `/v1` (TECH-4940): `task_list`, `task_show`, `run_list`, `run_show`, `run_report`, `health` |
 
 ## 2. Internal and public API
 
