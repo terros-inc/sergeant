@@ -2,14 +2,8 @@ name: v2
 
 on:
   pull_request:
-    paths:
-      - "v2/**"
-      - ".github/workflows/v2.yml"
   push:
     branches: [main]
-    paths:
-      - "v2/**"
-      - ".github/workflows/v2.yml"
 
 jobs:
   v2:
