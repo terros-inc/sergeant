@@ -38,6 +38,7 @@ function fakes(runs: RunRecord[] = []) {
     },
     linear: {
       readConversation: async (id) => (id === "UNF-1" ? conversation : Promise.reject(new Error(`no ${id}`))),
+      moveIssueToStarted: async () => ({ moved: false as const }),
       postComment: async ({ key, body }) => void comments.push({ key, body }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },

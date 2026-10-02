@@ -26,6 +26,13 @@ export interface LinearPort {
     relation: CreateFollowup["relation"];
     key: string;
   }): Promise<{ identifier: string; url: string }>;
+  /**
+   * Moves the issue to its team's first `started` state (lowest position) when its current state type
+   * is `triage`, `backlog`, or `unstarted` — the visible "In Progress" when the first worker starts
+   * (07 §5). A no-op for any other state type (already started, completed, or canceled) and when the
+   * team has no `started` state, so it never moves an issue backward. Returns what it did, for a log.
+   */
+  moveIssueToStarted(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
 }
 
 export interface GitHubPort {

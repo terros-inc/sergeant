@@ -146,6 +146,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // A run's id is saved before the runner is asked to start it (UNF-728).
   const ports: Ports & { reasoner: Reasoner } = {
     ...deps,
+    log,
     async recordRun(runId) {
       state.runIds.push(runId);
       state.unconfirmedStarts.push(runId);

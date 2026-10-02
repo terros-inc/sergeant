@@ -89,6 +89,7 @@ test("a question is posted once, holds every effect until a human replies, and s
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
       linear: {
+        async moveIssueToStarted() { return { moved: false as const }; },
         async readConversation() {
           if (live.agentComments.length > 0 && live.humanComments.length === 0) await onWait(++waits);
           return live;
@@ -171,6 +172,7 @@ test("a turn that asks does nothing else, whatever order reasoning proposed", as
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => situation.conversation,
+      moveIssueToStarted: async () => ({ moved: false as const }),
         postComment: async () => void effects.push("ask"),
         createFollowupIssue: async () => (effects.push("followup"), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
       },
@@ -197,6 +199,7 @@ test("a question whose post failed or went unconfirmed is posted again until Lin
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
       linear: {
+        async moveIssueToStarted() { return { moved: false as const }; },
         async readConversation() {
           if (live.agentComments.length > 0 && ++waits === 2) await writeFile(join(dir, "STOP"), "");
           return live;

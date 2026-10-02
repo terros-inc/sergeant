@@ -83,7 +83,7 @@ test("a blocking finding and then a red check each get a pushed fix on the same 
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); } },
+      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
       github: {
         readPullRequest: async () => pr,
         mergePullRequest: async (req) => {

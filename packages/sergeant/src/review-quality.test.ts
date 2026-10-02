@@ -100,6 +100,7 @@ async function scenario(opts: {
         workerLogin: "sergeant-worker[bot]",
         linear: {
           readConversation: async () => live,
+      moveIssueToStarted: async () => ({ moved: false as const }),
           postComment: async () => void events.push("outcome comment"),
           createFollowupIssue: async () => {
             throw new Error("unused");

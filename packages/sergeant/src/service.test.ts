@@ -52,6 +52,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
         if (id === "UNF-2" && readFailures-- > 0) throw new Error("Linear timed out");
         return live.get(id) ?? Promise.reject(new Error(`no ${id}`));
       },
+      moveIssueToStarted: async () => ({ moved: false as const }),
       postComment: async () => {},
       createFollowupIssue: async () => ({ identifier: "UNF-9", url: "https://linear.app/x/issue/UNF-9" }),
     },
@@ -111,7 +112,7 @@ function oneIssue(ids: string[], turnMs: number) {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
     delegatedIssues: async () => ids,
-    linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")) },
+    linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")), moveIssueToStarted: async () => ({ moved: false as const }) },
     github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
