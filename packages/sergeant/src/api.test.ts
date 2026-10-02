@@ -4,11 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Conversation, RunRecord } from "@terros/sergeant-contracts";
-import { startService, type Service, type ServiceDeps } from "./service.ts";
+import type { LinearUser } from "@terros/sergeant-linear";
+import { linearCallers } from "./auth.ts";
+import { startService, type Service, type ServiceDeps, type ServiceOptions } from "./service.ts";
 
 // The client API's actions must reach the task through the loop's own paths: a wake ends the loop's
 // wait and owes it a turn, a cancel undelegates and cancels the runs until the runner confirms them,
-// and a run cancel is the runner's. Without client auth, only a caller on the service's own host may use any of it.
+// and a run cancel is the runner's. Only a Linear user the installation admits may use any of it, or,
+// under `trustLoopback`, an operator on the service's own host.
 
 const agent = { id: "agent-v2", name: "Sergeant" };
 
@@ -65,8 +68,8 @@ function fakes(runs: RunRecord[] = []) {
 const exists = (file: string) => stat(file).then(() => true, () => false);
 
 // Polls only when woken: an unwoken loop would sit out the hour.
-const start = async (deps: ServiceDeps) => {
-  service = await startService({ enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 3600, port: 0, log: () => {} }, deps);
+const start = async (deps: ServiceDeps, opts: Partial<ServiceOptions> = { trustLoopback: true }) => {
+  service = await startService({ enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 3600, port: 0, log: () => {}, ...opts }, deps);
   return service.port ?? 0;
 };
 
@@ -210,18 +213,72 @@ test("a task cancel stops a run whose start had already passed the delegation ch
 });
 
 // The hosted proxy forwards to loopback, and a browser page can rebind a name to 127.0.0.1 or post a
-// form at it: none of them is an operator on the host.
-test("the API refuses a proxied request, a foreign Host, and a non-JSON post, while /health still answers", async () => {
+// form at it: none of them is an operator on the host, even where loopback is trusted.
+test("a trusted loopback still refuses a proxied request, a foreign Host, and a non-JSON post, while /health still answers", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
   const f = fakes();
   const port = await start(f.deps);
   await vi.waitFor(() => expect(f.turns()).toBe(1), { timeout: 5_000 });
 
-  expect((await call(port, "GET", "/v1/tasks", undefined, { "X-Forwarded-For": "203.0.113.9" })).status).toBe(403);
-  expect((await call(port, "GET", "/v1/tasks", undefined, { Forwarded: "for=203.0.113.9" })).status).toBe(403);
-  expect((await call(port, "GET", "/v1/tasks", undefined, { Host: "sergeant.example.com" })).status).toBe(403);
+  expect((await call(port, "GET", "/v1/tasks", undefined, { "X-Forwarded-For": "203.0.113.9" })).status).toBe(401);
+  expect((await call(port, "GET", "/v1/tasks", undefined, { Forwarded: "for=203.0.113.9" })).status).toBe(401);
+  expect((await call(port, "GET", "/v1/tasks", undefined, { Host: "sergeant.example.com" })).status).toBe(401);
   expect(await call(port, "POST", "/v1/tasks/UNF-1/cancel", "reason=x", { "Content-Type": "text/plain" })).toMatchObject({ status: 400 });
   expect(f.conversation.issue.delegate).not.toBeNull();
   expect((await call(port, "GET", "/health")).status).toBe(200);
-  expect((await call(port, "GET", "/v1/whoami")).json).toEqual({ user: null, auth: "loopback", enrolledRepositories: ["o/r"] });
+  expect((await call(port, "GET", "/v1/whoami")).json).toEqual({ auth: "loopback", user: null, approver: true, enrolledRepositories: ["o/r"] });
+  await service?.stop();
+  service = undefined;
+  await expect(start(f.deps, { trustLoopback: true, host: "0.0.0.0" })).rejects.toThrow(/--trust-loopback/);
+  // `localhost` is resolved when bound, and a resolver may send it anywhere.
+  await expect(start(f.deps, { trustLoopback: true, host: "localhost" })).rejects.toThrow(/--trust-loopback/);
+});
+
+// The API fails closed: with no login, a login Linear rejects or cannot check, or a Linear user the
+// installation does not admit, nothing is read or changed; an admitted user is named where they act.
+test("only an admitted Linear user may call the API, and approvers are told apart", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
+  const f = fakes();
+  const user = (id: string, over: Partial<LinearUser> = {}): LinearUser => ({ id, name: id, email: `${id}@example.com`, active: true, organizationId: "org", teamKeys: ["UNF"], ...over });
+  const users: Record<string, LinearUser> = {
+    member: user("Ada"),
+    approver: user("Grace", { teamKeys: ["OPS", "UNF"] }),
+    // A configured approver outside every allowed team is nobody here: approval adds to membership.
+    strayApprover: user("Linus", { teamKeys: ["OPS"] }),
+    outsider: user("Eve", { teamKeys: ["OPS"] }),
+    elsewhere: user("Mallory", { organizationId: "other-org" }),
+    former: user("Bob", { active: false }),
+    agent: user("agent-v2"),
+  };
+  const callerOf = linearCallers({
+    humans: { linearClientId: "client-1", teams: ["UNF"], approvers: ["Grace", "Linus"] },
+    organizationId: "org",
+    agentUserIds: [agent.id],
+    lookup: async (token) => (token === "linear-down" ? Promise.reject(new Error("Linear API request failed (502)")) : users[token]),
+  });
+  const port = await start(f.deps, { humans: { callerOf, linearClientId: "client-1" } });
+  await vi.waitFor(() => expect(f.turns()).toBe(1), { timeout: 5_000 });
+  const as = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+  expect(await call(port, "GET", "/v1/auth/config")).toEqual({ status: 200, json: { linear: { clientId: "client-1" } } });
+  // Without trustLoopback, a caller on this host is nobody.
+  expect(await call(port, "GET", "/v1/tasks")).toMatchObject({ status: 401, json: { error: { code: "unauthorized" } } });
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" })).status).toBe(401);
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, { Authorization: "Basic eDp5" })).status).toBe(401);
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as("revoked"))).status).toBe(401);
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as("linear-down"))).status).toBe(503);
+  for (const refused of ["outsider", "strayApprover", "elsewhere", "former", "agent"]) {
+    expect(await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as(refused))).toMatchObject({ status: 403, json: { error: { code: "forbidden" } } });
+  }
+  expect(f.conversation.issue.delegate).not.toBeNull();
+
+  expect((await call(port, "GET", "/v1/whoami", undefined, as("member"))).json).toEqual({
+    auth: "linear",
+    user: { id: "Ada", name: "Ada", email: "Ada@example.com" },
+    approver: false,
+    enrolledRepositories: ["o/r"],
+  });
+  expect((await call(port, "GET", "/v1/whoami", undefined, as("approver"))).json).toMatchObject({ user: { id: "Grace" }, approver: true });
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" }, as("member"))).json).toMatchObject({ undelegated: true });
+  expect(f.comments).toEqual([expect.objectContaining({ body: expect.stringContaining("at the request of Ada: wrong approach") })]);
 });

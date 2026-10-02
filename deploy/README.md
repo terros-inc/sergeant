@@ -82,6 +82,25 @@ anything, and the state backend and the provider refuse any other account.
    required status checks, and the worker App is not a bypass actor. Without required checks Sergeant
    never merges there (see the root `README.md`).
 6. **Linear**: the token acts as the agent user in `linear.agentUserId` (`live-check` verifies it).
+7. **Human login** for `sgt` (below): the config's `humans`, and the callback URL on the Linear app.
+
+### Human login for `sgt` (TECH-4938)
+
+People use `sgt` with their own Linear login, never AWS credentials (root `README.md`, The `sgt` CLI).
+`serve` runs without `--trust-loopback` here, so every `/v1` call needs one, an SSM port-forwarded
+call included; `/health` and `/status` are unchanged. Once per installation, before updating the host
+to a version with it (without `humans`, `serve` admits no caller and `sgt` is refused):
+
+1. In the installation's Linear workspace, open the V2 agent's OAuth application (Settings, API,
+   OAuth applications) and add the callback URL `http://localhost:4546/callback`. Note its client id.
+   `sgt login` uses PKCE with `actor=user` and the `read` scope, so no client secret is involved and
+   nothing new goes in Secrets Manager.
+2. Add `humans` to the installation-config parameter: `linearClientId` (that client id, which is
+   public), `teams` (the keys of the Linear teams whose members may use Sergeant), and `approvers`
+   (Linear user ids of members of those teams). Then update.
+3. Check from a laptop through the port-forward: `sgt login`, then `sgt whoami` names you.
+
+The API stays on loopback: publishing it through Caddy is a separate change.
 
 ### Webhooks
 

@@ -17,8 +17,8 @@ walking skeleton:
 | `packages/reasoning` (`@terros/sergeant-reasoning`) | One fresh-context reasoning turn through the local `claude` CLI: Situation Report in, validated proposed actions out |
 | `packages/linear`, `packages/github` (`@terros/sergeant-linear`, `-github`) | Live Linear and GitHub adapters (UNF-704), and GitHub App installation tokens for the control-plane and worker Apps (UNF-720) |
 | `packages/runner` (`@terros/sergeant-runner`) | Local primary worker and fresh-context reviewer (UNF-705) |
-| `packages/sergeant` (`@terros/sergeant`) | The app: executes proposed actions through the Gate against the ports, and the polling loop for one explicitly selected, V2-delegated issue that files follow-up issues, can ask a human and wait for the reply, posts one outcome comment after the merge, records review telemetry and audits a sample of skipped reviews, and stays within a task budget (UNF-706, UNF-724, UNF-727, UNF-728, UNF-729, UNF-730); and the long-running service that runs that loop for every delegated issue (UNF-719), with its loopback client API (UNF-713) |
-| `packages/cli` (`@terros/sergeant-cli`) | `sgt`, a thin client of that API (UNF-714) |
+| `packages/sergeant` (`@terros/sergeant`) | The app: executes proposed actions through the Gate against the ports, and the polling loop for one explicitly selected, V2-delegated issue that files follow-up issues, can ask a human and wait for the reply, posts one outcome comment after the merge, records review telemetry and audits a sample of skipped reviews, and stays within a task budget (UNF-706, UNF-724, UNF-727, UNF-728, UNF-729, UNF-730); and the long-running service that runs that loop for every delegated issue (UNF-719), with its client API (UNF-713) for Linear-authenticated callers (TECH-4938) |
+| `packages/cli` (`@terros/sergeant-cli`) | `sgt`, a thin client of that API (UNF-714), with `sgt login` through Linear (TECH-4938) |
 | `packages/mcp` (`@terros/sergeant-mcp`) | `sgt-mcp`, a read-only MCP server over stdio, another thin client of that API (TECH-4940) |
 
 The architecture is designed in pseudocode in [`docs/design/`](docs/design/README.md) (draft 3).
@@ -66,7 +66,9 @@ Optional `linear.otherAgentUserIds` lists other agents' users (V1's) whose comme
 input. Optional `review.auditSampleRate` (0 to 1, default 0.2) is the fraction of merged heads that
 skipped fresh review which get an audit review. Optional `linear.webhookSecret` and
 `github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
-webhooks; `serve` has each webhook endpoint only when its secret is set.
+webhooks; `serve` has each webhook endpoint only when its secret is set. Optional `humans` says who
+may use `sgt` and the client API, each with their own Linear login (see [The `sgt` CLI](#the-sgt-cli)):
+`{ "linearClientId": "<the Linear OAuth app's client id>", "teams": ["<team key>"], "approvers": ["<Linear user id>"] }`.
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs
 contents and pull requests write, checks and commit statuses read, and metadata read. The worker App
@@ -205,12 +207,19 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   the issue, and cancels every run of the task not confirmed stopped; it answers with any run the runner
   has not yet confirmed, and `serve` keeps driving the recorded cancel at each intake, across a restart,
   until it has. Delegating again resumes the task. A run cancel is the
-  runner's confirmed cancel, noted on the issue so the next turn does not just restart it. There is no
-  client authentication yet (UNF-718): `/v1` answers only a loopback caller naming a loopback `Host`,
-  not relayed by a proxy, and posts must be JSON, so neither a proxy nor a published port exposes it.
+  runner's confirmed cancel, noted on the issue so the next turn does not just restart it. Every
+  `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
+  from `sgt login`, which `serve` reads back from Linear on every call and admits only for an active
+  user of the agent's own Linear workspace, not an agent, in one of `humans.teams`; those listed
+  in `humans.approvers` are approvers too. `/v1/whoami` says whether the caller is an approver. Wakes and cancels are logged
+  with the caller's name, and a cancel's note on the issue names them. Only `GET /v1/auth/config`, the
+  public client id `sgt login` starts with, needs no caller. For development on one machine,
+  `--trust-loopback` also admits a caller on the host with no login, as an operator; it is refused
+  unless `--host` is `127.0.0.1` or `::1` (not a name such as `localhost`), and never covers a request relayed by a proxy or naming a non-loopback
+  `Host`. Posts must be JSON, so a cross-site form cannot post.
 
 ```sh
-pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2]
+pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2] [--trust-loopback]
 ```
 
 To run `serve` on one AWS host behind an HTTPS endpoint, see [`deploy/`](deploy/README.md): Terraform,
@@ -220,22 +229,36 @@ the host install and update scripts, and the runbook.
 
 `sgt` (UNF-714) only calls the client API and prints the answer: concise lines by default, the API's
 own JSON with `--json` (errors too, as `{"error":{"code","message"}}`; exit 1 for an API error, 2 for
-usage). It needs no AWS credentials. Run `sgt --help` for the commands: `task list | show | wake |
-cancel`, `run list | show | report | cancel`, `whoami`.
+usage). It needs no AWS credentials. Run `sgt --help` for the commands: `login`, `logout`, `whoami`,
+`task list | show | wake | cancel`, `run list | show | report | cancel`.
 
 ```sh
 alias sgt="node $PWD/packages/cli/src/sgt.ts"   # from the repository root
+sgt login                                        # once: sign in with Linear in the browser
+sgt whoami
 sgt task show UNF-123                            # serve on this machine: http://127.0.0.1:8080
 ```
 
-The only profile is local: `--api <url>`, else `SGT_API_URL`, else `http://127.0.0.1:8080`. To use
-the hosted instance until client login exists (UNF-718), forward its loopback port over SSM
-(operator AWS access to the instance is needed for the session, never for `sgt` itself):
+The API is `--api <url>`, else `SGT_API_URL`, else `http://127.0.0.1:8080`. `sgt login` signs you in
+as yourself with Linear OAuth (PKCE, no client secret) through the installation's Linear OAuth app,
+whose client id the API serves, and keeps the resulting Linear token, renewed before it expires, for
+that API URL in `~/.config/sergeant/credentials.json` (or under `XDG_CONFIG_HOME`), readable only by
+you. It is the only credential `sgt` holds, and it is sent only over HTTPS or to loopback. The
+browser returns to `http://localhost:4546/callback` (`SGT_LOGIN_PORT` changes the port, and the app
+must list the result). `sgt logout` forgets it on this machine; revoking the app in your Linear
+account settings ends it at Linear.
+
+The installation's Linear OAuth app (the V2 agent's own app; one app per installation is enough) needs
+`http://localhost:4546/callback` among its callback URLs; `sgt login` asks for the `read` scope as the
+user (`actor=user`), and its client id goes in the installation config's `humans.linearClientId`. Until
+the hosted API is published, reach it by forwarding its loopback port over SSM (operator AWS access to
+the instance is needed for the session, never for `sgt` itself), then sign in to that URL:
 
 ```sh
 aws ssm start-session --target <instance id> --document-name AWS-StartPortForwardingSession \
   --parameters '{"portNumber":["8080"],"localPortNumber":["18080"]}'
-SGT_API_URL=http://127.0.0.1:18080 sgt task list
+export SGT_API_URL=http://127.0.0.1:18080
+sgt login && sgt task list
 ```
 
 ### The MCP server
@@ -244,8 +267,9 @@ SGT_API_URL=http://127.0.0.1:18080 sgt task list
 `task_show(ref)`, `run_list(task?)`, `run_show(run)`, `run_report(run)`, and `health`. Each tool is
 one GET to the same client API, and returns the API's JSON unchanged as structured content (errors
 as `{"error":{"code","message"}}` tool errors). It cannot wake or cancel anything. It reaches the API
-exactly as `sgt` does (`--api`, else `SGT_API_URL`, else `http://127.0.0.1:8080`, through the SSM
-port-forward for the hosted instance). Register it with a client as a stdio server:
+at the same URL as `sgt` (`--api`, else `SGT_API_URL`, else `http://127.0.0.1:8080`), but sends no
+Linear login yet, so only a `serve --trust-loopback` on the same machine answers it. Register it with
+a client as a stdio server:
 
 ```json
 { "mcpServers": { "sergeant": { "command": "node", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "http://127.0.0.1:18080"] } } }

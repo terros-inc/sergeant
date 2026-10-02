@@ -3,18 +3,22 @@
 // and writes live Linear and GitHub, launches real model sessions, and costs money. From
 // packages/sergeant, after building the runner image (`docker build -t sergeant-runner:local ../runner/container`):
 //
-//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2]
+//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2] [--trust-loopback]
 //
 // Every repository in the installation config is enrolled. Credentials come from the config's secret
 // references exactly as for the canary (canary.ts). SIGINT or SIGTERM stops intake and lets each task
 // loop end at its next poll; a second signal exits at once. `GET /health` reports only
 // whether it is healthy; `GET /status` adds its tasks and latest intake, for loopback only. With the
-// config's webhook secrets, `POST /webhooks/linear` and `/webhooks/github` wake tasks early.
+// config's webhook secrets, `POST /webhooks/linear` and `/webhooks/github` wake tasks early. The client
+// API admits the Linear users the config's `humans` names (auth.ts); `--trust-loopback` also admits an
+// operator on this host with no login, for development, and is refused unless `--host` is 127.0.0.1 or ::1.
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
+import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner } from "@terros/sergeant-runner";
+import { linearCallers } from "./auth.ts";
 import { connect, loadConfig } from "./config.ts";
 import { startService } from "./service.ts";
 
@@ -30,6 +34,7 @@ const { values } = parseArgs({
     "reasoning-model": { type: "string", default: "opus" },
     "worker-model": { type: "string", default: "opus" },
     "reviewer-model": { type: "string", default: "opus" },
+    "trust-loopback": { type: "boolean", default: false },
   },
 });
 
@@ -52,6 +57,18 @@ const service = await startService(
     intakeSeconds: count(values["intake-seconds"], "--intake-seconds", 1),
     pollSeconds: count(values["poll-seconds"], "--poll-seconds", 1),
     webhookSecrets: installation.webhookSecrets,
+    trustLoopback: values["trust-loopback"],
+    ...(config.humans && {
+      humans: {
+        linearClientId: config.humans.linearClientId,
+        callerOf: linearCallers({
+          humans: config.humans,
+          organizationId: installation.linearOrganizationId,
+          agentUserIds: [installation.agentUserId, ...config.linear.otherAgentUserIds],
+          lookup: (token) => linearUser(token),
+        }),
+      },
+    }),
   },
   {
     linear: installation.linear,

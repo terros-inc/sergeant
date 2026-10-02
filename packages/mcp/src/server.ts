@@ -7,8 +7,8 @@ import { z } from "zod";
 // answer validated against the API contract and returned unchanged as structured content, so it
 // carries exactly what `sgt task show` and `sgt run show` print, with ids and URLs, and no
 // transcripts. Every decision and lookup stays the server's, and it sends no POST, so it has no
-// mutation authority. The API answers only callers on its own host (UNF-718), so this runs there
-// too, over stdio.
+// mutation authority. It sends no Linear login yet (TECH-4938), so only a `serve --trust-loopback`
+// on its own host answers it; it runs there, over stdio.
 
 export const DEFAULT_API = "http://127.0.0.1:8080";
 

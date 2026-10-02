@@ -14,5 +14,10 @@
     "example-org/example-repo": { "mergeMethod": "squash" }
   },
   "modelTokenSecret": "sergeant/example/model-token",
-  "gitIdentity": { "name": "Example Human", "email": "human@example.com" }
+  "gitIdentity": { "name": "Example Human", "email": "human@example.com" },
+  "humans": {
+    "linearClientId": "0123456789abcdef0123456789abcdef",
+    "teams": ["ENG"],
+    "approvers": ["00000000-0000-0000-0000-000000000001"]
+  }
 }
