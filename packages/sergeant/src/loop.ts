@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import {
   BudgetStatus,
   checkBudget,
@@ -21,12 +20,14 @@ import {
 } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { z } from "zod";
+import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
 import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
 import { askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
 import { takeTurn } from "./index.ts";
 import { outcomeComment } from "./outcome.ts";
 import { openQuestion } from "./question.ts";
-import { approvedHead, auditDrawn, implementerOf, type ReviewFacts, reviewFacts } from "./review-quality.ts";
+import { type ReviewFacts, reviewFacts } from "./review-quality.ts";
+import { pause, type Wake } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
 
 // The walking skeleton's loop for one explicitly selected issue (UNF-706): poll, build a fresh
@@ -419,148 +420,6 @@ function fingerprintOf(s: SituationReport): string {
 const describePr = (p: PullRequestFacts) =>
   `${p.repo}#${p.number} ${p.state} @${p.headSha.slice(0, 12)} checks ${p.checks.required.map((c) => `${c.name}=${c.state}`).join(",") || "none"}`;
 
-/**
- * Posts the merge's outcome comment once, as the V2 agent, and only while the issue is still
- * delegated to it. Keyed by issue and merge, so a crash before `state.json` records it cannot post a
- * second one. Returns a result only when the loop must stop instead. Deliberately not held to the
- * budget (B1): it reports a merge that already happened, and withholding it would hide that merge
- * from the human.
- */
-async function postOutcome(
-  merged: NonNullable<State["merged"]>,
-  opts: LoopOptions,
-  deps: Ports,
-  log: (line: string) => void,
-  save: () => Promise<void>,
-): Promise<LoopResult | undefined> {
-  if (!merged.outcome || merged.outcomePostedAt) return undefined;
-  const { issue } = await deps.linear.readConversation(opts.issueId);
-  const delegation = checkDelegation(issue, deps.agentUserId);
-  if (!delegation.allowed) {
-    return { outcome: "stopped", detail: `${merged.repo}#${merged.number} merged; outcome not posted: ${delegation.reason}` };
-  }
-  const key = `outcome:${issue.id}:${merged.repo}#${merged.number}:${merged.mergedSha}`;
-  await deps.linear.postComment({ issueId: issue.id, body: merged.outcome, key });
-  merged.outcomePostedAt = new Date().toISOString();
-  await save();
-  log(`posted the outcome comment on ${issue.identifier}`);
-  return undefined;
-}
-
-const mergedHead = (m: NonNullable<State["merged"]>) => ({ repo: m.repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha });
-
-/**
- * Once per merge, the audit draw (06 §8). A merged head no fresh review approved skipped review; a
- * stable sample of those gets a separate fresh reviewer of exactly that head, started only while the
- * issue is still delegated (A1). Its run id comes from the head, so a restart before the save starts
- * no second audit.
- */
-async function drawAudit(
-  merged: NonNullable<State["merged"]>,
-  runIds: RunId[],
-  opts: LoopOptions,
-  deps: Ports,
-  log: (line: string) => void,
-  save: () => Promise<void>,
-  budgetOf: (runs: RunRecord[], unknownRuns: number) => BudgetStatus,
-): Promise<void> {
-  if (merged.auditDrawnAt) return;
-  const runs = await Promise.all(runIds.map((id) => deps.runner.status(id)));
-  const head = mergedHead(merged);
-  if (!approvedHead(runs, head) && auditDrawn(opts.auditSampleRate ?? 0.2, head)) {
-    const conversation = await deps.linear.readConversation(opts.issueId);
-    const delegation = checkDelegation(conversation.issue, deps.agentUserId);
-    // An audit is a new run, so it starts only within the task's budget too (B1, UNF-728).
-    const refused = delegation.allowed ? checkBudget(budgetOf(runs, 0), new Date()) : delegation;
-    if (!refused.allowed) {
-      log(`audit of ${head.repo}#${head.number} not started: ${refused.reason}`);
-    } else {
-      const runId = RunId.parse(`run_audit-${head.headSha}`);
-      const skipped = implementerOf(runs, head)?.reported?.review.reason ?? "no reason on record";
-      // A start that fails costs one audit sample, not the task: the merge is already done.
-      await deps.runner
-        .start({
-          runId,
-          role: "reviewer",
-          conversation,
-          repositories: [head.repo],
-          subject: [{ repo: head.repo, number: head.number, headSha: head.headSha }],
-          focus: auditFocus(head, skipped),
-        })
-        .then(
-          () => {
-            merged.audit = { runId };
-            log(`audit review ${runId} started for ${head.repo}#${head.number} (nonblocking: the merge is done)`);
-          },
-          (e: Error) => log(`audit review ${runId} failed to start: ${e.message}`),
-        );
-    }
-  }
-  merged.auditDrawnAt = new Date().toISOString();
-  await save();
-}
-
-const auditFocus = (head: { headSha: string; mergedSha: string }, skipped: string) =>
-  `Audit review (nonblocking). This head was merged as ${head.mergedSha} without a fresh review: the worker judged
-review unnecessary ("${skipped}"). Sergeant audits a random sample of such skips to measure whether they were
-safe. Review it exactly as you would before a merge. Your blocking findings become follow-up work; the merge is
-not undone.`;
-
-/**
- * After the merge and its outcome comment: waits for every review still running (a sampled audit, or
- * a required review the merge did not need) so its facts are recorded when it finishes.
- */
-async function finishReviews(
-  merged: NonNullable<State["merged"]>,
-  result: LoopResult,
-  ctx: { runIds: RunId[]; recordReviews: (runs: RunRecord[]) => Promise<void>; stop: string; opts: LoopOptions; deps: Ports; log: (line: string) => void },
-): Promise<LoopResult> {
-  const ids = merged.audit ? [...ctx.runIds, merged.audit.runId] : ctx.runIds;
-  for (;;) {
-    const runs = await Promise.all(ids.map((id) => ctx.deps.runner.status(id)));
-    await ctx.recordReviews(runs);
-    const running = runs.filter((r) => r.role === "reviewer" && r.status === "running").map((r) => r.runId);
-    const audit = runs.find((r) => r.runId === merged.audit?.runId);
-    if (running.length === 0) {
-      if (audit?.role !== "reviewer") return result;
-      const f = reviewFacts(audit, { trigger: "audit", issue: ctx.opts.issueId, runs, merged: mergedHead(merged) });
-      const verdict = f.verdict ?? `${audit.status}, no report`;
-      return { ...result, detail: `${result.detail}; audit ${audit.runId}: ${verdict}, ${f.mustFix.length} must-fix${f.followUp ? " (follow-up logged)" : ""}` };
-    }
-    if ((await exists(ctx.stop)) || ctx.opts.signal?.aborted) return { ...result, detail: `${result.detail}; review ${running.join(", ")} still running` };
-    ctx.log(`waiting: review ${running.join(", ")} running (nonblocking: the merge is done)`);
-    await pause((ctx.opts.pollSeconds ?? 60) * 1000, ctx.opts.signal);
-  }
-}
-
-/** An audit's must-fix findings on merged code, kept for a human to act on. */
-async function logFollowUp(f: ReviewFacts, run: RunRecord, file: string, log: (line: string) => void): Promise<void> {
-  const followUp = { at: f.at, issue: f.issue, merged: f.merged, auditRunId: run.runId, verdict: f.verdict, mustFix: f.mustFix, summary: run.report?.summary };
-  await appendFile(file, `${JSON.stringify(followUp)}\n`);
-  const where = f.merged ? `${f.merged.repo}#${f.merged.number} merged as ${f.merged.mergedSha}` : "the merged head";
-  log(`AUDIT FOLLOW-UP ${f.issue}: ${where} has ${f.mustFix.length} must-fix finding(s) (${f.mustFix.map((m) => m.id).join(", ")}) from audit ${run.runId}; recorded in ${file}`);
-}
-
-/** Step 13: whether Linear reaches Done through the GitHub integration, observed, not assumed. */
-async function observeCompletion(
-  merged: NonNullable<State["merged"]>,
-  opts: LoopOptions,
-  deps: Ports,
-  log: (line: string) => void,
-): Promise<LoopResult> {
-  const deadline = Date.parse(merged.at) + (opts.completionWaitMinutes ?? 10) * 60_000;
-  let seen = "";
-  for (;;) {
-    const { issue } = await deps.linear.readConversation(opts.issueId);
-    if (issue.state !== seen) log(`after merge: ${issue.identifier} is ${(seen = issue.state)}`);
-    const detail = `${merged.repo}#${merged.number} merged as ${merged.mergedSha} at ${merged.at}; ${issue.identifier} is ${issue.state}`;
-    if (issue.state === "Done") return { outcome: "done", detail };
-    if (Date.now() > deadline) return { outcome: "merged_not_done", detail };
-    if (opts.signal?.aborted) return { outcome: "stopped", detail };
-    await pause(15_000, opts.signal);
-  }
-}
-
 /** The task's state, or a new task starting now with `window`; a task's stored window always wins. */
 async function loadState(file: string, issueId: string, window: BudgetWindow): Promise<State> {
   const budget = { window, grants: [] };
@@ -579,59 +438,3 @@ export async function readTaskState(file: string, window: BudgetWindow = DEFAULT
   // A task saved before it had a window adopts the one it is resumed with, once.
   return TaskState.parse({ ...stored, budget: { window, grants: [], ...stored.budget } });
 }
-
-/**
- * A human's request that a task take a turn now (`sgt task wake`, 11 §2). It ends the loop's current
- * wait, and the next poll takes a turn even if nothing changed. It skips no hold: running work, an open
- * question, an exhausted budget, and the turn limit still apply. Only in memory: lost on a restart.
- */
-export class Wake {
-  /** A turn is owed; cleared when the loop takes one. */
-  pending = false;
-  /**
-   * What the loop last read, as `watchKey` spells it: its Linear issue's id and its PRs and their
-   * heads. A webhook naming one ends the loop's wait (`interrupt`) without owing a turn.
-   */
-  watched: string[] = [];
-  #interrupt = new AbortController();
-  #lastNudge = 0;
-  #trailing: NodeJS.Timeout | undefined;
-
-  request(): void {
-    this.pending = true;
-    this.interrupt();
-  }
-
-  /** Ends the current wait, or the next one if the loop is not waiting. */
-  interrupt(): void {
-    this.#interrupt.abort();
-  }
-
-  /**
-   * A webhook's wake: ends the wait at most once per `gapMs`. Another in that window marks it to end
-   * once more when the window closes, so a burst or a replayed delivery costs at most one reread per
-   * window, and an event that arrives right after another is still seen without waiting for a poll.
-   */
-  nudge(gapMs: number): void {
-    if (this.#trailing) return;
-    const fire = () => {
-      this.#trailing = undefined;
-      this.#lastNudge = Date.now();
-      this.interrupt();
-    };
-    const wait = this.#lastNudge + gapMs - Date.now();
-    if (wait <= 0) fire();
-    else this.#trailing = setTimeout(fire, wait).unref();
-  }
-
-  async sleep(ms: number, signal?: AbortSignal): Promise<void> {
-    const interrupt = this.#interrupt;
-    await pause(ms, signal ? AbortSignal.any([signal, interrupt.signal]) : interrupt.signal);
-    if (interrupt.signal.aborted) this.#interrupt = new AbortController();
-  }
-}
-
-/** Sleeps, cut short when `signal` aborts. */
-const pause = (ms: number, signal?: AbortSignal) => sleep(ms, undefined, { signal }).catch(() => {});
-
-const exists = (path: string) => stat(path).then(() => true, () => false);

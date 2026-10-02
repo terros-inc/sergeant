@@ -8,7 +8,8 @@ import { apiHandler } from "./api.ts";
 import { isLoopbackHost, type Caller } from "./auth.ts";
 import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
-import { runLoop, Wake, type LoopResult } from "./loop.ts";
+import { runLoop, type LoopResult } from "./loop.ts";
+import { Wake } from "./wake.ts";
 import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow

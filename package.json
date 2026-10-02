@@ -8,7 +8,8 @@
   "scripts": {
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "check-file-size": "node scripts/check-file-size.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
