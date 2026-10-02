@@ -88,9 +88,11 @@ test("a wake makes an unchanged task take a turn now, and a task without a deleg
   await vi.waitFor(() => expect(f.turns()).toBe(1), { timeout: 5_000 });
 
   expect(await call(port, "POST", "/v1/tasks/UNF-1/wake", { reason: "look again" })).toEqual({ status: 200, json: { ref: "UNF-1", woke: "active" } });
-  await vi.waitFor(() => expect(f.turns()).toBe(2), { timeout: 5_000 });
-  const { json } = await call(port, "GET", "/v1/tasks");
-  expect(json.tasks).toEqual([expect.objectContaining({ ref: "UNF-1", status: "active", turns: 2, lastSummary: "turn 2: nothing to do yet" })]);
+  // The turn is saved just after the reasoner answers.
+  await vi.waitFor(async () => {
+    const { json } = await call(port, "GET", "/v1/tasks");
+    expect(json.tasks).toEqual([expect.objectContaining({ ref: "UNF-1", status: "active", turns: 2, lastSummary: "turn 2: nothing to do yet" })]);
+  }, { timeout: 5_000 });
 
   expect(await call(port, "POST", "/v1/tasks/UNF-7/wake", {})).toMatchObject({ status: 409, json: { error: { code: "conflict" } } });
 });
