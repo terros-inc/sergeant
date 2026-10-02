@@ -97,7 +97,7 @@ to a version with it (without `humans`, `serve` admits no caller and `sgt` is re
    nothing new goes in Secrets Manager.
 2. Add `humans` to the installation-config parameter: `linearClientId` (that client id, which is
    public), `teams` (the keys of the Linear teams whose members may use Sergeant), and `approvers`
-   (Linear user ids). Then update.
+   (Linear user ids of members of those teams). Then update.
 3. Check from a laptop through the port-forward: `sgt login`, then `sgt whoami` names you.
 
 The API stays on loopback: publishing it through Caddy is a separate change.

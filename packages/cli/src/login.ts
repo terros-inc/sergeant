@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -49,8 +49,15 @@ export async function saveCredential(env: Env, api: string, credential: Credenti
   else delete all[api];
   const file = credentialsFile(env);
   await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-  await writeFile(file, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 });
-  await chmod(file, 0o600);
+  // A new file created 0600 then renamed over the old one: writing into an existing file keeps its
+  // mode, so the token would land in a file others may read.
+  const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await writeFile(temp, `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    await rename(temp, file);
+  } finally {
+    await rm(temp, { force: true });
+  }
 }
 
 const TokenResponse = z.object({ access_token: z.string().min(1), refresh_token: z.string().optional(), expires_in: z.number().optional() });

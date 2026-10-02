@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -119,7 +119,7 @@ test("a refusal, an off-contract answer, and an unreachable API each exit 1 with
 
 // `sgt login` against a fake Linear: the PKCE proof travels with the code and no client secret exists,
 // a redirect this login did not start is refused, the login is kept where only its owner can read
-// it, and every later call sends it, renewed before it expires.
+// it, even when it replaces a file others could read, and every later call sends it, renewed before it expires.
 test("login signs in through the browser with PKCE, keeps the token privately, and sends it renewed", async () => {
   const me = { auth: "linear", user: { id: "u1", name: "Ada", email: "ada@example.com" }, approver: false, enrolledRepositories: ["o/r"] };
   const { api, seen } = await fakeApi({ "GET /v1/auth/config": { json: { linear: { clientId: "client-1" } } }, "GET /v1/whoami": { json: me }, "GET /v1/tasks": { json: { tasks: [] } } });
@@ -158,9 +158,15 @@ test("login signs in through the browser with PKCE, keeps the token privately, a
   const saved = JSON.parse(await readFile(credentials, "utf8"));
   saved[api].expiresAt = new Date(Date.now() + 60_000).toISOString();
   await writeFile(credentials, JSON.stringify(saved));
+  // A login file others can read (left by an older sgt, or a careless copy) never receives the renewed token.
+  await chmod(credentials, 0o644);
+  const broad = await open(credentials, "r");
   await sgtWith({ fetch }, api, "task", "list");
   expect(tokenRequests.at(-1)?.get("grant_type")).toBe("refresh_token");
   expect(seen.at(-1)?.authorization).toBe("Bearer token-2");
+  expect(await broad.readFile("utf8")).not.toContain("token-2");
+  await broad.close();
+  expect((await stat(credentials)).mode & 0o777).toBe(0o600);
 
   expect(await sgt(api, "logout")).toMatchObject({ code: 0, out: expect.stringContaining("signed out") });
   await sgt(api, "task", "list");

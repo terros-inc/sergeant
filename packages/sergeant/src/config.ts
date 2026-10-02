@@ -75,7 +75,7 @@ export const InstallationConfig = z.strictObject({
       linearClientId: z.string().min(1),
       /** Keys of the Linear teams whose active members may use the API. */
       teams: z.array(z.string().min(1)).min(1),
-      /** Linear user ids of the approvers; they may use the API whatever their teams. */
+      /** Linear user ids of the approvers; they too must be in one of `teams`. */
       approvers: z.array(z.string().min(1)).default([]),
     })
     .optional(),

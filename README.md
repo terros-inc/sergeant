@@ -210,12 +210,12 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   runner's confirmed cancel, noted on the issue so the next turn does not just restart it. Every
   `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
   from `sgt login`, which `serve` reads back from Linear on every call and admits only for an active
-  user of the agent's own Linear workspace, not an agent, in one of `humans.teams` or listed in
-  `humans.approvers`. `/v1/whoami` says whether the caller is an approver. Wakes and cancels are logged
+  user of the agent's own Linear workspace, not an agent, in one of `humans.teams`; those listed
+  in `humans.approvers` are approvers too. `/v1/whoami` says whether the caller is an approver. Wakes and cancels are logged
   with the caller's name, and a cancel's note on the issue names them. Only `GET /v1/auth/config`, the
   public client id `sgt login` starts with, needs no caller. For development on one machine,
   `--trust-loopback` also admits a caller on the host with no login, as an operator; it is refused
-  unless `--host` is loopback, and never covers a request relayed by a proxy or naming a non-loopback
+  unless `--host` is `127.0.0.1` or `::1` (not a name such as `localhost`), and never covers a request relayed by a proxy or naming a non-loopback
   `Host`. Posts must be JSON, so a cross-site form cannot post.
 
 ```sh

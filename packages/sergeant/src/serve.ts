@@ -11,7 +11,7 @@
 // whether it is healthy; `GET /status` adds its tasks and latest intake, for loopback only. With the
 // config's webhook secrets, `POST /webhooks/linear` and `/webhooks/github` wake tasks early. The client
 // API admits the Linear users the config's `humans` names (auth.ts); `--trust-loopback` also admits an
-// operator on this host with no login, for development, and is refused with a non-loopback `--host`.
+// operator on this host with no login, for development, and is refused unless `--host` is 127.0.0.1 or ::1.
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";

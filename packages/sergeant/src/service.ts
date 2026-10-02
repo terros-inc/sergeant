@@ -42,7 +42,7 @@ export type ServiceOptions = {
   webhookGapSeconds?: number;
   /** Who may call the client API with a Linear login, and the client id `sgt login` uses (auth.ts). */
   humans?: { callerOf: (accessToken: string) => Promise<Caller>; linearClientId: string };
-  /** Trusts a loopback caller with no login as an operator: for development on one machine, refused unless `host` is loopback. */
+  /** Trusts a loopback caller with no login as an operator: for development on one machine, refused unless `host` is 127.0.0.1 or ::1. */
   trustLoopback?: boolean;
   log?: (line: string) => void;
 };

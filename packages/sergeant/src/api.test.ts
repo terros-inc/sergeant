@@ -230,6 +230,8 @@ test("a trusted loopback still refuses a proxied request, a foreign Host, and a 
   await service?.stop();
   service = undefined;
   await expect(start(f.deps, { trustLoopback: true, host: "0.0.0.0" })).rejects.toThrow(/--trust-loopback/);
+  // `localhost` is resolved when bound, and a resolver may send it anywhere.
+  await expect(start(f.deps, { trustLoopback: true, host: "localhost" })).rejects.toThrow(/--trust-loopback/);
 });
 
 // The API fails closed: with no login, a login Linear rejects or cannot check, or a Linear user the
@@ -240,14 +242,16 @@ test("only an admitted Linear user may call the API, and approvers are told apar
   const user = (id: string, over: Partial<LinearUser> = {}): LinearUser => ({ id, name: id, email: `${id}@example.com`, active: true, organizationId: "org", teamKeys: ["UNF"], ...over });
   const users: Record<string, LinearUser> = {
     member: user("Ada"),
-    approver: user("Grace", { teamKeys: [] }),
+    approver: user("Grace", { teamKeys: ["OPS", "UNF"] }),
+    // A configured approver outside every allowed team is nobody here: approval adds to membership.
+    strayApprover: user("Linus", { teamKeys: ["OPS"] }),
     outsider: user("Eve", { teamKeys: ["OPS"] }),
     elsewhere: user("Mallory", { organizationId: "other-org" }),
     former: user("Bob", { active: false }),
     agent: user("agent-v2"),
   };
   const callerOf = linearCallers({
-    humans: { linearClientId: "client-1", teams: ["UNF"], approvers: ["Grace"] },
+    humans: { linearClientId: "client-1", teams: ["UNF"], approvers: ["Grace", "Linus"] },
     organizationId: "org",
     agentUserIds: [agent.id],
     lookup: async (token) => (token === "linear-down" ? Promise.reject(new Error("Linear API request failed (502)")) : users[token]),
@@ -263,7 +267,7 @@ test("only an admitted Linear user may call the API, and approvers are told apar
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, { Authorization: "Basic eDp5" })).status).toBe(401);
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as("revoked"))).status).toBe(401);
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as("linear-down"))).status).toBe(503);
-  for (const refused of ["outsider", "elsewhere", "former", "agent"]) {
+  for (const refused of ["outsider", "strayApprover", "elsewhere", "former", "agent"]) {
     expect(await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as(refused))).toMatchObject({ status: 403, json: { error: { code: "forbidden" } } });
   }
   expect(f.conversation.issue.delegate).not.toBeNull();
