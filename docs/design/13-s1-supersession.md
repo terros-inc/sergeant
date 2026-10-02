@@ -97,7 +97,8 @@ job) · **DELETE** · **UNDECIDED** (in `14`).
 | Linear as only task source (ADR-0005/0012) | KEEP | | |
 | Linear OAuth CLI identity (ADR-0024), public API (ADR-0028) | KEEP | | |
 | `sgt admin` over SSM (ADR-0027) | KEEP | | |
-| Installation identity (ADR-0040), configuration in AWS (ADR-0042), releases pulled (ADR-0043) | KEEP | 10 | Recent captain decisions |
+| Installation identity (ADR-0040), configuration in AWS (ADR-0042) | KEEP | 10 | Recent captain decisions |
+| Releases published and pulled by policy, with yanking (ADR-0043) | CHANGE | 10 §6: each host follows green commits of `main` on a timer | Captain decision (TECH-4959) |
 | Rust (ADR-0002) | DELETE | TypeScript | Captain decision |
 | AXI CLI standard (ADR-0015-axi) | KEEP | `sgt` output conventions | |
 | Testing layers, `isolated_command`, daemon harness, `/health/loops` gate (UNF-482/554/555/556) | KEEP in spirit | same three layers for S2 (§4) | |
@@ -116,7 +117,7 @@ job) · **DELETE** · **UNDECIDED** (in `14`).
 | 0040 restart survival / installation identity | **Kept** (both) |
 | 0041 reviewer rules, CI is the gate | **Kept** (rules: a verdict on every requirement, trade-offs traced, numstat evidence); AC-section parsing and stable ids dropped |
 | 0042 configuration in AWS | **Kept**; enrollment stays in config |
-| 0043 installations pull releases | **Kept** |
+| 0043 installations pull releases | **Changed** (TECH-4959): hosts still pull, but there are no published releases, upgrade policies, or yanking; each host follows green commits of `main`, at once or after a soak (10 §6) |
 | 0018/0019/0020/0034 workspaces and pushes | **Abandoned** (runner-owned) |
 | 0022/0025 retry and rethink loops | **Abandoned** (Sergeant's judgment within budget) |
 | 0008 permissions | **Abandoned** |
@@ -167,7 +168,7 @@ code and runbooks if the older operator path is needed.
 | 3 | Build the **thin path** (§6) in the `v2/` workspace (UNF-700: Turborepo/pnpm, oxlint, Vitest, its own path-filtered CI; V1's CI skips `v2/**`): one delegated issue → reasoning → one worker → PR → fresh reviewer → merge → Linear completion, with only the hard controls that path needs. UNF-704 verified the GitHub → Linear completion behavior first on a sandbox repository and team (07 §7, `14` V2). | scenarios 1 and 2 pass as process tests with fake Linear, GitHub, and runner; the completion behavior is recorded as observed | delete the skeleton |
 | 4 | Run the thin path on the captain's laptop as its own installation identity, with its own Linear agent user ("Sergeant 2") and GitHub Apps on selected Personal repositories; runs in a container (10 §5). This is first real use, deliberately early | V2 completes a few simple real Personal issues end to end | stop delegating to "Sergeant 2"; V1 is untouched |
 | 5 | Grow it incrementally on the laptop, one increment at a time (§6), each with its scenarios added to the process suite: human questions, cancellation, budget enforcement, multi-repo, audit reviews, restart cases, and the rest. The full 15-scenario suite is the **destination**, not the admission ticket to first use | the 15 scenarios pass; captain judges V2 better on the real tasks tried (including a review that changes code, an audit review, a human question, and a time-budget stop); review telemetry recording | drop the increment; as step 4 |
-| 6 | Replace Personal's V1 with V2: drain V1, let in-flight tasks finish or undelegate them, keep V1's SQLite file and config version, `sgt config set` the V2 config, `sgt admin upgrade --release <v2 tag>`; retire the laptop identity | V2 runs Personal; `/health/loops` gate passes | reinstall the immutable release associated with `v1-final` (`v0.1.0+aad6046`; ADR-0043 rollback), restore the previous SSM config version, restore the kept SQLite file, re-delegate |
+| 6 | Replace Personal's V1 with V2: drain V1, let in-flight tasks finish or undelegate them, keep V1's SQLite file and config version, `sgt config set` the V2 config, move the host to V2 with `sergeant-update`; retire the laptop identity | V2 runs Personal; `/health/loops` gate passes | reinstall the immutable release associated with `v1-final` (`v0.1.0+aad6046`; ADR-0043 rollback), restore the previous SSM config version, restore the kept SQLite file, re-delegate |
 | 7 | Keep the V1 tag and history as the escape hatch; delete V1 code from main once V2 has carried real work for a while | captain says delete | check out the tag |
 
 Not in this plan: a long-term dual architecture, a compatibility layer, data migration from V1's
@@ -190,7 +191,7 @@ Logical groups for the later backlog, with the contract each one provides. No ti
 | 8 | **Review** | review briefs and separate reviewer runs; dispositions D1–D6; audit sampling; `ReviewFacts`; `sgt review quality` | 4, 5, 7 |
 | 9 | **Budgets and operations** | BudgetMeter (hard time and concurrency, best-effort spend), `enforce_budget`, grants; pause and drain; `/health/loops`; CloudWatch; the `sgt` commands and APIs in 11 | 2, 5, 6 |
 | 10 | **Evals** | reasoning replay evals with the fresh-start rubric (03 §8); worker evals and (manual) reviewer evals re-pointed at the S2 briefs | 6–8 |
-| 11 | **Transition** | `v1-final` tag; distinct V2 release tags; the laptop installation (identity, Linear agent user, Apps, container); the Personal replacement runbook and a rollback rehearsal | 1–9 |
+| 11 | **Transition** | `v1-final` tag; the laptop installation (identity, Linear agent user, Apps, container); the Personal replacement runbook and a rollback rehearsal | 1–9 |
 
 Slices are logical groups, not a build order. Delivery follows the transition plan (§5): a thin
 vertical path first, then increments, each landing on a system already in real use.

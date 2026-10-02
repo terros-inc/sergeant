@@ -7,8 +7,10 @@ Sergeant 2 keeps the installation model the captain chose recently, unchanged in
 - **Configuration** in that account's SSM, managed by `sgt config show | diff | set` with
   confirmation and SSM version history (ADR-0042, UNF-689).
 - **No named installations in source.** Personal and Terros use the same code and the same mechanism.
-- **The repository publishes releases; installations pull them** with their own credentials, by
-  policy (`manual | every-release | soak`) and with yanking (ADR-0043, UNF-637).
+- **Each host follows green commits of `main`** (TECH-4959, replacing ADR-0043's published releases,
+  `manual | every-release | soak` policies, and yanking). There is no release pipeline: a timer on the
+  host moves it to `main`'s newest commit whose CI passed, at once or after a soak, as its own
+  config's `release` setting says (§6).
 
 This document defines only what Sergeant 2 needs from configuration. The shape is
 `InstallationConfig` in `01`.
@@ -38,7 +40,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 | Human waits | remind after hours | |
 | Approvers | Linear user ids | budget grants, waivers, escalations |
 | AWS | runner dev role ARN, artifact bucket, CloudWatch log group | |
-| Release | upgrade policy, soak hours | ADR-0043 |
+| Release | channel (`main` or `soaked`), soak minutes, paused | absent: the host never updates itself (§6) |
 
 `sgt config set` validates the whole resulting document: unknown keys, types, references only (no
 literal credentials, as ADR-0042 already enforces), repository slugs well-formed, profiles naming
@@ -65,7 +67,7 @@ sgt config claude-profile <name> <profile>        # worker model tokens, stdin o
 sgt config repo add <name> <slug> --purpose "..." --merge-policy sergeant|human
 sgt doctor repo <name> <slug>                     # enrollment checklist (08 §2)
 terraform via the existing wrapper                # host, roles (control plane, runner dev role), bucket, log group
-sgt admin upgrade <name>                          # pull a release (ADR-0043)
+sergeant-update <ref>, then the release setting   # first install; afterwards the host follows main (§6)
 ```
 
 Infrastructure additions over Sergeant 1: the runner dev role (with its permission boundary) in the
@@ -97,6 +99,13 @@ special case:
 
 UNF-700 (captain): Sergeant 2 is an isolated `v2/` TypeScript workspace in the existing Sergeant
 repository (Turborepo with pnpm, oxlint, Vitest), with its own path-filtered CI; V1's CI skips `v2/**`.
-V2 releases are published from that workspace under distinct tags so an installation pulling V1 releases
-never picks one up; Personal's upgrade policy is set to `manual` before the first V2 release (13 §5).
 Once Sergeant 1 left `main`, UNF-735 moved the workspace from `v2/` to the repository root.
+
+TECH-4959 (captain): there are no published V2 releases. A release is a commit on `main` whose `v2`
+check passed, and each host pulls one itself: a systemd timer reads the installation config's
+`release` setting every 10 minutes and runs `sergeant-update <sha>`. Channel `main` takes `main`'s
+head once its check passed; channel `soaked` takes the newest green commit that has been on `main` for
+`soakMinutes`, a time window rather than coordination between installations. A red or missing check
+never deploys, a failed update leaves the previous commit running, and pausing or pinning is a config
+edit (`deploy/README.md`, Automatic updates). Which installation follows which channel is set only in
+its own config.

@@ -75,7 +75,9 @@ echo "installing Sergeant $version"
 
 # --- Host configuration from this checkout. ---
 install -m 0755 "$here/sergeant-update.sh" /usr/local/sbin/sergeant-update
-install -m 0644 "$here/sergeant.service" /etc/systemd/system/sergeant.service
+install -m 0755 "$here/sergeant-autoupdate.sh" /usr/local/sbin/sergeant-autoupdate
+install -m 0644 "$here/sergeant.service" "$here/sergeant-autoupdate.service" "$here/sergeant-autoupdate.timer" \
+  /etc/systemd/system/
 install -m 0644 "$here/logrotate" /etc/logrotate.d/sergeant
 sed "s/__HOSTNAME__/$SERGEANT_HOSTNAME/" "$here/Caddyfile" >/tmp/Caddyfile
 if ! cmp -s /tmp/Caddyfile /etc/caddy/Caddyfile; then
@@ -102,6 +104,9 @@ rm -f /tmp/installation.json
 # the new process picks them up. ---
 systemctl daemon-reload
 systemctl enable sergeant
+# Ticks do nothing until the installation config has a `release` setting. Starting the timer starts
+# no tick, so it leaves alone the one that may be running this install.
+systemctl enable --now sergeant-autoupdate.timer
 systemctl restart sergeant
 for _ in $(seq 60); do
   if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then

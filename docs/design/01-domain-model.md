@@ -117,7 +117,7 @@ InstallationConfig {            // ADR-0042 mechanism; Sergeant 2 keys only
   humanWait: { remindAfterHours }
   approvers: LinearUserId[]     // grant budget, waive review, receive escalations
   aws: { runnerDevRoleArn, artifactBucket, logGroup }
-  release: { upgradePolicy, soakHours }            // ADR-0043, unchanged
+  release?: { channel: main | soaked, soakMinutes?, paused? }  // 10 §6 (TECH-4959); absent: never self-update
 }
 ```
 
