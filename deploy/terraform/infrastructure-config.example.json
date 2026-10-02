@@ -11,7 +11,9 @@
       "sergeant/example/control-plane-app-private-key",
       "sergeant/example/worker-app-private-key",
       "sergeant/example/linear-agent-token",
-      "sergeant/example/model-token"
+      "sergeant/example/model-token",
+      "sergeant/example/linear-webhook-secret",
+      "sergeant/example/github-webhook-secret"
     ]
   }
 }

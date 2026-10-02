@@ -2,11 +2,13 @@
   "secrets": { "awsRegion": "us-west-2" },
   "linear": {
     "tokenSecret": "sergeant/example/linear-agent-token",
-    "agentUserId": "00000000-0000-0000-0000-000000000000"
+    "agentUserId": "00000000-0000-0000-0000-000000000000",
+    "webhookSecret": "sergeant/example/linear-webhook-secret"
   },
   "github": {
     "controlPlaneApp": { "appId": 1000001, "installationId": 2000001, "privateKeySecret": "sergeant/example/control-plane-app-private-key" },
-    "workerApp": { "appId": 1000002, "installationId": 2000002, "privateKeySecret": "sergeant/example/worker-app-private-key" }
+    "workerApp": { "appId": 1000002, "installationId": 2000002, "privateKeySecret": "sergeant/example/worker-app-private-key" },
+    "webhookSecret": "sergeant/example/github-webhook-secret"
   },
   "repositories": {
     "example-org/example-repo": { "mergeMethod": "squash" }

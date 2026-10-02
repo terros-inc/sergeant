@@ -64,7 +64,9 @@ Linear, or Claude login is used. Its shape is `InstallationConfig` in
 The Linear token must act as `agentUserId` (checked at startup); every Linear read and write uses it.
 Optional `linear.otherAgentUserIds` lists other agents' users (V1's) whose comments are not human
 input. Optional `review.auditSampleRate` (0 to 1, default 0.2) is the fraction of merged heads that
-skipped fresh review which get an audit review.
+skipped fresh review which get an audit review. Optional `linear.webhookSecret` and
+`github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
+webhooks; `serve` has each webhook endpoint only when its secret is set.
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs
 contents and pull requests write, checks and commit statuses read, and metadata read. The worker App
@@ -175,8 +177,19 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   slot.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
   Linear links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when they changed, so
-  missing webhooks do not matter. Its state is `<state dir>/tasks/<issue>/`; runs live under
+  a missed webhook costs only latency. Its state is `<state dir>/tasks/<issue>/`; runs live under
   `<state dir>/runs/`.
+- **Webhooks** (TECH-4937) are a latency optimization, never the source of truth.
+  `POST /webhooks/linear` and `POST /webhooks/github` refuse a delivery whose signature (HMAC-SHA256 of the
+  body, `Linear-Signature` or `X-Hub-Signature-256`) does not verify, before parsing it, and a Linear
+  delivery whose signed `webhookTimestamp` is over a minute from now. A verified event about an
+  issue's delegation, state, title, description, labels, comments, attachments, or relations, or a
+  PR's changes, pushes, reviews, check runs and suites, or statuses, names the issue or PR it is
+  about; each task loop watching that issue, PR, or head ends its wait and rereads, and a delegated
+  issue with no loop, or a delegation change to or from the V2 agent, runs an intake now. Nothing else
+  happens: no event owes a turn or is recorded, repeated events coalesce (each loop, and intake, wakes
+  at most once per 5 seconds), an issue or PR no task watches is ignored, and the polls still find
+  every change.
 - A loop that ends (idle, the turn limit, a failed read) is admitted again on a later intake while
   the issue is still delegated: an unchanged task takes no turn, a changed one does. A failed intake
   is logged and retried next interval.

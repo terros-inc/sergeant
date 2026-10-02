@@ -11,7 +11,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 
 | Path | What it is |
 |---|---|
-| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` on the config parameter (and an explicit deny on every other parameter, which SSM core would otherwise allow), and `secretsmanager:GetSecretValue` on exactly the four listed secrets. |
+| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` on the config parameter (and an explicit deny on every other parameter, which SSM core would otherwise allow), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to six with the webhook signing secrets). |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
@@ -31,10 +31,13 @@ How it fits together:
   the model token and, for a worker, its scoped worker-App token.
 - **State is on the data volume** (`/var/lib/sergeant/state`: `tasks/`, `runs/`, `service.lock`). It
   survives an instance replacement and Terraform refuses to destroy it (`prevent_destroy`).
-- **Only `/health` is public.** `serve` listens on `127.0.0.1:8080`; Caddy terminates HTTPS for the
-  hostname (Let's Encrypt over HTTP-01) and proxies `/health`, nothing else. `/health` answers only
-  `{"ok":true}`, or 503 `{"ok":false}` while stopping or after a failed intake; active task ids and
-  intake errors are on `/status`, which Caddy does not proxy.
+- **Only `/health` and the two webhook endpoints are public.** `serve` listens on `127.0.0.1:8080`;
+  Caddy terminates HTTPS for the hostname (Let's Encrypt over HTTP-01) and proxies `GET /health` and
+  `POST /webhooks/linear` and `/webhooks/github` (bodies up to 1 MB), nothing else. `/health` answers
+  only `{"ok":true}`, or 503 `{"ok":false}` while stopping or after a failed intake; active task ids
+  and intake errors are on `/status`, which Caddy does not proxy. A webhook endpoint answers 404
+  until the installation config names its signing secret, and 401 to any delivery whose signature
+  does not verify.
 - **The config lives in AWS.** Every install reads the SSM parameter (default
   `/sergeant/v2/installation-config`) and replaces `/etc/sergeant/installation.json` only if it parses
   as an `InstallationConfig`; a config that does not parse stops the update before `serve` restarts.
@@ -61,8 +64,8 @@ anything, and the state backend and the provider refuse any other account.
    ```
 
    The state bucket already exists; this configuration never creates it. `secret_names` lists every
-   secret the config refers to, and nothing else: exactly four literal names, which Terraform
-   enforces. To change an input later, put the parameter again and rerun `./init.sh`.
+   secret the config refers to, and nothing else: four literal names, or up to six with the webhook
+   signing secrets (Webhooks below), which Terraform enforces. To change an input later, put the parameter again and rerun `./init.sh`.
 2. **Secrets** exist in Secrets Manager under those names: both GitHub Apps' private keys, the Linear
    agent token, and the model token.
 3. **Installation config.** Write it (shape: `host/installation.example.json`; field notes in
@@ -79,6 +82,35 @@ anything, and the state backend and the provider refuse any other account.
    required status checks, and the worker App is not a bypass actor. Without required checks Sergeant
    never merges there (see the root `README.md`).
 6. **Linear**: the token acts as the agent user in `linear.agentUserId` (`live-check` verifies it).
+
+### Webhooks
+
+Webhooks only make Sergeant notice a Linear or GitHub change sooner; without them every change is
+still found by the intake (2 minutes) and each task's poll (1 minute). Set them up once per
+installation, in this order, and expect deliveries made in between to fail harmlessly:
+
+1. **Secrets.** Create two Secrets Manager secrets: the GitHub one with a value you generate
+   (`openssl rand -hex 32`), and the Linear one, whose value is the signing secret Linear shows for the
+   app's webhook (step 5; put a placeholder until then and set the real value with
+   `aws secretsmanager put-secret-value`).
+2. **Terraform.** Add both names to `secret_names` in the infrastructure-config parameter, then
+   `./init.sh`, plan, and apply: only the instance role's secrets policy changes.
+3. **Installation config.** Add `linear.webhookSecret` and `github.webhookSecret` (the two secret
+   names) to the installation-config parameter.
+4. **Update** the host (Update below): it installs the Caddyfile that publishes the webhook paths and
+   restarts `serve`, which reads the secrets at startup. Run it again after any secret value changes.
+5. **Linear.** In the V2 agent's Linear OAuth app settings, point the app's webhook at
+   `https://<hostname>/webhooks/linear` (re-point it if it still targets an earlier endpoint, such as
+   Sergeant 1's), enable it, and subscribe to issues, comments, and issue attachments; an agent app
+   also gets agent session events. Copy its signing secret into the Linear secret, then update again.
+6. **GitHub.** In the control-plane App's settings, make its webhook active with URL
+   `https://<hostname>/webhooks/github` and the GitHub secret's value, and subscribe to Pull request,
+   Pull request review, Check run, Check suite, Push, and Status events (its existing permissions
+   cover them).
+7. **Check** each one's recent deliveries: Linear's webhook page and the App's Advanced tab should show
+   `200`. A `401` means the secret differs (serve logs `bad signature`) or, for Linear, the delivery is
+   over a minute old (serve logs `stale webhookTimestamp`: check the host's clock); a `404`, that the
+   config does not name the secret or the host was not updated.
 
 ### Taking over from Sergeant 1 (DNS)
 
