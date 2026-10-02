@@ -10,7 +10,8 @@ import { linearNudge } from "./webhooks.ts";
 
 // Webhooks are a latency optimization only: a signed event ends the wait of the loop watching what
 // it names (polls here are an hour apart, so only a webhook can explain a prompt reread), an unsigned
-// one does nothing, an event no task watches is ignored, and no event forces a turn on its own.
+// or stale one does nothing, an event no task watches is ignored, a stream of events rereads at most
+// once per gap, and no event forces a turn on its own.
 
 const agent = { id: "agent-v2", name: "Sergeant" };
 const secrets = { linear: "linear-secret", github: "github-secret" };
@@ -68,6 +69,7 @@ async function start() {
       },
       postComment: async () => {},
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
+      moveIssueToStarted: async () => ({ moved: false as const }),
     },
     github: { readPullRequest: async () => pr, mergePullRequest: async () => Promise.reject(new Error("unused")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
@@ -79,12 +81,13 @@ async function start() {
     },
   };
   service = await startService(
-    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, log: () => {} },
+    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, webhookGapSeconds: 0.5, log: () => {} },
     deps,
   );
   const port = service.port;
-  const post = (source: "linear" | "github", payload: unknown, opts: { secret?: string; event?: string } = {}) => {
-    const body = JSON.stringify(payload);
+  // A Linear delivery is stamped now unless the payload says otherwise.
+  const post = (source: "linear" | "github", payload: object, opts: { secret?: string; event?: string } = {}) => {
+    const body = JSON.stringify(source === "linear" ? { webhookTimestamp: Date.now(), ...payload } : payload);
     const signature = createHmac("sha256", opts.secret ?? secrets[source]).update(body).digest("hex");
     const headers: Record<string, string> =
       source === "linear"
@@ -104,21 +107,30 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
   const before = reads("UNF-1");
   const comment = { type: "Comment", action: "create", data: { id: "c1", issueId: "i-UNF-1", body: "Also update the README." } };
 
-  // A forged or unsigned delivery is refused before its body is looked at.
+  // A forged or unsigned delivery is refused before its body is looked at, and a signed Linear one
+  // with no timestamp, or one over a minute from now, as a replay.
   expect(await post("linear", comment, { secret: "wrong" })).toBe(401);
   expect(await post("github", { repository: { full_name: "o/r" }, check_suite: { head_sha: head, pull_requests: [] } }, { secret: "wrong" })).toBe(401);
+  expect(await post("linear", { ...comment, webhookTimestamp: undefined })).toBe(401);
+  expect(await post("linear", { ...comment, webhookTimestamp: Date.now() - 120_000 })).toBe(401);
+  expect(await post("linear", { ...comment, webhookTimestamp: Date.now() + 120_000 })).toBe(401);
   // Signed, but about a head and a repository no task watches.
-  expect(await post("github", { repository: { full_name: "o/r" }, check_suite: { head_sha: "b".repeat(40), pull_requests: [{ number: 8 }] } })).toBe(202);
-  expect(await post("github", { repository: { full_name: "other/repo" }, pull_request: { number: 7 } }, { event: "pull_request" })).toBe(202);
+  expect(await post("github", { repository: { full_name: "o/r" }, check_suite: { head_sha: "b".repeat(40), pull_requests: [{ number: 8 }] } })).toBe(200);
+  expect(await post("github", { repository: { full_name: "other/repo" }, pull_request: { number: 7 } }, { event: "pull_request" })).toBe(200);
   await sleep(200);
   expect(reads("UNF-1")).toBe(before);
 
   // A check on the PR's watched head rereads at once, but nothing changed, so no turn.
-  expect(await post("github", { repository: { full_name: "O/R" }, check_suite: { head_sha: head, pull_requests: [] } })).toBe(202);
-  await vi.waitFor(() => expect(reads("UNF-1")).toBeGreaterThan(before), { timeout: 2_000 });
-  // A burst of events with nothing changed is still no turn: a webhook never owes one.
-  await Promise.all(Array.from({ length: 10 }, () => post("github", { repository: { full_name: "o/r" }, pull_request: { number: 7 } }, { event: "pull_request" })));
-  await sleep(200);
+  expect(await post("github", { repository: { full_name: "O/R" }, check_suite: { head_sha: head, pull_requests: [] } })).toBe(200);
+  await vi.waitFor(() => expect(reads("UNF-1")).toBe(before + 1), { timeout: 2_000 });
+  // A burst, then a steady stream for 1.5 s, rereads at most once per 0.5 s gap (each event would
+  // reread without the cap), and still owes no turn.
+  const pullRequest = () => post("github", { repository: { full_name: "o/r" }, pull_request: { number: 7 } }, { event: "pull_request" });
+  await Promise.all(Array.from({ length: 10 }, pullRequest));
+  for (let i = 0; i < 30; i++) await Promise.all([pullRequest(), sleep(50)]);
+  await sleep(700);
+  expect(reads("UNF-1") - (before + 1)).toBeGreaterThanOrEqual(2);
+  expect(reads("UNF-1") - (before + 1)).toBeLessThanOrEqual(6);
   expect(counts.turns).toEqual(["UNF-1"]);
 
   // A human comments: the comment's webhook, naming the issue only by id, gets it a turn now.
@@ -126,7 +138,7 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
     ...conversation("UNF-1"),
     humanComments: [{ id: "c1", author: { id: "u1", name: "Human" }, createdAt: "2026-10-02T06:01:00.000Z", updatedAt: "2026-10-02T06:01:00.000Z", body: "Also update the README." }],
   });
-  expect(await post("linear", comment)).toBe(202);
+  expect(await post("linear", comment)).toBe(200);
   await vi.waitFor(() => expect(counts.turns).toEqual(["UNF-1", "UNF-1"]), { timeout: 2_000 });
 });
 
@@ -136,11 +148,11 @@ test("a delegation to the V2 agent runs an intake now, which admits the issue", 
   live.set("UNF-2", conversation("UNF-2"));
   delegated.push("UNF-2");
   // Someone else's delegation is not Sergeant's to look at.
-  expect(await post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-2", identifier: "UNF-2", delegateId: "someone-else" }, updatedFrom: { delegateId: null } })).toBe(202);
+  expect(await post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-2", identifier: "UNF-2", delegateId: "someone-else" }, updatedFrom: { delegateId: null } })).toBe(200);
   await sleep(200);
   expect(counts.intakes).toBe(intakes);
 
-  expect(await post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-2", identifier: "UNF-2", delegateId: agent.id }, updatedFrom: { delegateId: null } })).toBe(202);
+  expect(await post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-2", identifier: "UNF-2", delegateId: agent.id }, updatedFrom: { delegateId: null } })).toBe(200);
   await vi.waitFor(() => expect(counts.turns).toContain("UNF-2"), { timeout: 2_000 });
   expect(reads("UNF-2")).toBeGreaterThan(0);
 });

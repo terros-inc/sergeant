@@ -37,6 +37,8 @@ export type ServiceOptions = {
   host?: string;
   /** Webhook signing secrets: each source with one gets its `POST /webhooks/<source>` endpoint. */
   webhookSecrets?: { linear?: string; github?: string };
+  /** The least time between two webhook wakes of one task loop, or of intake (`Wake.nudge`). */
+  webhookGapSeconds?: number;
   log?: (line: string) => void;
 };
 
@@ -187,18 +189,19 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       }),
   });
   // A webhook ends the wait of each loop watching what it names, and runs an intake for a delegated
-  // issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: a wait ended
-  // twice is ended once. An issue or PR no task knows is ignored; the polls cover it.
+  // issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
+  // most once per `webhookGapSeconds`. An issue or PR no task knows is ignored; the polls cover it.
+  const gapMs = (opts.webhookGapSeconds ?? 5) * 1000;
   const nudge = ({ keys, intake }: Nudge) => {
     const named = new Set(keys);
     let admit = intake;
     for (const [issueId, wake] of wakes) {
       if (!named.has(issueId) && !wake.watched.some((k) => named.has(k))) continue;
-      if (active.has(issueId)) wake.interrupt();
+      if (active.has(issueId)) wake.nudge(gapMs);
       else if (delegated.includes(issueId)) admit = true;
     }
     if (delegated.some((id) => named.has(id) && !active.has(id))) admit = true;
-    if (admit) intakeWake.interrupt();
+    if (admit) intakeWake.nudge(gapMs);
   };
   const webhooks = webhookHandler({
     secrets: opts.webhookSecrets ?? {},

@@ -594,6 +594,8 @@ export class Wake {
    */
   watched: string[] = [];
   #interrupt = new AbortController();
+  #lastNudge = 0;
+  #trailing: NodeJS.Timeout | undefined;
 
   request(): void {
     this.pending = true;
@@ -603,6 +605,23 @@ export class Wake {
   /** Ends the current wait, or the next one if the loop is not waiting. */
   interrupt(): void {
     this.#interrupt.abort();
+  }
+
+  /**
+   * A webhook's wake: ends the wait at most once per `gapMs`. Another in that window marks it to end
+   * once more when the window closes, so a burst or a replayed delivery costs at most one reread per
+   * window, and an event that arrives right after another is still seen without waiting for a poll.
+   */
+  nudge(gapMs: number): void {
+    if (this.#trailing) return;
+    const fire = () => {
+      this.#trailing = undefined;
+      this.#lastNudge = Date.now();
+      this.interrupt();
+    };
+    const wait = this.#lastNudge + gapMs - Date.now();
+    if (wait <= 0) fire();
+    else this.#trailing = setTimeout(fire, wait).unref();
   }
 
   async sleep(ms: number, signal?: AbortSignal): Promise<void> {

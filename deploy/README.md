@@ -108,8 +108,9 @@ installation, in this order, and expect deliveries made in between to fail harml
    Pull request review, Check run, Check suite, Push, and Status events (its existing permissions
    cover them).
 7. **Check** each one's recent deliveries: Linear's webhook page and the App's Advanced tab should show
-   `202`. A `401` means the secret differs (serve logs `bad signature`); a `404`, that the config does not
-   name the secret or the host was not updated.
+   `200`. A `401` means the secret differs (serve logs `bad signature`) or, for Linear, the delivery is
+   over a minute old (serve logs `stale webhookTimestamp`: check the host's clock); a `404`, that the
+   config does not name the secret or the host was not updated.
 
 ### Taking over from Sergeant 1 (DNS)
 

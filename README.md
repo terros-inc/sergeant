@@ -180,14 +180,16 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   a missed webhook costs only latency. Its state is `<state dir>/tasks/<issue>/`; runs live under
   `<state dir>/runs/`.
 - **Webhooks** (TECH-4937) are a latency optimization, never the source of truth.
-  `POST /webhooks/linear` and `POST /webhooks/github` refuse a delivery whose signature (HMAC-SHA256
-  of the body, `Linear-Signature` or `X-Hub-Signature-256`) does not verify, before parsing it. A
-  verified event about an issue's delegation, state, title, description, labels, comments,
-  attachments, or relations, or a PR's changes, pushes, reviews, check runs and suites, or statuses,
-  names the issue or PR it is about; each task loop watching that issue, PR, or head ends its wait
-  and rereads, and a delegated issue with no loop, or a delegation change to or from the V2 agent,
-  runs an intake now. Nothing else happens: no event owes a turn or is recorded, repeated events
-  coalesce, an issue or PR no task watches is ignored, and the polls still find every change.
+  `POST /webhooks/linear` and `POST /webhooks/github` refuse a delivery whose signature (HMAC-SHA256 of the
+  body, `Linear-Signature` or `X-Hub-Signature-256`) does not verify, before parsing it, and a Linear
+  delivery whose signed `webhookTimestamp` is over a minute from now. A verified event about an
+  issue's delegation, state, title, description, labels, comments, attachments, or relations, or a
+  PR's changes, pushes, reviews, check runs and suites, or statuses, names the issue or PR it is
+  about; each task loop watching that issue, PR, or head ends its wait and rereads, and a delegated
+  issue with no loop, or a delegation change to or from the V2 agent, runs an intake now. Nothing else
+  happens: no event owes a turn or is recorded, repeated events coalesce (each loop, and intake, wakes
+  at most once per 5 seconds), an issue or PR no task watches is ignored, and the polls still find
+  every change.
 - A loop that ends (idle, the turn limit, a failed read) is admitted again on a later intake while
   the issue is still delegated: an unchanged task takes no turn, a changed one does. A failed intake
   is logged and retried next interval.

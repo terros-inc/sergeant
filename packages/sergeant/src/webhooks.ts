@@ -8,10 +8,13 @@ import { z } from "zod";
 // changed. Nothing here reads a comment, decides anything, or touches Linear or GitHub, and nothing is
 // recorded: a dropped, duplicated, or replayed delivery costs at most one extra reread, and the polls
 // still find every change. The body is read only up to `MAX_BODY` and parsed only once its signature
-// verifies.
+// verifies; a Linear delivery whose signed `webhookTimestamp` is over `LINEAR_REPLAY_MS` from now is
+// refused as a replay, as Linear advises. GitHub signs no timestamp, so a replay of one is bounded by
+// the wake's rate cap (`Wake.nudge`) instead.
 
 export const WEBHOOK_PATHS = { linear: "/webhooks/linear", github: "/webhooks/github" } as const;
 const MAX_BODY = 1024 * 1024;
+const LINEAR_REPLAY_MS = 60_000;
 
 export type Nudge = {
   /** What a verified event names: Linear issue ids and identifiers, PRs, and heads, as `watchKey` spells them. */
@@ -52,9 +55,14 @@ export function webhookHandler(opts: WebhookOptions): (req: IncomingMessage, res
       return 401;
     }
     const payload: unknown = JSON.parse(body.toString("utf8"));
+    if (source === "linear" && !fresh(payload)) {
+      opts.log("linear webhook refused: missing or stale webhookTimestamp");
+      return 401;
+    }
     const nudge = source === "linear" ? linearNudge(payload, opts.agentUserId) : githubNudge(header(req, "x-github-event") ?? "", payload, enrolled);
     if (nudge) opts.nudge(nudge);
-    return 202;
+    // Linear counts anything but 200 as a failed delivery, and retries it.
+    return 200;
   };
   return (req, res) => {
     handle(req).then(
@@ -71,6 +79,12 @@ export function verifySignature(secret: string, body: Buffer, signature: string 
   const given = Buffer.from(signature);
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
+
+/** Whether a Linear payload's `webhookTimestamp` (epoch ms) is within `LINEAR_REPLAY_MS` of now. */
+const fresh = (payload: unknown) => {
+  const at = (payload as { webhookTimestamp?: unknown } | null)?.webhookTimestamp;
+  return typeof at === "number" && Math.abs(Date.now() - at) <= LINEAR_REPLAY_MS;
+};
 
 /** The body, or undefined once it passes `MAX_BODY`. */
 async function readBody(req: IncomingMessage): Promise<Buffer | undefined> {
