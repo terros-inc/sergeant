@@ -27,6 +27,7 @@ import { takeTurn } from "./index.ts";
 import { outcomeComment } from "./outcome.ts";
 import { openQuestion } from "./question.ts";
 import { approvedHead, auditDrawn, implementerOf, type ReviewFacts, reviewFacts } from "./review-quality.ts";
+import { watchKey } from "./webhooks.ts";
 
 // The walking skeleton's loop for one explicitly selected issue (UNF-706): poll, build a fresh
 // Situation Report, take a reasoning turn when something changed, execute through the Gate, and
@@ -214,6 +215,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     await recordReviews(runs);
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
     const conversation = await deps.linear.readConversation(opts.issueId);
+    // What a webhook names to end this loop's wait (webhooks.ts): the issue, its PRs, and their heads.
+    const watch = (prs: { repo: string; number: number; headSha?: string }[]) => {
+      if (!opts.wake) return;
+      const keys = prs.flatMap((p) => [watchKey.pullRequest(p.repo, p.number), ...(p.headSha ? [watchKey.head(p.repo, p.headSha)] : [])]);
+      opts.wake.watched = [conversation.issue.id, ...keys];
+    };
+    watch(conversation.issue.linkedPullRequests);
     // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer,
     // is not Sergeant's to work on. Undelegation is the human's cancel: its runs are canceled so they
     // publish nothing more, and the loop stops only once the runner confirms each one stopped. The
@@ -265,6 +273,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     unposted = undefined;
     const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
+    watch(pullRequests);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
@@ -579,6 +588,11 @@ export async function readTaskState(file: string, window: BudgetWindow = DEFAULT
 export class Wake {
   /** A turn is owed; cleared when the loop takes one. */
   pending = false;
+  /**
+   * What the loop last read, as `watchKey` spells it: its Linear issue's id and its PRs and their
+   * heads. A webhook naming one ends the loop's wait (`interrupt`) without owing a turn.
+   */
+  watched: string[] = [];
   #interrupt = new AbortController();
 
   request(): void {

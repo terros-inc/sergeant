@@ -2,19 +2,20 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { setTimeout as sleep } from "node:timers/promises";
 import type { RepoSlug } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
 import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import { runLoop, Wake, type LoopResult } from "./loop.ts";
+import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
 // existing loop (loop.ts), at most `maxTasks` at a time. Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
-// when those changed, so no webhook is needed. Nothing is kept but each task's own `state.json` and a
+// when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) only ends a loop's wait
+// or runs an intake sooner. Nothing is kept but each task's own `state.json` and a
 // recorded API cancel not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
 // delegated, and a restarted process rereads everything and continues, repeating some work. One
 // process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
@@ -34,6 +35,8 @@ export type ServiceOptions = {
   port?: number;
   /** Interface the server listens on: loopback unless set. Never publish `/status`. */
   host?: string;
+  /** Webhook signing secrets: each source with one gets its `POST /webhooks/<source>` endpoint. */
+  webhookSecrets?: { linear?: string; github?: string };
   log?: (line: string) => void;
 };
 
@@ -70,6 +73,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     wakes.set(issueId, wake);
     return wake;
   };
+  // Ends the intake loop's wait: a webhook naming a delegated issue with no loop, or a delegation change.
+  const intakeWake = new Wake();
 
   const admit = (issueId: string) => {
     if (active.has(issueId)) return;
@@ -150,7 +155,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         lastIntake = { at, error: (e as Error).message };
         log(`intake failed, retrying next interval: ${lastIntake.error}`);
       }
-      await sleep((opts.intakeSeconds ?? 120) * 1000, undefined, { signal: abort.signal }).catch(() => {});
+      await intakeWake.sleep((opts.intakeSeconds ?? 120) * 1000, abort.signal);
     }
   })();
 
@@ -181,18 +186,43 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         return drive(ref);
       }),
   });
+  // A webhook ends the wait of each loop watching what it names, and runs an intake for a delegated
+  // issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: a wait ended
+  // twice is ended once. An issue or PR no task knows is ignored; the polls cover it.
+  const nudge = ({ keys, intake }: Nudge) => {
+    const named = new Set(keys);
+    let admit = intake;
+    for (const [issueId, wake] of wakes) {
+      if (!named.has(issueId) && !wake.watched.some((k) => named.has(k))) continue;
+      if (active.has(issueId)) wake.interrupt();
+      else if (delegated.includes(issueId)) admit = true;
+    }
+    if (delegated.some((id) => named.has(id) && !active.has(id))) admit = true;
+    if (admit) intakeWake.interrupt();
+  };
+  const webhooks = webhookHandler({
+    secrets: opts.webhookSecrets ?? {},
+    agentUserId: deps.agentUserId,
+    enrolledRepositories: opts.enrolledRepositories,
+    nudge,
+    log,
+  });
+  const webhookPaths = new Set<string>(Object.values(WEBHOOK_PATHS));
+
   const server =
     opts.port === undefined
       ? undefined
       : createServer((req, res) => {
-          // `/health` is the one path the host's proxy publishes, so it says only whether serve is
-          // healthy: not stopping, and its latest intake succeeded. Task ids and intake errors are
-          // private, served on `/status` to loopback only.
+          // `/health` and the webhooks are the only paths the host's proxy publishes, so `/health` says
+          // only whether serve is healthy: not stopping, and its latest intake succeeded. Task ids and
+          // intake errors are private, served on `/status` to loopback only.
           const ok = !abort.signal.aborted && !lastIntake?.error;
           if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
             res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
             const detail = req.url === "/status" && { stopping: abort.signal.aborted, tasks: [...active.keys()], lastIntake };
             res.end(JSON.stringify({ ok, ...detail }));
+          } else if (webhookPaths.has(new URL(req.url ?? "/", "http://localhost").pathname)) {
+            webhooks(req, res);
           } else {
             api(req, res);
           }

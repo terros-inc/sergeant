@@ -32,8 +32,8 @@ variable "secret_names" {
 
   # They become IAM resource patterns, so a wildcard or an ARN here would widen the grant.
   validation {
-    condition     = length(var.secret_names) == 4 && length(distinct(var.secret_names)) == 4 && alltrue([for name in var.secret_names : can(regex("^[A-Za-z0-9/_+=.@-]+$", name))])
-    error_message = "Expected exactly four distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, and the model token."
+    condition     = length(var.secret_names) >= 4 && length(var.secret_names) <= 6 && length(distinct(var.secret_names)) == length(var.secret_names) && alltrue([for name in var.secret_names : can(regex("^[A-Za-z0-9/_+=.@-]+$", name))])
+    error_message = "Expected four to six distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, the model token, and optionally the Linear and GitHub webhook signing secrets."
   }
 }
 

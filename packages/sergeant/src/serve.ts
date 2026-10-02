@@ -8,7 +8,8 @@
 // Every repository in the installation config is enrolled. Credentials come from the config's secret
 // references exactly as for the canary (canary.ts). SIGINT or SIGTERM stops intake and lets each task
 // loop end at its next poll; a second signal exits at once. `GET /health` reports only
-// whether it is healthy; `GET /status` adds its tasks and latest intake, for loopback only.
+// whether it is healthy; `GET /status` adds its tasks and latest intake, for loopback only. With the
+// config's webhook secrets, `POST /webhooks/linear` and `/webhooks/github` wake tasks early.
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
@@ -50,6 +51,7 @@ const service = await startService(
     maxTasks: count(values["max-tasks"], "--max-tasks", 1),
     intakeSeconds: count(values["intake-seconds"], "--intake-seconds", 1),
     pollSeconds: count(values["poll-seconds"], "--poll-seconds", 1),
+    webhookSecrets: installation.webhookSecrets,
   },
   {
     linear: installation.linear,

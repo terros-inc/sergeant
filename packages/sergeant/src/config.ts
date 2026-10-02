@@ -10,7 +10,7 @@ import { z } from "zod";
 // secret references only. Secret references are AWS Secrets Manager ids, resolved at startup and
 // never printed. Nothing installation-specific or personal lives in code.
 
-const LITERAL_CREDENTIAL = /^(lin_(api|oauth)_|gh[pousr]_|github_pat_|sk-ant-)/;
+const LITERAL_CREDENTIAL = /^(lin_(api|oauth|wh)_|gh[pousr]_|github_pat_|sk-ant-)/;
 const SecretRef = z
   .string()
   .regex(/^[\w/+=.@:-]+$/, "expected a Secrets Manager secret id or ARN")
@@ -35,6 +35,8 @@ export const InstallationConfig = z.strictObject({
     agentUserId: z.string().min(1),
     /** Other Linear users that act for agents (V1's, say): their comments are not human input either. */
     otherAgentUserIds: z.array(z.string().min(1)).default([]),
+    /** The Linear app webhook's signing secret; without it serve has no Linear webhook endpoint. */
+    webhookSecret: SecretRef.optional(),
   }),
   github: z
     .strictObject({
@@ -42,6 +44,8 @@ export const InstallationConfig = z.strictObject({
       controlPlaneApp: GitHubAppRef,
       /** Its key only mints each run's scoped token; workers push and open PRs as this App. */
       workerApp: GitHubAppRef,
+      /** The control-plane App webhook's secret; without it serve has no GitHub webhook endpoint. */
+      webhookSecret: SecretRef.optional(),
     })
     // Repository rules tell GitHub App actors apart, not Sergeant's labels: one App in both roles
     // would let workers merge as the control plane.
@@ -100,6 +104,8 @@ export type Installation = {
   workerApp: GitHubApp;
   githubTokens: RunGitHubTokens;
   modelToken: string;
+  /** Webhook signing secrets, for the sources the config gives one. */
+  webhookSecrets: { linear?: string; github?: string };
 };
 
 /** Resolves every secret reference and builds the direct effectors for `repositories`. */
@@ -108,11 +114,14 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
   const unknown = enrolled.filter(([, c]) => !c).map(([r]) => r);
   if (unknown.length > 0) throw new Error(`not enrolled in the installation config: ${unknown.join(", ")}`);
   const secret = secretResolver(config);
-  const [linearToken, controlPlaneKey, workerKey, modelToken] = await Promise.all([
+  const optional = (ref: string | undefined) => (ref === undefined ? undefined : secret(ref));
+  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook] = await Promise.all([
     secret(config.linear.tokenSecret),
     secret(config.github.controlPlaneApp.privateKeySecret),
     secret(config.github.workerApp.privateKeySecret),
     secret(config.modelTokenSecret),
+    optional(config.linear.webhookSecret),
+    optional(config.github.webhookSecret),
   ]);
   const app = (ref: z.infer<typeof GitHubAppRef>, privateKey: string) =>
     githubApp({ appId: ref.appId, installationId: ref.installationId, privateKey });
@@ -142,5 +151,6 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     workerApp,
     githubTokens: runTokens(workerApp),
     modelToken,
+    webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },
   };
 }
