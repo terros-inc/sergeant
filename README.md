@@ -37,6 +37,9 @@ pnpm typecheck   # turbo run typecheck (tsc, strict)
 pnpm test        # turbo run test      (vitest)
 ```
 
+CI ([`.github/workflows/v2.yml`](.github/workflows/v2.yml)) runs the same boundaries, lint, typecheck,
+and test tasks on every pull request and every push to `main`.
+
 The live commands below are manual and never run from tests or CI. They take an installation
 config file that holds identifiers and secret references only (AWS Secrets Manager ids, resolved
 with the configured AWS profile and region); no credential is ever printed, and no ambient `gh`,
