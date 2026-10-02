@@ -176,6 +176,9 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
 pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2]
 ```
 
+To run `serve` on one AWS host behind an HTTPS endpoint, see [`deploy/`](deploy/README.md): Terraform,
+the host install and update scripts, and the runbook.
+
 ### UNF-724 live check (after UNF-720)
 
 Once the V2 Linear agent app, both GitHub Apps, and the canary repository's ruleset exist:

@@ -7,7 +7,8 @@
 //
 // Every repository in the installation config is enrolled. Credentials come from the config's secret
 // references exactly as for the canary (canary.ts). SIGINT or SIGTERM stops intake and lets each task
-// loop end at its next poll; a second signal exits at once. `GET /health` reports the process alive.
+// loop end at its next poll; a second signal exits at once. `GET /health` reports only
+// whether it is healthy; `GET /status` adds its tasks and latest intake, for loopback only.
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";

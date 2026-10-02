@@ -1,0 +1,17 @@
+{
+  "backend": {
+    "bucket": "sergeant-tfstate-example",
+    "region": "us-west-2"
+  },
+  "variables": {
+    "account_id": "123456789012",
+    "hostname": "sergeant.example.com",
+    "source_repository_url": "https://github.com/terros-inc/sergeant",
+    "secret_names": [
+      "sergeant/example/control-plane-app-private-key",
+      "sergeant/example/worker-app-private-key",
+      "sergeant/example/linear-agent-token",
+      "sergeant/example/model-token"
+    ]
+  }
+}

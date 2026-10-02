@@ -75,9 +75,9 @@ test("works every delegated issue unattended within the task limit, and resumes 
 
   const first = await start();
   await vi.waitFor(() => expect(new Set(turns.map((t) => t.issue))).toEqual(new Set(issues)), { timeout: 5_000 });
-  const health = await fetch(`http://127.0.0.1:${first.port}/health`);
-  expect(health.status).toBe(200);
-  expect(await health.json()).toMatchObject({ ok: true, lastIntake: { at: expect.any(String) } });
+  const status = await fetch(`http://127.0.0.1:${first.port}/status`);
+  expect(status.status).toBe(200);
+  expect(await status.json()).toMatchObject({ ok: true, lastIntake: { at: expect.any(String) } });
   await first.stop();
 
   // Three tasks admitted together would overlap in their first turns; only two may run at once.
@@ -148,6 +148,28 @@ test("a second service on the same state directory is refused until the first st
   await first.stop();
   expect(counts.maxInTurn).toBe(1);
   await (await startService(options(), deps)).stop();
+});
+
+// The host publishes `/health` to the internet; it must not name a task or carry an intake error.
+test("public /health says only whether serve is healthy; task ids and intake errors stay on /status", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const { deps, counts } = oneIssue(["UNF-1"], 0);
+  let failing = false;
+  const delegatedIssues = async () => {
+    if (failing) throw new Error("Linear refused UNF-1's team");
+    return ["UNF-1"];
+  };
+  const service = await startService({ ...options(), port: 0 }, { ...deps, delegatedIssues });
+  const get = (path: string) => fetch(`http://127.0.0.1:${service.port}${path}`);
+  await vi.waitFor(() => expect(counts.turns).toBe(1), { timeout: 5_000 });
+  const healthy = await get("/health");
+  expect([healthy.status, await healthy.text()]).toEqual([200, '{"ok":true}']);
+
+  failing = true;
+  await vi.waitFor(async () => expect((await get("/health")).status).toBe(503), { timeout: 5_000 });
+  expect(await (await get("/health")).text()).toBe('{"ok":false}');
+  expect(await (await get("/status")).json()).toMatchObject({ ok: false, tasks: ["UNF-1"], lastIntake: { error: "Linear refused UNF-1's team" } });
+  await service.stop();
 });
 
 // Separate processes started together, each holding the service if it gets it: exactly one does,

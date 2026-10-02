@@ -1,0 +1,4 @@
+tfplan
+terraform.tfvars.json
+# The operator's draft of the SSM parameter value (README).
+infrastructure-config.json
