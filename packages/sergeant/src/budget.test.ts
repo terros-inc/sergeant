@@ -95,6 +95,7 @@ async function scenario(opts: {
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => (live = await opts.onPoll(++polls, live)),
+      moveIssueToStarted: async () => ({ moved: false as const }),
         async postComment({ key, body }) {
           posted.push(body);
           const id = commentIdFor(key);

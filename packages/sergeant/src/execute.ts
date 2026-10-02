@@ -40,6 +40,8 @@ export type Ports = {
    * delegation gone or is among the runs the cancel stops, across a restart too.
    */
   exclusive?: <T>(step: () => Promise<T>) => Promise<T>;
+  /** Best-effort progress line (e.g. moving the issue to In Progress). No-op when absent. */
+  log?: (line: string) => void;
 };
 
 export type ActionOutcome =
@@ -122,6 +124,17 @@ export async function execute(action: ProposedAction, situation: SituationReport
           );
           const role = action.kind === "start_worker" ? "worker" : "reviewer";
           const started: RunRecord = { runId, role, status: "running", provider: "unknown", model: "unknown", report: null };
+          // Best effort, after the start is a done fact: show the issue as In Progress the moment the
+          // first worker starts (TECH-4947). A failed status write is logged and never fails the start,
+          // and the move itself only runs for a worker and never moves a started/done issue backward.
+          if (action.kind === "start_worker") {
+            try {
+              const moved = await ports.linear.moveIssueToStarted(conversation.issue.id);
+              if (moved.moved) ports.log?.(`moved ${conversation.issue.identifier} to In Progress (${moved.from} -> ${moved.to})`);
+            } catch (e) {
+              ports.log?.(`could not move ${conversation.issue.identifier} to In Progress: ${(e as Error).message}`);
+            }
+          }
           return { action, status: "done", result: { runId }, started };
         });
       }

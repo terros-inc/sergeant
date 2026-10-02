@@ -83,14 +83,20 @@ const situation: SituationReport = {
 };
 const merge: MergePr = { kind: "merge_pr", repo: pr.repo, number: 7, expectedHeadSha: head, reviewStanding: { kind: "reviewed", reviewRunId: "run_review" } };
 
-function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversation } = {}) {
+function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversation; moveFails?: boolean } = {}) {
   const merged: Parameters<GitHubPort["mergePullRequest"]>[0][] = [];
   const started: string[] = [];
   const sent: string[] = [];
+  const moved: string[] = [];
   const filed: Parameters<Ports["linear"]["createFollowupIssue"]>[0][] = [];
   const p: Ports = {
     linear: {
       readConversation: async () => live.conversation ?? conversation,
+      moveIssueToStarted: async (id) => {
+        moved.push(id);
+        if (live.moveFails) throw new Error("Linear unavailable");
+        return { moved: true as const, from: "Todo", to: "In Progress" };
+      },
       postComment: async () => {},
       createFollowupIssue: async (req) => {
         filed.push(req);
@@ -110,7 +116,7 @@ function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversati
       send: async (runId) => void sent.push(runId),
     },
   };
-  return { p, merged, started, sent, filed };
+  return { p, merged, started, sent, moved, filed };
 }
 
 test("an exact-head reviewed merge reaches GitHub with the expected head", async () => {
@@ -182,6 +188,25 @@ test("two start_worker proposals in one turn start exactly one worker", async ()
   const { outcomes } = await takeTurn({ ...situation, runs: [] }, { ...p, reasoner });
   expect(started).toHaveLength(1);
   expect(outcomes[1]).toMatchObject({ status: "denied", rule: "R4" });
+});
+
+// TECH-4947: a started worker makes the issue visibly In Progress, best effort. The move runs after
+// the start is a done fact, only for a worker, and a failed status write never fails or blocks the start.
+test("start_worker moves the issue to In Progress, and a failed move still leaves the start done", async () => {
+  const start: ProposedAction = { kind: "start_worker", objective: "Do UNF-1.", repositories: [pr.repo] };
+  const ok = ports();
+  expect(await execute(start, { ...situation, runs: [] }, ok.p)).toMatchObject({ status: "done" });
+  expect([ok.started.length, ok.moved]).toEqual([1, ["i1"]]);
+
+  const failing = ports({ moveFails: true });
+  expect(await execute(start, { ...situation, runs: [] }, failing.p)).toMatchObject({ status: "done" });
+  expect([failing.started.length, failing.moved]).toEqual([1, ["i1"]]);
+
+  // A reviewer start never moves the issue: In Progress belongs to the worker starting.
+  const review: ProposedAction = { kind: "start_reviewer", subject: [{ repo: pr.repo, number: 7, headSha: head }] };
+  const rv = ports();
+  expect(await execute(review, { ...situation, runs: [] }, rv.p)).toMatchObject({ status: "done" });
+  expect([rv.started.length, rv.moved]).toEqual([1, []]);
 });
 
 test("send_run to a run outside this task is refused before the runner", async () => {

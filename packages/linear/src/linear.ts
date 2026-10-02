@@ -83,6 +83,31 @@ const createIssue = `
   }
 `;
 const issueById = `query SergeantIssueById($id: String!) { issue(id: $id) { identifier url } }`;
+const issueWorkflow = `
+  query SergeantIssueWorkflow($id: String!) {
+    issue(id: $id) {
+      state { name type }
+      team { states(first: 100) { nodes { id name type position } } }
+    }
+  }
+`;
+const moveState = `
+  mutation SergeantMoveState($id: String!, $stateId: String!) {
+    issueUpdate(id: $id, input: { stateId: $stateId }) { success }
+  }
+`;
+const workflowState = z.object({ id: z.string().min(1), name: z.string(), type: z.string(), position: z.number() });
+const issueWorkflowShape = z.object({
+  issue: z
+    .object({
+      state: z.object({ name: z.string(), type: z.string() }),
+      team: z.object({ states: z.object({ nodes: z.array(workflowState) }) }),
+    })
+    .nullable(),
+});
+
+/** State types that a delegated issue may still be sitting in before its first worker starts. */
+const unstartedTypes = new Set(["triage", "backlog", "unstarted"]);
 const createRelation = `
   mutation SergeantRelation($input: IssueRelationCreateInput!) {
     issueRelationCreate(input: $input) { success }
@@ -254,6 +279,21 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         async () => (await request(relationById, { id: relationId }, z.object({ issueRelation: z.object({ id: z.string() }).nullable() }))).issueRelation?.id === relationId,
       );
       return issue;
+    },
+
+    async moveIssueToStarted(issueId) {
+      const { issue } = await request(issueWorkflow, { id: issueId }, issueWorkflowShape);
+      if (!issue) throw new Error(`Linear issue not found: ${issueId}`);
+      // Only ever move forward out of an unstarted-like state: already started, completed, or canceled
+      // issues (and teams with no started state) are left exactly as they are.
+      if (!unstartedTypes.has(issue.state.type)) return { moved: false };
+      const target = issue.team.states.nodes
+        .filter((s) => s.type === "started")
+        .sort((a, b) => a.position - b.position)[0];
+      if (!target) return { moved: false };
+      const { issueUpdate } = await request(moveState, { id: issueId, stateId: target.id }, z.object({ issueUpdate: z.object({ success: z.boolean() }) }));
+      if (!issueUpdate.success) throw new Error("Linear issueUpdate did not succeed");
+      return { moved: true, from: issue.state.name, to: target.name };
     },
 
     async viewer() {

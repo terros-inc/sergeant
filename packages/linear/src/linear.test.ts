@@ -106,6 +106,59 @@ test("postComment uses one id per key and treats Linear's duplicate refusal as a
   await expect(failing.postComment({ issueId: "UNF-1", body: "x", key: "k" })).rejects.toThrow(/forbidden/);
 });
 
+// TECH-4947: the first worker starting must make the issue visibly In Progress, moving it to the
+// team's first `started` state only from an unstarted-like state, by position, and never backward.
+test("moveIssueToStarted moves an unstarted issue to the first started state and is a no-op otherwise", async () => {
+  const states = [
+    { id: "s-triage", name: "Triage", type: "triage", position: 0 },
+    { id: "s-backlog", name: "Backlog", type: "backlog", position: 1 },
+    { id: "s-todo", name: "Todo", type: "unstarted", position: 2 },
+    // Two started states: the lower position wins, regardless of input order.
+    { id: "s-review", name: "In Review", type: "started", position: 4 },
+    { id: "s-progress", name: "In Progress", type: "started", position: 3 },
+    { id: "s-done", name: "Done", type: "completed", position: 5 },
+  ];
+  const updates: { id: string; stateId: string }[] = [];
+  const portFor = (current: { name: string; type: string }) =>
+    createLinearPort({
+      apiKey: "test",
+      sergeantUserIds: [],
+      fetch: async (_i, init) => {
+        const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { id: string; stateId?: string } };
+        if (query.includes("issueUpdate")) {
+          updates.push({ id: variables.id, stateId: variables.stateId ?? "" });
+          return Response.json({ data: { issueUpdate: { success: true } } });
+        }
+        return Response.json({ data: { issue: { state: current, team: { states: { nodes: states } } } } });
+      },
+    });
+
+  // Unstarted-like states move forward to the lowest-position started state.
+  for (const type of ["triage", "backlog", "unstarted"]) {
+    expect(await portFor({ name: type, type }).moveIssueToStarted("UNF-1")).toEqual({ moved: true, from: type, to: "In Progress" });
+  }
+  expect(updates).toEqual([
+    { id: "UNF-1", stateId: "s-progress" },
+    { id: "UNF-1", stateId: "s-progress" },
+    { id: "UNF-1", stateId: "s-progress" },
+  ]);
+
+  // Already started, completed, or canceled: never touched, so never moved backward.
+  updates.length = 0;
+  for (const current of [{ name: "In Progress", type: "started" }, { name: "Done", type: "completed" }, { name: "Canceled", type: "canceled" }]) {
+    expect(await portFor(current).moveIssueToStarted("UNF-1")).toEqual({ moved: false });
+  }
+  expect(updates).toEqual([]);
+
+  // A team with no started state leaves an unstarted issue where it is rather than failing.
+  const noStarted = createLinearPort({
+    apiKey: "test",
+    sergeantUserIds: [],
+    fetch: async () => Response.json({ data: { issue: { state: { name: "Todo", type: "unstarted" }, team: { states: { nodes: states.filter((s) => s.type !== "started") } } } } }),
+  });
+  expect(await noStarted.moveIssueToStarted("UNF-1")).toEqual({ moved: false });
+});
+
 // UNF-729: a follow-up must never be filed twice, even when the process dies between Linear creating
 // the issue and linking it, and it must land in the origin's team and project, delegated to nobody.
 // This fake keeps Linear's one behavior the adapter relies on: a create under an existing id fails.
