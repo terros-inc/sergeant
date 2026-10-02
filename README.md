@@ -64,8 +64,10 @@ Linear, or Claude login is used. Its shape is `InstallationConfig` in
 The Linear token must act as `agentUserId` (checked at startup); every Linear read and write uses it.
 Optional `linear.otherAgentUserIds` lists other agents' users (V1's) whose comments are not human
 input. Optional `review.auditSampleRate` (0 to 1, default 0.2) is the fraction of merged heads that
-skipped fresh review which get an audit review. Optional `linear.webhookSecret` and
-`github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
+skipped fresh review which get an audit review. Optional `budget` is the budget window a task gets
+when it starts, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
+numbers, each optional; unset, 120 minutes and $25; see the task budget under Commands). Optional
+`linear.webhookSecret` and `github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
 webhooks; `serve` has each webhook endpoint only when its secret is set. Optional `humans` says who
 may use `sgt` and the client API, each with their own Linear login (see [The `sgt` CLI](#the-sgt-cli)):
 `{ "linearClientId": "<the Linear OAuth app's client id>", "teams": ["<team key>"], "approvers": ["<Linear user id>"] }`.
@@ -144,11 +146,13 @@ cat <state dirs>/reviews.jsonl | jq -s 'reduce .[] as $f ({}; .[$f.runId] = $f) 
     ledToChange: map(select(.resultingMutation == true)) | length, unknown: map(select(.resultingMutation == "unknown")) | length})'
 ```
 
-Each task has a budget window (`--budget-minutes`, default 120; `--budget-usd`, default 25), saved in
-`state.json` with the task's start before anything else happens. A restart keeps the stored window and
-logs that it ignores different flags; only a grant extends it. Wall time is hard and runs from the
-task's start, including time spent waiting for a human. Spend is best-effort: the cost runs and
-reasoning turns report when they end (a turn's cost counts before its proposals run), so a running or
+Each task has a budget window, saved in `state.json` with the task's start before anything else
+happens. It is the installation config's `budget` (`{ "minutes": 45, "usd": 10 }`, say; TECH-4964),
+each field unset defaulting to 120 minutes and $25; `canary`'s `--budget-minutes` and `--budget-usd`
+override the config's for its task. A restart keeps the stored window and logs that it ignores a
+different one, so changing the config's `budget` affects only tasks that start afterward; only a grant
+extends a task's window. Wall time is hard and runs from the task's start, including time spent
+waiting for a human. Spend is best-effort: the cost runs and reasoning turns report when they end (a turn's cost counts before its proposals run), so a running or
 canceled run's cost is unknown and the wall time is the backstop; there is no billing ledger. Once
 either is exhausted, no run, message, follow-up, or merge happens (Gate rule B1, checked before every
 effect and again right after its live reads), running runs are canceled until the runner confirms it,

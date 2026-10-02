@@ -19,7 +19,7 @@ import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner } from "@terros/sergeant-runner";
 import { linearCallers } from "./auth.ts";
-import { connect, loadConfig } from "./config.ts";
+import { connect, loadConfig, taskBudget } from "./config.ts";
 import { startService } from "./service.ts";
 
 const { values } = parseArgs({
@@ -56,6 +56,7 @@ const service = await startService(
     maxTasks: count(values["max-tasks"], "--max-tasks", 1),
     intakeSeconds: count(values["intake-seconds"], "--intake-seconds", 1),
     pollSeconds: count(values["poll-seconds"], "--poll-seconds", 1),
+    budget: taskBudget(config),
     webhookSecrets: installation.webhookSecrets,
     trustLoopback: values["trust-loopback"],
     ...(config.humans && {
