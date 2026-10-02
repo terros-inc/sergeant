@@ -14,7 +14,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 | `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` on the config parameter (and an explicit deny on every other parameter, which SSM core would otherwise allow), and `secretsmanager:GetSecretValue` on exactly the four listed secrets. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
-| `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref with a control-plane App token and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
+| `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
 | `host/install.sh` | Idempotent install from the checkout: packages (Docker, Node 24, Caddy, the `claude` CLI at the runner image's version), the data volume, the `sergeant` user, the runner image, dependencies, the config, and a restart of `serve`. |
 | `host/installation.example.json` | The shape of the installation config (`InstallationConfig`; identifiers and secret references only). |
 | `host/sergeant.service`, `Caddyfile`, `cloudwatch-agent.json`, `logrotate` | The systemd unit, the HTTPS proxy, log shipping, and log rotation. |
@@ -22,9 +22,8 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 How it fits together:
 
 - **No SSH and no personal credential on the host.** Operators reach it with SSM (Run Command or
-  Session Manager). `sergeant-update` fetches the source with a short-lived installation token of the
-  config's control-plane App, narrowed to the source repository with contents read, so the repository
-  may be private.
+  Session Manager). The source repository is public, so `sergeant-update` fetches it anonymously over
+  HTTPS with no credential.
 - **Secrets stay in Secrets Manager.** `serve` resolves the config's secret references with the
   instance role at startup, as it does on a laptop (`secretResolver`), and holds them in memory.
 - **Runs cannot reach the instance role.** IMDSv2 is required with a hop limit of 1, so a Docker
@@ -67,15 +66,15 @@ anything, and the state backend and the provider refuse any other account.
 2. **Secrets** exist in Secrets Manager under those names: both GitHub Apps' private keys, the Linear
    agent token, and the model token.
 3. **Installation config.** Write it (shape: `host/installation.example.json`; field notes in
-   the root `README.md`) to the installation-config parameter. The first boot needs it to find the control-plane App:
+   the root `README.md`) to the installation-config parameter. The first boot refuses to start
+   without it:
 
    ```sh
    aws ssm put-parameter --name /sergeant/v2/installation-config --type String --overwrite \
      --value file://installation.json
    ```
 
-4. **Control-plane App** is installed on the source repository (the host fetches it with that App)
-   and on every enrolled repository.
+4. **Control-plane App** is installed on every enrolled repository.
 5. **Enrolled repositories' rulesets**: the default branch requires a pull request and declares
    required status checks, and the worker App is not a bypass actor. Without required checks Sergeant
    never merges there (see the root `README.md`).
@@ -138,16 +137,6 @@ The restart sends SIGTERM: `serve` stops intake and ends each task at its next p
 minutes, then systemd kills it). Running worker and reviewer containers keep running and the new
 process picks them up from the state dir. `cat /etc/sergeant/release` on the host shows the deployed
 ref and commit. To roll back, update to the previous commit.
-
-A host installed before the workspace moved from `v2/` to the repository root (UNF-735) still has the
-old `sergeant-update`, which checks out the ref and then fails to find `v2/deploy/host/install.sh`.
-Update such a host once with this command in place of `/usr/local/sbin/sergeant-update main` above;
-it also removes the old layout's leftover `node_modules`. The install it runs replaces
-`sergeant-update`, so every later update is the ordinary one:
-
-```sh
-/usr/local/sbin/sergeant-update main; test -x /opt/sergeant/src/deploy/host/install.sh && rm -rf /opt/sergeant/src/v2 && /opt/sergeant/src/deploy/host/install.sh
-```
 
 ### Live check on the host
 

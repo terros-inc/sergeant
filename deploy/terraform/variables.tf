@@ -17,7 +17,7 @@ variable "hostname" {
 }
 
 variable "source_repository_url" {
-  description = "The Sergeant repository the host checks out, e.g. https://github.com/<owner>/sergeant. The control-plane App must be installed on it."
+  description = "The Sergeant repository the host checks out, e.g. https://github.com/<owner>/sergeant. It must be public: the host fetches it anonymously."
   type        = string
 
   validation {
