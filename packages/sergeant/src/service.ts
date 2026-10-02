@@ -86,7 +86,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         signal: abort.signal,
         wake: wakeOf(issueId),
       },
-      deps,
+      { ...deps, exclusive: (step) => locked(issueId, step) },
     )
       .then(
         (result) => {
@@ -106,18 +106,23 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   // A task cancel recorded through the API and not yet confirmed (cancel.ts): driven at once, again
   // at every intake until the runner confirms its runs stopped, and so after a restart too, whether or
   // not the issue is still delegated. One step per task at a time, so a request's own drive is the one
-  // that answers it; it is not held to the task limit.
-  const closing = new Map<string, Promise<unknown>>();
-  const serialized = <T>(ref: string, step: () => Promise<T>): Promise<T> => {
-    const next = (closing.get(ref) ?? Promise.resolve()).catch(() => {}).then(step);
-    closing.set(ref, next);
+  // that answers it; it is not held to the task limit. The same per-task lock holds a run's start from
+  // its delegation check to the runner (execute.ts), so a cancel lists every run that got past it.
+  const locks = new Map<string, Promise<unknown>>();
+  const locked = <T>(ref: string, step: () => Promise<T>): Promise<T> => {
+    const next = (locks.get(ref) ?? Promise.resolve()).catch(() => {}).then(step);
+    locks.set(ref, next);
     void next
       .finally(() => {
-        if (closing.get(ref) === next) closing.delete(ref);
-        // The task's loop, polled now, finds its delegation gone and ends.
-        if (active.has(ref)) wakeOf(ref).interrupt();
+        if (locks.get(ref) === next) locks.delete(ref);
       })
       .catch(() => {});
+    return next;
+  };
+  const serialized = <T>(ref: string, step: () => Promise<T>): Promise<T> => {
+    const next = locked(ref, step);
+    // The task's loop, polled now, finds its delegation gone and ends.
+    void next.finally(() => active.has(ref) && wakeOf(ref).interrupt()).catch(() => {});
     return next;
   };
   const drive = (ref: string) => driveCancel(opts.stateDir, ref, deps, log);
@@ -201,7 +206,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       abort.abort();
       await intakeLoop;
       await Promise.all(active.values());
-      await Promise.allSettled(closing.values());
+      await Promise.allSettled(locks.values());
       if (server) await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
       await release();
     },

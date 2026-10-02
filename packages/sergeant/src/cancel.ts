@@ -91,8 +91,9 @@ export async function driveCancel(stateDir: string, ref: string, deps: ServiceDe
       undelegated = true;
       log(`${ref}: canceled through the API: ${intent.reason}`);
     }
-    // Undelegated, the task's loop starts nothing more (the executor re-checks before each start), so
-    // these are all the runs the cancel must stop. A later delegation's new runs are not this cancel's.
+    // Undelegated, the task's loop starts nothing more (the executor re-checks before each start), and
+    // a start already past that check finished under the task's lock (service.ts) before this drive
+    // began, so these are all the runs the cancel must stop. A later delegation's new runs are not this cancel's.
     intent.runIds = runIdsOf(await readTaskState(join(taskDir(stateDir, ref), "state.json")));
     await writeFile(intentFile(stateDir, ref), JSON.stringify(intent, null, 2));
   }

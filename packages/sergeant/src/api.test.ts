@@ -167,6 +167,45 @@ test.each([
   expect(f.turns()).toBe(0);
 });
 
+// A start already past its delegation check when a task cancel begins must not escape it: the
+// cancel waits for that start and stops its run, so nothing is left running across a restart.
+test("a task cancel stops a run whose start had already passed the delegation check", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
+  const runs: RunRecord[] = [];
+  const f = fakes(runs);
+  f.deps.runner.start = async (spec) => void runs.push({ runId: spec.runId, role: spec.role, status: "running", provider: "p", model: "m", report: null });
+  let proposed = false;
+  f.deps.reasoner.turn = async () => {
+    const actions = proposed ? [] : [{ kind: "start_worker" as const, objective: "Do UNF-1.", repositories: ["o/r"] }];
+    proposed = true;
+    return { output: { summary: "start a worker", actions }, model: "m", promptVersion: "p" };
+  };
+  // The start's live read (by the issue's id) still sees the delegation, then is held until released.
+  let release = () => {};
+  let paused = false;
+  const read = f.deps.linear.readConversation;
+  f.deps.linear.readConversation = async (id) => {
+    if (id !== "i-UNF-1") return read(id);
+    const seen = structuredClone(f.conversation);
+    paused = true;
+    await new Promise<void>((resolve) => (release = resolve));
+    return seen;
+  };
+  const port = await start(f.deps);
+  await vi.waitFor(() => expect(paused).toBe(true), { timeout: 5_000 });
+
+  const canceling = call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  release();
+  expect((await canceling).json).toEqual({ ref: "UNF-1", undelegated: true, stopping: [] });
+  expect(runs).toEqual([expect.objectContaining({ status: "canceled" })]);
+
+  await service?.stop();
+  await start(f.deps);
+  expect(await exists(join(dir, "tasks", "UNF-1", "cancel.json"))).toBe(false);
+  expect(runs).toEqual([expect.objectContaining({ status: "canceled" })]);
+});
+
 // The hosted proxy forwards to loopback, and a browser page can rebind a name to 127.0.0.1 or post a
 // form at it: none of them is an operator on the host.
 test("the API refuses a proxied request, a foreign Host, and a non-JSON post, while /health still answers", async () => {
