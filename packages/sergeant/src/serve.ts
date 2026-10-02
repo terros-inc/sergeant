@@ -65,6 +65,7 @@ const service = await startService(
     }),
     reasoner: claudeCliReasoner({ model: values["reasoning-model"] }),
     delegatedIssues: () => installation.linear.delegatedIssues(installation.agentUserId),
+    undelegate: (issueId) => installation.linear.undelegate(issueId),
   },
 );
 console.log(`Sergeant serving ${repositories.join(", ")}; GET http://${values.host}:${service.port}/health`);

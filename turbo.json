@@ -5,6 +5,7 @@
     "tags": {
       "contracts": { "dependencies": { "allow": [] } },
       "adapter": { "dependencies": { "allow": ["contracts"] } },
+      "client": { "dependencies": { "allow": ["contracts"] }, "dependents": { "allow": [] } },
       "app": { "dependents": { "allow": [] } }
     }
   },

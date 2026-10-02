@@ -66,6 +66,8 @@ export interface RunnerPort {
   start(spec: RunSpec): Promise<void>;
   status(runId: RunId): Promise<RunRecord>;
   cancel(runId: RunId): Promise<void>;
+  /** The raw Markdown report a run ended with, if it wrote one; parsed, it is the record's `report`. */
+  report?(runId: RunId): Promise<string | undefined>;
   /** Steering text to a running worker, where the runner supports it. */
   send?(runId: RunId, message: string): Promise<void>;
 }

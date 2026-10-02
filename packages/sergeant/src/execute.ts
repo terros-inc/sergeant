@@ -34,6 +34,12 @@ export type Ports = {
    * crash between the start and the loop's save still leaves a run it can cancel (UNF-728).
    */
   recordRun?: (runId: RunId) => Promise<void>;
+  /**
+   * The task's start/cancel lock, held from a start's live delegation check until the runner is asked
+   * to start it. A task cancel lists the runs to stop under the same lock, so a start either sees the
+   * delegation gone or is among the runs the cancel stops, across a restart too.
+   */
+  exclusive?: <T>(step: () => Promise<T>) => Promise<T>;
 };
 
 export type ActionOutcome =
@@ -71,50 +77,53 @@ export async function execute(action: ProposedAction, situation: SituationReport
     switch (action.kind) {
       case "start_worker":
       case "start_reviewer": {
-        // Delegation, the issue's linked PRs, and who opened a reviewer's subject PRs come from live
-        // reads, never the snapshot.
-        const subjects = action.kind === "start_reviewer" ? action.subject.filter((s) => enrolledRepositories.includes(s.repo)) : [];
-        const [{ issue }, subjectPullRequests] = await Promise.all([
-          ports.linear.readConversation(conversation.issue.id),
-          Promise.all(subjects.map((s) => ports.github.readPullRequest(s.repo, s.number))),
-        ]);
-        const delegation = checkDelegation(issue, ports.agentUserId);
-        if (!delegation.allowed) return denied(delegation);
-        const verdict = checkStart(action, {
-          runs,
-          enrolledRepositories,
-          linkedPullRequests: issue.linkedPullRequests,
-          workerLogin: ports.workerLogin,
-          subjectPullRequests,
+        const exclusive = ports.exclusive ?? ((step) => step());
+        return await exclusive(async (): Promise<ActionOutcome> => {
+          // Delegation, the issue's linked PRs, and who opened a reviewer's subject PRs come from live
+          // reads, never the snapshot.
+          const subjects = action.kind === "start_reviewer" ? action.subject.filter((s) => enrolledRepositories.includes(s.repo)) : [];
+          const [{ issue }, subjectPullRequests] = await Promise.all([
+            ports.linear.readConversation(conversation.issue.id),
+            Promise.all(subjects.map((s) => ports.github.readPullRequest(s.repo, s.number))),
+          ]);
+          const delegation = checkDelegation(issue, ports.agentUserId);
+          if (!delegation.allowed) return denied(delegation);
+          const verdict = checkStart(action, {
+            runs,
+            enrolledRepositories,
+            linkedPullRequests: issue.linkedPullRequests,
+            workerLogin: ports.workerLogin,
+            subjectPullRequests,
+          });
+          if (!verdict.allowed) return denied(verdict);
+          const late = inBudget();
+          if (!late.allowed) return denied(late);
+          const runId = `run_${randomUUID()}`;
+          // Accepted: the deadline can pass during this milliseconds-long write, and the run still starts.
+          await ports.recordRun?.(runId);
+          await ports.runner.start(
+            action.kind === "start_worker"
+              ? {
+                  runId,
+                  role: "worker",
+                  conversation,
+                  repositories: action.repositories,
+                  objective: action.objective,
+                  context: { pullRequests: situation.pullRequests, runs },
+                }
+              : {
+                  runId,
+                  role: "reviewer",
+                  conversation,
+                  repositories: [...new Set(action.subject.map((s) => s.repo))],
+                  subject: action.subject,
+                  ...(action.focus !== undefined && { focus: action.focus }),
+                },
+          );
+          const role = action.kind === "start_worker" ? "worker" : "reviewer";
+          const started: RunRecord = { runId, role, status: "running", provider: "unknown", model: "unknown", report: null };
+          return { action, status: "done", result: { runId }, started };
         });
-        if (!verdict.allowed) return denied(verdict);
-        const late = inBudget();
-        if (!late.allowed) return denied(late);
-        const runId = `run_${randomUUID()}`;
-        // Accepted: the deadline can pass during this milliseconds-long write, and the run still starts.
-        await ports.recordRun?.(runId);
-        await ports.runner.start(
-          action.kind === "start_worker"
-            ? {
-                runId,
-                role: "worker",
-                conversation,
-                repositories: action.repositories,
-                objective: action.objective,
-                context: { pullRequests: situation.pullRequests, runs },
-              }
-            : {
-                runId,
-                role: "reviewer",
-                conversation,
-                repositories: [...new Set(action.subject.map((s) => s.repo))],
-                subject: action.subject,
-                ...(action.focus !== undefined && { focus: action.focus }),
-              },
-        );
-        const role = action.kind === "start_worker" ? "worker" : "reviewer";
-        const started: RunRecord = { runId, role, status: "running", provider: "unknown", model: "unknown", report: null };
-        return { action, status: "done", result: { runId }, started };
       }
       case "send_run": {
         const verdict = checkSend(action, { runs });

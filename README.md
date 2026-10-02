@@ -17,7 +17,8 @@ walking skeleton:
 | `packages/reasoning` (`@terros/sergeant-reasoning`) | One fresh-context reasoning turn through the local `claude` CLI: Situation Report in, validated proposed actions out |
 | `packages/linear`, `packages/github` (`@terros/sergeant-linear`, `-github`) | Live Linear and GitHub adapters (UNF-704), and GitHub App installation tokens for the control-plane and worker Apps (UNF-720) |
 | `packages/runner` (`@terros/sergeant-runner`) | Local primary worker and fresh-context reviewer (UNF-705) |
-| `packages/sergeant` (`@terros/sergeant`) | The app: executes proposed actions through the Gate against the ports, and the polling loop for one explicitly selected, V2-delegated issue that files follow-up issues, can ask a human and wait for the reply, posts one outcome comment after the merge, records review telemetry and audits a sample of skipped reviews, and stays within a task budget (UNF-706, UNF-724, UNF-727, UNF-728, UNF-729, UNF-730); and the long-running service that runs that loop for every delegated issue (UNF-719) |
+| `packages/sergeant` (`@terros/sergeant`) | The app: executes proposed actions through the Gate against the ports, and the polling loop for one explicitly selected, V2-delegated issue that files follow-up issues, can ask a human and wait for the reply, posts one outcome comment after the merge, records review telemetry and audits a sample of skipped reviews, and stays within a task budget (UNF-706, UNF-724, UNF-727, UNF-728, UNF-729, UNF-730); and the long-running service that runs that loop for every delegated issue (UNF-719), with its loopback client API (UNF-713) |
+| `packages/cli` (`@terros/sergeant-cli`) | `sgt`, a thin client of that API (UNF-714) |
 
 The architecture is designed in pseudocode in [`docs/design/`](docs/design/README.md) (draft 3).
 Code here implements only the parts a ticket asks for. [`AGENTS.md`](AGENTS.md) is the guide for
@@ -180,6 +181,16 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   continues, accepting some repeated work. One process serves a state directory: it holds an OS file lock on
   `<state dir>/service.lock` (released when it exits, however it exits), and a second start is refused while it does. `GET /health` on `--host` (127.0.0.1) and `--port` (8080) reports the process alive,
   the tasks running, and the last intake.
+- The same port answers the client API under `/v1` (UNF-713, the slice of design 11 §2 `sgt` uses):
+  task and run reads, `POST /v1/tasks/:ref/wake`, `/v1/tasks/:ref/cancel`, and `/v1/runs/:id/cancel`.
+  A wake ends the task loop's wait and owes it one turn, behind every hold the loop keeps. A task
+  cancel is recorded in the task's directory first, then removes the V2 agent's delegation, says why on
+  the issue, and cancels every run of the task not confirmed stopped; it answers with any run the runner
+  has not yet confirmed, and `serve` keeps driving the recorded cancel at each intake, across a restart,
+  until it has. Delegating again resumes the task. A run cancel is the
+  runner's confirmed cancel, noted on the issue so the next turn does not just restart it. There is no
+  client authentication yet (UNF-718): `/v1` answers only a loopback caller naming a loopback `Host`,
+  not relayed by a proxy, and posts must be JSON, so neither a proxy nor a published port exposes it.
 
 ```sh
 pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2]
@@ -187,6 +198,28 @@ pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8
 
 To run `serve` on one AWS host behind an HTTPS endpoint, see [`deploy/`](deploy/README.md): Terraform,
 the host install and update scripts, and the runbook.
+
+### The `sgt` CLI
+
+`sgt` (UNF-714) only calls the client API and prints the answer: concise lines by default, the API's
+own JSON with `--json` (errors too, as `{"error":{"code","message"}}`; exit 1 for an API error, 2 for
+usage). It needs no AWS credentials. Run `sgt --help` for the commands: `task list | show | wake |
+cancel`, `run list | show | report | cancel`, `whoami`.
+
+```sh
+alias sgt="node $PWD/packages/cli/src/sgt.ts"   # from the repository root
+sgt task show UNF-123                            # serve on this machine: http://127.0.0.1:8080
+```
+
+The only profile is local: `--api <url>`, else `SGT_API_URL`, else `http://127.0.0.1:8080`. To use
+the hosted instance until client login exists (UNF-718), forward its loopback port over SSM
+(operator AWS access to the instance is needed for the session, never for `sgt` itself):
+
+```sh
+aws ssm start-session --target <instance id> --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8080"],"localPortNumber":["18080"]}'
+SGT_API_URL=http://127.0.0.1:18080 sgt task list
+```
 
 ### UNF-724 live check (after UNF-720)
 

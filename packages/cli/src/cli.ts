@@ -1,0 +1,285 @@
+import { randomUUID } from "node:crypto";
+import { parseArgs } from "node:util";
+import {
+  ApiError,
+  CancelRunResponse,
+  CancelTaskResponse,
+  RunDetail,
+  RunList,
+  TaskDetail,
+  TaskList,
+  WakeResponse,
+  WhoAmI,
+  type RunSummary,
+  type TaskSummary,
+} from "@terros/sergeant-contracts";
+import type { z } from "zod";
+
+// `sgt`, a thin client of the Sergeant 2 API (11 §7, UNF-714): it sends one request per command and
+// prints the answer, concise by default and the API's own JSON with `--json`. Every decision is the
+// server's. There is no client authentication yet (UNF-718): the API answers only callers on its own
+// host, so the one profile is local, reached on the hosted instance through an SSM port-forward.
+
+export const DEFAULT_API = "http://127.0.0.1:8080";
+
+export const USAGE = `usage: sgt [--api <url>] [--json] <command>
+
+  task list                          tasks Sergeant knows, with status, turns, and runs
+  task show <UNF-123>                one task: issue, budget, runs, recent turns
+  task wake <UNF-123> [--reason …]   take a turn now
+  task cancel <UNF-123> --reason …   stop: removes Sergeant's delegation and cancels its runs
+  run list [--task <UNF-123>]
+  run show <run>
+  run report <run>                   the run's raw Markdown report
+  run cancel <run> [--reason …]
+  whoami
+
+The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
+one through an SSM port-forward). --json prints the API's JSON unchanged, errors included.`;
+
+export type Io = {
+  env: Record<string, string | undefined>;
+  out: (text: string) => void;
+  err: (text: string) => void;
+  fetch?: typeof globalThis.fetch;
+};
+
+type Flags = { reason?: string | undefined; task?: string | undefined };
+type Context = { api: string; json: boolean; io: Io; flags: Flags };
+type Command = { args: number; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
+
+class Usage extends Error {}
+class Failure extends Error {}
+
+const commands: Record<string, Command> = {
+  "task list": {
+    args: 0,
+    run: async (ctx) => {
+      const { tasks } = await call(ctx, "GET", "/v1/tasks", TaskList);
+      print(ctx, { tasks }, () => (tasks.length ? table(tasks.map(taskRow)) : "no tasks"));
+    },
+  },
+  "task show": {
+    args: 1,
+    run: async (ctx, [ref]) => {
+      const detail = await call(ctx, "GET", `/v1/tasks/${path(ref)}`, TaskDetail);
+      print(ctx, detail, () => showTask(detail));
+    },
+  },
+  "task wake": {
+    args: 1,
+    flags: ["reason"],
+    run: async (ctx, [ref]) => {
+      const res = await call(ctx, "POST", `/v1/tasks/${path(ref)}/wake`, WakeResponse, { reason: ctx.flags.reason });
+      const said = {
+        active: "its loop polls now and takes a turn once nothing holds it (a running run, an open question, an exhausted budget)",
+        admitted: "its loop started and takes a turn",
+        queued: "every task slot is busy; it starts and takes a turn at the next free slot",
+      }[res.woke];
+      print(ctx, res, () => `${res.ref} woken: ${said}`);
+    },
+  },
+  "task cancel": {
+    args: 1,
+    flags: ["reason"],
+    run: async (ctx, [ref]) => {
+      if (!ctx.flags.reason?.trim()) throw new Usage("task cancel needs --reason");
+      const res = await call(ctx, "POST", `/v1/tasks/${path(ref)}/cancel`, CancelTaskResponse, { reason: ctx.flags.reason, requestId: randomUUID() });
+      print(ctx, res, () => {
+        const delegation = res.undelegated ? "Sergeant's delegation is removed" : "Sergeant was already not delegated";
+        return res.stopping.length === 0
+          ? `${res.ref} canceled: ${delegation} and no run of it is running`
+          : `${res.ref} canceling: ${delegation}; not yet confirmed stopped, Sergeant keeps canceling: ${res.stopping.join(", ")} (sgt run list --task ${res.ref})`;
+      });
+    },
+  },
+  "run list": {
+    args: 0,
+    flags: ["task"],
+    run: async (ctx) => {
+      const query = ctx.flags.task ? `?task=${path(ctx.flags.task)}` : "";
+      const { runs } = await call(ctx, "GET", `/v1/runs${query}`, RunList);
+      print(ctx, { runs }, () => (runs.length ? table(runs.map(runRow)) : "no runs"));
+    },
+  },
+  "run show": {
+    args: 1,
+    run: async (ctx, [runId]) => {
+      const detail = await call(ctx, "GET", `/v1/runs/${path(runId)}`, RunDetail);
+      print(ctx, detail, () => showRun(detail));
+    },
+  },
+  "run report": {
+    args: 1,
+    run: async (ctx, [runId]) => {
+      const markdown = await request(ctx, "GET", `/v1/runs/${path(runId)}/report`);
+      ctx.io.out(ctx.json ? `${JSON.stringify({ report: markdown })}\n` : markdown.endsWith("\n") ? markdown : `${markdown}\n`);
+    },
+  },
+  "run cancel": {
+    args: 1,
+    flags: ["reason"],
+    run: async (ctx, [runId]) => {
+      const res = await call(ctx, "POST", `/v1/runs/${path(runId)}/cancel`, CancelRunResponse, { reason: ctx.flags.reason });
+      print(ctx, res, () => `${res.runId} (${res.task}) ${res.status === "canceled" ? "canceled" : `already ${res.status}`}`);
+    },
+  },
+  whoami: {
+    args: 0,
+    run: async (ctx) => {
+      const me = await call(ctx, "GET", "/v1/whoami", WhoAmI);
+      print(ctx, me, () =>
+        [`api ${ctx.api}: local profile, no client login yet (the API answers callers on its own host)`, `enrolled ${me.enrolledRepositories.join(", ") || "none"}`].join("\n"),
+      );
+    },
+  },
+};
+
+/** Runs one `sgt` invocation; returns the exit code: 0 ok, 1 the API refused or failed, 2 usage. */
+export async function main(argv: string[], io: Io): Promise<number> {
+  let json = argv.includes("--json");
+  try {
+    const { values, positionals } = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        api: { type: "string" },
+        json: { type: "boolean" },
+        reason: { type: "string" },
+        task: { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
+    });
+    json = values.json ?? false;
+    if (values.help || positionals.length === 0) {
+      io.out(`${USAGE}\n`);
+      return values.help ? 0 : 2;
+    }
+    const name = positionals[0] === "whoami" ? "whoami" : positionals.slice(0, 2).join(" ");
+    const command = commands[name];
+    if (!command) throw new Usage(`unknown command: ${positionals.join(" ")}`);
+    const args = positionals.slice(name.split(" ").length);
+    if (args.length !== command.args) throw new Usage(`${name} takes ${command.args || "no"} argument${command.args === 1 ? "" : "s"}`);
+    const flags = { reason: values.reason, task: values.task };
+    const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
+    if (stray) throw new Usage(`${name} takes no --${stray}`);
+    const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");
+    await command.run({ api, json, io, flags }, args);
+    return 0;
+  } catch (e) {
+    if (e instanceof Failure) return 1;
+    const usage = e instanceof Usage || (e as { code?: string }).code?.startsWith("ERR_PARSE_ARGS");
+    if (!usage) throw e;
+    io.err(`sgt: ${(e as Error).message} (sgt --help for usage)\n`);
+    return 2;
+  }
+}
+
+/** One API call; a refusal, an unreachable API, or a response outside the contract ends the command. */
+async function request(ctx: Context, method: "GET" | "POST", path: string, body?: object): Promise<string> {
+  const fetchFn = ctx.io.fetch ?? globalThis.fetch;
+  const res = await fetchFn(`${ctx.api}${path}`, {
+    method,
+    ...(body && { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  }).catch((e: Error) =>
+    fail(ctx, "unavailable", `cannot reach the Sergeant API at ${ctx.api} (${(e.cause as Error | undefined)?.message ?? e.message}). Is serve running there? For the hosted instance, open the SSM port-forward first (v2/README.md).`),
+  );
+  const text = await res.text();
+  if (res.ok) return text;
+  const refused = ApiError.safeParse(safeJson(text));
+  if (refused.success) return fail(ctx, refused.data.error.code, refused.data.error.message);
+  return fail(ctx, "unavailable", `${method} ${path} answered ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+}
+
+async function call<T>(ctx: Context, method: "GET" | "POST", path: string, schema: z.ZodType<T>, body?: object): Promise<T> {
+  const text = await request(ctx, method, path, body);
+  const parsed = schema.safeParse(safeJson(text));
+  if (!parsed.success) return fail(ctx, "unavailable", `${method} ${path} answered outside the API contract: ${parsed.error.issues[0]?.message ?? text.slice(0, 200)}`);
+  return parsed.data;
+}
+
+function fail(ctx: Context, code: ApiError["error"]["code"], message: string): never {
+  if (ctx.json) ctx.io.out(`${JSON.stringify({ error: { code, message } } satisfies ApiError)}\n`);
+  else ctx.io.err(`sgt: ${code}: ${message}\n`);
+  throw new Failure(message);
+}
+
+const safeJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+const path = (segment: string | undefined) => encodeURIComponent(segment ?? "");
+
+function print(ctx: Context, value: unknown, human: () => string): void {
+  ctx.io.out(`${ctx.json ? JSON.stringify(value) : human()}\n`);
+}
+
+// --- human output: one line per item, aligned; detail only in `show`
+
+function table(rows: string[][]): string {
+  const widths = rows[0]?.map((_, i) => Math.max(...rows.map((r) => r[i]?.length ?? 0))) ?? [];
+  return rows.map((r) => r.map((cell, i) => cell.padEnd(widths[i] ?? 0)).join("  ").trimEnd()).join("\n");
+}
+
+const clip = (text: string | undefined, max = 80) => {
+  const line = (text ?? "").replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+};
+const minute = (iso: string | undefined) => (iso ? `${iso.slice(0, 16).replace("T", " ")}Z` : "-");
+const usd = (n: number | undefined) => (n === undefined ? "-" : `$${n.toFixed(2)}`);
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+const taskRow = (t: TaskSummary) => [t.ref, t.status, plural(t.turns, "turn"), plural(t.runs, "run"), minute(t.lastTurnAt), clip(t.lastSummary, 60)];
+
+const runRow = (r: RunSummary) => [r.runId, r.task, r.role ?? "-", r.status, usd(r.costUsd), clip(r.summary ?? r.error, 60)];
+
+function showTask(d: TaskDetail): string {
+  const { task, issue, budget } = d;
+  const lines = [
+    "error" in issue
+      ? `${task.ref}  ${task.status}  (Linear unreadable: ${issue.error})`
+      : `${task.ref}  ${task.status}  ${issue.title}\n${issue.state}, ${issue.delegatedToSergeant ? "delegated to Sergeant" : issue.delegate ? `delegated to ${issue.delegate}` : "not delegated"}  ${issue.url}`,
+  ];
+  if (task.statusDetail) lines.push(`last ended: ${task.statusDetail}`);
+  lines.push(`started ${minute(task.startedAt)}, ${plural(task.turns, "turn")}, last ${minute(task.lastTurnAt)}`);
+  if (budget) {
+    const spent = `${usd(budget.spentUsd)} of ${usd(budget.costLimitUsd)}${budget.unknownCostRuns ? ` (+${plural(budget.unknownCostRuns, "run")} not yet costed)` : ""}`;
+    lines.push(`budget: ${spent}, wall time until ${minute(budget.wallDeadline)}${budget.exhausted ? `  EXHAUSTED: ${budget.exhausted}` : ""}`);
+  }
+  if (task.merged) lines.push(`merged: ${task.merged.repo}#${task.merged.number} as ${task.merged.mergedSha.slice(0, 12)} at ${minute(task.merged.at)}`);
+  if (d.runs.length) lines.push("runs:", indent(table(d.runs.map((r) => runRow(r).filter((_, i) => i !== 1)))));
+  if (d.recentTurns.length) {
+    lines.push("recent turns:");
+    for (const t of d.recentTurns) lines.push(`  ${minute(t.at)}  ${clip(t.summary, 100)}`, ...t.outcomes.map((o) => `    ${clip(o, 100)}`));
+  }
+  if (d.followups.length) lines.push("follow-ups:", ...d.followups.map((f) => `  ${f.identifier}  ${clip(f.title, 60)}  ${f.url}`));
+  return lines.join("\n");
+}
+
+function showRun({ task, run }: RunDetail): string {
+  const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${usd(run.costUsd)}`];
+  if (!run.report) {
+    lines.push(run.reportError ? `no report: ${run.reportError}` : "no report yet");
+  } else if (run.role === "worker") {
+    const r = run.report;
+    lines.push(`${r.outcome}: ${r.summary}`);
+    for (const pr of r.pullRequests) {
+      const review = pr.review.required ? "review required" : `review skipped: ${pr.review.reason}`;
+      lines.push(`  ${pr.repo}#${pr.number} @${pr.headSha.slice(0, 12)} ${pr.closesIssue ? "closes the issue" : "part of it"}, ${review}`);
+    }
+    for (const gap of r.knownGaps) lines.push(`  gap: ${gap}`);
+  } else {
+    const r = run.report;
+    lines.push(`${r.verdict}: ${r.summary}`);
+    for (const pr of r.reviewed) lines.push(`  reviewed ${pr.repo}#${pr.number} @${pr.headSha.slice(0, 12)}`);
+    for (const f of r.findings) lines.push(`  ${f.severity} ${f.id}: ${clip(f.description, 100)}${f.location ? ` (${f.location})` : ""}`);
+  }
+  lines.push(`full report: sgt run report ${run.runId}`);
+  return lines.join("\n");
+}
+
+const indent = (text: string) => text.replace(/^/gm, "  ");

@@ -1,0 +1,22 @@
+{
+  "name": "@terros/sergeant-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The sgt CLI: a thin client of the Sergeant 2 API (UNF-714). Depends only on contracts.",
+  "type": "module",
+  "bin": {
+    "sgt": "./src/sgt.ts"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@terros/sergeant-contracts": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
+  }
+}
