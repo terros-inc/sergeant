@@ -5,6 +5,7 @@ import { RepoSlug, type GitHubPort, type LinearPort, type RunGitHubTokens } from
 import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
 import { createLinearPort } from "@terros/sergeant-linear";
 import { z } from "zod";
+import type { BudgetWindow } from "./budget.ts";
 
 // One installation's V2 identities and enrolled repositories (10 §2, UNF-720): identifiers and
 // secret references only. Secret references are AWS Secrets Manager ids, resolved at startup and
@@ -85,8 +86,16 @@ export const InstallationConfig = z.strictObject({
       auditSampleRate: z.number().min(0).max(1),
     })
     .default({ auditSampleRate: 0.2 }),
+  /** The budget window a task gets when it starts (TECH-4964); each one unset keeps its default (120 minutes, $25). */
+  budget: z.strictObject({ minutes: z.number().positive().optional(), usd: z.number().positive().optional() }).optional(),
 });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;
+
+/** The config's `budget` as a loop's budget option: a task started from now on gets it; a running one keeps its own. */
+export function taskBudget(config: InstallationConfig): Partial<BudgetWindow> {
+  const { minutes, usd } = config.budget ?? {};
+  return { ...(minutes !== undefined && { wallMinutes: minutes }), ...(usd !== undefined && { costUsd: usd }) };
+}
 
 export async function loadConfig(file: string): Promise<InstallationConfig> {
   return InstallationConfig.parse(JSON.parse(await readFile(file, "utf8")));

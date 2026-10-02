@@ -41,7 +41,7 @@ How it fits together:
 - **The config lives in AWS.** Every install reads the SSM parameter (default
   `/sergeant/v2/installation-config`) and replaces `/etc/sergeant/installation.json` only if it parses
   as an `InstallationConfig`; a config that does not parse stops the update before `serve` restarts.
-  Enrolling a repository is: edit the parameter, then update.
+  Enrolling a repository, or changing the per-task budget, is: edit the parameter, then update.
 - **Logs** go to `/var/log/sergeant/serve.log` on the host and to CloudWatch Logs group `/sergeant/v2`
   (streams `<instance id>/serve` and `<instance id>/first-boot`).
 
@@ -188,6 +188,20 @@ The restart sends SIGTERM: `serve` stops intake and ends each task at its next p
 minutes, then systemd kills it). Running worker and reviewer containers keep running and the new
 process picks them up from the state dir. `cat /etc/sergeant/release` on the host shows the deployed
 ref and commit. To roll back, update to the previous commit.
+
+### Change the per-task budget
+
+The installation config's `budget` is the window each task gets when it starts; without it, 120
+minutes and $25 (root `README.md`, under Commands). Add or change it in your `installation.json`, for
+example `"budget": { "minutes": 45, "usd": 10 }`, put the parameter, then run an Update (above):
+
+```sh
+aws ssm put-parameter --name /sergeant/v2/installation-config --type String --overwrite \
+  --value file://installation.json
+```
+
+Only tasks that start after the update get the new window. A task already running keeps the one it
+started with (the log says `ignoring the budget options`); only a human's "extend" reply enlarges it.
 
 ### Live check on the host
 

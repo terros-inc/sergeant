@@ -19,7 +19,7 @@ import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner } from "@terros/sergeant-runner";
-import { connect, loadConfig } from "./config.ts";
+import { connect, loadConfig, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const { values } = parseArgs({
@@ -31,7 +31,10 @@ const { values } = parseArgs({
     "reasoning-model": { type: "string", default: "opus" },
     "worker-model": { type: "string", default: "opus" },
     "reviewer-model": { type: "string", default: "opus" },
-    /** The task's budget window (UNF-728): hard wall time, and best-effort spend. Fixed when the task starts. */
+    /**
+     * The task's budget window (UNF-728): hard wall time, and best-effort spend. Fixed when the task
+     * starts. Each flag given overrides the installation config's `budget` (TECH-4964).
+     */
     "budget-minutes": { type: "string" },
     "budget-usd": { type: "string" },
   },
@@ -54,6 +57,7 @@ const result = await runLoop(
     dir,
     auditSampleRate: config.review.auditSampleRate,
     budget: {
+      ...taskBudget(config),
       ...(values["budget-minutes"] !== undefined && { wallMinutes: positive(values["budget-minutes"], "--budget-minutes") }),
       ...(values["budget-usd"] !== undefined && { costUsd: positive(values["budget-usd"], "--budget-usd") }),
     },
