@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
@@ -131,7 +131,12 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   };
   await mkdir(opts.dir, { recursive: true });
   const state = await loadState(files.state, opts.issueId, { ...DEFAULT_BUDGET, ...opts.budget });
-  const save = () => writeFile(files.state, JSON.stringify(state, null, 2));
+  // Replaced whole, never rewritten in place: the API and a task cancel read it while the loop runs.
+  const save = async () => {
+    const tmp = `${files.state}.${randomUUID()}.tmp`;
+    await writeFile(tmp, JSON.stringify(state, null, 2));
+    await rename(tmp, files.state);
+  };
   // The start time and the budget window are on disk before anything else happens.
   await save();
   const requested = { ...state.budget.window, ...opts.budget };
