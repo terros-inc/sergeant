@@ -32,6 +32,7 @@ test("reads Claude's and Codex's weekly and 5-hour percent left, with their rese
   const read = accountQuota({ fetch });
 
   expect(await read(claude())).toMatchObject({
+    source: "usage-endpoint",
     weekly: { remainingPercent: 83 },
     // Unrounded: 80.4% used is 19.6% left, below the 20% floor, never rounded up to it.
     fiveHour: { remainingPercent: 19.6, resetsAt: "2026-10-03T15:00:00.000Z" },
@@ -45,10 +46,10 @@ test("reads Claude's and Codex's weekly and 5-hour percent left, with their rese
 
 // `claude setup-token` tokens may only run inference, and the usage endpoint refuses them; the
 // limits then come from the headers every Messages response carries.
-test("a Claude token the usage endpoint refuses is read from the Messages rate-limit headers", async () => {
-  const { fetch } = fakeFetch((url) =>
+test("a Claude 429 is read from the Messages rate-limit headers and records its source", async () => {
+  const { fetch, calls } = fakeFetch((url) =>
     url.endsWith("/usage")
-      ? json({ error: { type: "permission_error" } }, 403)
+      ? json({ error: { type: "rate_limit_error" } }, 429)
       : new Response("{}", {
           headers: {
             "anthropic-ratelimit-unified-5h-utilization": "0.8",
@@ -58,9 +59,11 @@ test("a Claude token the usage endpoint refuses is read from the Messages rate-l
         }),
   );
   expect(await accountQuota({ fetch })(claude())).toMatchObject({
+    source: "header-fallback",
     weekly: { remainingPercent: 40 },
     fiveHour: { remainingPercent: 20, resetsAt: new Date(1_790_000_000_000).toISOString() },
   });
+  expect(calls.map(({ url }) => url)).toEqual(["https://api.anthropic.com/api/oauth/usage", "https://api.anthropic.com/v1/messages"]);
 });
 
 // A failed read is an unknown reading, never a thrown launch, and it is stored on the run record, so
@@ -69,7 +72,10 @@ test("a failed read is unknown, never throws, and never records the credential",
   const down = fakeFetch(() => json({}, 500)).fetch;
   const broken = "{ not json sk-ant-oat01-secret";
   const read = accountQuota({ fetch: down });
-  expect(await read(claude())).toMatchObject({ account: "terros-claude", error: "usage endpoint answered 500" });
+  expect(await read(claude())).toMatchObject({
+    account: "terros-claude",
+    error: "usage endpoint answered 500; header fallback answered 500 without limits",
+  });
   const unreadable = await read(codex(broken));
   expect(unreadable.weekly).toBeUndefined();
   expect(JSON.stringify(unreadable)).not.toContain("secret");
