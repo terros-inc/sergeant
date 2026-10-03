@@ -15,6 +15,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
+| `host/sergeant-autoupdate.sh`, `.service`, `.timer` | Every 10 minutes, run `sergeant-update` to a newer green commit of `main` if the installation config's `release` setting asks for one (Automatic updates below). |
 | `host/install.sh` | Idempotent install from the checkout: packages (Docker, Node 24, Caddy, the `claude` CLI at the runner image's version), the data volume, the `sergeant` user, the runner image, dependencies, the config, and a restart of `serve`. |
 | `host/installation.example.json` | The shape of the installation config (`InstallationConfig`; identifiers and secret references only). |
 | `host/sergeant.service`, `Caddyfile`, `cloudwatch-agent.json`, `logrotate` | The systemd unit, the HTTPS proxy, log shipping, and log rotation. |
@@ -43,8 +44,9 @@ How it fits together:
   as an `InstallationConfig`; a config that does not parse stops the update before `serve` restarts.
   Enrolling a repository, changing the per-task budget, or changing the task slots (`maxTasks`,
   `waitingGraceMinutes`), is: edit the parameter, then update.
-- **Logs** go to `/var/log/sergeant/serve.log` on the host and to CloudWatch Logs group `/sergeant/v2`
-  (streams `<instance id>/serve` and `<instance id>/first-boot`).
+- **Logs** go to `/var/log/sergeant/serve.log` and `autoupdate.log` on the host and to CloudWatch Logs
+  group `/sergeant/v2` (streams `<instance id>/serve`, `<instance id>/autoupdate`, and
+  `<instance id>/first-boot`).
 
 ## RUNBOOK
 
@@ -189,7 +191,49 @@ aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
 The restart sends SIGTERM: `serve` stops intake and ends each task at its next poll (up to 15
 minutes, then systemd kills it). Running worker and reviewer containers keep running and the new
 process picks them up from the state dir. `cat /etc/sergeant/release` on the host shows the deployed
-ref and commit. To roll back, update to the previous commit.
+ref and commit. To roll back, update to the previous commit; with automatic updates on, first pause
+them or remove `release` (Automatic updates, Pin or roll back), or the next tick moves the host
+forward again.
+
+### Automatic updates (TECH-4959)
+
+A systemd timer runs `sergeant-autoupdate` every 10 minutes. Each tick rereads the installation-config
+parameter's `release` setting and, at most, runs `sergeant-update <sha>`:
+
+| `release` | The host moves to |
+|---|---|
+| absent | nothing: it never updates itself |
+| `{"channel": "main"}` | `main`'s head, once the `v2` check passed on that exact commit |
+| `{"channel": "soaked", "soakMinutes": 90}` | the newest `main` commit whose `v2` run passed and was started by its push to `main` at least `soakMinutes` ago, if it is newer than the host's |
+| either, with `"paused": true` | nothing, until `paused` is removed |
+
+Which channel an installation follows is its own choice, made only in its own config parameter. A
+red, running, or missing check never deploys; a soaked host compares times, not other hosts.
+A tick does nothing while `sergeant-update` runs. If an update fails after checking out its commit,
+the tick reinstalls the previous release and records the commit in `/etc/sergeant/autoupdate-failed`,
+which later ticks skip until a newer commit qualifies (delete the file to retry it). Each tick logs
+its decision to `/var/log/sergeant/autoupdate.log` (stream `<instance id>/autoupdate`); `systemctl
+list-timers sergeant-autoupdate` shows the next tick.
+
+Every install puts the timer in place, so an existing host gets it from one ordinary Update to a
+commit that has it. Then set the release setting, choosing one channel:
+
+```sh
+aws ssm get-parameter --name /sergeant/v2/installation-config --query Parameter.Value --output text |
+  jq '.release = {"channel": "main"}' >installation.json
+# or: jq '.release = {"channel": "soaked", "soakMinutes": 90}'
+aws ssm put-parameter --name /sergeant/v2/installation-config --type String --overwrite \
+  --value file://installation.json
+```
+
+The next tick uses it; no update is needed. The same edit with `jq '.release.paused = true'` pauses
+and `jq 'del(.release.paused)'` resumes.
+
+**Pin or roll back.** Between two commits that both know `release` (TECH-4959 or later), pause, then
+Update to the commit you want; resume to unpin. A commit from before TECH-4959 rejects the unknown
+`release` key, so its update stops at the config check without restarting `serve`. Before updating
+to one, remove the setting entirely with the same edit and `jq 'del(.release)'` (pausing is not
+enough); set it again once the host is back on a commit that knows it.
 
 Sergeant's version comes from git, not `package.json`: the nearest `vMAJOR.MINOR.PATCH` tag, plus
 the commits since it, plus the short SHA (`v2.0.0` and 37 commits later at `aad6046` is
@@ -266,6 +310,7 @@ do to `canary`; the service's per-task state is `/var/lib/sergeant/state/tasks/<
 
 ```sh
 aws logs tail /sergeant/v2 --follow --log-stream-name-prefix "$ID/serve"
+aws logs tail /sergeant/v2 --since 1h --log-stream-name-prefix "$ID/autoupdate"
 ```
 
 On the host: `tail -f /var/log/sergeant/serve.log`, `journalctl -u sergeant -u caddy`, run records

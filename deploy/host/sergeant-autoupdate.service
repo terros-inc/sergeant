@@ -1,0 +1,15 @@
+# One automatic-update tick (sergeant-autoupdate.sh), started by sergeant-autoupdate.timer and installed
+# by install.sh. Root, like sergeant-update. Never runs twice at once: the timer does not start an
+# active unit.
+[Unit]
+Description=Sergeant 2 automatic update
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sergeant-autoupdate
+# Room for an update and, if it fails, reinstalling the previous release.
+TimeoutStartSec=2h
+StandardOutput=append:/var/log/sergeant/autoupdate.log
+StandardError=inherit

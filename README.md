@@ -74,6 +74,9 @@ numbers, each optional; unset, 120 minutes and $25; see the task budget under Co
 webhooks; `serve` has each webhook endpoint only when its secret is set. Optional `humans` says who
 may use `sgt` and the client API, each with their own Linear login (see [The `sgt` CLI](#the-sgt-cli)):
 `{ "linearClientId": "<the Linear OAuth app's client id>", "teams": ["<team key>"], "approvers": ["<Linear user id>"] }`.
+Optional `release` makes the host update itself to green commits of `main`: `{ "channel": "main" }`
+or `{ "channel": "soaked", "soakMinutes": 90 }`, with `"paused": true` to stop (`deploy/README.md`,
+Automatic updates).
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs
 contents and pull requests write, checks and commit statuses read, and metadata read. The worker App

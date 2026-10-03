@@ -1,0 +1,9 @@
+# Starts sergeant-autoupdate.service every 10 minutes. Installed and enabled by install.sh.
+[Unit]
+Description=Sergeant 2 automatic update, every 10 minutes
+
+[Timer]
+OnCalendar=*:0/10
+
+[Install]
+WantedBy=timers.target

@@ -80,6 +80,21 @@ export const InstallationConfig = z.strictObject({
       approvers: z.array(z.string().min(1)).default([]),
     })
     .optional(),
+  /**
+   * How the host follows main (deploy/README.md, Automatic updates; TECH-4959): main's head once its
+   * v2 check passed, or the newest green main commit that has been on main `soakMinutes`. Read by the
+   * host's `sergeant-autoupdate`, not by serve. Absent or `paused`, the host never updates itself.
+   */
+  release: z
+    .discriminatedUnion("channel", [
+      z.strictObject({ channel: z.literal("main"), paused: z.boolean().optional() }),
+      z.strictObject({
+        channel: z.literal("soaked"),
+        soakMinutes: z.number().int().positive(),
+        paused: z.boolean().optional(),
+      }),
+    ])
+    .optional(),
   review: z
     .strictObject({
       /** The fraction of merged heads that skipped fresh review which get a nonblocking audit review (06 §8). */
