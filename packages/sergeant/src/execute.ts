@@ -127,6 +127,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
                   conversation,
                   repositories: [...new Set(action.subject.map((s) => s.repo))],
                   subject: action.subject,
+                  pullRequests: subjectPullRequests,
                   ...(action.focus !== undefined && { focus: action.focus }),
                 },
           );
