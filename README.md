@@ -188,11 +188,12 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   starting it. A task asked to wake (`sgt task wake`) goes first. A task holds its slot while it runs
   a worker, a reviewer, or a reasoning turn, and while it waits (TECH-5015). With nothing running and
   nothing changing (checks, mergeability, an API, a human merge), it keeps its slot for
-  `waitingGraceMinutes` (15) and continues at once if the wait clears; still blocked, it asks a human
-  on the issue. It keeps its slot for the same grace while that question (or any question, or a budget
-  question) is unanswered, and continues at once on an answer; past it, its slot goes to the next task
-  and its loop keeps polling without a slot. Once the human answers, it queues for a slot in the same
-  order as new work.
+  `waitingGraceMinutes` (15) and continues at once if anything changes; still blocked, it asks a human
+  on the issue. It keeps watching GitHub after asking: a merge is completed, and any other change, or
+  an answer, continues the task. Unanswered and unchanged for the same grace, its slot goes to the next
+  task and its loop keeps polling without a slot (likewise a question reasoning or the budget asked,
+  which waits only on the human). Once something changes, it queues for a slot in the same order as
+  new work.
   `GET /status` lists the released tasks under `released`.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
   Linear links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when they changed, so

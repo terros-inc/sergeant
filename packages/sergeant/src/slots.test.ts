@@ -173,7 +173,7 @@ test("blocked past the grace, the task asks a human; answered within the next gr
   await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0.02 }, logs);
   await f.finish("CI");
   await vi.waitFor(() => expect(asked(logs, "CI")).toBe(true), { timeout: 5_000 });
-  await vi.waitFor(() => expect(logs).toContainEqual(expect.stringContaining("CI: waiting: the question posted at")), { timeout: 5_000 });
+  await vi.waitFor(() => expect(logs).toContainEqual(expect.stringContaining("CI: waiting: blocked; asked a human at")), { timeout: 5_000 });
   expect(f.turns).toEqual(["CI"]);
 
   f.answer("CI");
@@ -181,6 +181,18 @@ test("blocked past the grace, the task asks a human; answered within the next gr
   // Its wait ended with the answer: the grace running out during its next turn frees nothing.
   await sleep(1_500);
   expect(f.turns).toEqual(["CI", "CI"]);
+  expect(lostSlot(logs, "CI")).toEqual([]);
+});
+
+test("after the blocked question, a change on GitHub continues the task in the same slot without a reply", async () => {
+  const f = fakes([issue("CI", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  f.blocked.add("CI");
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0.02 }, logs);
+  await f.finish("CI");
+  await vi.waitFor(() => expect(asked(logs, "CI")).toBe(true), { timeout: 5_000 });
+  f.checks.state = "passed";
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "CI"]), { timeout: 5_000 });
   expect(lostSlot(logs, "CI")).toEqual([]);
 });
 

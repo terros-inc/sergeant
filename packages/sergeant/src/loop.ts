@@ -22,9 +22,9 @@ import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
-import { noteEdit, openQuestion, questionKey } from "./question.ts";
+import { noteEdit, openQuestion } from "./question.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
-import { blockedQuestion } from "./slots.ts";
+import { blockedFooter, blockedQuestion } from "./slots.ts";
 import { applyTurn, loadState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -48,7 +48,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const graceMs = (opts.waitingGraceMinutes ?? 15) * 60_000;
   // A question unanswered for the grace gives up the task's slot; the loop keeps polling without one.
   const releasePast = (askedAt: string) => {
-    if (opts.slot?.state !== "held" || Date.now() - Date.parse(askedAt) < graceMs) return;
+    if (!opts.slot || opts.slot.state === "released" || Date.now() - Date.parse(askedAt) < graceMs) return;
     log("no human answer within the grace: task slot released until something changes");
     opts.slot.release();
   };
@@ -260,14 +260,24 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
       const quietMs = Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt);
+      // Nothing running and nothing changed: the task waits on something outside Sergeant, keeping its
+      // slot. Past the grace it asks a human once for this fingerprint, under its own key rather than as
+      // an open question, so GitHub progress (a merge, checks, reviews) still changes the fingerprint and
+      // continues the task. Unanswered and unchanged past the grace again, its slot is released.
+      const blockedKey = `blocked:${conversation.issue.id}:${fingerprint}`;
+      const blocked = running.length === 0 ? conversation.agentComments.find((c) => c.id === commentIdFor(blockedKey)) : undefined;
+      if (blocked) {
+        releasePast(blocked.createdAt);
+        log(`waiting: blocked; asked a human at ${blocked.createdAt}, no reply or other change yet`);
+        await wait(pollMs);
+        continue;
+      }
       if (running.length === 0 && quietMs > (opts.idleMinutes ?? 60) * 60_000) {
         return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMs / 60_000)} minutes` };
       }
-      // Nothing running and nothing changed: the task waits on something outside Sergeant, keeping its
-      // slot. Past the grace it asks a human, as a question (question.ts) so the usual wait follows.
       if (running.length === 0 && quietMs >= graceMs) {
-        const key = questionKey(conversation.issue.id, conversationRevision(conversation));
-        const asked = await askHuman(blockedQuestion(situation, Math.round(quietMs / 60_000)), situation, deps, key);
+        const minutes = Math.round(quietMs / 60_000);
+        const asked = await askHuman(blockedQuestion(situation, minutes, Math.round(graceMs / 60_000)), situation, deps, blockedKey, blockedFooter);
         log(`blocked past the grace: asking a human: ${describeOutcome(asked)}`);
         await wait(pollMs);
         continue;

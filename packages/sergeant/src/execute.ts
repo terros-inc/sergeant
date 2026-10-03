@@ -244,12 +244,13 @@ export async function askHuman(
   situation: SituationReport,
   ports: Ports,
   key: string,
+  footer?: string,
 ): Promise<ActionOutcome> {
   const { issue } = situation.conversation;
   try {
     const delegation = checkDelegation((await ports.linear.readConversation(issue.id)).issue, ports.agentUserId);
     if (!delegation.allowed) return { action, status: "denied", rule: delegation.rule, reason: delegation.reason };
-    await ports.linear.postComment({ issueId: issue.id, body: questionComment(action), key });
+    await ports.linear.postComment({ issueId: issue.id, body: questionComment(action, footer), key });
     return { action, status: "done", result: { commentId: commentIdFor(key) } };
   } catch (e) {
     return { action, status: "failed", error: (e as Error).message };

@@ -26,7 +26,7 @@ export function openQuestion(conversation: Conversation): AgentComment | undefin
 }
 
 /** The one concise question comment (07 §4). */
-export function questionComment(ask: Extract<ProposedAction, { kind: "ask_human" }>): string {
+export function questionComment(ask: Extract<ProposedAction, { kind: "ask_human" }>, footer?: string): string {
   const options = ask.options ? ["", "Options:", ...ask.options.map((o, i) => `${i + 1}. ${o}`)] : [];
   const reply = ask.options ? "Reply in your own words; a number is fine." : "Reply in your own words.";
   return [
@@ -35,7 +35,7 @@ export function questionComment(ask: Extract<ProposedAction, { kind: "ask_human"
     ask.question.trim(),
     ...options,
     "",
-    `${reply} Sergeant does nothing more on this issue until someone replies.`,
+    footer ?? `${reply} Sergeant does nothing more on this issue until someone replies.`,
   ].join("\n");
 }
 

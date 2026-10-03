@@ -43,9 +43,9 @@ export class Slot {
     this.changed = changed;
   }
 
-  /** The human did not answer within the grace: the next task in order gets the slot. */
+  /** The human did not answer within the grace, and nothing changed: the next task in order gets the slot. */
   release(): void {
-    if (this.state !== "held") return;
+    if (this.state === "released") return;
     this.state = "released";
     this.changed();
   }
@@ -61,7 +61,7 @@ export class Slot {
 }
 
 /** The question a task asks once it has waited the grace on something outside Sergeant with nothing changing. */
-export function blockedQuestion(s: SituationReport, minutes: number): Extract<ProposedAction, { kind: "ask_human" }> {
+export function blockedQuestion(s: SituationReport, minutes: number, grace: number): Extract<ProposedAction, { kind: "ask_human" }> {
   const prs = s.pullRequests.map(
     (p) => `${p.repo}#${p.number} ${p.state}, mergeable ${p.mergeable ?? "unknown"}, checks ${p.checks.required.map((c) => `${c.name}=${c.state}`).join(",") || "none"}`,
   );
@@ -71,7 +71,12 @@ export function blockedQuestion(s: SituationReport, minutes: number): Extract<Pr
     `- PRs: ${prs.join("; ") || "none"}.`,
     ...(s.recentTurns.length > 0 ? [`- Last decision: ${s.recentTurns.at(-1)?.summary}`] : []),
     "",
-    "What should Sergeant do? It keeps watching, and continues at once if the wait clears.",
+    "What should Sergeant do?",
+    "",
+    `If the wait clears on GitHub (a merge, checks, a review), Sergeant continues without a reply. Otherwise it needs one: it keeps this task's slot for ${grace} more minutes, then frees it for other work until someone replies.`,
   ];
   return { kind: "ask_human", question: lines.join("\n").slice(0, 4_000) };
 }
+
+/** The blocked question's closing line, in place of the usual "does nothing more until someone replies". */
+export const blockedFooter = "Reply in your own words.";
