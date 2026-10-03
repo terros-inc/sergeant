@@ -4,6 +4,8 @@ import {
   actor,
   clearDelegate,
   commentById,
+  commentThread,
+  commentThreadShape,
   completedPage,
   completedQuery,
   createComment,
@@ -26,6 +28,7 @@ import {
   issueWorkflowShape,
   moveState,
   relationById,
+  resolveComment,
   response,
   unstartedTypes,
   viewerQuery,
@@ -152,7 +155,9 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         const author = humanAuthor(item);
         return author ? [{ id: item.id, author, createdAt: item.createdAt, updatedAt: item.updatedAt, body: item.body }] : [];
       });
-      const agentComments = comments.filter((item) => !humanAuthor(item)).map(({ id, createdAt, body }) => ({ id, createdAt, body }));
+      const agentComments = comments
+        .filter((item) => !humanAuthor(item))
+        .map(({ id, createdAt, body, parentId }) => ({ id, createdAt, body, ...(parentId && { parentId }) }));
 
       return Conversation.parse({
         issue: {
@@ -174,13 +179,13 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       });
     },
 
-    async postComment({ issueId, body, key }) {
+    async postComment({ issueId, body, key, parentId }) {
       const id = commentIdFor(key);
       await createOnce(
         async () => {
           const { commentCreate } = await request(
             createComment,
-            { input: { id, issueId, body } },
+            { input: { id, issueId, body, ...(parentId && { parentId }) } },
             z.object({ commentCreate: z.object({ success: z.boolean() }) }),
           );
           if (!commentCreate.success) throw new Error("Linear commentCreate did not succeed");
@@ -188,6 +193,22 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         },
         async () => (await request(commentById, { id }, z.object({ comment: z.object({ id: z.string() }).nullable() }))).comment?.id === id,
       );
+    },
+
+    async resolveThread(commentId) {
+      const read = async (id: string) => {
+        const { comment } = await request(commentThread, { id }, commentThreadShape);
+        if (!comment) throw new Error(`Linear comment not found: ${id}`);
+        return comment;
+      };
+      const named = await read(commentId);
+      const top = named.parentId ? await read(named.parentId) : named;
+      // Never a human's thread, nor another bot's.
+      if (!top.user || !sergeantUsers.has(top.user.id)) return "not_sergeants";
+      if (top.resolvedAt) return "already_resolved";
+      const { commentResolve } = await request(resolveComment, { id: top.id }, z.object({ commentResolve: z.object({ success: z.boolean() }) }));
+      if (!commentResolve.success) throw new Error("Linear commentResolve did not succeed");
+      return "resolved";
     },
 
     async createFollowupIssue({ originIssueId, title, description, relation, key }) {

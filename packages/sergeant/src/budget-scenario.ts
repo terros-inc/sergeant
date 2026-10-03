@@ -15,7 +15,8 @@ import {
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { runLoop, type LoopOptions } from "./loop.ts";
 
-// The fakes the budget and undelegation tests (budget.test.ts, undelegation.test.ts) run the loop over.
+// The fakes the budget, undelegation, and answered-question tests (budget.test.ts, undelegation.test.ts,
+// answered.test.ts) run the loop over.
 
 export const head = "a".repeat(40);
 export const repo = "o/canary";
@@ -83,6 +84,8 @@ export async function scenario(opts: {
   if (opts.state) await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", turns: 1, recentTurns: [], ...opts.state }));
   let live: Conversation = { issue, humanComments: [], agentComments: [], ...opts.conversation };
   const posted: string[] = [];
+  const replies: { body: string; parentId: string }[] = [];
+  const resolved: string[] = [];
   const merged: unknown[] = [];
   let polls = 0;
   const result = await runLoop(
@@ -93,12 +96,14 @@ export async function scenario(opts: {
       linear: {
         readConversation: async () => (live = await opts.onPoll(++polls, live)),
       moveIssueToStarted: async () => ({ moved: false as const }),
-        async postComment({ key, body }) {
+        async postComment({ key, body, parentId }) {
           posted.push(body);
+          if (parentId) replies.push({ body, parentId });
           const id = commentIdFor(key);
           if (live.agentComments.some((c) => c.id === id)) return;
-          live = { ...live, agentComments: [...live.agentComments, { id, createdAt: new Date().toISOString(), body }] };
+          live = { ...live, agentComments: [...live.agentComments, { id, createdAt: new Date().toISOString(), body, ...(parentId && { parentId }) }] };
         },
+        resolveThread: async (id) => (resolved.push(id), "resolved" as const),
         createFollowupIssue: async () => { throw new Error("unused"); },
       },
       github: { readPullRequest: async () => pr, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
@@ -106,7 +111,7 @@ export async function scenario(opts: {
       reasoner: { turn: opts.reasoner },
     },
   );
-  return { result, posted, merged };
+  return { result, posted, replies, resolved, merged };
 }
 
 export type Saved = { runIds: string[]; budget: { window: unknown; grants: unknown[] }; recentTurns: { outcomes: string[] }[] };

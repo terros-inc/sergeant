@@ -11,9 +11,15 @@ export interface LinearPort {
   readConversation(issueId: string): Promise<Conversation>;
   /**
    * Posts a comment as Sergeant's agent, at most once per `key`: Linear's client-supplied comment id
-   * is derived from it, so a retry after a lost response or a crash posts nothing new.
+   * is derived from it, so a retry after a lost response or a crash posts nothing new. With
+   * `parentId`, it is a reply in that comment's thread.
    */
-  postComment(req: { issueId: string; body: string; key: string }): Promise<void>;
+  postComment(req: { issueId: string; body: string; key: string; parentId?: string }): Promise<void>;
+  /**
+   * Resolves the thread a comment is in, only when Sergeant wrote its top comment (TECH-5052). A
+   * thread already resolved, by anyone, is left as it is. Returns what it did, for a log.
+   */
+  resolveThread?(commentId: string): Promise<"resolved" | "already_resolved" | "not_sergeants">;
   /**
    * Creates an issue in the origin issue's team and project, in the team's first `backlog` state
    * (never Triage), related to it as `relation` says, with no delegate. It is assigned to the origin's
