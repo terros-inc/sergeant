@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { request } from "node:http";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
@@ -243,3 +244,50 @@ test("of processes racing for one state directory, exactly one serves it, even o
   expect(afterCrash.lines.join("")).toMatch(/refused/);
   expect(afterCrash.serving, afterCrash.lines.join("")).toHaveLength(1);
 }, 30_000);
+
+/** GETs `path` from `connect` (the address the peer reaches serve on) with `headers`. */
+function get(connect: string, port: number | undefined, path: string, headers: Record<string, string> = {}) {
+  return new Promise<{ status: number; json: any }>((resolve, reject) => {
+    const req = request({ host: connect, port, path, headers }, (res) => {
+      let text = "";
+      res.on("data", (d: Buffer) => (text += d.toString()));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, json: JSON.parse(text) }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+// TECH-4951: `/status` names tasks and intake errors, so it must refuse, as `/v1` does, any caller
+// not on this host even when a proxy or a bind address publishes it: a request relayed by a proxy
+// (which connects from loopback), a DNS-rebound page naming another Host, or a peer elsewhere.
+const unauthorized = { status: 401, json: { error: { code: "unauthorized", message: expect.any(String) } } };
+
+test("/status answers a caller on this host and refuses a proxied request or a foreign Host", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const { deps, counts } = oneIssue(["UNF-1"], 0);
+  const service = await startService({ ...options(), port: 0 }, deps);
+  await vi.waitFor(() => expect(counts.turns).toBe(1), { timeout: 5_000 });
+  expect(await get("127.0.0.1", service.port, "/status")).toMatchObject({ status: 200, json: { tasks: ["UNF-1"] } });
+  expect(await get("127.0.0.1", service.port, "/status", { "X-Forwarded-For": "203.0.113.9" })).toMatchObject(unauthorized);
+  expect(await get("127.0.0.1", service.port, "/status", { Forwarded: "for=203.0.113.9" })).toMatchObject(unauthorized);
+  expect(await get("127.0.0.1", service.port, "/status", { Host: "sergeant.example.com" })).toMatchObject(unauthorized);
+  // `/health` is public and unchanged.
+  expect(await get("127.0.0.1", service.port, "/health", { "X-Forwarded-For": "203.0.113.9" })).toEqual({ status: 200, json: { ok: true } });
+  await service.stop();
+});
+
+const lanAddress = Object.values(networkInterfaces())
+  .flat()
+  .find((a) => a?.family === "IPv4" && !a.internal)?.address;
+
+test.skipIf(!lanAddress)("/status refuses a peer that is not loopback, while /health answers it", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const { deps } = oneIssue([], 0);
+  const service = await startService({ ...options(), port: 0, host: "0.0.0.0" }, deps);
+  const hostHeader = { Host: `127.0.0.1:${service.port}` };
+  expect(await get(lanAddress ?? "", service.port, "/status", hostHeader)).toMatchObject(unauthorized);
+  expect((await get(lanAddress ?? "", service.port, "/health", hostHeader)).status).toBe(200);
+  expect((await get("127.0.0.1", service.port, "/status")).status).toBe(200);
+  await service.stop();
+});
