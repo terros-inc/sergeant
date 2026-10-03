@@ -2,10 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { sergeantVersion, type RepoSlug } from "@terros/sergeant-contracts";
+import { sergeantVersion, type ApiError, type RepoSlug } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
+import { fromThisHost, send } from "./api-http.ts";
 import { isLoopbackHost, type Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
 import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
@@ -282,8 +283,12 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
           // `/health` and the webhooks are the only paths the host's proxy publishes, so `/health` says
           // only whether serve is healthy: not stopping, and its latest intake succeeded. Task ids and
           // intake errors are private, served on `/status` to loopback only, with Sergeant's git version.
+          // `/status` refuses any other caller as `/v1` does, so its privacy does not rest on the proxy.
           const ok = !abort.signal.aborted && !lastIntake?.error;
-          if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
+          if (req.method === "GET" && req.url === "/status" && !fromThisHost(req)) {
+            const refused: ApiError = { error: { code: "unauthorized", message: "/status answers only a caller on the Sergeant host" } };
+            send(res, { status: 401, json: refused });
+          } else if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
             res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
             const released = [...slots].filter(([, s]) => s.released).map(([id]) => id);
             const detail = req.url === "/status" && { version, stopping: abort.signal.aborted, tasks: [...active.keys()], released, lastIntake };

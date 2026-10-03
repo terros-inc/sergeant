@@ -42,11 +42,17 @@ export async function callerOf(req: IncomingMessage, ctl: ApiControl): Promise<C
       throw new Refusal(503, "unavailable", `cannot check the caller's Linear login: ${e.message}`);
     });
   }
-  const forwarded = req.headers.forwarded !== undefined || req.headers["x-forwarded-for"] !== undefined;
-  if (ctl.trustLoopback && LOOPBACK_PEER.has(req.socket.remoteAddress ?? "") && LOOPBACK_HOST.test(req.headers.host ?? "") && !forwarded) {
-    return { kind: "loopback", approver: true };
-  }
+  if (ctl.trustLoopback && fromThisHost(req)) return { kind: "loopback", approver: true };
   throw new Refusal(401, "unauthorized", "the Sergeant API needs your Linear login: run `sgt login`");
+}
+
+/**
+ * A caller on this host: a loopback peer, naming a loopback Host (so a DNS-rebound page cannot pass),
+ * and not relayed by a proxy (the hosted proxy connects from loopback too, so its callers cannot).
+ */
+export function fromThisHost(req: IncomingMessage): boolean {
+  const forwarded = req.headers.forwarded !== undefined || req.headers["x-forwarded-for"] !== undefined;
+  return LOOPBACK_PEER.has(req.socket.remoteAddress ?? "") && LOOPBACK_HOST.test(req.headers.host ?? "") && !forwarded;
 }
 
 export const ok = (json: unknown): Reply => ({ status: 200, json });
