@@ -69,10 +69,13 @@ export async function drawAudit(
       const runId = RunId.parse(`run_audit-${head.headSha}`);
       const skipped = implementerOf(runs, head)?.reported?.review.reason ?? "no reason on record";
       // A start that fails costs one audit sample, not the task: the merge is already done.
-      await deps.github
-        .readPullRequest(head.repo, head.number)
-        .then((pr) =>
-          deps.runner.start({
+      const pr = await deps.github.readPullRequest(head.repo, head.number).catch((e: Error) => {
+        log(`audit review ${runId} failed to read ${head.repo}#${head.number}: ${e.message}`);
+        return undefined;
+      });
+      if (pr) {
+        await deps.runner
+          .start({
             runId,
             role: "reviewer",
             conversation,
@@ -80,15 +83,13 @@ export async function drawAudit(
             subject: [{ repo: head.repo, number: head.number, headSha: head.headSha }],
             pullRequests: [pr],
             focus: auditFocus(head, skipped),
-          }),
-        )
-        .then(
-          () => {
+          })
+          .then(() => {
             merged.audit = { runId };
             log(`audit review ${runId} started for ${head.repo}#${head.number} (nonblocking: the merge is done)`);
-          },
-          (e: Error) => log(`audit review ${runId} failed to start: ${e.message}`),
-        );
+          })
+          .catch((e: Error) => log(`audit review ${runId} failed to start: ${e.message}`));
+      }
     }
   }
   merged.auditDrawnAt = new Date().toISOString();
