@@ -73,6 +73,19 @@ const TaskState = z.object({
     })
     .optional(),
   /**
+   * TECH-5136: the turn that ended the task as accepted (TECH-5118), saved with that turn. From then on
+   * the loop only replays the ending (loop.ts): no reasoning turn can deny it or fail to propose it again.
+   */
+  accepted: z
+    .object({
+      at: z.iso.datetime(),
+      /** The human reply that accepted, which keys the acknowledgment; absent, none is posted. */
+      replyId: z.string().optional(),
+      /** The acknowledgment, built from the PRs the accepting turn saw. */
+      comment: z.string(),
+    })
+    .optional(),
+  /**
    * Merges whose sole re-check also failed or was refused, one per PR (the latest head), with when the
    * ready-for-human-merge comment was confirmed posted (TECH-4987, TECH-5077).
    */

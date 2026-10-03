@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { conversationRevision, linearUploads, issueRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { drawAudit, exists, finishReviews, observeCompletion, postOutcome } from "./after-merge.ts";
-import { markAccepted, postAccepted } from "./accepted.ts";
+import { acceptedComment, markAccepted, postAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
 import { cancelPending, driveCancel } from "./cancel.ts";
@@ -156,6 +156,27 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       await save();
     }
 
+    if (state.accepted) {
+      // TECH-5118: a human accepted the work as it is in reply to the budget question, so the task ends
+      // with no fresh window and nothing more asked. The accepting turn was saved, so this ending is only
+      // replayed, never decided again by a fresh turn (TECH-5136): its question thread is resolved first
+      // (TECH-5138), then one keyed line says Sergeant has stopped (TECH-5120), then `state.json` is set
+      // aside like a stop's, so intake resumes it no more; its PRs and the issue are left for a human. The
+      // marker keeps intake from starting it afresh while the issue stays in Todo (accepted.ts). A failed
+      // resolve waits for the next pass; a failed post fails the loop, and the resumed task replays the
+      // ending under the same key. Either way the acknowledgment appears only on a task that is ending.
+      const { at, replyId, comment } = state.accepted;
+      const conversation = await deps.linear.readConversation(opts.issueId);
+      if (!(await resolveDue(conversation))) {
+        await wait(pollMs);
+        continue;
+      }
+      if (replyId) await postAccepted(conversation.issue.id, replyId, comment, deps.linear);
+      await markAccepted(opts.dir, at);
+      await rename(files.state, join(opts.dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
+      return { outcome: "accepted", detail: "a human accepted the work as it is" };
+    }
+
     if (state.merged) {
       // Post-merge effects and an audit reviewer are task work too. A resumed task that gave up its
       // slot while waiting must be readmitted before it can post, draw, or start that reviewer. Once
@@ -299,31 +320,15 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const accepted = outcomes.some((o) => o.action.kind === "accept_as_is" && o.status === "done");
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
-    // An accepting turn commits none, so a crash before the task is set aside below takes it again.
     const unsettled = unsettledMerges(outcomes, situation);
-    const committed = failedAsk || accepted ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
+    const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed }, log);
+    // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
+    const reply = accepted ? latestAnswer(conversation) : undefined;
+    if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests) };
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
     await postHandoffs(conversation.issue.id);
-    if (accepted) {
-      // TECH-5118: a human accepted the work as it is in reply to the budget question, so the task ends
-      // with no fresh window and nothing more asked. Its question thread is resolved and `state.json` set
-      // aside like a stop's, so intake resumes it no more; its PRs and the issue are left for a human.
-      // The marker keeps intake from starting it afresh while the issue stays in Todo (accepted.ts).
-      // One keyed line says so first (TECH-5120); a failed post fails the loop before the task is set
-      // aside, and the retried turn posts it under the same key. A failed resolve leaves the task as it
-      // is too (TECH-5138): the next pass resolves the thread first, and its retried turn ends the task.
-      const reply = latestAnswer(conversation);
-      if (reply) await postAccepted(conversation.issue.id, reply.id, situation.pullRequests, deps.linear);
-      if (!(await resolveDue(conversation))) {
-        await wait(pollMs);
-        continue;
-      }
-      await markAccepted(opts.dir, at);
-      await rename(files.state, join(opts.dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
-      return { outcome: "accepted", detail: "a human accepted the work as it is" };
-    }
   }
 }
