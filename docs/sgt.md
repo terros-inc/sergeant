@@ -24,8 +24,9 @@ pnpm install-sgt
 
 `pnpm install-sgt` writes a small script, `~/.local/bin/sgt`, that runs
 `node <repo>/packages/cli/src/sgt.ts "$@"` from this checkout, so `sgt` works in every shell. Set
-`SGT_BIN_DIR` to put it elsewhere. If it says the directory is not on your `PATH`, add the line it
-prints to your shell profile (`~/.zshrc` or `~/.bashrc`) and open a new terminal. Then
+`SGT_BIN_DIR` to put it elsewhere. It only ever replaces its own script: if some other file or a
+symlink is already there, it stops and says so. If it says the directory is not on your `PATH`, add
+the line it prints to your shell profile (`~/.zshrc` or `~/.bashrc`) and open a new terminal. Then
 `sgt --version` should print a version.
 
 **Update** from the same checkout; the wrapper picks up the new code by itself:
@@ -56,12 +57,15 @@ sgt whoami    # who the installation takes you for, and the repositories it work
 The login needs local port 4546 free while it waits for the browser. It is kept per installation URL
 in `~/.config/sergeant/credentials.json` and renewed automatically; `sgt logout` forgets it.
 
-**Who may use it.** Any active member of one of the installation's configured Linear teams may sign
-in and use every `sgt` command. **Approvers** are members the installation also lists by name;
-`sgt whoami` says `, an approver` after your name. No `sgt` command is limited to approvers yet.
-If `sgt login` or `sgt whoami` says you are in none of the installation's teams, or the API refuses
-you, ask your installation's operator (who manages its configuration) to add your team, or to make you
-an approver.
+**Who may use it.** Access needs an active Linear account in your installation's Linear workspace
+that is a member of one of the installation's configured Linear teams; that membership is checked on
+every call, so leaving those teams ends your access. Every such member may use every `sgt` command.
+**Approvers** are members the installation also lists by name (`sgt whoami` says `, an approver`
+after your name); being an approver never admits someone outside those teams, and no `sgt` command is
+limited to approvers yet. If `sgt login` or `sgt whoami` says you are in none of the installation's
+teams, ask a Linear admin of your workspace to add you to one of the teams it names. To become an
+approver, or to have another team configured, ask your installation's operator (who manages its
+configuration).
 
 ## 5. Everyday commands
 
@@ -77,8 +81,8 @@ sgt run show <run>                             # one run: status, model, cost, o
 sgt run report <run>                           # the run's Markdown report
 ```
 
-- `--json` on any command prints the API's JSON unchanged (errors as `{"error":{"code","message"}}`),
-  for scripts and `jq`.
+- `--json` prints JSON for scripts and `jq`: the API's own JSON for most commands, `{"report": "…"}`
+  for `run report`, `{"api","signedOut"}` for `logout`, and errors as `{"error":{"code","message"}}`.
 - `sgt --help` lists every command, including `run cancel <run> [--reason …]`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
 - MCP: `node <repo>/packages/mcp/src/sgt-mcp.ts` is a read-only MCP server over stdio, but it sends
