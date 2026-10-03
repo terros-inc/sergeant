@@ -18,7 +18,7 @@ import type { ServiceDeps } from "./service.ts";
 // is done; until then the loop or `serve` drives it again, at every intake too, its startup included,
 // whatever the issue's delegation or state is by then. A run whose status cannot be read is unknown
 // and is canceled like a running one, never taken as stopped (04 §6). The stop waits through the
-// existing grace for its final report (TECH-5070), then finishes with a visible warning if the report
+// existing grace, counted from the first failed read of its final report (TECH-5070, TECH-5107), then finishes with a visible warning if the report
 // stays unreadable (TECH-5074). Nothing resumes a stopped task: the issue delegated and in Todo again
 // starts a fresh one, with a new budget.
 
@@ -35,8 +35,13 @@ const CancelIntent = z.object({
   closed: z.array(ClosedPullRequest).default([]),
   /** Completed GitHub close effects, keyed per PR and exact head so a re-drive skips them. */
   prCloseKeys: z.array(z.string()).default([]),
-  /** Whether the durable, idempotent warning about an unconfirmed stop was posted. */
+  /**
+   * Whether the durable, idempotent warning about a stalled stop was posted. Despite its name it is
+   * about cancels the runner never confirmed, not unreadable statuses; renaming it would change the record.
+   */
   unreadableStatusSurfaced: z.boolean().default(false),
+  /** When each canceled run's status was first read unreadable: its grace counts from then, not from `at`. */
+  unreadableSince: z.record(z.string(), z.iso.datetime()).default({}),
 });
 type CancelIntent = z.infer<typeof CancelIntent>;
 
@@ -135,7 +140,8 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     await writeIntent(dir, intent);
   }
   const stopping: RunId[] = [];
-  const unreadable: RunId[] = [];
+  const uncanceled: RunId[] = [];
+  const unreadablePastGrace: RunId[] = [];
   const runs: RunRecord[] = [];
   for (const runId of intent.runIds) {
     let run = await deps.runner.status(runId).catch(() => undefined);
@@ -151,6 +157,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
       );
       if (!canceled) {
         stopping.push(runId);
+        uncanceled.push(runId);
         continue;
       }
       // Read every canceled run again, now it is stopped: it may have reported a PR Linear has not
@@ -162,13 +169,20 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     if (run) runs.push(run);
     else {
       stopping.push(runId);
-      unreadable.push(runId);
       log(`${ref}: status of ${runId} unreadable after its cancel, retrying`);
+      // The grace counts from the run's first unreadable read, not from `at`, so a cancel that kept
+      // failing past it still gets its report's reread (TECH-5070) on later drives before the stop
+      // finishes without it.
+      const since = intent.unreadableSince[runId];
+      if (!since) {
+        intent.unreadableSince[runId] = new Date().toISOString();
+        await writeIntent(dir, intent);
+      } else if (Date.now() - Date.parse(since) >= SURFACE_STALLED_STOP_AFTER_MS) unreadablePastGrace.push(runId);
     }
   }
-  const unreadablePastGrace = Date.now() - Date.parse(intent.at) >= SURFACE_STALLED_STOP_AFTER_MS ? unreadable : [];
   const stillStopping = stopping.filter((runId) => !unreadablePastGrace.includes(runId));
-  if (stillStopping.length > 0 && !intent.unreadableStatusSurfaced) {
+  // An unreadable run within its grace is not stalled: it finishes with its own note once that passes.
+  if (uncanceled.length > 0 && !intent.unreadableStatusSurfaced) {
     const stalledForMs = Date.now() - Date.parse(intent.at);
     if (stalledForMs >= SURFACE_STALLED_STOP_AFTER_MS) {
       const stalledForMinutes = Math.floor(stalledForMs / 60_000);
@@ -177,7 +191,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
         await deps.linear.postComment({
           issueId: issue.id,
           key: `cancel-stalled:${issue.id}:${intent.requestId}`,
-          body: stalledStopComment(stillStopping, stalledForMinutes),
+          body: stalledStopComment(uncanceled, stalledForMinutes),
         });
         intent.unreadableStatusSurfaced = true;
         await writeIntent(dir, intent);
@@ -236,7 +250,7 @@ function stopComment(intent: CancelIntent, unreadable: RunId[]): string {
 }
 
 function stalledStopComment(runIds: RunId[], stalledForMinutes: number): string {
-  return `Sergeant has been trying to stop this task for over ${stalledForMinutes} minutes, but could not confirm the run status or cancellation: ${runIds.map((id) => `\`${id}\``).join(", ")}. The stop remains pending so a worker-reported PR is not missed, and Sergeant will not restart this issue while it is pending. To clear it, restore the runner so Sergeant can read the final run status; Sergeant will keep retrying automatically.`;
+  return `Sergeant has been trying to stop this task for over ${stalledForMinutes} minutes, but the runner has not confirmed the cancellation of ${runIds.map((id) => `run \`${id}\``).join(", ")}. Its PRs stay open and the stop remains pending until every run is confirmed stopped, so none can push to a PR after Sergeant closes it, and Sergeant will not restart this issue while it is pending. To clear it, make sure the runner can cancel those runs; Sergeant will keep retrying automatically.`;
 }
 
 /**

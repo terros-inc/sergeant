@@ -27,10 +27,14 @@ async function stopWithFlakyStatus(failures: number) {
   return { deps, seen, live, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
 }
 
-async function ageStop(task: string) {
+// Ages the stop's record by 16 minutes, and its runs' first unreadable reads unless `at` only.
+async function ageStop(task: string, which: "all" | "at" | "reads" = "all") {
   const file = join(task, "cancel.json");
-  const intent = JSON.parse(await readFile(file, "utf8"));
-  await writeFile(file, JSON.stringify({ ...intent, at: new Date(Date.now() - 16 * 60 * 1000).toISOString() }));
+  const intent = JSON.parse(await readFile(file, "utf8")) as { at: string; unreadableSince?: Record<string, string> };
+  const aged = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+  if (which !== "reads") intent.at = aged;
+  if (which !== "at") intent.unreadableSince = Object.fromEntries(Object.keys(intent.unreadableSince ?? {}).map((id) => [id, aged]));
+  await writeFile(file, JSON.stringify(intent));
 }
 
 test("a stop whose run status read fails once reads it again after the cancel and closes the worker's unlinked PR", async () => {
@@ -98,6 +102,31 @@ test.each(["unreadable status and failed cancel", "readable running status and f
   await ageStop(task);
   expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
   expect(seen.comments[0]).toMatchObject({ key: expect.stringMatching(/^cancel-stalled:i1:/), body: expect.stringContaining("for over 16 minutes") });
+  expect(seen.comments[0]?.body).toContain("the runner has not confirmed the cancellation of run `run_w1`");
+  expect(seen.comments[0]?.body).not.toMatch(/run status|worker-reported/);
+});
+
+// TECH-5107: the grace counts from the first failed status read, not from when the stop was
+// recorded, so a cancel that kept failing past it still gets its report reread on later drives.
+test("a cancel that fails past the grace then succeeds does not finish on its first unreadable read", async () => {
+  const { deps, seen, live, task, drive } = await stopWithFlakyStatus(99);
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }];
+  const cancel = deps.runner.cancel;
+  deps.runner.cancel = async () => Promise.reject(new Error("Docker unavailable"));
+  await ageStop(task, "at");
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel-stalled:i1:/), body: expect.any(String) }]);
+  // The cancel now succeeds, but the run's status still cannot be read: the stop waits for its report.
+  deps.runner.cancel = cancel;
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.closed).toEqual([]);
+  expect(seen.comments).toHaveLength(1);
+  // Once the grace has passed since that first failed read, it finishes with its note.
+  await ageStop(task, "reads");
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }] });
+  expect(seen.comments[1]).toEqual({ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining("run `run_w1` could not be read") });
+  expect(await readdir(task)).not.toContain("cancel.json");
 });
 
 test("a warning failure is retried without failing the stop and reuses its idempotency key", async () => {
