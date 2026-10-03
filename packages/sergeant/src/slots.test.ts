@@ -291,6 +291,30 @@ test("post-merge effects wait for a task slot", async () => {
   await vi.waitFor(() => expect(f.posted.join("\n")).toContain("Merged."), { timeout: 5_000 });
 });
 
+test("a merged task with its outcome posted and audit drawn ends without asking for a slot", async () => {
+  // TECH-5127: intake resumes a merged task whose issue never reaches Done (canceled after the merge,
+  // say) every time. With nothing left to post or draw, it must not queue ahead of fresh work.
+  const f = fakes([issue("HOLDS", "In Progress", 1, "2026-10-03T00:00:00.000Z")]);
+  const logs: string[] = [];
+  const at = new Date(Date.now() - 3_600_000).toISOString();
+  await start(f.deps, { maxTasks: 1, intakeSeconds: 3_600 }, logs, async () => {
+    await mkdir(join(dir, "tasks", "MERGED"), { recursive: true });
+    await writeFile(join(dir, "tasks", "MERGED", "state.json"), JSON.stringify({
+      issueId: "MERGED",
+      startedAt: at,
+      turns: 1,
+      runIds: [],
+      recentTurns: [],
+      budget: { window: { wallMinutes: 120, costUsd: 25 }, grants: [] },
+      merged: { repo: "o/r", number: 1, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at, outcome: "Merged.", outcomePostedAt: at, auditDrawnAt: at },
+    }));
+  });
+  await vi.waitFor(() => expect(f.turns).toEqual(["HOLDS"]), { timeout: 5_000 });
+  await vi.waitFor(() => expect(logs.some((l) => l.startsWith("MERGED: loop ended merged_not_done"))).toBe(true), { timeout: 5_000 });
+  expect(logs.filter((l) => l.startsWith("MERGED: ") && /queued|admitted/.test(l))).toEqual([]);
+  expect(f.posted).toEqual([]);
+});
+
 test.each([
   ["a merge refused by GitHub", "refused"],
   ["human-requested changes", "changes"],
