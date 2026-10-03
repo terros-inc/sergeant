@@ -7,9 +7,9 @@ import { commentIdFor, type Conversation, type ProposedAction } from "@terros/se
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { startService, type Service, type ServiceDeps } from "./service.ts";
 
-// TECH-5008: with more delegated issues than slots, finishing work must beat starting it and an older
-// high-priority task must never be starved by newer work; a task waiting on a human must not keep its
-// slot past the grace, nor lose it when the human answers within it.
+// TECH-5008, TECH-5015: with more delegated issues than slots, finishing work must beat starting it and
+// an older high-priority task must never be starved by newer work; a waiting task, on a human or on CI,
+// must not keep its slot past the grace, nor lose it when the human answers within it.
 
 const agent = { id: "agent-v2", name: "Sergeant" };
 const ask: ProposedAction = { kind: "ask_human", question: "Which one?", options: ["A", "B"] };
@@ -25,13 +25,15 @@ const issue = (identifier: string, status: "In Review" | "In Progress" | "Todo",
 /**
  * Fakes for the delegated `issues`. Each reasoning turn records its issue and holds its slot until
  * `finish(id)`; an issue in `asking` asks a question on its next turn. `answer(id)` is a human reply.
+ * The issue `withPr` has an open PR, o/r#1, whose required check is `ci.state`. `posted` is every
+ * Linear comment.
  */
-function fakes(issues: DelegatedIssue[]) {
+function fakes(issues: DelegatedIssue[], withPr?: string) {
   const delegated = [...issues];
   const conversations = new Map<string, Conversation>();
   const conversation = (identifier: string) => {
     const c = conversations.get(identifier) ?? {
-      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [] },
+      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: identifier === withPr ? [{ repo: "o/r", number: 1 }] : [] },
       humanComments: [],
       agentComments: [],
     };
@@ -41,6 +43,9 @@ function fakes(issues: DelegatedIssue[]) {
   const turns: string[] = [];
   const holding = new Map<string, () => void>();
   const asking = new Set<string>();
+  const posted: string[] = [];
+  const ci = { state: "pending" as "pending" | "passed" };
+  const sha = "a".repeat(40);
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
@@ -48,13 +53,19 @@ function fakes(issues: DelegatedIssue[]) {
     linear: {
       readConversation: async (id) => conversation(id.replace(/^i-/, "")),
       postComment: async ({ issueId, body, key }) => {
+        posted.push(`${issueId}: ${body}`);
         const c = conversation(issueId.replace(/^i-/, ""));
         if (!c.agentComments.some((a) => a.id === commentIdFor(key))) c.agentComments.push({ id: commentIdFor(key), createdAt: new Date().toISOString(), body });
       },
       moveIssueToStarted: async () => ({ moved: false as const }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: {
+      readPullRequest: async (repo, number) => {
+        const checks = { sha, required: [{ name: "ci", state: ci.state }] };
+        return { repo, number, url: "https://github.com/o/r/pull/1", author: "sergeant-worker[bot]", state: "open", draft: false, headSha: sha, mergedSha: null, baseRef: "main", body: "", mergeable: true, checks, humanFeedback: [] };
+      },
+      closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
@@ -79,7 +90,7 @@ function fakes(issues: DelegatedIssue[]) {
     const now = new Date().toISOString();
     conversations.set(id, { ...c, humanComments: [...c.humanComments, { id: `reply-${id}`, author: { id: "u1", name: "Human" }, createdAt: now, updatedAt: now, body: "A" }] });
   };
-  return { delegated, deps, turns, asking, finish, answer };
+  return { delegated, deps, turns, asking, posted, ci, finish, answer };
 }
 
 let dir = "";
@@ -102,7 +113,7 @@ const underway = async (identifier: string) => {
   await writeFile(join(dir, "tasks", identifier, "state.json"), JSON.stringify(task));
 };
 
-const start = async (deps: ServiceDeps, opts: { maxTasks: number; waitingGraceMinutes?: number }, logs: string[] = []) => {
+const start = async (deps: ServiceDeps, opts: { maxTasks: number; waitingGraceMinutes?: number; idleMinutes?: number }, logs: string[] = []) => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-slots-test-"));
   for (const { identifier, state } of await deps.delegatedIssues()) if (state.type === "started") await underway(identifier);
   service = await startService(
@@ -187,7 +198,7 @@ test("a task waiting past the grace frees its slot, and once answered is readmit
   await f.finish("ASKS");
   // Past the grace, the slot goes to the next task while the question stays unanswered.
   await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER"]), { timeout: 5_000 });
-  expect(logs).toContainEqual("ASKS: waiting on a human past the grace; its task slot is free until the human answers");
+  expect(logs).toContainEqual("ASKS: waiting past the grace; its task slot is free until it has work again");
 
   // Answered while the slot is taken, the task queues; an In Review issue delegated meanwhile is ahead of it.
   f.answer("ASKS");
@@ -203,4 +214,27 @@ test("a task waiting past the grace frees its slot, and once answered is readmit
   await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER", "REVIEW", "ASKS"]), { timeout: 5_000 });
   expect(logs).toContainEqual("ASKS: has work again; admitted to a task slot");
   await f.finish("ASKS");
+});
+
+test("a task waiting on CI past the grace frees its slot quietly, and is readmitted ahead of new Todo work", async () => {
+  const f = fakes([issue("WAITS", "In Progress", 3, "2026-09-01T00:00:00.000Z"), issue("TODO-OLD", "Todo", 3, "2026-10-01T00:00:00.000Z")], "WAITS");
+  const logs: string[] = [];
+  // No idle end: the wait on CI outlasts the grace.
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0, idleMinutes: 60 }, logs);
+  await f.finish("WAITS");
+  // CI stays pending: past the grace, the slot goes to the next task with nothing said in Linear.
+  await vi.waitFor(() => expect(f.turns).toEqual(["WAITS", "TODO-OLD"]), { timeout: 5_000 });
+  expect(logs).toContainEqual("WAITS: waiting past the grace; its task slot is free until it has work again");
+  expect(f.posted).toEqual([]);
+
+  // CI finishes while the slot is taken: the task queues, and goes ahead of an urgent Todo delegated meanwhile.
+  f.ci.state = "passed";
+  await vi.waitFor(() => expect(logs).toContainEqual("WAITS: queued: waiting for a free task slot"), { timeout: 5_000 });
+  f.delegated.push(issue("TODO-URGENT", "Todo", 1, "2026-10-03T00:00:00.000Z"));
+  await sleep(100);
+  await f.finish("TODO-OLD");
+  await vi.waitFor(() => expect(f.turns).toEqual(["WAITS", "TODO-OLD", "WAITS"]), { timeout: 5_000 });
+  await f.finish("WAITS");
+  await vi.waitFor(() => expect(f.turns).toEqual(["WAITS", "TODO-OLD", "WAITS", "TODO-URGENT"]), { timeout: 5_000 });
+  expect(f.posted).toEqual([]);
 });

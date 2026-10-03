@@ -38,9 +38,9 @@ export type ServiceOptions = {
   enrolledRepositories: RepoSlug[];
   /** Holds `tasks/<issue identifier>/`, one task loop's directory each. */
   stateDir: string;
-  /** Task slots: tasks running or waiting on a human within the grace; further delegated issues wait for a free one. */
+  /** Task slots: tasks running or waiting within the grace; further delegated issues wait for a free one. */
   maxTasks?: number;
-  /** How long a task waiting on a human keeps its slot before the next task in order gets it. */
+  /** How long a waiting task (on a human or anything else) keeps its slot before the next task in order gets it. */
   waitingGraceMinutes?: number;
   intakeSeconds?: number;
   /** Each task loop's poll interval, and how long it stays with nothing changing and nothing running. */
@@ -94,7 +94,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const graceMs = (opts.waitingGraceMinutes ?? 15) * 60_000;
   const abort = new AbortController();
   const active = new Map<string, Promise<void>>();
-  // Each running loop's slot: released while it waits on a human past the grace (slots.ts).
+  // Each running loop's slot: released while it waits past the grace (slots.ts).
   const slots = new Map<string, Slot>();
   // When and how each task loop last ended: an unchanged ending (an idle task readmitted every intake,
   // say) is not logged again, and a loop that ended since the latest intake waits for the next.
@@ -159,9 +159,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     slots.set(issueId, slot);
   };
 
-  // TECH-5008: releases each slot held past the grace by a task waiting on a human, then gives every
-  // free slot to the task that wants one: first a released task with work again (its human answered,
-  // say), then a new Todo issue in admission order. A woken task (`sgt task wake`) goes first. A loop that ended since
+  // TECH-5008: releases each slot held past the grace by a waiting task, then gives every free slot
+  // to the task that wants one: first a released task with work again (its human answered or its CI
+  // finished, say), then a new Todo issue in admission order. A woken task (`sgt task wake`) goes first. A loop that ended since
   // the latest intake waits for the next one, so an idle task is not readmitted at once, over and over.
   const freeSlots = () => maxTasks - [...slots.values()].filter((s) => !s.released).length;
   const schedule = () => {
@@ -170,7 +170,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       if (slot.released || slot.waitingSince === undefined || Date.now() - slot.waitingSince < graceMs) continue;
       slot.released = true;
       slot.waitingSince = undefined;
-      log(`${issueId}: waiting on a human past the grace; its task slot is free until the human answers`);
+      log(`${issueId}: waiting past the grace; its task slot is free until it has work again`);
     }
     let free = freeSlots();
     if (free <= 0) return;

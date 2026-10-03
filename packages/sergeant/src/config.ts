@@ -106,7 +106,7 @@ export const InstallationConfig = z.strictObject({
   budget: z.strictObject({ minutes: z.number().positive().optional(), usd: z.number().positive().optional() }).optional(),
   /** Task slots `serve` fills at once (TECH-5008, superseding TECH-4988); `serve --max-tasks` wins, and without either it is 2. */
   maxTasks: z.number().int().positive().optional(),
-  /** Minutes a task waiting on a human keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */
+  /** Minutes a waiting task keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */
   waitingGraceMinutes: z.number().nonnegative().optional(),
   /** The agent CLI each role runs (TECH-5009). A role not named runs Claude Code, as it always has. */
   runners: z.strictObject({ worker: z.enum(ADAPTERS).optional(), reviewer: z.enum(ADAPTERS).optional() }).optional(),

@@ -68,7 +68,7 @@ skipped fresh review which get an audit review. Optional `budget` is the budget 
 when it starts or a human answers one of its questions, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
 numbers, each optional; unset, 120 minutes and $25; see the task budget under Commands). Optional
 `maxTasks` (a positive integer, default 2) is how many task slots `serve` fills, and optional
-`waitingGraceMinutes` (default 15) how long a task waiting on a human keeps its slot; `serve
+`waitingGraceMinutes` (default 15) how long a waiting task keeps its slot; `serve
 --max-tasks` and `--waiting-grace-minutes` win over them (see Intake under Commands). Optional
 `linear.webhookSecret` and `github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
 webhooks; `serve` has each webhook endpoint only when its secret is set. Optional `humans` says who
@@ -199,11 +199,11 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   A free slot goes to the highest-ordered task that wants one: by Linear status, In Review, then In
   Progress, then Todo; then by priority, Urgent to none; then newest first. Finishing work beats
   starting it. A task asked to wake (`sgt task wake`) goes first. A task holds its slot while it runs
-  a worker, a reviewer, or a reasoning turn, and while it waits on a human (a question, a budget
-  reply, a human merge, or changes requested) for up to `waitingGraceMinutes` (15). Answered within
-  the grace, it continues at once; past it, its slot goes to the next task, and its loop keeps polling
-  without a slot. Once the human answers, it queues for a slot in the same order as new work. Like a
-  question, a wait on a human merge or on requested changes no longer ends on the idle guard.
+  a worker, a reviewer, or a reasoning turn, and while it waits on anything (a question, a budget
+  reply, CI, mergeability, a human merge, an unreadable runner) for up to `waitingGraceMinutes` (15).
+  Answered within the grace, it continues at once; past it, its slot goes to the next task quietly,
+  with nothing posted in Linear, and its loop keeps polling without a slot (TECH-5015). Once it has
+  work again, it queues for a slot in the same order as new work, so In Progress goes ahead of Todo.
   `GET /status` lists the released tasks under `released`. Linear's list only discovers new work, and
   a task starts only from Todo (TECH-4989): an issue in Triage or Backlog waits until a human moves it
   there. A Todo issue with a Linear "blocked by" issue that is neither completed nor canceled waits
