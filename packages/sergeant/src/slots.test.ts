@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
-import { commentIdFor, type Conversation, type ProposedAction } from "@terros/sergeant-contracts";
+import { commentIdFor, type Conversation, type HumanPullRequestFeedback, type ProposedAction } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { startService, type Service, type ServiceDeps } from "./service.ts";
 
@@ -45,6 +45,7 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
   const asking = new Set<string>();
   const posted: string[] = [];
   const ci = { state: "pending" as "pending" | "passed" };
+  const feedback: HumanPullRequestFeedback[] = [];
   const sha = "a".repeat(40);
   const deps: ServiceDeps = {
     agentUserId: agent.id,
@@ -63,10 +64,10 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
     github: {
       readPullRequest: async (repo, number) => {
         const checks = { sha, required: [{ name: "ci", state: ci.state }] };
-        return { repo, number, url: "https://github.com/o/r/pull/1", author: "sergeant-worker[bot]", state: "open", draft: false, headSha: sha, mergedSha: null, baseRef: "main", body: "", mergeable: true, checks, humanFeedback: [] };
+        return { repo, number, url: "https://github.com/o/r/pull/1", author: "sergeant-worker[bot]", state: "open", draft: false, headSha: sha, mergedSha: null, baseRef: "main", body: "Fixes WAITS", mergeable: true, checks, humanFeedback: [...feedback] };
       },
-      closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
-    runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
+      closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no merge configured")) },
+    runner: { start: async () => {}, status: async () => Promise.reject(new Error("no run")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
         const id = situation.conversation.issue.identifier;
@@ -90,7 +91,7 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
     const now = new Date().toISOString();
     conversations.set(id, { ...c, humanComments: [...c.humanComments, { id: `reply-${id}`, author: { id: "u1", name: "Human" }, createdAt: now, updatedAt: now, body: "A" }] });
   };
-  return { delegated, deps, turns, asking, posted, ci, finish, answer };
+  return { delegated, deps, turns, asking, posted, ci, feedback, finish, answer };
 }
 
 let dir = "";
@@ -113,9 +114,15 @@ const underway = async (identifier: string) => {
   await writeFile(join(dir, "tasks", identifier, "state.json"), JSON.stringify(task));
 };
 
-const start = async (deps: ServiceDeps, opts: { maxTasks: number; waitingGraceMinutes?: number; idleMinutes?: number }, logs: string[] = []) => {
+const start = async (
+  deps: ServiceDeps,
+  opts: { maxTasks: number; waitingGraceMinutes?: number; idleMinutes?: number; intakeSeconds?: number },
+  logs: string[] = [],
+  setup?: () => Promise<void>,
+) => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-slots-test-"));
   for (const { identifier, state } of await deps.delegatedIssues()) if (state.type === "started") await underway(identifier);
+  await setup?.();
   service = await startService(
     { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 0, log: (l) => logs.push(l), ...opts },
     deps,
@@ -237,4 +244,86 @@ test("a task waiting on CI past the grace frees its slot quietly, and is readmit
   await f.finish("WAITS");
   await vi.waitFor(() => expect(f.turns).toEqual(["WAITS", "TODO-OLD", "WAITS", "TODO-URGENT"]), { timeout: 5_000 });
   expect(f.posted).toEqual([]);
+});
+
+test("a slot freed between intakes refreshes Linear before admitting new work", async () => {
+  const f = fakes([
+    issue("FIRST", "Todo", 1, "2026-10-03T00:00:00.000Z"),
+    issue("STALE", "Todo", 2, "2026-10-02T00:00:00.000Z"),
+  ]);
+  await start(f.deps, { maxTasks: 1, intakeSeconds: 3_600 });
+  await vi.waitFor(() => expect(f.turns).toEqual(["FIRST"]), { timeout: 5_000 });
+
+  // Linear no longer returns the queued issue. Ending FIRST wakes a fresh intake; the previous
+  // intake's STALE entry must not slip into the newly free slot first.
+  f.delegated.splice(1, 1);
+  await f.finish("FIRST");
+  await sleep(100);
+  expect(f.turns).toEqual(["FIRST"]);
+});
+
+test("post-merge effects wait for a task slot", async () => {
+  const f = fakes([issue("HOLDS", "In Progress", 1, "2026-10-03T00:00:00.000Z")]);
+  const at = new Date().toISOString();
+  await start(f.deps, { maxTasks: 1, intakeSeconds: 3_600 }, [], async () => {
+    await mkdir(join(dir, "tasks", "MERGED"), { recursive: true });
+    await writeFile(join(dir, "tasks", "MERGED", "state.json"), JSON.stringify({
+      issueId: "MERGED",
+      startedAt: at,
+      turns: 1,
+      runIds: [],
+      recentTurns: [],
+      budget: { window: { wallMinutes: 120, costUsd: 25 }, grants: [] },
+      merged: { repo: "o/r", number: 1, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at, outcome: "Merged." },
+    }));
+  });
+  await vi.waitFor(() => expect(f.turns).toEqual(["HOLDS"]), { timeout: 5_000 });
+  await sleep(100);
+  expect(f.posted).toEqual([]);
+});
+
+test.each([
+  ["a merge refused by GitHub", "refused"],
+  ["human-requested changes", "changes"],
+] as const)("%s remains a quiet wait that may end on the idle guard", async (_, kind) => {
+  const f = fakes([issue("WAITS", "In Progress", 2, "2026-10-01T00:00:00.000Z")], "WAITS");
+  f.ci.state = "passed";
+  const head = "a".repeat(40);
+  if (kind === "changes") {
+    f.feedback.push({ id: "review:1", kind: "review", author: "captain", state: "CHANGES_REQUESTED", body: "Please revise.", path: null, line: null, commitId: head, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), url: "https://github.com/o/r/pull/1#pullrequestreview-1" });
+  }
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, idleMinutes: 0 }, logs, async () => {
+    if (kind !== "refused") return;
+    const saved = JSON.parse(await readFile(join(dir, "tasks", "WAITS", "state.json"), "utf8"));
+    saved.refusedMerges = [{
+      repo: "o/r", number: 1, url: "https://github.com/o/r/pull/1", headSha: head,
+      conversationRevision: "0".repeat(64), reason: "repository policy requires a human", at: new Date().toISOString(), commentPostedAt: new Date().toISOString(),
+    }];
+    await writeFile(join(dir, "tasks", "WAITS", "state.json"), JSON.stringify(saved));
+  });
+  await f.finish("WAITS");
+  await vi.waitFor(() => expect(logs).toContainEqual(expect.stringContaining("WAITS: loop ended idle:")), { timeout: 5_000 });
+});
+
+test("an unanswered budget question releases its slot and is never ended by the idle guard", async () => {
+  const f = fakes([
+    issue("BUDGET", "In Progress", 2, "2026-10-01T00:00:00.000Z"),
+    issue("NEXT", "Todo", 1, "2026-10-03T00:00:00.000Z"),
+  ]);
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0, idleMinutes: 0 }, logs, async () => {
+    await writeFile(join(dir, "tasks", "BUDGET", "state.json"), JSON.stringify({
+      issueId: "BUDGET",
+      startedAt: "2026-10-03T00:00:00.000Z",
+      turns: 0,
+      runIds: [],
+      recentTurns: [],
+      budget: { window: { wallMinutes: 1, costUsd: 25 }, grants: [] },
+    }));
+  });
+  await vi.waitFor(() => expect(f.turns).toEqual(["NEXT"]), { timeout: 5_000 });
+  expect(f.posted.join("\n")).toContain("budget is exhausted");
+  expect(logs).toContainEqual("BUDGET: waiting past the grace; its task slot is free until it has work again");
+  expect(logs.some((line) => line.includes("BUDGET: loop ended idle"))).toBe(false);
 });
