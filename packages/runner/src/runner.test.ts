@@ -214,13 +214,14 @@ test("a Codex run records its summed tokens and no cost; a Claude run its report
     '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}',
   ].join("\n");
   const codex = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, codexLogs);
-  expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "sonnet" });
+  // M13 skips a record without `issueRevision`, so a Codex run must carry it like a Claude run (TECH-5045).
+  expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "sonnet", issueRevision: issueRevision(spec.conversation.issue) });
   expect(codex.tokens).toEqual({ input: 1010, cachedInput: 400, output: 55, reasoningOutput: 20 });
   expect(codex.costUsd).toBeUndefined();
   expect(codex.report).not.toBeNull();
 
   const failed = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, '{"type":"turn.failed","error":{"message":"401: Incorrect API key provided: sk-proj***abcd."}}', "");
-  expect(failed).toMatchObject({ status: "failed", reportError: expect.stringContaining("401: Incorrect API key provided: sk-[redacted]") });
+  expect(failed).toMatchObject({ status: "failed", issueRevision: issueRevision(spec.conversation.issue), reportError: expect.stringContaining("401: Incorrect API key provided: sk-[redacted]") });
   expect(JSON.stringify(failed)).not.toContain("abcd");
 
   const claude = await ended({}, '{"is_error":false,"session_id":"s","total_cost_usd":1.25,"modelUsage":{"claude-sonnet-5-5":{}}}');
