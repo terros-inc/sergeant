@@ -1,6 +1,7 @@
 export * from "./actions.ts";
 export * from "./api.ts";
 export * from "./budget.ts";
+export * from "./client.ts";
 export * from "./conversation.ts";
 export * from "./gate.ts";
 export * from "./github.ts";

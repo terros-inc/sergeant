@@ -4,9 +4,9 @@ import { RepoSlug } from "./conversation.ts";
 import { RunId, RunRecord } from "./runs.ts";
 import { FiledFollowup } from "./situation.ts";
 
-// The client API (11 §2, UNF-713): what `serve` answers on `/v1` and the `sgt` CLI reads. The server
-// validates request bodies with these schemas and the CLI validates responses with them, so the two
-// cannot drift silently. Only a minimal slice exists: task and run reads, wake, and cancel. Every
+// The client API (11 §2, UNF-713): what `serve` answers on `/v1` and `sgt` and `sgt-mcp` read. The
+// server validates request bodies with these schemas and its clients (client.ts) validate responses
+// with them, so they cannot drift silently. Only a minimal slice exists: task and run reads, wake, and cancel. Every
 // `/v1` call but `GET /v1/auth/config` names its caller: a Linear user's OAuth token as a bearer
 // (`sgt login`), or, only where `serve --trust-loopback` allows it, an operator on the host itself.
 

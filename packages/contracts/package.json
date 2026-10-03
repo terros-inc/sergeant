@@ -2,7 +2,7 @@
   "name": "@terros/sergeant-contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "Zod schemas, ports, and the pure Gate shared by every Sergeant 2 package. Depends on no internal package.",
+  "description": "Zod schemas, ports, the pure Gate, and the typed API client shared by every Sergeant 2 package. Depends on no internal package.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
