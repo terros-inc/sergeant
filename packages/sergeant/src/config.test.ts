@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { InstallationConfig, runnerRoles, taskBudget } from "./config.ts";
+import { InstallationConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const config = (controlPlaneAppId: number | string, workerAppId: number | string) => ({
@@ -22,6 +22,19 @@ test("the control-plane and worker GitHub Apps must differ, however the App ID i
   expect(InstallationConfig.safeParse(config(42, 42)).success).toBe(false);
   expect(InstallationConfig.safeParse(config(42, "42")).success).toBe(false);
   expect(InstallationConfig.parse(config(42, "43")).github.workerApp.appId).toBe(43);
+});
+
+test("reviewer profiles are validated and GitHub logins are matched case-insensitively", async () => {
+  const profile = "https://linear.app/acme/profiles/ada";
+  const parsed = InstallationConfig.parse({
+    ...config(1, 2),
+    linear: { ...config(1, 2).linear, reviewerProfiles: { "Ada-Lovelace": profile } },
+  });
+  const lookup = reviewerProfileLookup(parsed);
+
+  expect(await lookup("ada-lovelace")).toBe(profile);
+  expect(await lookup("grace")).toBeUndefined();
+  expect(InstallationConfig.safeParse({ ...config(1, 2), linear: { ...config(1, 2).linear, reviewerProfiles: { ada: "https://example.com/ada" } } }).success).toBe(false);
 });
 
 // TECH-4964: the config's budget is a task's stored window when it starts, the defaults without it,

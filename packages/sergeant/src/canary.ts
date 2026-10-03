@@ -20,7 +20,7 @@ import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
-import { connect, loadConfig, runnerRoles, taskBudget } from "./config.ts";
+import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const { values } = parseArgs({
@@ -67,6 +67,7 @@ const result = await runLoop(
     linear: installation.linear,
     agentUserId: installation.agentUserId,
     workerLogin: installation.workerLogin,
+    linearProfileForGitHubLogin: reviewerProfileLookup(config),
     github: installation.github,
     runner: containerRunner({
       rootDir: join(dir, "runs"),

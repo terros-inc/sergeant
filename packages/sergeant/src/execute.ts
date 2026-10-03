@@ -26,6 +26,8 @@ export type Ports = {
   linear: LinearPort;
   github: GitHubPort;
   runner: RunnerPort;
+  /** Resolves a GitHub login to the Linear profile URL that Markdown turns into a notifying mention. */
+  linearProfileForGitHubLogin?: (login: string) => Promise<string | undefined>;
   /** The V2 agent's Linear user: every effect requires the issue to be delegated to it (A1). */
   agentUserId: string;
   /** The worker App's GitHub login: Sergeant reviews and merges only PRs it opened (G3, M2). */

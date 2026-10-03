@@ -20,7 +20,7 @@ import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliFeedbackJudge, claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { linearCallers } from "./auth.ts";
-import { connect, loadConfig, runnerRoles, taskBudget } from "./config.ts";
+import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { startService } from "./service.ts";
 
 const { values } = parseArgs({
@@ -84,6 +84,7 @@ const service = await startService(
     linear: installation.linear,
     agentUserId: installation.agentUserId,
     workerLogin: installation.workerLogin,
+    linearProfileForGitHubLogin: reviewerProfileLookup(config),
     github: installation.github,
     runner: containerRunner({
       rootDir: join(stateDir, "runs"),
