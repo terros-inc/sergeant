@@ -148,7 +148,7 @@ test("a refusal, an off-contract answer, and an unreachable API each exit 1 with
 
   const down = await sgt("http://127.0.0.1:9", "--json", "whoami");
   expect(down.code).toBe(1);
-  expect(JSON.parse(down.out).error).toMatchObject({ code: "unavailable", message: expect.stringContaining("SSM port-forward") });
+  expect(JSON.parse(down.out).error).toMatchObject({ code: "unavailable", message: expect.stringContaining("hosted HTTPS endpoint") });
 });
 
 // `sgt login` against a fake Linear: the PKCE proof travels with the code and no client secret exists,

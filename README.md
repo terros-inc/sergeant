@@ -303,16 +303,19 @@ account settings ends it at Linear.
 
 The installation's Linear OAuth app (the V2 agent's own app; one app per installation is enough) needs
 `http://localhost:4546/callback` among its callback URLs; `sgt login` asks for the `read` scope as the
-user (`actor=user`), and its client id goes in the installation config's `humans.linearClientId`. Until
-the hosted API is published, reach it by forwarding its loopback port over SSM (operator AWS access to
-the instance is needed for the session, never for `sgt` itself), then sign in to that URL:
+user (`actor=user`), and its client id goes in the installation config's `humans.linearClientId`.
+The hosted API is available through the installation's permanent HTTPS endpoint. From a laptop—no
+AWS account or session is needed—set that endpoint, sign in, and list tasks:
 
 ```sh
-aws ssm start-session --target <instance id> --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["8080"],"localPortNumber":["18080"]}'
-export SGT_API_URL=http://127.0.0.1:18080
+export SGT_API_URL=https://<hostname>
 sgt login && sgt task list
 ```
+
+The host operator must first set all three `humans` fields: the app's public `linearClientId`, the
+allowed Linear team keys in `teams`, and the allowed teams' Linear user ids in `approvers`; the app
+must have the callback above. Until then the API fails closed. See [`deploy/README.md`](deploy/README.md)
+for rollout and unauthenticated live checks.
 
 ### The MCP server
 

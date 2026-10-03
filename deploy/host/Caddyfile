@@ -1,12 +1,21 @@
 # HTTPS for the permanent endpoint (certificate from Let's Encrypt over HTTP-01), installed by
-# install.sh. Only serve's /health and its two webhook endpoints are exposed; serve itself listens on
-# loopback and verifies each webhook's signature before parsing it.
+# install.sh. Only serve's health check, user-authenticated /v1 API, and two webhook endpoints are
+# exposed; serve itself listens on loopback. It authenticates every operational /v1 request and
+# verifies each webhook's signature before parsing it. /status and installation-admin surfaces stay
+# loopback-only.
 {
 	admin off
 }
 
 __HOSTNAME__ {
 	handle /health {
+		reverse_proxy 127.0.0.1:8080
+	}
+	@api path /v1 /v1/*
+	handle @api {
+		request_body {
+			max_size 1MB
+		}
 		reverse_proxy 127.0.0.1:8080
 	}
 	@webhooks {

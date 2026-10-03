@@ -249,7 +249,7 @@ const client = (ctx: Context) =>
     api: ctx.api,
     fetch: ctx.io.fetch,
     token: ctx.token,
-    unreachableHint: ". Is serve running there? For the hosted instance, open the SSM port-forward first (README.md).",
+    unreachableHint: ". Is serve running there, and is SGT_API_URL the hosted HTTPS endpoint (README.md)?",
   });
 
 const settle = <T>(ctx: Context, res: ApiResult<T>): T => (res.ok ? res.value : fail(ctx, res.error.code, res.error.message));
