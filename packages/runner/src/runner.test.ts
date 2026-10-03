@@ -227,3 +227,26 @@ test("a Codex run records its summed tokens and no cost; a Claude run its report
   expect(claude).toMatchObject({ status: "succeeded", provider: "anthropic/claude-code", model: "claude-sonnet-5-5", costUsd: 1.25 });
   expect(claude.tokens).toBeUndefined();
 });
+
+// TECH-5070: a stop cancels a run whose status it could not read, then reads it again for the PRs its
+// worker reported, which Linear may not link yet. A worker that already exited with its report, or
+// wrote it before it was stopped, keeps it through the cancel, or its PR would stay open.
+test("a canceled run keeps the report its worker wrote, and a run that wrote none has no report", async () => {
+  const reporting = REPORT.replace('"pullRequests": []', '"pullRequests": [{ "repo": "o/canary", "number": 9, "url": "https://github.com/o/canary/pull/9", "headSha": "' + "a".repeat(40) + '", "closesIssue": true, "review": { "required": true, "reason": "r" } }]');
+  const { runner, host, rootDir } = await started();
+  await writeFile(join(rootDir, "run_t1", "workspace", "sergeant-report.md"), reporting);
+  host.docker.running = false;
+  host.docker.reachable = false;
+  await expect(runner.status("run_t1")).rejects.toThrow(/unavailable/);
+  host.docker.reachable = true;
+
+  await runner.cancel("run_t1");
+  const canceled = await runner.status("run_t1");
+  expect(canceled).toMatchObject({ status: "canceled", report: { pullRequests: [{ repo: "o/canary", number: 9 }] } });
+  expect(await runner.report?.("run_t1")).toBe(reporting);
+
+  const silent = await started();
+  await silent.runner.cancel("run_t1");
+  expect(await silent.runner.status("run_t1")).toMatchObject({ status: "canceled", report: null });
+  expect((await silent.runner.status("run_t1")).reportError).toBeUndefined();
+});

@@ -17,8 +17,9 @@ import type { ServiceDeps } from "./service.ts";
 // on the issue, and the task's `state.json` is set aside. The intent is removed only once all of that
 // is done; until then the loop or `serve` drives it again, at every intake too, its startup included,
 // whatever the issue's delegation or state is by then. A run whose status cannot be read is unknown
-// and is canceled like a running one, never taken as stopped (04 §6). Nothing resumes a stopped task:
-// the issue delegated and in Todo again starts a fresh one, with a new budget.
+// and is canceled like a running one, never taken as stopped (04 §6), and the stop goes on only once
+// its status, with any PR its worker reported, reads after the cancel (TECH-5070). Nothing resumes a
+// stopped task: the issue delegated and in Todo again starts a fresh one, with a new budget.
 
 const CancelIntent = z.object({
   /** Why the task stopped, as the end of a sentence: "the issue was moved to Backlog". */
@@ -27,6 +28,8 @@ const CancelIntent = z.object({
   at: z.iso.datetime(),
   /** The task's runs when the stop was first driven: set once, before any is canceled. */
   runIds: z.array(RunId).optional(),
+  /** Those of `runIds` whose start the runner never confirmed (loop.ts), set with them. */
+  unconfirmedStarts: z.array(RunId).optional(),
   /** The PRs this stop closed, for the issue comment and the API's answer. */
   closed: z.array(ClosedPullRequest).default([]),
 });
@@ -98,7 +101,7 @@ export async function recordCancel(stateDir: string, ref: TaskRef, req: { reason
 
 /** How far a drive of a task's stop got. */
 export type StopProgress = {
-  /** Runs the runner has not yet confirmed stopped: empty once the stop is done, or when none is recorded. */
+  /** Runs not yet confirmed stopped, or whose status cannot be read since: empty once the stop is done, or when none is recorded. */
   stopping: RunId[];
   /** The PRs the stop closed, across every drive of it so far. */
   closedPullRequests: ClosedPullRequest[];
@@ -111,23 +114,43 @@ export type StopProgress = {
 export async function driveCancel(dir: string, ref: string, deps: Ports, enrolled: RepoSlug[], log: (line: string) => void): Promise<StopProgress> {
   const intent = await readIntent(dir);
   if (!intent) return { stopping: [], closedPullRequests: [] };
-  if (!intent.runIds) {
+  if (!intent.runIds || !intent.unconfirmedStarts) {
     // The task's loop takes no turn once a stop is recorded, and a start already past its live check
-    // finished under the task's lock before this drive began, so these are all the runs to stop.
-    intent.runIds = runIdsOf(await readTaskState(join(dir, "state.json")).catch(() => undefined));
+    // finished under the task's lock before this drive began, so these are all the runs to stop. They
+    // are kept in the intent, since `state.json` is set aside before the intent is removed.
+    const state = await readTaskState(join(dir, "state.json")).catch(() => undefined);
+    if (!intent.runIds) log(`${ref}: stopping: ${intent.reason}`);
+    intent.runIds ??= runIdsOf(state);
+    // An intent written before `unconfirmedStarts` existed whose `state.json` is already set aside was
+    // past its PR close and comment when it crashed: which starts went unconfirmed is lost, so any of its
+    // runs may have never started, and one the runner still does not know does not hold the stop.
+    intent.unconfirmedStarts = state ? (state.unconfirmedStarts ?? []) : intent.runIds;
     await writeIntent(dir, intent);
-    log(`${ref}: stopping: ${intent.reason}`);
   }
   const stopping: RunId[] = [];
   const runs: RunRecord[] = [];
   for (const runId of intent.runIds) {
-    const run = await deps.runner.status(runId).catch(() => undefined);
+    let run = await deps.runner.status(runId).catch(() => undefined);
+    if (!run || run.status === "running") {
+      const canceled = await deps.runner.cancel(runId).then(
+        () => (log(`${ref}: canceled ${runId}`), true),
+        (e: Error) => (log(`${ref}: cancel ${runId} not confirmed, retrying: ${e.message}`), false),
+      );
+      if (!canceled) {
+        stopping.push(runId);
+        continue;
+      }
+      // Only a run whose first status read failed is read again, now it is stopped: it may have reported
+      // a PR Linear has not linked yet, so the stop stays pending until it reads, or that PR is missed.
+      run ??= await deps.runner.status(runId).catch(() => undefined);
+      // A start never confirmed that the runner still does not know never started (loop.ts): no report.
+      if (!run && intent.unconfirmedStarts.includes(runId)) continue;
+    }
     if (run) runs.push(run);
-    if (run && run.status !== "running") continue;
-    await deps.runner.cancel(runId).then(
-      () => log(`${ref}: canceled ${runId}`),
-      (e: Error) => (stopping.push(runId), log(`${ref}: cancel ${runId} not confirmed, retrying: ${e.message}`)),
-    );
+    else {
+      stopping.push(runId);
+      log(`${ref}: status of ${runId} unreadable after its cancel, retrying`);
+    }
   }
   if (stopping.length > 0) return { stopping, closedPullRequests: intent.closed };
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open.

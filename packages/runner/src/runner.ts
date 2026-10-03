@@ -145,7 +145,6 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   }
 
   async function finalize(meta: RunMeta, exitCode: number): Promise<RunRecord> {
-    const p = paths(meta.runId);
     const logs = await exec("docker", ["logs", meta.container]);
     const agent = AGENTS[meta.adapter].parse(logs.stdout);
     const base = {
@@ -160,26 +159,19 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
+    const written = await agentReport(meta);
+    return finish(meta, RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: `no report written; ${why}` }) }), facts);
+  }
+
+  /** The report the agent wrote in its workspace, if any: copied out as `report.md` and parsed for its role. */
+  async function agentReport(meta: RunMeta) {
+    const p = paths(meta.runId);
     const reportPath = await agentFile(p.workspace, "sergeant-report.md");
     const markdown = reportPath && (await readFile(reportPath, "utf8"));
-    if (!markdown) {
-      return finish(meta, { ...base, role: meta.role, report: null, reportError: `no report written; ${why}` }, facts);
-    }
+    if (!markdown) return undefined;
     await writeFile(join(p.dir, "report.md"), markdown);
-    if (meta.role === "reviewer") {
-      const parsed = parseReport(markdown, ReviewReport);
-      return finish(
-        meta,
-        parsed.ok ? { ...base, role: "reviewer", report: parsed.report } : { ...base, role: "reviewer", report: null, reportError: parsed.error },
-        facts,
-      );
-    }
-    const parsed = parseReport(markdown, WorkerReport);
-    return finish(
-      meta,
-      parsed.ok ? { ...base, role: "worker", report: parsed.report } : { ...base, role: "worker", report: null, reportError: parsed.error },
-      facts,
-    );
+    const parsed = meta.role === "reviewer" ? parseReport(markdown, ReviewReport) : parseReport(markdown, WorkerReport);
+    return parsed.ok ? { report: parsed.report } : { report: null, reportError: parsed.error };
   }
 
   /**
@@ -316,7 +308,10 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       if (!isGone(inspect) && !(inspect.code === 0 && inspect.stdout.trim() === "false")) {
         throw new Error(`cancel of ${runId} not confirmed: ${(stop.stderr || inspect.stderr || inspect.stdout).trim().slice(-500)}`);
       }
-      await finish(meta, { runId, role: meta.role, status: "canceled", provider: AGENTS[meta.adapter].provider, model: meta.model, report: null, ...recorded(meta) }, {});
+      // A worker may have written its report, and opened PRs, before it exited or was stopped: the
+      // canceled record keeps it, so a stop still finds and closes those PRs (TECH-5070).
+      const base = { runId, role: meta.role, status: "canceled", provider: AGENTS[meta.adapter].provider, model: meta.model, report: null, ...recorded(meta) };
+      await finish(meta, RunRecord.parse({ ...base, ...(await agentReport(meta)) }), {});
     },
 
     async report(runId) {
