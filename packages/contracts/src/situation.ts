@@ -38,6 +38,11 @@ export const SituationReport = z.object({
    * the issue's attachments, what runs are given as files under `.sergeant/attachments/` (TECH-4994).
    */
   uploads: z.array(z.string()).default([]),
+  /**
+   * `issueRevision` of the current title and description. A run whose own `issueRevision` differs
+   * started from older text (TECH-5034).
+   */
+  issueRevision: z.string().optional(),
   /** Repositories runs may be given; the canary's allowlist. */
   enrolledRepositories: z.array(RepoSlug),
   pullRequests: z.array(PullRequestFacts),

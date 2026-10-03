@@ -30,7 +30,7 @@ const reviewer = (over: Partial<ReviewReport> = {}): RunRecord => ({
   },
 });
 
-const worker = (required: boolean, closesIssue = true): RunRecord => ({
+const worker = (required: boolean, closesIssue = true, unreadableInputs?: string[]): RunRecord => ({
   runId: "run_worker",
   role: "worker",
   status: "succeeded",
@@ -43,6 +43,7 @@ const worker = (required: boolean, closesIssue = true): RunRecord => ({
     pullRequests: [{ ...pr, headSha: head, url: "https://github.com/x/y/pull/7", closesIssue, review: { required, reason: "typo" } }],
     knownGaps: [],
     followups: [],
+    ...(unreadableInputs && { unreadableInputs }),
   },
 });
 
@@ -61,6 +62,8 @@ type Over = {
   liveConversationRevision?: string;
   linked?: MergeFacts["linkedPullRequests"];
   refusedMerges?: RefusedMerge[];
+  liveIssueRevision?: string;
+  agentComments?: MergeFacts["agentComments"];
 };
 const facts = (over: Over = {}): MergeFacts => ({
   pr: {
@@ -81,6 +84,8 @@ const facts = (over: Over = {}): MergeFacts => ({
   issueIdentifier: "UNF-1",
   pullRequests: over.pullRequests ?? [],
   liveConversationRevision: over.liveConversationRevision ?? rev,
+  liveIssueRevision: over.liveIssueRevision ?? "issue-v1",
+  agentComments: over.agentComments ?? [],
   linkedPullRequests: over.linked ?? [pr],
   workerLogin,
   enrolledRepositories: [pr.repo],
@@ -166,4 +171,27 @@ test("refuses to retry a merge GitHub refused by policy until something changes"
   expect(checkMerge(merge, facts({ refusedMerges: [refused] }))).toMatchObject({ allowed: false, rule: "M12" });
   const changed = "2".repeat(64);
   expect(checkMerge({ ...merge, conversationRevision: changed }, facts({ refusedMerges: [refused], liveConversationRevision: changed }))).toEqual({ allowed: true });
+});
+
+// TECH-5034: the issue was rewritten to require a bundled reference file while the task waited, and the
+// work merged against the old text. A review or waiver given against an earlier title or description
+// is no standing for the current acceptance criteria.
+test("refuses a standing given against an earlier title or description of the issue", () => {
+  const at = (run: RunRecord, issueRevision: string): RunRecord => ({ ...run, issueRevision });
+  expect(checkMerge(merge, facts({ runs: [at(reviewer(), "issue-v1"), worker(true)] }))).toEqual({ allowed: true });
+  expect(checkMerge(merge, facts({ runs: [at(reviewer(), "issue-v0"), worker(true)] }))).toMatchObject({ allowed: false, rule: "M13" });
+  const skip = { ...merge, reviewStanding: { kind: "not_required", workerRunId: "run_worker" } } as const;
+  expect(checkMerge(skip, facts({ runs: [at(worker(false), "issue-v0")] }))).toMatchObject({ allowed: false, rule: "M13" });
+});
+
+// TECH-5034: a worker could not read the Google Doc the issue depended on, said so only in its PR, and
+// the work went ahead. An input a run could not read blocks the merge until Sergeant has asked about it.
+test("refuses to merge past an input a run could not read until a question names it", () => {
+  const doc = "https://docs.google.com/document/d/standard";
+  const unread = worker(true, true, [doc]);
+  expect(checkMerge(merge, facts({ runs: [reviewer(), unread] }))).toMatchObject({ allowed: false, rule: "M14", reason: expect.stringContaining(doc) });
+  const asked = { id: "c1", createdAt: "2026-10-03T02:00:00.000Z", body: `**Question for you**\n\nThe worker could not read ${doc}. Can you share it?` };
+  expect(checkMerge(merge, facts({ runs: [reviewer(), unread], agentComments: [asked] }))).toEqual({ allowed: true });
+  const quoted = { ...asked, id: "c2", body: `Linked document: ${doc}` };
+  expect(checkMerge(merge, facts({ runs: [reviewer(), unread], agentComments: [quoted] }))).toMatchObject({ allowed: false, rule: "M14" });
 });

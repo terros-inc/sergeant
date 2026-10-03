@@ -7,6 +7,7 @@ import {
   commentIdFor,
   conversationRevision,
   linearUploads,
+  issueRevision,
   reportedClosing,
   SituationReport,
   type ProposedAction,
@@ -21,7 +22,7 @@ import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
-import { openQuestion } from "./question.ts";
+import { noteEdit, openQuestion } from "./question.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { humanWait } from "./slots.ts";
 import { applyTurn, loadState } from "./task-state.ts";
@@ -169,6 +170,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       await wait(pollMs);
       continue;
     }
+    // An edit while Sergeant waits on a reply gets one short notice (TECH-5034); retried next poll if it fails.
+    await noteEdit(conversation, state.seen, budgetAsked, deps.linear).then(
+      (posted) => posted && log(`noted an edit to ${conversation.issue.identifier} made while waiting on a reply`),
+      (e: Error) => log(`could not note the edit to ${conversation.issue.identifier}: ${e.message}`),
+    );
     // While the question Sergeant asked is unanswered it takes no turn and makes no effect, and no
     // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts.
     const question = openQuestion(conversation);
@@ -197,7 +203,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // a fact for the next turn.
     const landed = pullRequests.find((p) => p.state === "merged" && p.author === deps.workerLogin && reportedClosing(runs, p) === true);
     if (landed?.mergedSha) {
-      const outcome = outcomeComment(landed, landed.mergedSha, runs, state.followups);
+      const outcome = outcomeComment(landed, landed.mergedSha, runs, state.followups, conversation.issue);
       state.merged = {
         repo: landed.repo,
         number: landed.number,
@@ -216,6 +222,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       conversationRevision: conversationRevision(conversation, pullRequests),
       conversation,
       uploads: linearUploads(conversation),
+      issueRevision: issueRevision(conversation.issue),
       enrolledRepositories: opts.enrolledRepositories,
       pullRequests,
       runs,

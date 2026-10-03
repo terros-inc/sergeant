@@ -9,6 +9,7 @@ import {
   checkStart,
   commentIdFor,
   conversationRevision,
+  issueRevision,
   type FiledFollowup,
   type GitHubPort,
   type LinearPort,
@@ -132,7 +133,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
                 },
           );
           const role = action.kind === "start_worker" ? "worker" : "reviewer";
-          const started: RunRecord = { runId, role, status: "running", provider: "unknown", model: "unknown", report: null };
+          const started: RunRecord = { runId, role, status: "running", provider: "unknown", model: "unknown", report: null, issueRevision: issueRevision(conversation.issue) };
           // Best effort, after the start is a done fact: show the issue as In Progress the moment the
           // first worker starts (TECH-4947). A failed status write is logged and never fails the start,
           // and the move itself only runs for a worker and never moves a started/done issue backward.
@@ -179,6 +180,8 @@ export async function execute(action: ProposedAction, situation: SituationReport
             issueIdentifier: live.issue.identifier,
             pullRequests: situation.pullRequests,
             liveConversationRevision: liveRevision,
+            liveIssueRevision: issueRevision(live.issue),
+            agentComments: live.agentComments,
             linkedPullRequests: live.issue.linkedPullRequests,
             workerLogin: ports.workerLogin,
             enrolledRepositories,

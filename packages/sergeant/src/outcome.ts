@@ -1,4 +1,4 @@
-import type { FiledFollowup, PullRequestFacts, RunRecord } from "@terros/sergeant-contracts";
+import { issueRevision, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { approvedHead } from "./review-quality.ts";
 
 /**
@@ -6,8 +6,16 @@ import { approvedHead } from "./review-quality.ts";
  * the validation observed on it, the merge result, known gaps, and follow-ups filed. Built from live PR facts and the
  * run records: the ones the merge was allowed on, or, for a merge `state.json` never recorded, the
  * ones re-read after it. No run ids or other internals; Done is left to the GitHub integration.
+ * Known gaps are judged against the issue's current title and description (TECH-5034), so a human
+ * merge of work checked against older text, or over a review's unmet requirements, says so.
  */
-export function outcomeComment(pr: PullRequestFacts, mergedSha: string, runs: RunRecord[], followups: FiledFollowup[]): string {
+export function outcomeComment(
+  pr: PullRequestFacts,
+  mergedSha: string,
+  runs: RunRecord[],
+  followups: FiledFollowup[],
+  issue: Pick<Conversation["issue"], "title" | "description">,
+): string {
   const head = pr.headSha;
   const covers = (r: { repo: string; number: number }) => r.repo === pr.repo && r.number === pr.number;
 
@@ -25,7 +33,7 @@ export function outcomeComment(pr: PullRequestFacts, mergedSha: string, runs: Ru
   const validation = checks.every((c) => c.state === "passed")
     ? `required checks passed on that head: ${checks.map((c) => c.name).join(", ") || "none declared"}`
     : `required checks on that head: ${checks.map((c) => `${c.name} ${c.state}`).join(", ")}`;
-  const gaps = (report?.knownGaps ?? []).map((g) => g.trim().replace(/\.$/, ""));
+  const gaps = [...(report?.knownGaps ?? []), ...acceptanceGaps(pr, runs, issueRevision(issue))].map((g) => g.trim().replace(/\.$/, ""));
 
   return [
     `**Merged** [${pr.repo}#${pr.number}](${pr.url}): head \`${head.slice(0, 12)}\` merged as \`${mergedSha.slice(0, 12)}\`.`,
@@ -34,4 +42,21 @@ export function outcomeComment(pr: PullRequestFacts, mergedSha: string, runs: Ru
     `- Known gaps: ${gaps.length > 0 ? gaps.join("; ") : "none reported"}.`,
     ...(followups.length > 0 ? [`- Follow-ups filed: ${followups.map((f) => `[${f.identifier}](${f.url}) ${f.title}`).join("; ")}.`] : []),
   ].join("\n");
+}
+
+/**
+ * What the merged head leaves unmet of the current acceptance criteria, as far as the records show:
+ * every run that checked this head started from an earlier title or description, or the latest review
+ * of it found requirements unmet (a reviewer reports each as a blocking finding).
+ */
+function acceptanceGaps(pr: PullRequestFacts, runs: RunRecord[], current: string): string[] {
+  const atHead = (r: { repo: string; number: number; headSha: string }) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha;
+  const checked = runs.filter((r) => (r.role === "reviewer" ? r.report?.reviewed.some(atHead) : r.report?.pullRequests.some(atHead)));
+  const stale = checked.length > 0 && checked.every((r) => r.issueRevision !== undefined && r.issueRevision !== current);
+  const review = checked.findLast((r) => r.role === "reviewer");
+  const unmet = review?.role === "reviewer" && review.issueRevision === current ? (review.report?.findings ?? []).filter((f) => f.severity === "blocking") : [];
+  return [
+    ...(stale ? ["this head was checked only against an earlier title or description of the issue, not its current acceptance criteria"] : []),
+    ...unmet.map((f) => `unmet per review: ${f.description.split("\n")[0]?.slice(0, 200)}`),
+  ];
 }

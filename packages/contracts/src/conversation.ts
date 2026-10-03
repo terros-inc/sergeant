@@ -125,3 +125,12 @@ export function conversationRevision(conversation: Conversation, pullRequests: r
   if (attachments.length > 0) return sha256(JSON.stringify([title, description, comments, feedback, attachments]));
   return sha256(JSON.stringify(feedback.length > 0 ? [title, description, comments, feedback] : [title, description, comments]));
 }
+
+/**
+ * A hash of the issue's title and description alone: the text that states what is asked and its
+ * acceptance criteria. Each run records the one it started from (`RunRecord.issueRevision`), so a
+ * review or waiver given against an older text is told apart from one against the current text (M13).
+ */
+export function issueRevision(issue: Pick<Conversation["issue"], "title" | "description">): string {
+  return sha256(JSON.stringify([issue.title, issue.description]));
+}

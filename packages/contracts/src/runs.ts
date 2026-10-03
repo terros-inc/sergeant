@@ -19,6 +19,13 @@ export type ReviewRecommendation = z.infer<typeof ReviewRecommendation>;
 /** A PR head as a report names it. SHAs are kept as written; the Gate compares them exactly. */
 const ReportedPr = { repo: RepoSlug, number: z.number().int().positive(), headSha: z.string() };
 
+/**
+ * Inputs the issue depends on that the run could not read (an auth-gated link, a missing file or
+ * attachment), each named as the issue names it. Sergeant must ask a human about each before it
+ * merges (M14).
+ */
+const UnreadableInputs = z.array(z.string()).optional();
+
 export const WorkerReport = z.object({
   reportVersion: z.literal("s2-worker-report/1"),
   outcome: z.enum(["completed", "partial", "blocked", "needs_decision", "failed"]).catch("partial"),
@@ -38,6 +45,7 @@ export const WorkerReport = z.object({
     )
     .default([]),
   knownGaps: z.array(z.string()).default([]),
+  unreadableInputs: UnreadableInputs,
   /** Out-of-scope work the worker found; Sergeant's reasoning decides whether to file it. */
   followups: z.array(z.object({ title: z.string(), why: z.string().default("") })).default([]),
   /**
@@ -65,6 +73,7 @@ export const ReviewReport = z.object({
   reviewed: z.array(z.object(ReportedPr)).min(1),
   verdict: z.enum(["approve", "changes_requested", "needs_human"]),
   findings: z.array(Finding).default([]),
+  unreadableInputs: UnreadableInputs,
   summary: z.string(),
 });
 export type ReviewReport = z.infer<typeof ReviewReport>;
@@ -78,6 +87,11 @@ const RunBase = {
   costUsd: z.number().nonnegative().optional(),
   /** Why the report is null: missing, malformed, or failed validation. */
   reportError: z.string().optional(),
+  /**
+   * The `issueRevision` of the title and description the run started from, as the runner recorded it.
+   * Absent on records made before TECH-5034.
+   */
+  issueRevision: z.string().optional(),
 };
 
 /** One worker or reviewer run as the runner reports it. A reviewer is always its own fresh run. */

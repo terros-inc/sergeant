@@ -1,4 +1,4 @@
-import type { Conversation, ConversationRevision, PullRequestRef, RepoSlug } from "./conversation.ts";
+import type { AgentComment, Conversation, ConversationRevision, PullRequestRef, RepoSlug } from "./conversation.ts";
 import type { HumanPullRequestFeedback, PullRequestFacts } from "./github.ts";
 import type { MergePr, ProposedAction, ReviewStanding } from "./actions.ts";
 import type { RunRecord } from "./runs.ts";
@@ -101,6 +101,10 @@ export type MergeFacts = Ownership & {
   pullRequests: PullRequestFacts[];
   /** Recomputed from a live Linear read immediately before merging; `linkedPullRequests` is from it too. */
   liveConversationRevision: ConversationRevision;
+  /** `issueRevision` of the live issue's title and description, from the same read. */
+  liveIssueRevision: string;
+  /** The live issue's non-human comments, Sergeant's questions among them, from the same read. */
+  agentComments: AgentComment[];
   enrolledRepositories: RepoSlug[];
   runs: RunRecord[];
   /** Merges GitHub refused by repository policy, from the task's record. */
@@ -121,10 +125,26 @@ export function outstandingChangeRequests(feedback: HumanPullRequestFeedback[]):
   return [...latest].filter(([, state]) => state === "CHANGES_REQUESTED").map(([author]) => author);
 }
 
+/** The first line of every question Sergeant asks on an issue (07 §4). */
+export const QUESTION_HEADING = "**Question for you**";
+
+/**
+ * The inputs a run reported it could not read that no Sergeant question on the issue names yet (M14).
+ * Only Sergeant's own questions count, not other bot or integration comments that quote the input.
+ * A question stops the task until a human next changes the conversation (Q1); M14 checks only that it
+ * was asked, not that the human's change answered it.
+ */
+export function unaskedInputs(runs: RunRecord[], agentComments: AgentComment[]): string[] {
+  const inputs = new Set(runs.flatMap((r) => r.report?.unreadableInputs ?? []).map((i) => i.trim()).filter(Boolean));
+  const questions = agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING)).map((c) => c.body.toLowerCase());
+  return [...inputs].filter((i) => !questions.some((q) => q.includes(i.toLowerCase())));
+}
+
 /**
  * L1 (no unreviewed, red, or unmergeable merge), M2 (only this task's PRs), M9 (no early or missing completion),
- * L4 (no merge that overtakes unseen human input or a human's requested changes), and M12 (no retry
- * of a merge GitHub refused by policy while nothing changed).
+ * L4 (no merge that overtakes unseen human input or a human's requested changes), M12 (no retry
+ * of a merge GitHub refused by policy while nothing changed), M13 (no review standing given against an
+ * earlier title or description), and M14 (no merge past an input a run could not read, unasked).
  * `conversationRevision` is the one the proposing turn saw, attached by the core, not by reasoning.
  */
 export function checkMerge(
@@ -152,6 +172,19 @@ export function checkMerge(
 
   const standing = checkStanding(action.reviewStanding, { repo, number, sha }, facts.runs);
   if (standing) return deny("M6", standing);
+
+  // M13: the standing must judge the work against the current acceptance criteria. A run that started
+  // before the title or description changed checked it against the old text (07 §10). A record made
+  // before runs recorded their issue revision is not judged here.
+  const judge = action.reviewStanding.kind === "reviewed" ? action.reviewStanding.reviewRunId : action.reviewStanding.workerRunId;
+  const judged = facts.runs.find((r) => r.runId === judge)?.issueRevision;
+  if (judged !== undefined && judged !== facts.liveIssueRevision) {
+    return deny("M13", `${judge} checked this head against an earlier title or description of the issue; review it against the current one`);
+  }
+
+  // M14: an input the issue depends on that a run could not read is a human's call, never reasoning's.
+  const unasked = unaskedInputs(facts.runs, facts.agentComments);
+  if (unasked.length > 0) return deny("M14", `a run could not read ${unasked.join(", ")}; ask a human (ask_human naming each) before merging`);
 
   // M7: GitHub must say the PR can merge. Still computing (null) or conflicting is not a refusal by
   // policy: a later read that changes `mergeable` wakes a turn (TECH-4991), so wait instead of trying.

@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
+  issueRevision,
   parseReport,
   ReviewReport,
   RunRecord,
@@ -69,8 +70,11 @@ const RunMeta = z.object({
   repositories: z.array(z.string()),
   container: z.string(),
   startedAt: z.string(),
+  /** The issue text the run started from; every record of the run carries it (M13). */
+  issueRevision: z.string().optional(),
 });
 type RunMeta = z.infer<typeof RunMeta>;
+const recorded = (meta: RunMeta) => (meta.issueRevision !== undefined ? { issueRevision: meta.issueRevision } : {});
 
 /**
  * The local runner (04 §10 `claude-code-local`, laptop shape): every worker and reviewer is a new
@@ -135,6 +139,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       status: succeeded ? "succeeded" : "failed",
       provider: PROVIDER,
       model: resolved.length ? resolved.join(",") : meta.model,
+      ...recorded(meta),
       ...(agent?.total_cost_usd !== undefined && { costUsd: agent.total_cost_usd }),
     } as const;
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent?.subtype ? ` (${agent.subtype})` : ""}`;
@@ -242,6 +247,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         repositories: spec.repositories,
         container: `sergeant-${spec.runId}`,
         startedAt: new Date().toISOString(),
+        issueRevision: issueRevision(spec.conversation.issue),
       };
       await writeFile(p.meta, JSON.stringify(meta, null, 2));
       // `--env NAME` copies the value from the docker CLI's own environment, so no token is ever on
@@ -270,7 +276,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       if (done) return done;
       const meta = await readMeta(runId);
       const inspect = await exec("docker", ["inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", meta.container]);
-      const base = { runId, provider: PROVIDER, model: meta.model, role: meta.role, report: null };
+      const base = { runId, provider: PROVIDER, model: meta.model, role: meta.role, report: null, ...recorded(meta) };
       if (inspect.code !== 0) {
         // Unknown is not death (04 §6): only Docker saying the container does not exist is loss.
         if (!isGone(inspect)) throw new Error(`status of ${runId} unavailable: ${inspect.stderr.trim().slice(-500)}`);
@@ -292,7 +298,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       if (!isGone(inspect) && !(inspect.code === 0 && inspect.stdout.trim() === "false")) {
         throw new Error(`cancel of ${runId} not confirmed: ${(stop.stderr || inspect.stderr || inspect.stdout).trim().slice(-500)}`);
       }
-      await finish(meta, { runId, role: meta.role, status: "canceled", provider: PROVIDER, model: meta.model, report: null }, {});
+      await finish(meta, { runId, role: meta.role, status: "canceled", provider: PROVIDER, model: meta.model, report: null, ...recorded(meta) }, {});
     },
 
     async report(runId) {

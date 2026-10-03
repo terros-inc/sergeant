@@ -1,5 +1,17 @@
 import { readFile } from "node:fs/promises";
-import { BudgetStatus, FiledFollowup, RefusedMerge, RepoSlug, reportedClosing, RunId, Sha, type SituationReport } from "@terros/sergeant-contracts";
+import {
+  BudgetStatus,
+  conversationRevision,
+  ConversationRevision,
+  FiledFollowup,
+  issueRevision,
+  RefusedMerge,
+  RepoSlug,
+  reportedClosing,
+  RunId,
+  Sha,
+  type SituationReport,
+} from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
 import type { ActionOutcome } from "./execute.ts";
@@ -15,6 +27,8 @@ const TaskState = z.object({
   lastTurnAt: z.iso.datetime().optional(),
   /** What the last turn saw; an unchanged situation gets no new turn. */
   lastFingerprint: z.string().optional(),
+  /** The Linear conversation the last turn saw, so an edit made while waiting on a reply is noticed (TECH-5034). */
+  seen: z.object({ revision: ConversationRevision, issue: z.string() }).optional(),
   runIds: z.array(RunId),
   /**
    * Runs saved before the runner was asked to start them and not yet seen started: a crash, or a
@@ -71,6 +85,7 @@ export function applyTurn(
   state.turnCostUsd += turn.costUsd;
   state.lastTurnAt = at;
   state.lastFingerprint = turn.fingerprint;
+  state.seen = { revision: conversationRevision(situation.conversation), issue: issueRevision(situation.conversation.issue) };
   state.recentTurns = [...state.recentTurns, { at, summary: turn.summary, outcomes: described }].slice(-8);
   const done = outcomes.flatMap((o) => (o.status === "done" ? [o] : []));
   for (const o of done) {
@@ -92,7 +107,7 @@ export function applyTurn(
         continue;
       }
       const mergedSha = Sha.parse(o.merged.mergedSha);
-      const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups);
+      const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups, situation.conversation.issue);
       state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, at, outcome };
     }
   }
