@@ -125,8 +125,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const driveStop = async (reason: string): Promise<LoopResult | undefined> => {
     const exclusive = deps.exclusive ?? ((step) => step());
     const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
-    const unconfirmed = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
-    if (unconfirmed?.length !== 0) {
+    const progress = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
+    if (progress?.stopping.length !== 0) {
       log(`stopping (${reason}): retrying cancellation`);
       return undefined;
     }

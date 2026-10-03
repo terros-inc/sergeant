@@ -96,6 +96,40 @@ test("task cancel requires a reason before calling the API, then posts it as JSO
   expect(JSON.parse(seen[0]?.body ?? "")).toEqual({ reason: "wrong approach", requestId: expect.stringMatching(/^[\w-]+$/) });
 });
 
+// An operator must see which worker PRs a cancel closed without opening Linear, and a Sergeant that
+// predates the field must still answer in contract.
+test("task cancel lists the PRs the cancel closed, and reads an answer without them", async () => {
+  const pr = { repo: "terros-inc/sergeant", number: 7, url: "https://github.com/terros-inc/sergeant/pull/7" };
+  const { api } = await fakeApi({
+    "POST /v1/tasks/UNF-12/cancel": { json: { ref: "UNF-12", undelegated: true, stopping: [], closedPullRequests: [pr] } },
+    "POST /v1/tasks/UNF-13/cancel": { json: { ref: "UNF-13", undelegated: false, stopping: [] } },
+    "POST /v1/tasks/UNF-15/cancel": { json: { ref: "UNF-15", undelegated: true, stopping: [], closedPullRequests: [] } },
+    "POST /v1/tasks/UNF-14/cancel": { json: { ref: "UNF-14", undelegated: true, stopping: ["run_w1"], closedPullRequests: [] } },
+  });
+
+  const closed = await sgt(api, "task", "cancel", "UNF-12", "--reason", "wrong approach");
+  expect(closed).toEqual({
+    code: 0,
+    out: "UNF-12 canceled: Sergeant's delegation is removed and no run of it is running\nclosed terros-inc/sergeant#7  https://github.com/terros-inc/sergeant/pull/7\n",
+    err: "",
+  });
+  const json = await sgt(api, "--json", "task", "cancel", "UNF-12", "--reason", "wrong approach");
+  expect(JSON.parse(json.out)).toEqual({ ref: "UNF-12", undelegated: true, stopping: [], closedPullRequests: [pr] });
+
+  const none = await sgt(api, "task", "cancel", "UNF-15", "--reason", "wrong approach");
+  expect(none.out).toBe("UNF-15 canceled: Sergeant's delegation is removed and no run of it is running\nno open worker PR to close\n");
+
+  // An older answer says nothing of PRs: the CLI cannot know none was closed, and --json adds nothing.
+  const old = await sgt(api, "task", "cancel", "UNF-13", "--reason", "wrong approach");
+  expect(old).toMatchObject({ code: 0, out: "UNF-13 canceled: Sergeant was already not delegated and no run of it is running\n" });
+  const oldJson = await sgt(api, "--json", "task", "cancel", "UNF-13", "--reason", "wrong approach");
+  expect(JSON.parse(oldJson.out)).toStrictEqual({ ref: "UNF-13", undelegated: false, stopping: [] });
+
+  const stopping = await sgt(api, "task", "cancel", "UNF-14", "--reason", "wrong approach");
+  expect(stopping).toMatchObject({ code: 0, out: expect.stringContaining("Sergeant keeps canceling: run_w1") });
+  expect(stopping.out).toContain("Its open PRs are closed once they stop.");
+});
+
 test("a refusal, an off-contract answer, and an unreachable API each exit 1 with a usable error", async () => {
   const refusal = { error: { code: "conflict", message: "UNF-7 is not delegated to Sergeant's agent" } };
   const { api } = await fakeApi({

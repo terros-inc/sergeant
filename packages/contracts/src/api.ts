@@ -88,12 +88,21 @@ export const CancelTaskRequest = z.strictObject({
   /** Names this request: a retry with the same id posts no second comment. */
   requestId: z.string().regex(/^[\w-]{1,64}$/).optional(),
 });
+/** A worker PR a task cancel closed. */
+export const ClosedPullRequest = z.object({ repo: RepoSlug, number: z.number().int().positive(), url: z.url() });
+export type ClosedPullRequest = z.infer<typeof ClosedPullRequest>;
 export const CancelTaskResponse = z.object({
   ref: TaskRef,
   /** This request removed Sergeant's delegation. */
   undelegated: z.boolean(),
   /** Runs not yet confirmed stopped: Sergeant keeps canceling them. Empty once the cancel is done. */
   stopping: z.array(RunId),
+  /**
+   * The task's worker PRs its stop closed so far, across every drive of it. PRs are closed only once
+   * every run is stopped, so more may follow while `stopping` is not empty. Absent from a Sergeant
+   * that predates TECH-4995, which may still have closed PRs: absent is unknown, not none.
+   */
+  closedPullRequests: z.array(ClosedPullRequest).optional(),
 });
 export type CancelTaskResponse = z.infer<typeof CancelTaskResponse>;
 

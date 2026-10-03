@@ -108,6 +108,15 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
   const running = (runId: string, role: "worker" | "reviewer"): RunRecord => ({ runId, role, status: "running", provider: "p", model: "m", report: null });
   const f = fakes([running("run_w1", "worker"), running("run_r1", "reviewer")]);
+  // The worker's PR #7, open and linked to the issue: the task cancel closes it and says so.
+  const url = "https://github.com/o/r/pull/7";
+  let prState: "open" | "closed" = "open";
+  f.conversation.issue.linkedPullRequests = [{ repo: "o/r", number: 7 }];
+  f.deps.github.readPullRequest = async (repo, number) => ({
+    repo, number, url, author: "sergeant-worker[bot]", state: prState, draft: false, headSha: "a".repeat(40), mergedSha: null, baseRef: "main",
+    body: "Fixes UNF-1", mergeable: true, checks: { sha: "a".repeat(40), required: [] }, humanFeedback: [],
+  });
+  f.deps.github.closePullRequest = async () => void (prState = "closed");
   // A task already under way: its loop resumes holding two running runs and waits on them.
   await mkdir(join(dir, "tasks", "UNF-1"), { recursive: true });
   const state = { issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_w1", "run_r1"], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 } } };
@@ -125,8 +134,9 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   // Answered only once the runner confirms the task's runs stopped.
   expect(await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach", requestId: "req-1" })).toEqual({
     status: 200,
-    json: { ref: "UNF-1", undelegated: true, stopping: [] },
+    json: { ref: "UNF-1", undelegated: true, stopping: [], closedPullRequests: [{ repo: "o/r", number: 7, url }] },
   });
+  expect(prState).toBe("closed");
   expect(f.conversation.issue.delegate).toBeNull();
   expect(f.canceled).toEqual(["run_r1", "run_w1"]);
   // The loop, polled at once, finds its task undelegated and ends.
@@ -135,7 +145,7 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   expect(f.turns()).toBe(0);
 
   // Repeating it changes nothing: no second comment.
-  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" })).json).toEqual({ ref: "UNF-1", undelegated: false, stopping: [] });
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" })).json).toEqual({ ref: "UNF-1", undelegated: false, stopping: [], closedPullRequests: [] });
   expect(f.comments.map((c) => c.key)).toEqual(["cancel-run:run_r1", "cancel:i-UNF-1:req-1"]);
 });
 
@@ -207,7 +217,7 @@ test("a task cancel stops a run whose start had already passed the delegation ch
   const canceling = call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" });
   await new Promise((resolve) => setTimeout(resolve, 100));
   release();
-  expect((await canceling).json).toEqual({ ref: "UNF-1", undelegated: true, stopping: [] });
+  expect((await canceling).json).toEqual({ ref: "UNF-1", undelegated: true, stopping: [], closedPullRequests: [] });
   expect(runs).toEqual([expect.objectContaining({ status: "canceled" })]);
 
   await service?.stop();

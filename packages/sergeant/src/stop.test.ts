@@ -180,13 +180,19 @@ test("a human's task cancel closes the PR its worker reported, and only Sergeant
     runId: "run_w1", role: "worker", status: "running", provider: "p", model: "m",
     report: { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] },
   };
-  deps.runner.status = async () => reported;
+  deps.runner.status = async () => ({ ...reported, status: seen.canceled.length > 0 ? "canceled" : "running" });
   const task = taskDir(dir, "UNF-1");
   await mkdir(task, { recursive: true });
   await writeFile(join(task, "state.json"), state(["run_w1"]));
   expect(await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps)).toBe(true);
 
-  expect(await driveCancel(task, "UNF-1", deps, [repo], () => {})).toEqual([]);
+  // The first drive closes the PR but cannot tell Linear; the next drive still answers with that PR,
+  // so `sgt task cancel` shows what the whole stop closed, not only what its last drive did.
+  const postComment = deps.linear.postComment;
+  deps.linear.postComment = async () => Promise.reject(new Error("Linear is down"));
+  await expect(driveCancel(task, "UNF-1", deps, [repo], () => {})).rejects.toThrow("Linear is down");
+  deps.linear.postComment = postComment;
+  expect(await driveCancel(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
   expect(seen.canceled).toEqual(["run_w1"]);
   expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`the task was canceled by Ada: wrong approach. Its runs are canceled. Closed [${repo}#9]`) }]);

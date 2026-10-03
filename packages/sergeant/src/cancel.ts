@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { RepoSlug, RunId, STOP_STATE_TYPES, type Conversation, type PullRequestFacts, type PullRequestRef, type RunRecord, type TaskRef } from "@terros/sergeant-contracts";
+import { ClosedPullRequest, RepoSlug, RunId, STOP_STATE_TYPES, type Conversation, type PullRequestFacts, type PullRequestRef, type RunRecord, type TaskRef } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { exists } from "./after-merge.ts";
 import type { Ports } from "./execute.ts";
@@ -20,9 +20,6 @@ import type { ServiceDeps } from "./service.ts";
 // and is canceled like a running one, never taken as stopped (04 §6). Nothing resumes a stopped task:
 // the issue delegated and in Todo again starts a fresh one, with a new budget.
 
-const ClosedPr = z.object({ repo: RepoSlug, number: z.number().int().positive(), url: z.url() });
-type ClosedPr = z.infer<typeof ClosedPr>;
-
 const CancelIntent = z.object({
   /** Why the task stopped, as the end of a sentence: "the issue was moved to Backlog". */
   reason: z.string(),
@@ -30,8 +27,8 @@ const CancelIntent = z.object({
   at: z.iso.datetime(),
   /** The task's runs when the stop was first driven: set once, before any is canceled. */
   runIds: z.array(RunId).optional(),
-  /** The PRs this stop closed, for the issue comment. */
-  closed: z.array(ClosedPr).default([]),
+  /** The PRs this stop closed, for the issue comment and the API's answer. */
+  closed: z.array(ClosedPullRequest).default([]),
 });
 type CancelIntent = z.infer<typeof CancelIntent>;
 
@@ -99,14 +96,21 @@ export async function recordCancel(stateDir: string, ref: TaskRef, req: { reason
   return undelegated;
 }
 
+/** How far a drive of a task's stop got. */
+export type StopProgress = {
+  /** Runs the runner has not yet confirmed stopped: empty once the stop is done, or when none is recorded. */
+  stopping: RunId[];
+  /** The PRs the stop closed, across every drive of it so far. */
+  closedPullRequests: ClosedPullRequest[];
+};
+
 /**
- * Drives the recorded stop of the task `ref` in `dir` as far as it goes now, and returns the runs the
- * runner has not yet confirmed stopped: empty once the stop is done, or when none is recorded. Throws
- * when a step fails before it is done; the intent stays, so the next poll or intake drives it again.
+ * Drives the recorded stop of the task `ref` in `dir` as far as it goes now. Throws when a step fails
+ * before it is done; the intent stays, so the next poll or intake drives it again.
  */
-export async function driveCancel(dir: string, ref: string, deps: Ports, enrolled: RepoSlug[], log: (line: string) => void): Promise<RunId[]> {
+export async function driveCancel(dir: string, ref: string, deps: Ports, enrolled: RepoSlug[], log: (line: string) => void): Promise<StopProgress> {
   const intent = await readIntent(dir);
-  if (!intent) return [];
+  if (!intent) return { stopping: [], closedPullRequests: [] };
   if (!intent.runIds) {
     // The task's loop takes no turn once a stop is recorded, and a start already past its live check
     // finished under the task's lock before this drive began, so these are all the runs to stop.
@@ -125,7 +129,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
       (e: Error) => (stopping.push(runId), log(`${ref}: cancel ${runId} not confirmed, retrying: ${e.message}`)),
     );
   }
-  if (stopping.length > 0) return stopping;
+  if (stopping.length > 0) return { stopping, closedPullRequests: intent.closed };
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open.
   const { issue } = await deps.linear.readConversation(ref);
   for (const pr of await openPullRequests(issue.linkedPullRequests, runs, enrolled, deps)) {
@@ -139,7 +143,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     if (e.code !== "ENOENT") throw e;
   });
   await rm(intentFile(dir), { force: true });
-  return [];
+  return { stopping: [], closedPullRequests: intent.closed };
 }
 
 /**
@@ -185,5 +189,5 @@ export async function cancelRun(
   return deps.runner.status(runId);
 }
 
-/** What a task cancel through the API did: whether it removed the delegation, and the runs not yet confirmed stopped. */
-export type CancelProgress = { undelegated: boolean; stopping: RunId[] };
+/** What a task cancel through the API did: whether it removed the delegation, and how far its stop got. */
+export type CancelProgress = StopProgress & { undelegated: boolean };
