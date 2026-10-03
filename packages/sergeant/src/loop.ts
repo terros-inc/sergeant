@@ -22,7 +22,7 @@ import type { Reasoner } from "@terros/sergeant-reasoning";
 import { z } from "zod";
 import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
 import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
-import { driveCancel, recordStop } from "./cancel.ts";
+import { cancelPending, driveCancel, recordStop } from "./cancel.ts";
 import { askHuman, checkLive, describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
@@ -141,8 +141,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   };
   await mkdir(opts.dir, { recursive: true });
   const state = await loadState(files.state, opts.issueId, { ...DEFAULT_BUDGET, ...opts.budget });
+  // A stop by state this loop recorded (cancel.ts); whichever of this loop or `serve`'s intake drives it
+  // to the end sets `state.json` aside.
+  let stopRecorded = false;
   // Replaced whole, never rewritten in place: the API and a task cancel read it while the loop runs.
+  // Once a stop set it aside, it is never written again, so the issue back in Todo is a fresh task.
   const save = async () => {
+    if (stopRecorded && !(await exists(files.state))) return;
     const tmp = `${files.state}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify(state, null, 2));
     await rename(tmp, files.state);
@@ -211,7 +216,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // until the runner confirms each run stopped, its open PRs are closed, and the issue is told. A stop
   // by state sets `state.json` aside, so nothing here saves it again.
   const stop = async (cause: Parameters<typeof recordStop>[1], reason: string): Promise<LoopResult | undefined> => {
-    await recordStop(opts.dir, cause);
+    // A stop by state already driven to the end, by `serve`'s intake while this loop retried, is done:
+    // recording it again would stop the task twice and say so twice on the issue.
+    if (cause.cause === "state" && stopRecorded && !(await cancelPending(opts.dir))) return { outcome: "stopped", detail: reason };
+    if ((await recordStop(opts.dir, cause)) === "state") stopRecorded = true;
     const exclusive = deps.exclusive ?? ((step) => step());
     const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
     const progress = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));

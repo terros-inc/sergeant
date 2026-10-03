@@ -90,11 +90,16 @@ export async function recordCancel(stateDir: string, ref: TaskRef, req: { reason
   await writeIntent(dir, CancelIntent.parse({ reason: req.reason, requestId: req.requestId ?? randomUUID(), by: req.by, at: new Date().toISOString() }));
 }
 
-/** The loop's own cancel of the task in `dir`: the issue undelegated, or moved to the stop state `state`. */
-export async function recordStop(dir: string, stop: { cause: "undelegated" } | { cause: "state"; state: string }): Promise<void> {
-  if (await readIntent(dir)) return;
+/**
+ * The loop's own cancel of the task in `dir`: the issue undelegated, or moved to the stop state `state`.
+ * Returns the cause of the cancel now recorded, which is an earlier one's when one is already there.
+ */
+export async function recordStop(dir: string, stop: { cause: "undelegated" } | { cause: "state"; state: string }): Promise<CancelIntent["cause"]> {
+  const recorded = await readIntent(dir);
+  if (recorded) return recorded.cause;
   const reason = stop.cause === "state" ? stop.state : "the issue is no longer delegated to Sergeant";
   await writeIntent(dir, CancelIntent.parse({ reason, requestId: randomUUID(), cause: stop.cause, at: new Date().toISOString() }));
+  return stop.cause;
 }
 
 export type CancelProgress = {

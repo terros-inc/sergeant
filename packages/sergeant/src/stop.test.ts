@@ -192,3 +192,37 @@ test("a human's task cancel closes the PR its worker reported, and only Sergeant
   // A cancel through the API keeps the task to resume: only a stop by state sets it aside.
   expect(JSON.parse(await readFile(join(task, "state.json"), "utf8"))).toMatchObject({ runIds: ["run_w1"] });
 });
+
+test("a stop the loop could not finish and serve's intake finished is said once on the issue", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  await writeFile(join(dir, "state.json"), state(["run_w1"]));
+  const live = { conversation: issue("backlog", "Backlog") };
+  const { deps, seen } = fakes(live);
+  // The runner refuses the loop's cancels; intake's drive, under the same task lock, goes through.
+  let chain: Promise<unknown> = Promise.resolve();
+  deps.exclusive = <T>(step: () => Promise<T>) => {
+    const next = chain.then(step);
+    chain = next.catch(() => {});
+    return next;
+  };
+  let intake = false;
+  let refusals = 0;
+  const cancel = deps.runner.cancel;
+  deps.runner.cancel = async (id) => (intake ? cancel(id) : (refusals++, Promise.reject(new Error("docker stop timed out"))));
+
+  const loop = runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0.02, log: () => {} }, deps);
+  await vi.waitFor(() => expect(refusals).toBeGreaterThan(0));
+  await deps.exclusive(async () => {
+    intake = true;
+    return driveCancel(dir, "UNF-1", deps, [repo], () => {}).finally(() => (intake = false));
+  });
+
+  // The loop, still seeing Backlog, takes the stop as done rather than stopping the task again.
+  expect(await loop).toMatchObject({ outcome: "stopped" });
+  expect(seen.closed).toEqual([{ number: 7, comment: "Closed: the Linear issue was canceled or moved to Backlog." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`moved to Backlog. Its runs are canceled. Closed [${repo}#7]`) }]);
+  const files = await readdir(dir);
+  expect(files).not.toContain("state.json");
+  expect(files).not.toContain("cancel.json");
+  expect(files.filter((f) => f.startsWith("state.stopped-"))).toHaveLength(1);
+});

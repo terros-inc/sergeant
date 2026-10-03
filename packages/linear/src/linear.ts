@@ -67,8 +67,10 @@ const clearDelegate = `
 const delegatedQuery = (since: string) => `
   query SergeantDelegated($agent: ID!, $after: String) {
     issues(first: 100, after: $after, filter: {
-      delegate: { id: { eq: $agent } }
-      or: [{ state: { type: { nin: ["completed", "canceled"] } } }, { completedAt: { gt: ${JSON.stringify(since)} } }, { canceledAt: { gt: ${JSON.stringify(since)} } }]
+      and: [
+        { delegate: { id: { eq: $agent } } }
+        { or: [{ state: { type: { nin: ["completed", "canceled"] } } }, { completedAt: { gt: ${JSON.stringify(since)} } }, { canceledAt: { gt: ${JSON.stringify(since)} } }] }
+      ]
     }) {
       nodes { identifier state { type } }
       pageInfo { hasNextPage endCursor }
