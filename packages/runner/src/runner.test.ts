@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -9,10 +9,11 @@ import { containerRunner, type ContainerRunnerOptions } from "./runner.ts";
 // A fake host: records every command and plays Docker from `docker`. No real process is launched.
 function fakeHost() {
   const calls: { cmd: string; args: string[]; opts: ExecOptions }[] = [];
-  const docker = { reachable: true, running: true };
+  const docker = { reachable: true, running: true, logs: "" };
   const exec: Exec = async (cmd, args, opts = {}) => {
     calls.push({ cmd, args, opts });
     if (cmd !== "docker" || args[0] === "run" || args[0] === "rm") return { code: 0, stdout: "", stderr: "" };
+    if (args[0] === "logs") return { code: 0, stdout: docker.logs, stderr: "" };
     if (!docker.reachable) return { code: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" };
     if (args[0] === "stop") docker.running = false;
     const status = args.includes("{{.State.Running}}") ? String(docker.running) : `${docker.running ? "running" : "exited"} 0`;
@@ -59,7 +60,7 @@ async function started(extra: Record<string, unknown> = {}) {
   } as ContainerRunnerOptions;
   const runner = containerRunner(options);
   await runner.start(spec);
-  return { runner, host, minted };
+  return { runner, host, minted, rootDir: options.rootDir };
 }
 
 // The container is the hard boundary between runs and the operator's personal and control-plane
@@ -159,4 +160,69 @@ test("gives the run the issue's files read-only, fetched on the host, skipping o
   const brief = await readFile(join(rootDir, "run_t1", "workspace", "sergeant-brief.md"), "utf8");
   expect(brief).toContain("`/workspace/.sergeant/attachments/02-shot.png` — image/png");
   expect(brief).toContain(`${huge} ("huge.bin") — not downloaded: over the`);
+});
+
+const CODEX = '{"auth_mode":"chatgpt","tokens":{"access_token":"codex-test-token"}}';
+const envNames = (args: string[] = []) => args.flatMap((a, i, all) => (a === "--env" ? [all[i + 1]] : []));
+
+// TECH-5009: a role on Codex gets the Codex credential in place of the Claude token, never both, and
+// otherwise the same container: workspace mount, worker-App token, and human git identity.
+test("a codex-local run gets only the Codex credential in place of the Claude token", async () => {
+  const { host } = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
+
+  const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
+  expect(envNames(run?.args)).toEqual([
+    "CODEX_CREDENTIAL",
+    "GH_TOKEN",
+    "GIT_AUTHOR_NAME=Ada Example",
+    "GIT_AUTHOR_EMAIL=ada@example.com",
+    "GIT_COMMITTER_NAME=Ada Example",
+    "GIT_COMMITTER_EMAIL=ada@example.com",
+  ]);
+  expect(run?.opts.env).toMatchObject({ CODEX_CREDENTIAL: CODEX, GH_TOKEN: GH });
+  expect(run?.args.join(" ")).toContain("codex exec --json");
+  expect(run?.args.slice(-3)).toEqual(["3600", "sonnet", "10"]);
+  expect(host.calls.flatMap((c) => c.args).join(" ")).not.toContain("codex-test-token");
+  expect(() => containerRunner({ ...({} as ContainerRunnerOptions), rootDir: "/x", claudeOAuthToken: TOKEN, adapters: { reviewer: "codex-local" } })).toThrow(
+    /codexCredential/,
+  );
+});
+
+const REPORT = `Done.
+
+\`\`\`sergeant-report
+{ "reportVersion": "s2-worker-report/1", "outcome": "completed", "summary": "s", "pullRequests": [], "knownGaps": [], "followups": [] }
+\`\`\`
+`;
+
+async function ended(extra: Record<string, unknown>, logs: string, report = REPORT) {
+  const { runner, host, rootDir } = await started(extra);
+  if (report) await writeFile(join(rootDir, "run_t1", "workspace", "sergeant-report.md"), report);
+  host.docker.running = false;
+  host.docker.logs = logs;
+  return runner.status("run_t1");
+}
+
+// The budget adds `costUsd` and counts a run without one as unknown. Codex reports tokens, never
+// dollars: a guessed figure would understate or overstate spend, so its cost stays absent.
+test("a Codex run records its summed tokens and no cost; a Claude run its reported cost", async () => {
+  const codexLogs = [
+    '{"type":"thread.started","thread_id":"t-1"}',
+    "Reading prompt from stdin...",
+    '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50,"reasoning_output_tokens":20}}',
+    '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}',
+  ].join("\n");
+  const codex = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, codexLogs);
+  expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "sonnet" });
+  expect(codex.tokens).toEqual({ input: 1010, cachedInput: 400, output: 55, reasoningOutput: 20 });
+  expect(codex.costUsd).toBeUndefined();
+  expect(codex.report).not.toBeNull();
+
+  const failed = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, '{"type":"turn.failed","error":{"message":"401: Incorrect API key provided: sk-proj***abcd."}}', "");
+  expect(failed).toMatchObject({ status: "failed", reportError: expect.stringContaining("401: Incorrect API key provided: sk-[redacted]") });
+  expect(JSON.stringify(failed)).not.toContain("abcd");
+
+  const claude = await ended({}, '{"is_error":false,"session_id":"s","total_cost_usd":1.25,"modelUsage":{"claude-sonnet-5-5":{}}}');
+  expect(claude).toMatchObject({ status: "succeeded", provider: "anthropic/claude-code", model: "claude-sonnet-5-5", costUsd: 1.25 });
+  expect(claude.tokens).toBeUndefined();
 });

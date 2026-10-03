@@ -1,22 +1,5 @@
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
-
-/** The `claude -p` result line; everything else in it is ignored. */
-export const AgentOutput = z.object({
-  is_error: z.boolean(),
-  subtype: z.string().optional(),
-  session_id: z.string().optional(),
-  total_cost_usd: z.number().optional(),
-  modelUsage: z.record(z.string(), z.unknown()).optional(),
-});
-
-// Runs inside the container.
-export const AGENT_SCRIPT = `
-wall="$1"; model="$2"; budget="$3"
-exec timeout "$wall" claude -p "Read /workspace/sergeant-brief.md and do what it says. Your last step is writing /workspace/sergeant-report.md." \\
-  --output-format json --model "$model" --max-budget-usd "$budget" --permission-mode bypassPermissions
-`;
 
 /** Docker's definite answer that a container does not exist; any other failure is unknown. */
 export const isGone = (r: { code: number; stderr: string }) => r.code !== 0 && /no such (container|object)/i.test(r.stderr);

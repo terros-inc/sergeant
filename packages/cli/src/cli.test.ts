@@ -73,7 +73,7 @@ test("task show prints the facts an operator acts on, and --json is the API's an
   const human = await sgt(api, "task", "show", "UNF-12");
   expect(human.code).toBe(0);
   expect(human.out).toContain("UNF-12  active  Fix the login");
-  expect(human.out).toContain("budget: $3.50 of $25.00 (+1 run not yet costed)");
+  expect(human.out).toContain("budget: $3.50 of $25.00 (+1 run of unknown cost)");
   expect(human.out).toMatch(/run_w1\s+worker\s+running/);
   expect(human.out).toContain("Started a worker on the login fix");
 

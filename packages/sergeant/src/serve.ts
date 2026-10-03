@@ -20,7 +20,7 @@ import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliFeedbackJudge, claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { linearCallers } from "./auth.ts";
-import { connect, loadConfig, taskBudget } from "./config.ts";
+import { connect, loadConfig, runnerRoles, taskBudget } from "./config.ts";
 import { startService } from "./service.ts";
 
 const { values } = parseArgs({
@@ -34,8 +34,8 @@ const { values } = parseArgs({
     "intake-seconds": { type: "string", default: "120" },
     "poll-seconds": { type: "string", default: "60" },
     "reasoning-model": { type: "string", default: "opus" },
-    "worker-model": { type: "string", default: "opus" },
-    "reviewer-model": { type: "string", default: "opus" },
+    "worker-model": { type: "string" },
+    "reviewer-model": { type: "string" },
     "trust-loopback": { type: "boolean", default: false },
   },
 });
@@ -87,8 +87,9 @@ const service = await startService(
     github: installation.github,
     runner: containerRunner({
       rootDir: join(stateDir, "runs"),
-      models: { worker: values["worker-model"], reviewer: values["reviewer-model"] },
+      ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
       claudeOAuthToken: installation.modelToken,
+      ...(installation.codexCredential !== undefined && { codexCredential: installation.codexCredential }),
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
       fetchUpload: installation.linear.fetchUpload,

@@ -29,7 +29,7 @@ export function showTask(d: TaskDetail): string {
   if (task.statusDetail) lines.push(`last ended: ${task.statusDetail}`);
   lines.push(`started ${minute(task.startedAt)}, ${plural(task.turns, "turn")}, last ${minute(task.lastTurnAt)}`);
   if (budget) {
-    const spent = `${usd(budget.spentUsd)} of ${usd(budget.costLimitUsd)}${budget.unknownCostRuns ? ` (+${plural(budget.unknownCostRuns, "run")} not yet costed)` : ""}`;
+    const spent = `${usd(budget.spentUsd)} of ${usd(budget.costLimitUsd)}${budget.unknownCostRuns ? ` (+${plural(budget.unknownCostRuns, "run")} of unknown cost)` : ""}`;
     lines.push(`budget: ${spent}, wall time until ${minute(budget.wallDeadline)}${budget.exhausted ? `  EXHAUSTED: ${budget.exhausted}` : ""}`);
   }
   if (task.merged) lines.push(`merged: ${task.merged.repo}#${task.merged.number} as ${task.merged.mergedSha.slice(0, 12)} at ${minute(task.merged.at)}`);
@@ -43,7 +43,8 @@ export function showTask(d: TaskDetail): string {
 }
 
 export function showRun({ task, run }: RunDetail): string {
-  const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${usd(run.costUsd)}`];
+  const cost = run.costUsd === undefined && run.tokens ? `cost unknown, ${run.tokens.input} input and ${run.tokens.output} output tokens` : usd(run.costUsd);
+  const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${cost}`];
   if (!run.report) {
     lines.push(run.reportError ? `no report: ${run.reportError}` : "no report yet");
   } else if (run.role === "worker") {
