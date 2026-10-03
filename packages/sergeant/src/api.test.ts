@@ -106,6 +106,31 @@ test("a wake makes an unchanged task take a turn now, and a task without a deleg
   expect(await call(port, "POST", "/v1/tasks/UNF-7/wake", {})).toMatchObject({ status: 409, json: { error: { code: "conflict" } } });
 }, 30_000);
 
+test("a run view includes its provider choice and credential-free account", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
+  const providerChoice = {
+    adapter: "codex-local",
+    reason: "more weekly quota",
+    readings: [{ adapter: "codex-local", account: "installation-codex", readAt: "2026-10-03T12:00:00.000Z", weekly: { remainingPercent: 80 }, fiveHour: { remainingPercent: 90 } }],
+  };
+  const account = { id: "installation-codex", group: "owner", holder: "the installation" } as const;
+  const run: RunRecord = {
+    runId: "run_w1", role: "worker", status: "succeeded", provider: "openai/codex", model: "gpt-5", report: null,
+    providerChoice, account, accountReason: "owner's account installation-codex",
+  };
+  const f = fakes([run]);
+  await mkdir(join(dir, "tasks", "UNF-1"), { recursive: true });
+  await writeFile(join(dir, "tasks", "UNF-1", "state.json"), JSON.stringify({
+    issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: [run.runId], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 } },
+  }));
+  const port = await start(f.deps);
+
+  expect(await call(port, "GET", `/v1/runs/${run.runId}`)).toEqual({
+    status: 200,
+    json: { task: "UNF-1", run },
+  });
+}, 30_000);
+
 test("a run cancel notes it on the issue and cancels through the runner; a task cancel undelegates and cancels the rest", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
   const running = (runId: string, role: "worker" | "reviewer"): RunRecord => ({ runId, role, status: "running", provider: "p", model: "m", report: null });
