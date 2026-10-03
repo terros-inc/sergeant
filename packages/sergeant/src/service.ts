@@ -106,6 +106,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   let delegated: string[] = [];
   // Each open delegated issue's place in admission order; a task Linear no longer lists goes last.
   let rank = new Map<string, number>();
+  // Each Todo issue a blocker held up at the last intake, and the line logged for it: logged again only when it changes.
+  let blocked = new Map<string, string>();
   const byRank = (a: string, b: string) => (rank.get(a) ?? rank.size) - (rank.get(b) ?? rank.size);
   const wakes = new Map<string, Wake>();
   const wakeOf = (issueId: string) => {
@@ -239,8 +241,19 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
     for (const ref of resumable.sort(byRank)) admit(ref, freeSlots() <= 0);
     if (failed) throw failed;
-    // New work: a delegated issue in Todo, not one whose stop is still under way.
-    const todo = listed?.filter((issue) => issue.state.type === "unstarted") ?? [];
+    // New work: a delegated issue in Todo, not one whose stop is still under way nor one a Linear
+    // "blocked by" issue still holds up (TECH-5066); it starts at the first intake after its last
+    // blocker is completed or canceled. A task already under way resumes above, blocked or not.
+    const loggedBefore = blocked;
+    blocked = new Map();
+    const todo = (listed ?? []).filter((issue) => {
+      if (issue.state.type !== "unstarted") return false;
+      if (issue.blockedBy.length === 0) return true;
+      const line = `${issue.identifier} waiting on blocker ${issue.blockedBy.join(", ")}`;
+      if (loggedBefore.get(issue.identifier) !== line) log(line);
+      blocked.set(issue.identifier, line);
+      return false;
+    });
     const issues = await Promise.all(todo.map(async (issue) => ((await cancelPending(taskDir(opts.stateDir, issue.identifier))) ? [] : [issue])));
     ordered = issues.flat();
     delegated = ordered.map((issue) => issue.identifier);

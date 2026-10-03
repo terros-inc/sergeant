@@ -169,3 +169,71 @@ test("moveIssueToStarted moves an unstarted issue to the first started state and
   });
   expect(await noStarted.moveIssueToStarted("UNF-1")).toEqual({ moved: false });
 });
+
+// TECH-5066: intake holds a Todo issue back only for its unfinished "blocked by" issues. Linear keeps
+// "X blocked by Y" as Y's `blocks` relation, among X's inverse relations; any other relation, or a
+// blocker completed or canceled, must not hold it back.
+test("delegatedIssues lists each issue's unfinished blockers", async () => {
+  const blocker = (type: string, identifier: string, stateType: string) => ({ type, issue: { identifier, state: { type: stateType } } });
+  const linear = createLinearPort({
+    apiKey: "test",
+    sergeantUserIds: [],
+    fetch: async () =>
+      Response.json({
+        data: {
+          issues: {
+            nodes: [
+              {
+                identifier: "UNF-5",
+                priority: 2,
+                createdAt: at(0),
+                state: { name: "Todo", type: "unstarted" },
+                inverseRelations: {
+                  nodes: [
+                    blocker("blocks", "UNF-1", "started"),
+                    blocker("blocks", "UNF-2", "unstarted"),
+                    blocker("blocks", "UNF-3", "completed"),
+                    blocker("blocks", "UNF-4", "canceled"),
+                    blocker("related", "UNF-6", "started"),
+                  ],
+                  pageInfo: { hasNextPage: false },
+                },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }),
+  });
+  expect(await linear.delegatedIssues("agent")).toEqual([
+    { identifier: "UNF-5", priority: 2, createdAt: at(0), state: { name: "Todo", type: "unstarted" }, blockedBy: ["UNF-1", "UNF-2"] },
+  ]);
+});
+
+// TECH-5066: only the first 20 inverse relations are read, so an issue with more must wait rather than
+// start while an unread open blocker may hold it up.
+test("delegatedIssues holds back an issue whose relations it could not read in full", async () => {
+  const relations = Array.from({ length: 20 }, (_, i) => ({ type: "related", issue: { identifier: `UNF-${i + 10}`, state: { type: "started" } } }));
+  const linear = createLinearPort({
+    apiKey: "test",
+    sergeantUserIds: [],
+    fetch: async () =>
+      Response.json({
+        data: {
+          issues: {
+            nodes: [
+              {
+                identifier: "UNF-5",
+                priority: 2,
+                createdAt: at(0),
+                state: { name: "Todo", type: "unstarted" },
+                inverseRelations: { nodes: relations, pageInfo: { hasNextPage: true } },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }),
+  });
+  expect((await linear.delegatedIssues("agent"))[0]?.blockedBy).toEqual(["relations past the first 20, unread"]);
+});
