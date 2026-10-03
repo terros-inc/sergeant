@@ -3,6 +3,8 @@ import { commentIdFor, issueRevision, rereviewRequests, type LinearPort, type Pu
 // TECH-4992: a human's requested changes block the merge (M8) until that human approves or someone
 // dismisses the review. Once a successor's head has addressed them and the merge gate would pass it but
 // for M8, nothing else is left for Sergeant to do, so it asks the human once, on the issue, to re-review or dismiss.
+// "Would merge" is the executor's own merge preflight (TECH-5065): the live checks (A1, A2) and the
+// budget (B1) as well as the merge gate, so an exhausted budget or a stopped issue asks no one.
 
 /** Once per PR head: the comment's id is derived from this key, so Linear shows whether it was posted. */
 export const rereviewKey = (issueId: string, pr: PullRequestFacts) => `rereview:${issueId}:${pr.repo}#${pr.number}:${pr.headSha}`;
@@ -24,13 +26,13 @@ export function rereviewComment(pr: PullRequestFacts, reviewers: string[]): stri
  */
 export async function postRereviewRequests(
   situation: SituationReport,
-  workerLogin: string,
+  owner: { workerLogin: string; agentUserId: string },
   linear: Pick<LinearPort, "postComment">,
   log: (line: string) => void,
 ): Promise<void> {
   const { issue, agentComments } = situation.conversation;
-  // The merge gate's facts as of this poll, for a merge proposed from this very situation.
-  const facts = { ...situation, agentComments, workerLogin, linkedPullRequests: issue.linkedPullRequests, issueIdentifier: issue.identifier };
+  // The merge preflight's facts as of this poll, for a merge proposed from this very situation.
+  const facts = { ...situation, ...owner, agentComments, issue, linkedPullRequests: issue.linkedPullRequests, issueIdentifier: issue.identifier, now: new Date() };
   const live = { liveConversationRevision: situation.conversationRevision, liveIssueRevision: issueRevision(issue) };
   for (const pr of situation.pullRequests) {
     const reviewers = rereviewRequests({ ...facts, ...live, pr });
