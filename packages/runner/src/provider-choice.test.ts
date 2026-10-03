@@ -32,6 +32,7 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
   const quota = async ({ adapter }: { adapter: Adapter }): Promise<QuotaReading> => ({
     adapter,
     readAt: "2026-10-03T12:00:00.000Z",
+    ...(adapter === "claude-code-local" && { source: "header-fallback" as const }),
     weekly: { remainingPercent: left[adapter][0] },
     fiveHour: { remainingPercent: left[adapter][1] },
   });
@@ -55,7 +56,10 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
   expect(record).toMatchObject({
     provider: "anthropic/claude-code",
     model: "opus",
-    providerChoice: { adapter: "claude-code-local", readings: [{ adapter: "claude-code-local", weekly: { remainingPercent: 83 } }, { adapter: "codex-local" }] },
+    providerChoice: {
+      adapter: "claude-code-local",
+      readings: [{ adapter: "claude-code-local", source: "header-fallback", weekly: { remainingPercent: 83 } }, { adapter: "codex-local" }],
+    },
   });
   expect(launched[0]).toContain("claude -p");
 

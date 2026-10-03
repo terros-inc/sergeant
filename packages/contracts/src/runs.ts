@@ -99,6 +99,8 @@ export const QuotaReading = z.object({
   /** The model account read (TECH-5113); absent on records made before it. */
   account: z.string().optional(),
   readAt: z.string(),
+  /** How Claude quota was obtained; absent on older records and other providers. */
+  source: z.enum(["usage-endpoint", "header-fallback"]).optional(),
   weekly: QuotaWindow.optional(),
   fiveHour: QuotaWindow.optional(),
   error: z.string().optional(),

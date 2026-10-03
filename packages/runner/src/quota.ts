@@ -23,6 +23,14 @@ type Window = NonNullable<QuotaReading["weekly"]>;
 // header's 0.57 reads as 43% left rather than 43.00000000000001%.
 const left = (usedPercent: number) => Math.max(0, Math.min(100, Number((100 - usedPercent).toFixed(6))));
 const unixTime = (seconds: number | null | undefined) => (seconds ? { resetsAt: new Date(seconds * 1000).toISOString() } : {});
+const failure = (error: unknown) =>
+  error instanceof Unreadable
+    ? error.message
+    : error instanceof Error
+      ? error.name === "TimeoutError"
+        ? "timed out"
+        : `unreadable (${error.name})`
+      : "unreadable";
 
 /** `GET /api/oauth/usage`, what Claude Code's `/usage` reads: percent used per window, with its reset. */
 const ClaudeWindow = z.object({ utilization: z.number(), resets_at: z.string().nullish() }).nullish();
@@ -62,23 +70,33 @@ export function accountQuota(opts: QuotaOptions = {}): ReadQuota {
 
   async function claude(token: string): Promise<Omit<QuotaReading, "adapter" | "readAt">> {
     const auth = { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" };
-    // One limit for the whole read, the header fallback included.
-    const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
-    const usage = await get("https://api.anthropic.com/api/oauth/usage", { headers: auth, signal });
-    if (usage.ok) {
-      const body = ClaudeUsage.parse(await usage.json());
-      return windows(claudeWindow(body.seven_day), claudeWindow(body.five_hour));
+    let usageFailure: string;
+    try {
+      const usage = await get("https://api.anthropic.com/api/oauth/usage", { headers: auth });
+      if (usage.ok) {
+        const body = ClaudeUsage.parse(await usage.json());
+        const read = windows(claudeWindow(body.seven_day), claudeWindow(body.five_hour));
+        if (!("error" in read)) return { source: "usage-endpoint", ...read };
+        usageFailure = `usage endpoint ${read.error}`;
+      } else {
+        usageFailure = `usage endpoint answered ${usage.status}`;
+      }
+    } catch (error) {
+      usageFailure = `usage endpoint ${failure(error)}`;
     }
-    if (usage.status !== 401 && usage.status !== 403) throw new Unreadable(`usage endpoint answered ${usage.status}`);
-    const probe = await get("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      signal,
-      headers: { ...auth, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1, messages: [{ role: "user", content: "." }] }),
-    });
-    await probe.body?.cancel();
-    const read = windows(headerWindow(probe.headers, "7d"), headerWindow(probe.headers, "5h"));
-    return "error" in read ? { error: `usage endpoint answered ${usage.status}; messages answered ${probe.status} without limits` } : read;
+
+    try {
+      const probe = await get("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { ...auth, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1, messages: [{ role: "user", content: "." }] }),
+      });
+      await probe.body?.cancel().catch(() => undefined);
+      const read = windows(headerWindow(probe.headers, "7d"), headerWindow(probe.headers, "5h"));
+      return "error" in read ? { error: `${usageFailure}; header fallback answered ${probe.status} without limits` } : { source: "header-fallback", ...read };
+    } catch (error) {
+      return { error: `${usageFailure}; header fallback ${failure(error)}` };
+    }
   }
 
   async function codex(credential: string): Promise<Omit<QuotaReading, "adapter" | "readAt">> {
@@ -104,11 +122,11 @@ export function accountQuota(opts: QuotaOptions = {}): ReadQuota {
     // A JSON or schema error can quote what it read, credential included, so only its kind is kept.
     const reading = (adapter === "codex-local" ? codex(credential) : claude(credential)).then(
       (r) => ({ adapter, account: id, readAt, ...r }),
-      (e: Error) => ({
+      (e: unknown) => ({
         adapter,
         account: id,
         readAt,
-        error: e instanceof Unreadable ? e.message : e.name === "TimeoutError" ? "timed out" : `unreadable (${e.name})`,
+        error: failure(e),
       }),
     );
     cache.set(key, { at: now(), reading });
