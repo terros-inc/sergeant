@@ -45,13 +45,15 @@ mkdir -p "$src"
 git -C "$src" remote remove origin 2>/dev/null || true
 git -C "$src" remote add origin "$SERGEANT_SOURCE_REPOSITORY_URL.git"
 # Tags and full history, so the version (packages/contracts/src/version.ts) can count the commits since
-# the nearest vMAJOR.MINOR.PATCH tag. Versioning never fails an update: if that fetch fails, a shallow
-# fetch still updates and the version falls back to 0.0.0+<sha>.
-deepen=()
-[ "$(git -C "$src" rev-parse --is-shallow-repository)" = true ] && deepen=(--unshallow)
-git -C "$src" fetch -q --tags "${deepen[@]}" origin "$ref" || {
-  echo "cannot fetch tags and history for $ref; fetching it shallow, so the version will be 0.0.0+<sha>" >&2
-  git -C "$src" fetch -q --depth 1 origin "$ref"
+# the nearest vMAJOR.MINOR.PATCH tag. --force takes a tag that moved on origin; without it git refuses to
+# clobber the local tag and the whole fetch fails. Versioning never fails an update: if that fetch
+# fails, a plain fetch still updates (shallow only if the clone already is) and the version may fall
+# back to 0.0.0+<sha>.
+deepen=() keep=()
+[ "$(git -C "$src" rev-parse --is-shallow-repository)" = true ] && deepen=(--unshallow) keep=(--depth 1)
+git -C "$src" fetch -q --tags --force "${deepen[@]}" origin "$ref" || {
+  echo "cannot fetch tags and history for $ref; fetching just $ref, so the version may be 0.0.0+<sha>" >&2
+  git -C "$src" fetch -q "${keep[@]}" origin "$ref"
 }
 git -C "$src" checkout -q --force --detach FETCH_HEAD
 git -C "$src" clean -qfdx -e node_modules
