@@ -121,7 +121,10 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     const state = await readTaskState(join(dir, "state.json")).catch(() => undefined);
     if (!intent.runIds) log(`${ref}: stopping: ${intent.reason}`);
     intent.runIds ??= runIdsOf(state);
-    intent.unconfirmedStarts = state?.unconfirmedStarts ?? [];
+    // An intent written before `unconfirmedStarts` existed whose `state.json` is already set aside was
+    // past its PR close and comment when it crashed: which starts went unconfirmed is lost, so any of its
+    // runs may have never started, and one the runner still does not know does not hold the stop.
+    intent.unconfirmedStarts = state ? (state.unconfirmedStarts ?? []) : intent.runIds;
     await writeIntent(dir, intent);
   }
   const stopping: RunId[] = [];

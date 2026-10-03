@@ -264,6 +264,23 @@ test("a stop's never-started run does not hold it pending once state.json is set
   expect(await readdir(task)).not.toContain("cancel.json");
 });
 
+// A stop recorded before the intent kept its unconfirmed starts, that crashed once `state.json` was
+// set aside, does not wait forever on a run that never started.
+test("a legacy stop with state.json set aside does not hold pending on a never-started run", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const { deps, seen } = fakes({ conversation: issue("started", "In Progress") });
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  // The old code's drive already closed PR #7 and said so before it set state.json aside.
+  const closed = [{ repo, number: 7, url: pr(7).url }];
+  seen.closed.push({ number: 7, comment: "Closed: wrong approach." });
+  await writeFile(join(task, "cancel.json"), JSON.stringify({ reason: "wrong approach", requestId: "r1", at: new Date().toISOString(), runIds: ["run_w1", "run_lost"], closed }));
+  expect(await driveCancel(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: closed });
+  expect(seen.canceled).toEqual(["run_w1", "run_lost"]);
+  expect(seen.comments).toHaveLength(1);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
 test("a stop the loop could not finish and serve's intake finished is said once on the issue", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
   await writeFile(join(dir, "state.json"), state(["run_w1"]));
