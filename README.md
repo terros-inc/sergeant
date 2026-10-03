@@ -50,7 +50,11 @@ Linear, or Claude login is used. Its shape is `InstallationConfig` in
 ```json
 {
   "secrets": { "awsRegion": "us-west-2", "awsProfile": "<profile>" },
-  "linear": { "tokenSecret": "<V2 Linear agent token secret id>", "agentUserId": "<V2 agent user id>" },
+  "linear": {
+    "tokenSecret": "<V2 Linear agent token secret id>",
+    "agentUserId": "<V2 agent user id>",
+    "reviewerProfiles": { "github-login": "https://linear.app/<workspace>/profiles/<user>" }
+  },
   "github": {
     "controlPlaneApp": { "appId": 1, "installationId": 2, "privateKeySecret": "<secret id>" },
     "workerApp": { "appId": 3, "installationId": 4, "privateKeySecret": "<secret id>" }
@@ -63,7 +67,10 @@ Linear, or Claude login is used. Its shape is `InstallationConfig` in
 
 The Linear token must act as `agentUserId` (checked at startup); every Linear read and write uses it.
 Optional `linear.otherAgentUserIds` lists other agents' users (V1's) whose comments are not human
-input. Optional `review.auditSampleRate` (0 to 1, default 0.2) is the fraction of merged heads that
+input. Optional `linear.reviewerProfiles` maps GitHub logins to Linear profile URLs. Sergeant puts
+the URL in a re-review request so Linear renders a real user mention and sends an Inbox notification;
+a missing mapping or failed lookup leaves the existing plain `@github-login` text. Optional
+`review.auditSampleRate` (0 to 1, default 0.2) is the fraction of merged heads that
 skipped fresh review which get an audit review. Optional `budget` is the budget window a task gets
 when it starts or a human answers one of its questions, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
 numbers, each optional; unset, 120 minutes and $25; see the task budget under Commands). Optional

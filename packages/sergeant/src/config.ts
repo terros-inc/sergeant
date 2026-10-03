@@ -37,6 +37,13 @@ export const InstallationConfig = z.strictObject({
     agentUserId: z.string().min(1),
     /** Other Linear users that act for agents (V1's, say): their comments are not human input either. */
     otherAgentUserIds: z.array(z.string().min(1)).default([]),
+    /** GitHub reviewer login to Linear profile URL; Linear renders the URL as a notifying mention. */
+    reviewerProfiles: z
+      .record(
+        z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "expected a GitHub login"),
+        z.string().regex(/^https:\/\/linear\.app\/[^/]+\/profiles\/[^/?#]+$/, "expected a Linear profile URL"),
+      )
+      .default({}),
     /** The Linear app webhook's signing secret; without it serve has no Linear webhook endpoint. */
     webhookSecret: SecretRef.optional(),
   }),
@@ -147,6 +154,12 @@ export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role,
 export function taskBudget(config: InstallationConfig): Partial<BudgetWindow> {
   const { minutes, usd } = config.budget ?? {};
   return { ...(minutes !== undefined && { wallMinutes: minutes }), ...(usd !== undefined && { costUsd: usd }) };
+}
+
+/** Configured reviewer identity lookup. GitHub logins are case-insensitive. */
+export function reviewerProfileLookup(config: InstallationConfig): (login: string) => Promise<string | undefined> {
+  const profiles = new Map(Object.entries(config.linear.reviewerProfiles).map(([login, url]) => [login.toLowerCase(), url]));
+  return async (login) => profiles.get(login.toLowerCase());
 }
 
 export async function loadConfig(file: string): Promise<InstallationConfig> {

@@ -3,6 +3,7 @@
   "linear": {
     "tokenSecret": "sergeant/example/linear-agent-token",
     "agentUserId": "00000000-0000-0000-0000-000000000000",
+    "reviewerProfiles": {},
     "webhookSecret": "sergeant/example/linear-webhook-secret"
   },
   "github": {
