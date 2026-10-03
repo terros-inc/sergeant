@@ -30,8 +30,13 @@ export type LoopOptions = {
   signal?: AbortSignal;
   /** A human asking for a turn now (`sgt task wake`). */
   wake?: Wake;
-  /** The task's slot (TECH-5008): told when the task waits on a human, and asked before each turn. */
+  /** The task's slot (TECH-5015): released when a question goes unanswered past the grace, and taken before each turn. */
   slot?: Slot;
+  /**
+   * How long the task waits, holding its slot, on something outside Sergeant before it asks a human,
+   * and then on that human's answer before it releases the slot (default 15).
+   */
+  waitingGraceMinutes?: number;
 };
 
 export type LoopResult = {

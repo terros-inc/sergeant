@@ -90,7 +90,7 @@ export const InstallationConfig = z.strictObject({
   budget: z.strictObject({ minutes: z.number().positive().optional(), usd: z.number().positive().optional() }).optional(),
   /** Task slots `serve` fills at once (TECH-5008, superseding TECH-4988); `serve --max-tasks` wins, and without either it is 2. */
   maxTasks: z.number().int().positive().optional(),
-  /** Minutes a task waiting on a human keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */
+  /** Minutes a waiting task keeps its slot, once before asking a human and once more for the answer (TECH-5015); `serve --waiting-grace-minutes` wins, and without either it is 15. */
   waitingGraceMinutes: z.number().nonnegative().optional(),
 });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;

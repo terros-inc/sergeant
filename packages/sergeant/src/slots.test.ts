@@ -3,16 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
-import { commentIdFor, type Conversation, type ProposedAction } from "@terros/sergeant-contracts";
+import { commentIdFor, type Conversation, type PullRequestFacts } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { startService, type Service, type ServiceDeps } from "./service.ts";
 
 // TECH-5008: with more delegated issues than slots, finishing work must beat starting it and an older
-// high-priority task must never be starved by newer work; a task waiting on a human must not keep its
-// slot past the grace, nor lose it when the human answers within it.
+// high-priority task must never be starved by newer work. TECH-5015: a waiting task keeps its slot for
+// the grace, then asks a human and keeps it for the grace again; only an unanswered question frees it.
 
 const agent = { id: "agent-v2", name: "Sergeant" };
-const ask: ProposedAction = { kind: "ask_human", question: "Which one?", options: ["A", "B"] };
+const head = "a".repeat(40);
 
 const issue = (identifier: string, status: "In Review" | "In Progress" | "Todo", priority: number, createdAt: string): DelegatedIssue => ({
   identifier,
@@ -23,7 +23,8 @@ const issue = (identifier: string, status: "In Review" | "In Progress" | "Todo",
 
 /**
  * Fakes for the delegated `issues`. Each reasoning turn records its issue and holds its slot until
- * `finish(id)`; an issue in `asking` asks a question on its next turn. `answer(id)` is a human reply.
+ * `finish(id)`, then proposes nothing. An issue in `blocked` has a PR whose required check is pending
+ * until `checks.state` changes; `answer(id)` is a human reply.
  */
 function fakes(issues: DelegatedIssue[]) {
   const delegated = [...issues];
@@ -39,13 +40,17 @@ function fakes(issues: DelegatedIssue[]) {
   };
   const turns: string[] = [];
   const holding = new Map<string, () => void>();
-  const asking = new Set<string>();
+  const blocked = new Set<string>();
+  const checks = { state: "pending" as "pending" | "passed" };
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
     delegatedIssues: async () => [...delegated],
     linear: {
-      readConversation: async (id) => conversation(id.replace(/^i-/, "")),
+      readConversation: async (id) => {
+        const c = conversation(id.replace(/^i-/, ""));
+        return { ...c, issue: { ...c.issue, linkedPullRequests: blocked.has(c.issue.identifier) ? [{ repo: "o/r", number: 1 }] : [] } };
+      },
       postComment: async ({ issueId, body, key }) => {
         const c = conversation(issueId.replace(/^i-/, ""));
         if (!c.agentComments.some((a) => a.id === commentIdFor(key))) c.agentComments.push({ id: commentIdFor(key), createdAt: new Date().toISOString(), body });
@@ -53,7 +58,24 @@ function fakes(issues: DelegatedIssue[]) {
       moveIssueToStarted: async () => ({ moved: false as const }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: {
+      readPullRequest: async (): Promise<PullRequestFacts> => ({
+        repo: "o/r",
+        number: 1,
+        url: "https://github.com/o/r/pull/1",
+        state: "open",
+        draft: false,
+        author: "sergeant-worker[bot]",
+        headSha: head,
+        mergedSha: null,
+        baseRef: "main",
+        body: "",
+        mergeable: true,
+        checks: { sha: head, required: [{ name: "validate", state: checks.state }] },
+        humanFeedback: [],
+      }),
+      mergePullRequest: async () => Promise.reject(new Error("unused")),
+    },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
@@ -63,8 +85,7 @@ function fakes(issues: DelegatedIssue[]) {
           holding.set(id, resolve);
           held.add(resolve);
         });
-        const actions = asking.delete(id) ? [ask] : [];
-        return { output: { summary: "turn", actions }, model: "m", promptVersion: "p" };
+        return { output: { summary: "turn", actions: [] }, model: "m", promptVersion: "p" };
       },
     },
   };
@@ -78,7 +99,7 @@ function fakes(issues: DelegatedIssue[]) {
     const now = new Date().toISOString();
     conversations.set(id, { ...c, humanComments: [...c.humanComments, { id: `reply-${id}`, author: { id: "u1", name: "Human" }, createdAt: now, updatedAt: now, body: "A" }] });
   };
-  return { delegated, deps, turns, asking, finish, answer };
+  return { delegated, deps, turns, blocked, checks, finish, answer };
 }
 
 let dir = "";
@@ -94,10 +115,10 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const start = async (deps: ServiceDeps, opts: { maxTasks: number; waitingGraceMinutes?: number }, logs: string[] = []) => {
+const start = async (deps: ServiceDeps, opts: { maxTasks: number; waitingGraceMinutes?: number; idleMinutes?: number }, logs: string[] = []) => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-slots-test-"));
   service = await startService(
-    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 0, log: (l) => logs.push(l), ...opts },
+    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 60, log: (l) => logs.push(l), ...opts },
     deps,
   );
 };
@@ -111,7 +132,8 @@ test("free slots go to In Review, then In Progress, then Todo; then by priority;
     issue("PROGRESS-HIGH-NEW", "In Progress", 2, "2026-09-20T00:00:00.000Z"),
     issue("REVIEW-NONE-OLD", "In Review", 0, "2026-08-01T00:00:00.000Z"),
   ]);
-  await start(f.deps, { maxTasks: 3 });
+  // Each task ends on the idle guard once its turn finishes, freeing its slot.
+  await start(f.deps, { maxTasks: 3, idleMinutes: 0 });
   await vi.waitFor(() => expect(f.turns).toHaveLength(3), { timeout: 5_000 });
   await sleep(100);
   expect(new Set(f.turns)).toEqual(new Set(["REVIEW-NONE-OLD", "PROGRESS-HIGH-NEW", "PROGRESS-HIGH-OLD"]));
@@ -126,46 +148,64 @@ test("free slots go to In Review, then In Progress, then Todo; then by priority;
   expect(f.turns.slice(3)).toEqual(["PROGRESS-LOW-NEW", "TODO-URGENT-NEW", "TODO-NONE"]);
 });
 
-test("a task answered within the grace keeps its slot and continues without queueing", async () => {
-  const f = fakes([issue("ASKS", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
-  f.asking.add("ASKS");
-  const logs: string[] = [];
-  // A grace of 1.2 seconds: the human answers well within it, and the test outlasts it.
-  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0.02 }, logs);
-  await f.finish("ASKS");
-  await vi.waitFor(() => expect(logs).toContainEqual(expect.stringContaining("ASKS: waiting: the question posted at")), { timeout: 5_000 });
-  await sleep(100);
-  expect(f.turns).toEqual(["ASKS"]);
+const asked = (logs: string[], id: string) => logs.some((l) => l.startsWith(`${id}: blocked past the grace: asking a human`));
+const lostSlot = (logs: string[], id: string) => logs.filter((l) => l.startsWith(`${id}:`) && /released|queued|admitted to a task slot again/.test(l));
 
-  f.answer("ASKS");
-  await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "ASKS"]), { timeout: 5_000 });
-  // Its wait ended with the answer: the grace running out during its next turn frees nothing.
-  await sleep(1_500);
-  expect(f.turns).toEqual(["ASKS", "ASKS"]);
-  expect(logs.filter((l) => l.startsWith("ASKS:") && /queued|past the grace/.test(l))).toEqual([]);
+test("an external wait that clears within the grace continues at once in the same slot", async () => {
+  const f = fakes([issue("CI", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  f.blocked.add("CI");
+  const logs: string[] = [];
+  // A grace of 3 seconds; the check passes well within it.
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0.05 }, logs);
+  await f.finish("CI");
+  await vi.waitFor(() => expect(logs).toContainEqual("CI: waiting: nothing changed since the last turn"), { timeout: 5_000 });
+  f.checks.state = "passed";
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "CI"]), { timeout: 5_000 });
+  expect(asked(logs, "CI")).toBe(false);
+  expect(lostSlot(logs, "CI")).toEqual([]);
 });
 
-test("a task waiting past the grace frees its slot, and once answered is readmitted in order", async () => {
-  const f = fakes([issue("ASKS", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
-  f.asking.add("ASKS");
+test("blocked past the grace, the task asks a human; answered within the next grace, it continues in the same slot", async () => {
+  const f = fakes([issue("CI", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  f.blocked.add("CI");
+  const logs: string[] = [];
+  // A grace of 1.2 seconds: the check stays pending past it, and the human answers within the next.
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0.02 }, logs);
+  await f.finish("CI");
+  await vi.waitFor(() => expect(asked(logs, "CI")).toBe(true), { timeout: 5_000 });
+  await vi.waitFor(() => expect(logs).toContainEqual(expect.stringContaining("CI: waiting: the question posted at")), { timeout: 5_000 });
+  expect(f.turns).toEqual(["CI"]);
+
+  f.answer("CI");
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "CI"]), { timeout: 5_000 });
+  // Its wait ended with the answer: the grace running out during its next turn frees nothing.
+  await sleep(1_500);
+  expect(f.turns).toEqual(["CI", "CI"]);
+  expect(lostSlot(logs, "CI")).toEqual([]);
+});
+
+test("unanswered past the next grace, the slot is released; a later reply queues in admission order", async () => {
+  const f = fakes([issue("CI", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  f.blocked.add("CI");
   const logs: string[] = [];
   await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0 }, logs);
-  await f.finish("ASKS");
-  // Past the grace, the slot goes to the next task while the question stays unanswered.
-  await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER"]), { timeout: 5_000 });
-  expect(logs).toContainEqual("ASKS: waiting on a human past the grace; its task slot is free until the human answers");
+  await f.finish("CI");
+  // Blocked, it asks; unanswered, its slot goes to the next task while the question stays open.
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "NEWER"]), { timeout: 5_000 });
+  expect(asked(logs, "CI")).toBe(true);
+  expect(logs).toContainEqual("CI: no human answer within the grace: task slot released until something changes");
 
   // Answered while the slot is taken, the task queues; an In Review issue delegated meanwhile is ahead of it.
-  f.answer("ASKS");
-  await vi.waitFor(() => expect(logs).toContainEqual("ASKS: queued: waiting for a free task slot"), { timeout: 5_000 });
+  f.answer("CI");
+  await vi.waitFor(() => expect(logs).toContainEqual("CI: queued: waiting for a free task slot"), { timeout: 5_000 });
   f.delegated.push(issue("REVIEW", "In Review", 0, "2026-09-01T00:00:00.000Z"));
   await sleep(100);
   await f.finish("NEWER");
-  await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER", "REVIEW"]), { timeout: 5_000 });
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "NEWER", "REVIEW"]), { timeout: 5_000 });
   await sleep(100);
   expect(f.turns).toHaveLength(3);
   await f.finish("REVIEW");
-  await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER", "REVIEW", "ASKS"]), { timeout: 5_000 });
-  expect(logs).toContainEqual("ASKS: the human answered; admitted to a task slot again");
-  await f.finish("ASKS");
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "NEWER", "REVIEW", "CI"]), { timeout: 5_000 });
+  expect(logs).toContainEqual("CI: admitted to a task slot again");
+  await f.finish("CI");
 });

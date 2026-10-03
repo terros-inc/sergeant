@@ -68,7 +68,8 @@ skipped fresh review which get an audit review. Optional `budget` is the budget 
 when it starts, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
 numbers, each optional; unset, 120 minutes and $25; see the task budget under Commands). Optional
 `maxTasks` (a positive integer, default 2) is how many task slots `serve` fills, and optional
-`waitingGraceMinutes` (default 15) how long a task waiting on a human keeps its slot; `serve
+`waitingGraceMinutes` (default 15) how long a waiting task keeps its slot, before it asks a human and
+again for the answer; `serve
 --max-tasks` and `--waiting-grace-minutes` win over them (see Intake under Commands). Optional
 `linear.webhookSecret` and `github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
 webhooks; `serve` has each webhook endpoint only when its secret is set. Optional `humans` says who
@@ -185,11 +186,13 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   A free slot goes to the highest-ordered task that wants one: by Linear status, In Review, then In
   Progress, then Todo; then by priority, Urgent to none; then newest first. Finishing work beats
   starting it. A task asked to wake (`sgt task wake`) goes first. A task holds its slot while it runs
-  a worker, a reviewer, or a reasoning turn, and while it waits on a human (a question, a budget
-  reply, a human merge, or changes requested) for up to `waitingGraceMinutes` (15). Answered within
-  the grace, it continues at once; past it, its slot goes to the next task, and its loop keeps polling
-  without a slot. Once the human answers, it queues for a slot in the same order as new work. Like a
-  question, a wait on a human merge or on requested changes no longer ends on the idle guard.
+  a worker, a reviewer, or a reasoning turn, and while it waits (TECH-5015). With nothing running and
+  nothing changing (checks, mergeability, an API, a human merge), it keeps its slot for
+  `waitingGraceMinutes` (15) and continues at once if the wait clears; still blocked, it asks a human
+  on the issue. It keeps its slot for the same grace while that question (or any question, or a budget
+  question) is unanswered, and continues at once on an answer; past it, its slot goes to the next task
+  and its loop keeps polling without a slot. Once the human answers, it queues for a slot in the same
+  order as new work.
   `GET /status` lists the released tasks under `released`.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
   Linear links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when they changed, so

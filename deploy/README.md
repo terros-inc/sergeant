@@ -215,8 +215,8 @@ started with (the log says `ignoring the budget options`); only a human's "exten
 ### Change the task slots
 
 The installation config's `maxTasks` (default 2) is how many task slots `serve` fills, and
-`waitingGraceMinutes` (default 15) how long a task waiting on a human keeps its slot before the next
-task in order gets it (root `README.md`, Intake under Commands). Add or change them in your
+`waitingGraceMinutes` (default 15) how long a waiting task keeps its slot before it asks a human, and
+then how long it waits for the answer before the next task in order gets the slot (root `README.md`, Intake under Commands). Add or change them in your
 `installation.json`, for example `"maxTasks": 4`, put the parameter, then run an Update (above):
 
 ```sh

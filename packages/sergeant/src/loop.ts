@@ -22,9 +22,9 @@ import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
-import { noteEdit, openQuestion } from "./question.ts";
+import { noteEdit, openQuestion, questionKey } from "./question.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
-import { humanWait } from "./slots.ts";
+import { blockedQuestion } from "./slots.ts";
 import { applyTurn, loadState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -45,6 +45,13 @@ export { readTaskState, type TaskState } from "./task-state.ts";
 export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reasoner }): Promise<LoopResult> {
   const log = opts.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
   const pollMs = (opts.pollSeconds ?? 60) * 1000;
+  const graceMs = (opts.waitingGraceMinutes ?? 15) * 60_000;
+  // A question unanswered for the grace gives up the task's slot; the loop keeps polling without one.
+  const releasePast = (askedAt: string) => {
+    if (opts.slot?.state !== "held" || Date.now() - Date.parse(askedAt) < graceMs) return;
+    log("no human answer within the grace: task slot released until something changes");
+    opts.slot.release();
+  };
   const wait = (ms: number) => (opts.wake ? opts.wake.sleep(ms, opts.signal) : pause(ms, opts.signal));
   const files = {
     state: join(opts.dir, "state.json"),
@@ -180,7 +187,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const question = openQuestion(conversation);
     if (question) {
       unposted = undefined;
-      if (live.length === 0) opts.slot?.waiting(Date.parse(question.createdAt));
+      if (live.length === 0) releasePast(question.createdAt);
       log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);
       await wait(pollMs);
       continue;
@@ -243,7 +250,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {
-      opts.slot?.waiting(Date.parse(budgetAsked.createdAt));
+      releasePast(budgetAsked.createdAt);
       log(`waiting: the budget question posted at ${budgetAsked.createdAt} has no human reply yet`);
       await wait(pollMs);
       continue;
@@ -252,19 +259,25 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const fingerprint = fingerprintOf(situation);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
-      // Waiting on a human merge or requested changes is a human wait like a question: no idle end.
-      const human = running.length === 0 ? humanWait(situation) : undefined;
-      if (human) opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
-      const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
-      if (running.length === 0 && !human && quietMinutes > (opts.idleMinutes ?? 60)) {
-        return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMinutes)} minutes` };
+      const quietMs = Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt);
+      if (running.length === 0 && quietMs > (opts.idleMinutes ?? 60) * 60_000) {
+        return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMs / 60_000)} minutes` };
       }
-      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : human ? `waiting on ${human}` : "waiting: nothing changed since the last turn");
+      // Nothing running and nothing changed: the task waits on something outside Sergeant, keeping its
+      // slot. Past the grace it asks a human, as a question (question.ts) so the usual wait follows.
+      if (running.length === 0 && quietMs >= graceMs) {
+        const key = questionKey(conversation.issue.id, conversationRevision(conversation));
+        const asked = await askHuman(blockedQuestion(situation, Math.round(quietMs / 60_000)), situation, deps, key);
+        log(`blocked past the grace: asking a human: ${describeOutcome(asked)}`);
+        await wait(pollMs);
+        continue;
+      }
+      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : "waiting: nothing changed since the last turn");
       await wait(pollMs);
       continue;
     }
-    // A task whose slot was released while it waited on a human queues for one before its turn.
-    if (opts.slot && !opts.slot.work()) {
+    // A task whose slot was released while a question went unanswered queues for one before its turn.
+    if (opts.slot && !opts.slot.take()) {
       log("queued: waiting for a free task slot");
       await wait(pollMs);
       continue;

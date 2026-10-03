@@ -34,9 +34,9 @@ export type ServiceOptions = {
   enrolledRepositories: RepoSlug[];
   /** Holds `tasks/<issue identifier>/`, one task loop's directory each. */
   stateDir: string;
-  /** Task slots: tasks running or waiting on a human within the grace; further delegated issues wait for a free one. */
+  /** Task slots: tasks working, or waiting within a grace (slots.ts); further delegated issues wait for a free one. */
   maxTasks?: number;
-  /** How long a task waiting on a human keeps its slot before the next task in order gets it. */
+  /** How long a task waits, keeping its slot, on something outside Sergeant before asking a human, then on the answer. */
   waitingGraceMinutes?: number;
   intakeSeconds?: number;
   /** Each task loop's poll interval, and how long it stays with nothing changing and nothing running. */
@@ -87,10 +87,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const log = opts.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
   const release = await lockStateDir(opts.stateDir);
   const maxTasks = opts.maxTasks ?? 2;
-  const graceMs = (opts.waitingGraceMinutes ?? 15) * 60_000;
   const abort = new AbortController();
   const active = new Map<string, Promise<void>>();
-  // Each running loop's slot: released while it waits on a human past the grace (slots.ts).
+  // Each running loop's slot: released while a question goes unanswered past the grace (slots.ts).
   const slots = new Map<string, Slot>();
   // When and how each task loop last ended: an unchanged ending (an idle task readmitted every intake,
   // say) is not logged again, and a loop that ended since the latest intake waits for the next.
@@ -127,6 +126,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         signal: abort.signal,
         wake: wakeOf(issueId),
         slot,
+        ...(opts.waitingGraceMinutes !== undefined && { waitingGraceMinutes: opts.waitingGraceMinutes }),
       },
       { ...deps, exclusive: (step) => locked(issueId, step) },
     )
@@ -148,24 +148,18 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     slots.set(issueId, slot);
   };
 
-  // TECH-5008: releases each slot held past the grace by a task waiting on a human, then gives every
-  // free slot to the highest-ordered task that wants one: a released task whose human answered, or a
-  // delegated issue with no loop. A woken task (`sgt task wake`) goes first. A loop that ended since
-  // the latest intake waits for the next one, so an idle task is not readmitted at once, over and over.
+  // TECH-5008: gives every free slot to the highest-ordered task that wants one: a released task with
+  // work again (TECH-5015), or a delegated issue with no loop. A woken task (`sgt task wake`) goes
+  // first. A loop that ended since the latest intake waits for the next one, so an idle task is not
+  // readmitted at once, over and over.
   const schedule = () => {
     if (abort.signal.aborted) return;
-    for (const [issueId, slot] of slots) {
-      if (slot.released || slot.waitingSince === undefined || Date.now() - slot.waitingSince < graceMs) continue;
-      slot.released = true;
-      slot.waitingSince = undefined;
-      log(`${issueId}: waiting on a human past the grace; its task slot is free until the human answers`);
-    }
-    let free = maxTasks - [...slots.values()].filter((s) => !s.released).length;
+    let free = maxTasks - [...slots.values()].filter((s) => s.state === "held").length;
     if (free <= 0) return;
     const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
     const queued = ordered
       .map((issue) => issue.identifier)
-      .filter((id) => (active.has(id) ? slots.get(id)?.wanted : (ended.get(id)?.at ?? 0) < intakeStartedAt))
+      .filter((id) => (active.has(id) ? slots.get(id)?.state === "queued" : (ended.get(id)?.at ?? 0) < intakeStartedAt))
       .sort((a, b) => woken(a) - woken(b));
     for (const issueId of queued) {
       if (free-- <= 0) break;
@@ -174,9 +168,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         admit(issueId);
         continue;
       }
-      slot.released = false;
-      slot.wanted = false;
-      log(`${issueId}: the human answered; admitted to a task slot again`);
+      slot.state = "held";
+      log(`${issueId}: admitted to a task slot again`);
       wakeOf(issueId).interrupt();
     }
   };
@@ -311,7 +304,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
             send(res, { status: 401, json: refused });
           } else if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
             res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
-            const released = [...slots].filter(([, s]) => s.released).map(([id]) => id);
+            const released = [...slots].filter(([, s]) => s.state !== "held").map(([id]) => id);
             const detail = req.url === "/status" && { version, stopping: abort.signal.aborted, tasks: [...active.keys()], released, lastIntake };
             res.end(JSON.stringify({ ok, ...detail }));
           } else if (webhookPaths.has(new URL(req.url ?? "/", "http://localhost").pathname)) {
