@@ -174,7 +174,7 @@ test("a running task's runs are canceled within one poll of the move, and the st
   expect(seen).toMatchObject({ turns: 0, starts: 0, canceled: ["run_w1"] });
 });
 
-test("a human's task cancel closes the PR its worker reported, and only Sergeant's own", async () => {
+test("a human's task cancel closes only its worker's PR, and a retry never closes the same head twice", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
   const live = { conversation: issue("started", "In Progress") };
   live.conversation.issue.linkedPullRequests = [{ repo, number: 8 }];
@@ -185,6 +185,10 @@ test("a human's task cancel closes the PR its worker reported, and only Sergeant
     report: { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] },
   };
   deps.runner.status = async () => ({ ...reported, status: seen.canceled.length > 0 ? "canceled" : "running" });
+  // Keep returning the closed head as open, as a stale/retried read may. The durable per-head effect
+  // key, rather than GitHub's latest state, must keep the second drive from closing or commenting it.
+  const readPullRequest = deps.github.readPullRequest;
+  deps.github.readPullRequest = async (ownerRepo, number) => (number === 9 ? pr(9) : readPullRequest(ownerRepo, number));
   const task = taskDir(dir, "UNF-1");
   await mkdir(task, { recursive: true });
   await writeFile(join(task, "state.json"), state(["run_w1"]));
@@ -195,9 +199,11 @@ test("a human's task cancel closes the PR its worker reported, and only Sergeant
   const postComment = deps.linear.postComment;
   deps.linear.postComment = async () => Promise.reject(new Error("Linear is down"));
   await expect(driveCancel(task, "UNF-1", deps, [repo], () => {})).rejects.toThrow("Linear is down");
+  expect(JSON.parse(await readFile(join(task, "cancel.json"), "utf8")).prCloseKeys).toEqual([`close-pr:${repo}#9:${head}`]);
   deps.linear.postComment = postComment;
   expect(await driveCancel(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
   expect(seen.canceled).toEqual(["run_w1"]);
+  // The retried turn saw the same PR and head as open, but performed no second GitHub effect.
   expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`the task was canceled by Ada: wrong approach. Its runs are canceled. Closed [${repo}#9]`) }]);
   // Like every stop, it sets the task aside: nothing resumes it.
