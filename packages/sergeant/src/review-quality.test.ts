@@ -27,6 +27,7 @@ const pr = (headSha: string): PullRequestFacts => ({
   body: "Fixes UNF-1",
   mergeable: true,
   checks: { sha: headSha, required: [{ name: "validate", state: "passed" }] },
+  humanFeedback: [],
 });
 type Addressed = NonNullable<Extract<RunRecord, { role: "worker" }>["report"]>["addressedFindings"];
 const worker = (headSha: string, review: { required: boolean; reason: string }, addressedFindings?: Addressed): RunRecord => ({

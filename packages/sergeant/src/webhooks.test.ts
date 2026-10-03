@@ -29,6 +29,7 @@ const pr: PullRequestFacts = {
   body: "Fixes UNF-1",
   mergeable: true,
   checks: { sha: head, required: [{ name: "validate", state: "pending" }] },
+  humanFeedback: [],
 };
 const conversation = (identifier: string): Conversation => ({
   issue: {

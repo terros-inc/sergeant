@@ -37,8 +37,12 @@ export interface LinearPort {
 
 export interface GitHubPort {
   readPullRequest(repo: RepoSlug, number: number): Promise<PullRequestFacts>;
-  /** Merges only if the head is still `expectedHeadSha` (GitHub's `sha` guard). */
-  mergePullRequest(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<{ mergedSha: Sha }>;
+  /**
+   * Merges only if the head is still `expectedHeadSha` (GitHub's `sha` guard). A merge GitHub refuses
+   * by repository policy (405 or not mergeable: a required review Sergeant cannot give, say) resolves
+   * to `refused` with GitHub's message; any other failure rejects.
+   */
+  mergePullRequest(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<{ mergedSha: Sha } | { refused: string }>;
 }
 
 /**

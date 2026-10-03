@@ -1,5 +1,6 @@
 import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { readHumanFeedback } from "./pr-feedback.ts";
 
 const pullRequest = z.object({
   number: z.number().int().positive(),
@@ -66,10 +67,13 @@ export type GitHubAdapterOptions = {
 
 class GitHubHttpError extends Error {
   readonly status: number;
+  /** GitHub's `message`, when the response carried one. */
+  readonly detail: string | undefined;
 
-  constructor(status: number) {
-    super(`GitHub API request failed (${status})`);
+  constructor(status: number, detail?: string) {
+    super(`GitHub API request failed (${status})${detail ? `: ${detail}` : ""}`);
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -103,7 +107,10 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       },
     });
     if (requestOptions.allowStatuses?.includes(res.status)) return null;
-    if (!res.ok) throw new GitHubHttpError(res.status);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+      throw new GitHubHttpError(res.status, typeof body?.message === "string" ? body.message : undefined);
+    }
     if (requestOptions.failOnNextPage && /rel="next"/.test(res.headers.get("link") ?? "")) {
       throw new Error("GitHub active-rules page is truncated; pagination is required");
     }
@@ -207,9 +214,10 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const { config } = configFor(repo);
       const live = await readRawPullRequest(repo, number);
       const headSha = Sha.parse(live.head.sha);
-      const [observed, declared] = await Promise.all([
+      const [observed, declared, humanFeedback] = await Promise.all([
         readObservedChecks(repo, headSha),
         readRequiredChecks(repo, live.base.ref),
+        readHumanFeedback((path) => request(path), repo, number),
       ]);
       // Only the base branch's declared required checks count; one that never reported is
       // `missing`. With none declared the list is empty and M5 refuses the merge, unless this
@@ -239,6 +247,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         body: live.body ?? "",
         mergeable: live.mergeable,
         checks: { sha: headSha, required },
+        humanFeedback,
       });
     },
 
@@ -268,11 +277,19 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
             body: JSON.stringify({ sha: expectedHeadSha, merge_method: config.mergeMethod }),
           }),
         );
-        if (!result.merged) throw new Error(`GitHub refused merge: ${result.message}`);
+        if (!result.merged) return { refused: result.message };
         return { mergedSha: Sha.parse(result.sha) };
       } catch (error) {
         if (!(error instanceof GitHubHttpError) || error.status !== 405) throw error;
-        return alreadyMerged(repo, number, expectedHeadSha, error);
+        // 405 is repository policy (a required review Sergeant cannot give, such as a code owner's, or
+        // not mergeable) unless this exact head already merged, or the base moved mid-merge, which a
+        // retry can get past. A moved head is 409 and still rejects.
+        try {
+          return await alreadyMerged(repo, number, expectedHeadSha, error);
+        } catch (e) {
+          if (e !== error || /base branch was modified/i.test(error.detail ?? "")) throw e;
+          return { refused: error.detail ?? "405 Method Not Allowed" };
+        }
       }
     },
   };

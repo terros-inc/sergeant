@@ -18,8 +18,11 @@ const pr = {
 
 const json = (value: unknown, status = 200, headers?: HeadersInit) =>
   Response.json(value, { status, ...(headers && { headers }) });
+/** A PR's human-feedback lists are empty unless a test's `fetch` answers them. */
+const noFeedback = (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) =>
+  /\/(reviews|comments)\?per_page=100&page=1$/.test(String(input)) && !init?.method ? fetch(input, init).catch(() => json([])) : fetch(input, init);
 const adapter = (fetch: typeof globalThis.fetch, observedChecksFallback = false) =>
-  createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash", observedChecksFallback } }, fetch });
+  createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash", observedChecksFallback } }, fetch: noFeedback(fetch) });
 
 // Treating observed checks as required cannot know a check that has not appeared yet, so a base
 // with no declared required checks must yield none (M5 then refuses the merge), never whatever
@@ -173,4 +176,64 @@ test("a failed approval prevents the merge", async () => {
 
   await expect(adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).rejects.toThrow("(422)");
   expect(paths.some((path) => path.includes("/merge"))).toBe(false);
+});
+
+// TECH-4987: the captain's "Request changes" and inline comments were invisible to Sergeant. Every
+// human review and comment must reach the PR facts (M8 reads them), and a bot's, Sergeant's own
+// approval included, must never pass for human input.
+test("reads human reviews and comments on the PR, never a bot's", async () => {
+  const human = { login: "captain", type: "User" };
+  const bot = { login: "sergeant-control[bot]", type: "Bot" };
+  const at = "2026-10-03T01:00:00Z";
+  const url = `https://github.com/${repo}/pull/7`;
+  const fetch = async (input: string | URL | Request) => {
+    const path = String(input);
+    if (path.endsWith("/pulls/7")) return json(pr);
+    if (path.includes("/check-runs")) return json({ total_count: 1, check_runs: [{ name: "ci", status: "completed", conclusion: "success", app: { id: 1 } }] });
+    if (path.endsWith("/status?per_page=100")) return json({ state: "pending", total_count: 0, statuses: [] });
+    if (path.includes("/protection/")) return json({ message: "Not Found" }, 404);
+    if (path.endsWith("/rules/branches/main?per_page=100")) return json([{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "ci" }] } }]);
+    if (path.endsWith("/pulls/7/reviews?per_page=100&page=1")) {
+      return json([
+        { id: 1, user: bot, state: "APPROVED", body: "gate passed", commit_id: head, submitted_at: at, html_url: `${url}#r1` },
+        { id: 2, user: human, state: "CHANGES_REQUESTED", body: "remove references to terros-wiki", commit_id: head, submitted_at: "2026-10-03T02:00:00Z", html_url: `${url}#r2` },
+        { id: 3, user: human, state: "PENDING", body: "draft", commit_id: head, submitted_at: null, html_url: `${url}#r3` },
+      ]);
+    }
+    if (path.endsWith("/pulls/7/comments?per_page=100&page=1")) {
+      return json([{ id: 4, user: human, body: "not here", path: "docs/a.md", line: 12, commit_id: head, created_at: "2026-10-03T01:59:00Z", updated_at: "2026-10-03T02:01:00Z", html_url: `${url}#c4` }]);
+    }
+    if (path.endsWith("/issues/7/comments?per_page=100&page=1")) {
+      return json([
+        { id: 5, user: bot, body: "CI summary", created_at: at, updated_at: at, html_url: `${url}#c5` },
+        { id: 6, user: human, body: "see my review", created_at: "2026-10-03T02:05:00Z", updated_at: "2026-10-03T02:05:00Z", html_url: `${url}#c6` },
+      ]);
+    }
+    throw new Error(`unexpected request: ${path}`);
+  };
+
+  const { humanFeedback } = await adapter(fetch).readPullRequest(repo, 7);
+  expect(humanFeedback.map((f) => [f.id, f.author, f.state, f.path, f.line])).toEqual([
+    ["review_comment:4", "captain", null, "docs/a.md", 12],
+    ["review:2", "captain", "CHANGES_REQUESTED", null, null],
+    ["comment:6", "captain", null, null, null],
+  ]);
+  expect(humanFeedback[0]).toMatchObject({ body: "not here", updatedAt: "2026-10-03T02:01:00.000Z", commitId: head });
+});
+
+// TECH-4987: on a repository that requires a code owner's review, GitHub refuses the merge (405) after
+// Sergeant's own approval. That is repository policy, not a fault to retry, and must come back as a
+// refusal with GitHub's words rather than an error.
+test("a merge GitHub refuses by repository policy resolves to refused", async () => {
+  const fetch = async (input: string | URL | Request) => {
+    const path = String(input);
+    if (path.endsWith("/pulls/7/reviews")) return json({ id: 1 });
+    if (path.endsWith("/pulls/7/merge")) return json({ message: "Waiting on code owner review from terros-inc/owners." }, 405);
+    if (path.endsWith("/pulls/7")) return json(pr);
+    throw new Error(`unexpected ${path}`);
+  };
+
+  expect(await adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).toEqual({
+    refused: "Waiting on code owner review from terros-inc/owners.",
+  });
 });

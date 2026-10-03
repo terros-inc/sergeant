@@ -64,15 +64,27 @@ export function commentIdFor(key: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
+/** What the revision reads of a PR's human feedback (TECH-4987); `PullRequestFacts` has it. */
+type PullRequestFeedbackFacts = {
+  repo: string;
+  number: number;
+  humanFeedback: readonly { id: string; updatedAt: string; state: string | null; body: string }[];
+};
+
 /**
- * A deterministic hash of what humans have said: the issue title and description, and each human
- * comment's id, updatedAt, and body hash. A merge proposed against one revision is refused once the
- * live revision differs (M10), so no merge overtakes human input that no turn has seen.
+ * A deterministic hash of what humans have said: the issue title and description, each human
+ * comment's id, updatedAt, and body hash, and each human review or comment on the task's PRs (id,
+ * updatedAt, review state, body hash). A merge proposed against one revision is refused once the live
+ * revision differs (M10), so no merge overtakes human input that no turn has seen. Without PRs it is
+ * the Linear conversation's alone, which is what a question's key uses (questions are answered in Linear).
  */
-export function conversationRevision(conversation: Conversation): ConversationRevision {
-  const comments = conversation.humanComments
-    .map((c) => [c.id, c.updatedAt, sha256(c.body)] as const)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+export function conversationRevision(conversation: Conversation, pullRequests: readonly PullRequestFeedbackFacts[] = []): ConversationRevision {
+  const byKey = <T extends readonly [string, ...unknown[]]>(rows: T[]) => rows.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const comments = byKey(conversation.humanComments.map((c) => [c.id, c.updatedAt, sha256(c.body)] as const));
   const { title, description } = conversation.issue;
-  return sha256(JSON.stringify([title, description, comments]));
+  const feedback = byKey(
+    pullRequests.flatMap((p) => p.humanFeedback.map((f) => [`${p.repo}#${p.number}:${f.id}`, f.updatedAt, f.state, sha256(f.body)] as const)),
+  );
+  // Unchanged for a task with no human PR feedback, so revisions taken before TECH-4987 still match.
+  return sha256(JSON.stringify(feedback.length > 0 ? [title, description, comments, feedback] : [title, description, comments]));
 }

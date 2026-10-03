@@ -1,4 +1,4 @@
-import type { Conversation, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
+import type { Conversation, HumanPullRequestFeedback, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
 import { conversationRevision } from "@terros/sergeant-contracts";
 
 // Briefs for the walking skeleton, after 05 §2–4 and 06 §2–4, trimmed to what this runner supports.
@@ -113,8 +113,9 @@ function renderContext({ pullRequests, runs }: Extract<RunSpec, { role: "worker"
   if (pullRequests.length === 0 && runs.length === 0) return "";
   const prs = pullRequests.map((p) => {
     const checks = p.checks.required.map((c) => `${c.name} ${c.state}`).join(", ") || "none declared";
+    const human = p.humanFeedback.map(renderHumanFeedback).join("\n");
     return `- ${p.url} — ${p.state}${p.draft ? " (draft)" : ""}, head \`${p.headSha}\`, base \`${p.baseRef}\`${p.mergeable === false ? ", has merge conflicts" : ""}
-  Required checks on that head: ${checks}`;
+  Required checks on that head: ${checks}${human && `\n  Human reviews and comments on this PR, oldest first:\n${human}`}`;
   });
   const earlier = runs.map((r) => {
     const status = `${r.runId} (${r.role}, ${r.status})`;
@@ -129,7 +130,9 @@ function renderContext({ pullRequests, runs }: Extract<RunSpec, { role: "worker"
 
 You continue earlier work on this issue. Start from what was pushed: check out the open PR's branch,
 fix it there, and push to it, so the same PR gets the fix; do not open a second PR for the same
-change. Address every blocking finding below, by fixing it or by saying in your report, with
+change. A human's review or comment on a PR below that asks for a change is a blocking finding that
+outranks Sergeant's own reviewer: address it on that PR, unless a later human review already settled
+it, and say in your report how. Address every blocking finding below, by fixing it or by saying in your report, with
 evidence, why it is wrong, and list each finding you answered in \`addressedFindings\`. Read a
 failing check's logs with \`gh\` (\`gh pr checks\`, \`gh run view --log-failed\`). Then decide afresh whether your new head needs review (rule 8): it does if anything
 changed since the last approving review of the PR needs one, including an earlier run's unreviewed fix.
@@ -142,6 +145,18 @@ ${prs.join("\n") || "(none opened yet)"}
 
 ${earlier.join("\n\n") || "(none)"}
 `;
+}
+
+/** One human review or comment on a PR, for the successor that must address it (TECH-4987). */
+function renderHumanFeedback(f: HumanPullRequestFeedback): string {
+  const what =
+    f.kind === "review"
+      ? `review, ${f.state}${f.commitId ? ` at \`${f.commitId.slice(0, 12)}\`` : ""}`
+      : f.kind === "review_comment"
+        ? `inline comment on \`${f.path}${f.line !== null ? `:${f.line}` : ""}\``
+        : "comment";
+  const body = f.body.trim() ? `\n${f.body.trim().replace(/^/gm, "      > ")}` : "";
+  return `    - ${f.author} — ${what} — ${f.updatedAt} — ${f.url}${body}`;
 }
 
 /** A review's verdict and findings, for any later run that must act on them or recheck them. */

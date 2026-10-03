@@ -124,8 +124,9 @@ installation, in this order, and expect deliveries made in between to fail harml
    also gets agent session events. Copy its signing secret into the Linear secret, then update again.
 6. **GitHub.** In the control-plane App's settings, make its webhook active with URL
    `https://<hostname>/webhooks/github` and the GitHub secret's value, and subscribe to Pull request,
-   Pull request review, Check run, Check suite, Push, and Status events (its existing permissions
-   cover them).
+   Pull request review, Pull request review comment, Issue comment, Check run, Check suite, Push, and
+   Status events (its existing permissions cover them). Review and comment events only shorten the
+   wait: polling reads human PR feedback either way.
 7. **Check** each one's recent deliveries: Linear's webhook page and the App's Advanced tab should show
    `200`. A `401` means the secret differs (serve logs `bad signature`) or, for Linear, the delivery is
    over a minute old (serve logs `stale webhookTimestamp`: check the host's clock); a `404`, that the

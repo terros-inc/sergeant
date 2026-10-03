@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import { checkMerge, type MergeFacts } from "./gate.ts";
 import type { MergePr } from "./actions.ts";
+import type { HumanPullRequestFeedback } from "./github.ts";
+import type { RefusedMerge } from "./situation.ts";
 import type { ReviewReport, RunRecord } from "./runs.ts";
 
 // The merge gate is the one place an unreviewed, red, wrong-head, or stale-conversation merge is
@@ -52,7 +54,14 @@ const merge: MergePr & { conversationRevision: string } = {
   conversationRevision: rev,
 };
 
-type Over = { pr?: Partial<MergeFacts["pr"]>; pullRequests?: MergeFacts["pullRequests"]; runs?: RunRecord[]; liveConversationRevision?: string; linked?: MergeFacts["linkedPullRequests"] };
+type Over = {
+  pr?: Partial<MergeFacts["pr"]>;
+  pullRequests?: MergeFacts["pullRequests"];
+  runs?: RunRecord[];
+  liveConversationRevision?: string;
+  linked?: MergeFacts["linkedPullRequests"];
+  refusedMerges?: RefusedMerge[];
+};
 const facts = (over: Over = {}): MergeFacts => ({
   pr: {
     ...pr,
@@ -66,6 +75,7 @@ const facts = (over: Over = {}): MergeFacts => ({
     body: "Fixes UNF-1",
     mergeable: true,
     checks: { sha: head, required: [{ name: "ci", state: "passed" }] },
+    humanFeedback: [],
     ...over.pr,
   },
   issueIdentifier: "UNF-1",
@@ -75,6 +85,7 @@ const facts = (over: Over = {}): MergeFacts => ({
   workerLogin,
   enrolledRepositories: [pr.repo],
   runs: over.runs ?? [reviewer(), worker(true)],
+  refusedMerges: over.refusedMerges ?? [],
 });
 
 test("a reviewed, green, exact-head merge against an unchanged conversation is allowed", () => {
@@ -114,4 +125,42 @@ test("refuses a not-required standing unless the worker skipped review for this 
   expect(checkMerge(skip, facts({ runs: [reviewer()] }))).toMatchObject({ rule: "M6" });
   const asReview = { ...merge, reviewStanding: { kind: "reviewed", reviewRunId: "run_worker" } } as const;
   expect(checkMerge(asReview, facts({ runs: [worker(false)] }))).toMatchObject({ rule: "M6" });
+});
+
+// TECH-4987: Sergeant proposed merging over the captain's "Request changes" twice. A human's requested
+// changes outrank Sergeant's own approving reviewer at any head, until that human approves or the
+// review is dismissed; another human's approval or the requester's later plain comment does not lift it.
+test("refuses to merge while a human's latest review requests changes, at any head", () => {
+  let n = 0;
+  const reviewBy = (author: string, state: HumanPullRequestFeedback["state"], commitId = head): HumanPullRequestFeedback => {
+    n += 1;
+    const at = `2026-10-03T0${n}:00:00.000Z`;
+    return { id: `review:${n}`, kind: "review", author, state, body: "", path: null, line: null, commitId, createdAt: at, updatedAt: at, url: `https://github.com/x/y/pull/7#r${n}` };
+  };
+  const withFeedback = (...humanFeedback: HumanPullRequestFeedback[]) => checkMerge(merge, facts({ pr: { humanFeedback } }));
+
+  const requested = reviewBy("captain", "CHANGES_REQUESTED", moved);
+  expect(withFeedback(requested)).toMatchObject({ allowed: false, rule: "M8", reason: expect.stringContaining("captain") });
+  expect(withFeedback(requested, reviewBy("captain", "COMMENTED"))).toMatchObject({ rule: "M8" });
+  expect(withFeedback(requested, reviewBy("someone-else", "APPROVED"))).toMatchObject({ rule: "M8" });
+  expect(withFeedback(requested, reviewBy("captain", "APPROVED"))).toEqual({ allowed: true });
+  // GitHub marks a dismissed review DISMISSED in place.
+  expect(withFeedback({ ...requested, state: "DISMISSED" })).toEqual({ allowed: true });
+});
+
+// TECH-4987: on a repository whose policy needs a human to merge (code owners), GitHub refused the merge
+// and Sergeant retried it with nothing changed. Only a changed conversation, human PR feedback
+// included, lets the same head be tried again.
+test("refuses to retry a merge GitHub refused by policy until something changes", () => {
+  const refused: RefusedMerge = {
+    ...pr,
+    url: "https://github.com/trevorallred/canary/pull/7",
+    headSha: head,
+    conversationRevision: rev,
+    reason: "Waiting on code owner review from @terros-inc/owners.",
+    at: "2026-10-03T01:00:00.000Z",
+  };
+  expect(checkMerge(merge, facts({ refusedMerges: [refused] }))).toMatchObject({ allowed: false, rule: "M12" });
+  const changed = "2".repeat(64);
+  expect(checkMerge({ ...merge, conversationRevision: changed }, facts({ refusedMerges: [refused], liveConversationRevision: changed }))).toEqual({ allowed: true });
 });
