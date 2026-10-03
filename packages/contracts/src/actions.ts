@@ -49,6 +49,11 @@ export const AskHuman = z.object({
   /** Concise: the question and why only a human can decide it. */
   question: z.string().min(1).max(4_000),
   options: z.array(z.string().min(1).max(500)).min(2).max(6).optional(),
+  /**
+   * TECH-5052: the id of Sergeant's earlier question whose reply did not settle it. This one is posted
+   * as a reply in that question's thread, which stays open.
+   */
+  followsUp: z.string().min(1).optional(),
 });
 
 /**
@@ -93,6 +98,11 @@ export type ProposedAction = z.infer<typeof ProposedAction>;
 export const TurnOutput = z.object({
   summary: z.string().min(1).max(2_000),
   actions: z.array(ProposedAction).max(5),
+  /**
+   * TECH-5052: the id of Sergeant's question whose human reply this turn acted on. Once every action
+   * of the turn is done, Sergeant resolves that question's thread in Linear.
+   */
+  answered: z.string().min(1).optional(),
   nextWakeSeconds: z.number().int().min(60).max(14_400).optional(),
 });
 export type TurnOutput = z.infer<typeof TurnOutput>;

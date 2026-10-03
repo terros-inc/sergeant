@@ -6,6 +6,7 @@ const comment = z.object({
   body: z.string(),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
+  parentId: z.string().nullable(),
   user: actor.nullable(),
   externalUser: actor.nullable(),
   botActor: z.object({ id: z.string().nullable(), type: z.string(), name: z.string().nullable() }).nullable(),
@@ -49,7 +50,7 @@ export const issueQuery = `
       attachments(first: 100) { nodes { id title url sourceType updatedAt creator { id name } } }
       comments(first: 50, after: $after) {
         nodes {
-          id body createdAt updatedAt
+          id body createdAt updatedAt parentId
           user { id name }
           externalUser { id name }
           botActor { id type name }
@@ -66,6 +67,16 @@ export const createComment = `
   }
 `;
 export const commentById = `query SergeantCommentById($id: String!) { comment(id: $id) { id } }`;
+// TECH-5052: a thread is resolved on its top comment, only when Sergeant wrote it.
+export const commentThread = `query SergeantCommentThread($id: String!) { comment(id: $id) { id parentId resolvedAt user { id } } }`;
+export const commentThreadShape = z.object({
+  comment: z.object({ id: z.string(), parentId: z.string().nullable(), resolvedAt: z.string().nullable(), user: z.object({ id: z.string() }).nullable() }).nullable(),
+});
+export const resolveComment = `
+  mutation SergeantResolveThread($id: String!) {
+    commentResolve(id: $id) { success }
+  }
+`;
 export const viewerQuery = `query SergeantViewer { viewer { id name organization { id } } }`;
 export const clearDelegate = `
   mutation SergeantUndelegate($id: String!) {

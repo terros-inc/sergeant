@@ -34,8 +34,11 @@ export const IssueAttachment = z.object({
 });
 export type IssueAttachment = z.infer<typeof IssueAttachment>;
 
-/** A comment that is not human input: Sergeant's own (its questions and outcomes), or a bot's. */
-export const AgentComment = z.object({ id: z.string().min(1), createdAt: Instant, body: z.string() });
+/**
+ * A comment that is not human input: Sergeant's own (its questions and outcomes), or a bot's.
+ * `parentId` is the thread's top comment when it is a reply.
+ */
+export const AgentComment = z.object({ id: z.string().min(1), createdAt: Instant, body: z.string(), parentId: z.string().min(1).optional() });
 export type AgentComment = z.infer<typeof AgentComment>;
 
 /** The current Linear task source: the issue verbatim and every human-authored comment. */

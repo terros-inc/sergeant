@@ -81,6 +81,12 @@ revision the proposing turn saw: if a comment or edit arrived since, the Gate re
 decides (M10, X5). A human's "stop" therefore can never be overtaken by a merge decided before it
 (03 §5).
 
+**Resolving the thread** (TECH-5052). Once Sergeant has acted on an answer (granted the budget, or a
+turn that names the question it `answered` asked nothing and had every action done), it resolves its
+own question's thread with Linear's `commentResolve`, so an open thread only means "still needs a
+human". A clarifying question is a reply in the same thread (`followsUp`), which stays open. Never a
+human's or another bot's thread; a thread already resolved is left alone; a failure is only logged.
+
 **Reminders.** After `humanWait.remindAfterHours` without an answer, Sergeant is woken to decide
 whether to re-ask more simply, mention someone, continue with its recommendation where that is safe
 and reversible, or leave it.

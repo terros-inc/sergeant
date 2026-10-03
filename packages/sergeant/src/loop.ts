@@ -22,7 +22,7 @@ import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
-import { noteEdit, openQuestion } from "./question.ts";
+import { noteEdit, openQuestion, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { humanWait } from "./slots.ts";
@@ -291,6 +291,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     );
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
+    await resolveAnswered({ answered: turn.output.answered, outcomes }, situation, deps.linear, log);
     await postHandoffs(conversation.issue.id);
     if (retryMerge) {
       log("the merge did not happen for a reason the next poll may not show: another turn after the next poll");

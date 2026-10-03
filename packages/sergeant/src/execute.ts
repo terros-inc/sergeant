@@ -21,7 +21,7 @@ import {
   type RunRecord,
   type SituationReport,
 } from "@terros/sergeant-contracts";
-import { questionComment, questionKey } from "./question.ts";
+import { ownQuestion, questionComment, questionKey } from "./question.ts";
 
 export type Ports = {
   linear: LinearPort;
@@ -238,7 +238,10 @@ export async function execute(action: ProposedAction, situation: SituationReport
   }
 }
 
-/** Posts a question as the V2 agent under `key`, at most once however often it is retried. */
+/**
+ * Posts a question as the V2 agent under `key`, at most once however often it is retried. A follow-up
+ * to one of Sergeant's own questions is a reply in that question's thread (TECH-5052).
+ */
 export async function askHuman(
   action: Extract<ProposedAction, { kind: "ask_human" }>,
   situation: SituationReport,
@@ -249,7 +252,9 @@ export async function askHuman(
   try {
     const delegation = checkDelegation((await ports.linear.readConversation(issue.id)).issue, ports.agentUserId);
     if (!delegation.allowed) return { action, status: "denied", rule: delegation.rule, reason: delegation.reason };
-    await ports.linear.postComment({ issueId: issue.id, body: questionComment(action), key });
+    const thread = ownQuestion(situation.conversation, action.followsUp);
+    const parentId = thread && (thread.parentId ?? thread.id);
+    await ports.linear.postComment({ issueId: issue.id, body: questionComment(action), key, ...(parentId && { parentId }) });
     return { action, status: "done", result: { commentId: commentIdFor(key) } };
   } catch (e) {
     return { action, status: "failed", error: (e as Error).message };

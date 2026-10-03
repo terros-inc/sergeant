@@ -41,6 +41,7 @@ const authored = (id: string, createdAt: string, author: Record<string, unknown>
   updatedAt: createdAt,
   user: null,
   externalUser: null,
+  parentId: null,
   botActor: null,
   ...author,
 });
