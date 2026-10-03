@@ -152,3 +152,26 @@ test("a legacy stop with state.json set aside does not hold pending on a never-s
   expect(seen.comments).toHaveLength(1);
   expect(await readdir(task)).not.toContain("cancel.json");
 });
+
+// TECH-5114: a start never confirmed that a drive read running did start, so its report may name
+// a PR Linear has not linked: a failed reread after its cancel holds the stop like any other run's.
+test("an unconfirmed start read running before its cancel holds the stop when its reread fails", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const { deps, seen } = fakes({ conversation: issue("started", "In Progress") });
+  const status = deps.runner.status;
+  let reads = 0;
+  deps.runner.status = async (id) => (reads++ > 0 ? Promise.reject(new Error("runner unreachable")) : status(id));
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), JSON.stringify({ ...JSON.parse(state(["run_w1"])), unconfirmedStarts: ["run_w1"] }));
+  await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
+  const drive = () => driveCancel(task, "UNF-1", deps, [repo], () => {});
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.canceled).toEqual(["run_w1"]);
+  expect(seen.comments).toEqual([]);
+  expect(await readdir(task)).toContain("cancel.json");
+  // Past the grace it finishes, saying that run's report could not be read.
+  await ageStop(task);
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }] });
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining("run `run_w1` could not be read") }]);
+});
