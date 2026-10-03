@@ -67,6 +67,8 @@ export type WorkerReport = z.infer<typeof WorkerReport>;
 export const Finding = z.object({
   id: z.string().min(1),
   severity: z.enum(["blocking", "non_blocking", "nit"]),
+  /** An unmet or contradicted requirement; ordinary implementation defects omit this. */
+  category: z.literal("acceptance").optional(),
   description: z.string(),
   location: z.string().optional(),
 });

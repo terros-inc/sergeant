@@ -177,7 +177,9 @@ function renderHumanFeedback(f: HumanPullRequestFeedback): string {
 /** A review's verdict and findings, for any later run that must act on them or recheck them. */
 function renderReview(report: ReviewReport): string {
   const heads = report.reviewed.map((h) => `${h.repo}#${h.number} at \`${h.headSha}\``).join(", ");
-  const findings = report.findings.map((f) => `- [${f.severity}] ${f.id}${f.location ? ` (${f.location})` : ""}: ${f.description}`);
+  const findings = report.findings.map(
+    (f) => `- [${f.severity}${f.category ? `, ${f.category}` : ""}] ${f.id}${f.location ? ` (${f.location})` : ""}: ${f.description}`,
+  );
   return `Verdict **${report.verdict}** on ${heads}. ${report.summary}\n\nFindings:\n${findings.join("\n") || "- (none)"}`;
 }
 
@@ -245,7 +247,8 @@ produced. You have no GitHub, AWS, or Linear credentials; everything you need is
    ("tested", "net simplification", "accepted trade-off") as unverified.
 3. Rule on every requirement the issue states, quoting it, with evidence: met, not met, contradicted
    (a decision narrowed or dropped it; only a human may do that), or needs live validation. Report
-   every unmet or contradicted requirement also as a blocking finding.
+   every unmet or contradicted requirement also as a blocking finding with \`category: "acceptance"\`.
+   Omit \`category\` from ordinary implementation defects.
 4. Trace self-declared trade-offs that change persisted or control-plane state through every reader,
    or report them as blocking.
 5. Name every correctness claim that rests on behavior outside the repository; verify it if you can,
@@ -270,6 +273,7 @@ with evidence), ending with exactly one fenced block tagged \`sergeant-report\` 
   "reviewed": [${subjects.map((s) => `{ "repo": "${s.repo}", "number": ${s.number}, "headSha": "${s.headSha}" }`).join(", ")}],
   "verdict": "approve" | "changes_requested" | "needs_human",
   "findings": [{ "id": "f1", "severity": "blocking" | "non_blocking" | "nit",
+                 "category": "acceptance" (omit unless this is an unmet or contradicted requirement),
                  "description": "...", "location": "path:line" }],
   "unreadableInputs": [],
   "summary": "<one paragraph>" }

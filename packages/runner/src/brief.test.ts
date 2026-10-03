@@ -96,3 +96,9 @@ test("a reviewer brief for PRs without human feedback has no human-feedback sect
   // The sections around it still join cleanly.
   expect(brief).toContain("Fixes UNF-1\n\n## Environment");
 });
+
+test("the reviewer brief distinguishes acceptance findings from ordinary defects", () => {
+  const brief = reviewerBrief(spec([pr]), [subject], []);
+  expect(brief).toContain('blocking finding with `category: "acceptance"`');
+  expect(brief).toContain("Omit `category` from ordinary implementation defects.");
+});
