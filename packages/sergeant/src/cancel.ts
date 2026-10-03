@@ -74,9 +74,13 @@ async function readIntent(dir: string): Promise<CancelIntent | undefined> {
   return raw === undefined ? undefined : CancelIntent.parse(JSON.parse(raw));
 }
 
+// Replaced whole, never rewritten in place: the loop's `recordStop` reads it outside the task's lock
+// while an intake drive may be writing it.
 async function writeIntent(dir: string, intent: CancelIntent): Promise<void> {
   await mkdir(dir, { recursive: true });
-  await writeFile(intentFile(dir), JSON.stringify(intent, null, 2));
+  const tmp = `${intentFile(dir)}.${randomUUID()}.tmp`;
+  await writeFile(tmp, JSON.stringify(intent, null, 2));
+  await rename(tmp, intentFile(dir));
 }
 
 /**
