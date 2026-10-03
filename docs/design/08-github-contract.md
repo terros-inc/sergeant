@@ -132,10 +132,15 @@ that the PR is ready for a human to merge (its link and the reviewed head), and 
 a new human review or comment, or a human edit on the issue lets a later turn try again. A temporary
 405 is not policy and fails the action instead, so a later turn retries: "Base branch was modified", or
 "Pull Request is not mergeable" while GitHub is still computing mergeability (M7 normally refuses that
-first). Because such a failure, or an M7 refusal of a PR the poll saw mergeable, can leave the next poll
-looking unchanged, the loop does not commit that turn's fingerprint: it takes another turn after the
-next poll, also after a restart. The Linear issue's Done state follows from
-automation, not from Sergeant (07 §7).
+first). After every merge attempt, whether it succeeds, fails, or is refused, the loop commits the
+turn's fingerprint; an unchanged poll therefore does not spend another reasoning turn. When M7 denies
+a merge for a PR that the turn's poll saw as mergeable, the committed fingerprint records that PR as
+`mergeable: null`, matching the merge preflight's later read. The first poll that reports definite
+mergeability again then differs and wakes exactly one turn. `baseSha` is also part of the fingerprint,
+so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` is the
+only action outcome that leaves the fingerprint uncommitted, so the question can be retried after the
+next poll or a restart. The Linear issue's Done state follows from automation, not from Sergeant
+(07 §7).
 
 Where `mergePolicy` is `human`, Sergeant gets the PR ready (green, reviewed, disposition recorded),
 says so in Linear once if useful, and waits. A human merge triggers automation as usual.
