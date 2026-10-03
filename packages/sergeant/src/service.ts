@@ -1,21 +1,17 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { sergeantVersion, type ApiError, type RepoSlug } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
-import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
-import { fromThisHost, send } from "./api-http.ts";
-import { isLoopbackHost, type Caller } from "./auth.ts";
-import type { BudgetWindow } from "./budget.ts";
+import { isLoopbackHost } from "./auth.ts";
 import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
-import type { Ports } from "./execute.ts";
-import { sweepFeedbackEvery, type FeedbackDeps } from "./feedback.ts";
 import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
 import { admissionOrder, Slot } from "./slots.ts";
+import { startFeedbackLoop } from "./service-feedback.ts";
+import { lockStateDir } from "./service-lock.ts";
+import { createServiceServer } from "./service-http.ts";
+import type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
 import { Wake } from "./wake.ts";
-import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
+import { webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
@@ -34,57 +30,7 @@ import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 // after a task's work landed is swept separately (feedback.ts) and may file an ordinary Backlog
 // follow-up, which nothing here starts: a human moves it to Todo and delegates it, like any issue.
 
-export type ServiceOptions = {
-  enrolledRepositories: RepoSlug[];
-  /** Holds `tasks/<issue identifier>/`, one task loop's directory each. */
-  stateDir: string;
-  /** Task slots: tasks running or waiting within the grace; further delegated issues wait for a free one. */
-  maxTasks?: number;
-  /** How long a waiting task (on a human or anything else) keeps its slot before the next task in order gets it. */
-  waitingGraceMinutes?: number;
-  intakeSeconds?: number;
-  /** Each task loop's poll interval, and how long it stays with nothing changing and nothing running. */
-  pollSeconds?: number;
-  idleMinutes?: number;
-  /** The budget window of a task that starts; a task already started keeps its stored one (loop.ts). */
-  budget?: Partial<BudgetWindow>;
-  /** Each task loop's audit sample rate (loop.ts); omitted, the loop's default. */
-  auditSampleRate?: number;
-  /** Minutes between post-merge feedback sweeps (feedback.ts), when `deps.feedback` is given. */
-  feedbackSweepMinutes?: number;
-  /** How long after work lands its feedback is still watched. */
-  feedbackLookbackDays?: number;
-  /** Port for `GET /health` and `GET /status`; omitted, no server. 0 picks a free one. */
-  port?: number;
-  /** Interface the server listens on: loopback unless set. Never publish `/status`. */
-  host?: string;
-  /** Webhook signing secrets: each source with one gets its `POST /webhooks/<source>` endpoint. */
-  webhookSecrets?: { linear?: string; github?: string };
-  /** The least time between two webhook wakes of one task loop, or of intake (`Wake.nudge`). */
-  webhookGapSeconds?: number;
-  /** Who may call the client API with a Linear login, and the client id `sgt login` uses (auth.ts). */
-  humans?: { callerOf: (accessToken: string) => Promise<Caller>; linearClientId: string };
-  /** Trusts a loopback caller with no login as an operator: for development on one machine, refused unless `host` is 127.0.0.1 or ::1. */
-  trustLoopback?: boolean;
-  log?: (line: string) => void;
-};
-
-export type ServiceDeps = Ports & {
-  reasoner: Reasoner;
-  /** Open issues delegated to the V2 agent, with their status, priority, and creation time: only to discover new work in Todo. */
-  delegatedIssues: () => Promise<DelegatedIssue[]>;
-  /** Removes the issue's delegation to the V2 agent: a human's cancel through the API. */
-  undelegate?: (issueId: string) => Promise<void>;
-  /** Reads and judgment for post-merge feedback; without them, feedback on landed work is not swept. */
-  feedback?: Pick<FeedbackDeps, "completedIssues" | "issueProgress" | "judge">;
-};
-
-export type Service = {
-  /** Where `GET /health` listens, once started. */
-  port: number | undefined;
-  /** Stops intake and resolves once every task loop has ended at its next poll. */
-  stop(): Promise<void>;
-};
+export type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
 
 export async function startService(opts: ServiceOptions, deps: ServiceDeps): Promise<Service> {
   if (opts.trustLoopback && !isLoopbackHost(opts.host ?? "127.0.0.1")) throw new Error(`--trust-loopback is refused on a non-loopback --host (${opts.host})`);
@@ -276,17 +222,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   })();
 
-  // Post-merge feedback (feedback.ts), on its own slower cadence so it never holds up intake.
-  const feedbackLoop = deps.feedback
-    ? sweepFeedbackEvery((opts.feedbackSweepMinutes ?? 10) * 60_000, { stateDir: opts.stateDir, enrolledRepositories: opts.enrolledRepositories, log, signal: abort.signal, ...(opts.feedbackLookbackDays !== undefined && { lookbackDays: opts.feedbackLookbackDays }) }, {
-        ...deps.feedback,
-        openIssues: async () => (await deps.delegatedIssues()).map((issue) => issue.identifier),
-        linear: deps.linear,
-        github: deps.github,
-        agentUserId: deps.agentUserId,
-        workerLogin: deps.workerLogin,
-      })
-    : Promise.resolve();
+  const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal);
 
   const api = apiHandler({
     stateDir: opts.stateDir,
@@ -340,32 +276,10 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     nudge,
     log,
   });
-  const webhookPaths = new Set<string>(Object.values(WEBHOOK_PATHS));
-  const { version } = sergeantVersion();
-
   const server =
     opts.port === undefined
       ? undefined
-      : createServer((req, res) => {
-          // `/health` and the webhooks are the only paths the host's proxy publishes, so `/health` says
-          // only whether serve is healthy: not stopping, and its latest intake succeeded. Task ids and
-          // intake errors are private, served on `/status` to loopback only, with Sergeant's git version.
-          // `/status` refuses any other caller as `/v1` does, so its privacy does not rest on the proxy.
-          const ok = !abort.signal.aborted && !lastIntake?.error;
-          if (req.method === "GET" && req.url === "/status" && !fromThisHost(req)) {
-            const refused: ApiError = { error: { code: "unauthorized", message: "/status answers only a caller on the Sergeant host" } };
-            send(res, { status: 401, json: refused });
-          } else if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
-            res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
-            const released = [...slots].filter(([, s]) => s.released).map(([id]) => id);
-            const detail = req.url === "/status" && { version, stopping: abort.signal.aborted, tasks: [...active.keys()], released, lastIntake };
-            res.end(JSON.stringify({ ok, ...detail }));
-          } else if (webhookPaths.has(new URL(req.url ?? "/", "http://localhost").pathname)) {
-            webhooks(req, res);
-          } else {
-            api(req, res);
-          }
-        });
+      : createServiceServer({ abort, lastIntake: () => lastIntake, slots, active, webhooks, api });
   if (server) await new Promise<void>((resolve) => server.listen(opts.port, opts.host ?? "127.0.0.1", resolve));
   const address = server?.address();
 
@@ -381,25 +295,4 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       await release();
     },
   };
-}
-
-/**
- * Holds `<stateDir>/service.lock` until released or this process exits, refusing while another
- * process, or another service in this one, holds it. The exclusion is SQLite's exclusive lock, an
- * OS file lock, so a dead holder's is released with the process and there is no stale lock to take
- * over. The file is never removed: a remover could unlink it under a starter that just opened it,
- * and the next starter would lock a fresh file beside it. `service.pid` only names the holder.
- */
-async function lockStateDir(stateDir: string): Promise<() => Promise<void>> {
-  await mkdir(stateDir, { recursive: true });
-  const db = new DatabaseSync(join(stateDir, "service.lock"), { timeout: 0 });
-  try {
-    db.exec("BEGIN EXCLUSIVE");
-  } catch (e) {
-    db.close();
-    const holder = (await readFile(join(stateDir, "service.pid"), "utf8").catch(() => "")).trim();
-    throw new Error(`a Sergeant service${holder && ` (pid ${holder})`} already serves ${stateDir}: ${(e as Error).message}`);
-  }
-  await writeFile(join(stateDir, "service.pid"), `${process.pid}\n`);
-  return async () => db.close();
 }

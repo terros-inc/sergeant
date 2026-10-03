@@ -1,47 +1,7 @@
 import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
-
-const pullRequest = z.object({
-  number: z.number().int().positive(),
-  html_url: z.url(),
-  user: z.object({ login: z.string().min(1) }),
-  body: z.string().nullish(),
-  state: z.enum(["open", "closed"]),
-  draft: z.boolean(),
-  merged_at: z.string().nullable(),
-  mergeable: z.boolean().nullable(),
-  merge_commit_sha: z.string().nullable(),
-  head: z.object({ sha: z.string() }),
-  base: z.object({ ref: z.string().min(1), sha: z.string() }),
-});
-const checkRun = z.object({
-  name: z.string().min(1),
-  status: z.string(),
-  conclusion: z.string().nullable(),
-  app: z.object({ id: z.number().int() }).nullable(),
-});
-const checkRuns = z.object({ total_count: z.number().int(), check_runs: z.array(checkRun) });
-const commitStatus = z.object({
-  state: z.enum(["error", "failure", "pending", "success"]),
-  total_count: z.number().int().nonnegative(),
-  statuses: z.array(z.object({ context: z.string().min(1), state: z.enum(["error", "failure", "pending", "success"]) })),
-});
-const protection = z.object({
-  contexts: z.array(z.string()).optional(),
-  checks: z.array(z.object({ context: z.string(), app_id: z.number().int().nullable() })).optional(),
-});
-const branchRules = z.array(z.object({ type: z.string(), parameters: z.unknown().optional() }).passthrough());
-const requiredRule = z.object({
-  required_status_checks: z.array(
-    z.object({ context: z.string().min(1), integration_id: z.number().int().nullable().optional() }),
-  ),
-});
-const mergeResponse = z.object({ sha: z.string(), merged: z.boolean(), message: z.string() });
-const repositoryConfig = z.object({
-  mergeMethod: z.enum(["merge", "squash", "rebase"]),
-  observedChecksFallback: z.boolean().default(false),
-});
+import { branchRules, checkRun, checkRuns, commitStatus, mergeResponse, protection, pullRequest, repositoryConfig, requiredRule } from "./schemas.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
 type ObservedCheck = { name: string; appId?: number; state: Exclude<CheckState, "missing"> };
