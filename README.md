@@ -206,6 +206,22 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   happens: no event owes a turn or is recorded, repeated events coalesce (each loop, and intake, wakes
   at most once per 5 seconds), an issue or PR no task watches is ignored, and the polls still find
   every change.
+- **Post-merge feedback** (TECH-4985). While a task is active, a human's comment is part of its
+  conversation, as above. Once its completing PR (`Fixes`) merged or its issue is Done, the loop takes
+  no more turns, so a sweep every 10 minutes reads those issues (delegated to `agentUserId` and
+  completed in the last 14 days, open and delegated, or merged by this host in that time): human
+  comments on the issue after the work landed, and comments, review comments, and reviews on its
+  merged worker-App PRs after their merge from the repository's owners, members, and collaborators.
+  A reasoning call judges each one; an acknowledgement or discussion files nothing. Actionable
+  feedback becomes one ordinary follow-up issue (Backlog, assigned to the origin's owner, not
+  delegated; see the design's §11), related to the origin, whose description is the delta reasoning
+  wrote, the feedback verbatim, and links to the original issue and the merged PRs; a comment on the
+  origin says so. A human starts it like any issue, by moving it to Todo and delegating it to Sergeant.
+  Its Linear id is derived from the feedback, so the same feedback never files a second issue.
+  `<state dir>/feedback.json` records what was judged and failed attempts, and its `since` (the first
+  sweep) keeps feedback from before the rollout out. Per issue, at most 3 follow-ups are filed and 10
+  pieces of feedback judged; past that, or after 3 failed attempts at one piece, Sergeant says so in a
+  comment on the issue rather than dropping it silently.
 - A loop that ends (idle, the turn limit, a failed read) is admitted again on a later intake while
   the issue is still delegated: an unchanged task takes no turn, a changed one does. A failed intake
   is logged and retried next interval.

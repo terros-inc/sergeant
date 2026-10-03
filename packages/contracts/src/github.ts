@@ -32,6 +32,11 @@ export const HumanPullRequestFeedback = z.object({
   /** A review cannot be edited in place on GitHub's API, so its own is its submission time. */
   updatedAt: z.iso.datetime({ offset: true }),
   url: z.url(),
+  /**
+   * GitHub's `author_association` (`OWNER`, `MEMBER`, `COLLABORATOR`, `NONE`, ...): whether the author
+   * has a role in the repository. Absent where a source does not know it.
+   */
+  association: z.string().optional(),
 });
 export type HumanPullRequestFeedback = z.infer<typeof HumanPullRequestFeedback>;
 
@@ -47,6 +52,8 @@ export const PullRequestFacts = z.object({
   headSha: Sha,
   /** The merge commit once GitHub reports the PR merged; null before then. */
   mergedSha: Sha.nullable(),
+  /** When GitHub merged it; null before then, absent where a source does not know it. */
+  mergedAt: z.iso.datetime({ offset: true }).nullish(),
   baseRef: z.string().min(1),
   /** The PR description; GitHub's empty body is "". M9 reads its closing reference. */
   body: z.string(),

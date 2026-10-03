@@ -221,6 +221,15 @@ work is a separate outcome, or when out-of-scope work was discovered that someon
   the origin to Sergeant when Linear's history shows it, else unassigned.
 - Limits: `maxPerTask` and `maxDepth` (F1–F3); deduplicated by Sergeant's semantic key (02 §6).
 
+**Feedback after the work landed (TECH-4985).** Once the completing PR merged or the issue is Done,
+the task loop takes no more turns, so a human comment on the issue, or a comment or review on its
+merged PR from someone with a role in the repository, would otherwise be lost. Sergeant sweeps
+recently landed issues, reasoning judges each new piece of feedback, and actionable feedback becomes
+one ordinary follow-up under the rule above (Backlog, owner-assigned, not delegated), keyed by the
+feedback, with the delta, the feedback verbatim, and links to the issue and the merged PRs. A human
+starts it the normal way, by moving it to Todo and delegating it; nothing about it is special after
+that. Feedback while the task is active stays part of its conversation (§10) and never files one.
+
 Multi-repository work does not need follow-ups: one worker handles all repositories in the task's set
 (S1's UNF-625 machinery is not needed).
 

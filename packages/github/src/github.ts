@@ -243,6 +243,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         draft: live.draft,
         headSha,
         mergedSha: live.merged_at ? live.merge_commit_sha : null,
+        mergedAt: live.merged_at ? new Date(live.merged_at).toISOString() : null,
         baseRef: live.base.ref,
         body: live.body ?? "",
         mergeable: live.mergeable,

@@ -4,6 +4,8 @@ import {
   actor,
   clearDelegate,
   commentById,
+  completedPage,
+  completedQuery,
   createComment,
   createIssue,
   createRelation,
@@ -16,6 +18,8 @@ import {
   followupOriginShape,
   issueById,
   issuePage,
+  issueProgress,
+  issueProgressShape,
   issueQuery,
   issueRef,
   issueWorkflow,
@@ -63,6 +67,10 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
    * plane: runs get the file, never the token (TECH-4994). Any other URL is refused.
    */
   fetchUpload(url: string, init?: { signal?: AbortSignal }): Promise<Response>;
+  /** Identifiers of the issues delegated to `agentUserId` that reached a completed state after `since`. */
+  completedIssues(agentUserId: string, since: string): Promise<string[]>;
+  /** The issue's state type and, while it is completed, when it completed. */
+  issueProgress(issueId: string): Promise<{ stateType: string; completedAt: string | null }>;
   /** Removes the issue's delegate: a human's cancel (`sgt task cancel`). Idempotent. */
   undelegate(issueId: string): Promise<void>;
 } {
@@ -283,6 +291,23 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         if (!next.startsWith("https://")) throw new Error("Linear upload redirected off https");
       }
       throw new Error("too many redirects fetching a Linear upload");
+    },
+
+    async completedIssues(agentUserId, since) {
+      const completed: string[] = [];
+      let after: string | null = null;
+      do {
+        const { issues }: z.infer<typeof completedPage> = await request(completedQuery, { agent: agentUserId, since, after }, completedPage);
+        completed.push(...issues.nodes.map((n) => n.identifier));
+        after = issues.pageInfo.hasNextPage ? issues.pageInfo.endCursor : null;
+      } while (after);
+      return completed;
+    },
+
+    async issueProgress(issueId) {
+      const { issue } = await request(issueProgress, { id: issueId }, issueProgressShape);
+      if (!issue) throw new Error(`Linear issue not found: ${issueId}`);
+      return { stateType: issue.state.type, completedAt: issue.completedAt };
     },
 
     async undelegate(issueId) {
