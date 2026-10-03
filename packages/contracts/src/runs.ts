@@ -4,6 +4,10 @@ import { RepoSlug } from "./conversation.ts";
 export const RunId = z.string().regex(/^run_[\w-]+$/);
 export type RunId = z.infer<typeof RunId>;
 
+/** A machine-readable terminal failure that Sergeant handles outside ordinary agent reasoning. */
+export const RunFailureReason = z.enum(["authentication"]);
+export type RunFailureReason = z.infer<typeof RunFailureReason>;
+
 const FAIL_SAFE = "fail-safe: missing or unjustified skip, so review is required";
 
 /**
@@ -100,6 +104,8 @@ const RunBase = {
     .optional(),
   /** Why the report is null: missing, malformed, or failed validation. */
   reportError: z.string().optional(),
+  /** A distinct actionable cause when the runner can classify the failure safely. */
+  failureReason: RunFailureReason.optional(),
   /**
    * The `issueRevision` of the title and description the run started from, as the runner recorded it.
    * Absent on records made before TECH-5034.

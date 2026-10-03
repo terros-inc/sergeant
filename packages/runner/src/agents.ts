@@ -1,4 +1,4 @@
-import type { RunRecord } from "@terros/sergeant-contracts";
+import type { RunFailureReason, RunRecord } from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 // The agent CLIs a run can use (04 §10, TECH-5009). Each runs in the same container, with the same
@@ -15,6 +15,8 @@ export type AgentResult = {
   ok: boolean;
   /** Why it did not succeed, in the CLI's words. */
   detail?: string;
+  /** An actionable failure category, without credential or provider error text. */
+  failureReason?: RunFailureReason;
   sessionId?: string;
   /** Only a dollar figure the CLI itself reported; never an estimate. */
   costUsd?: number;
@@ -28,7 +30,7 @@ export type Agent = {
   /** The model credential's variable: the only one that enters this agent's containers. */
   credentialEnv: string;
   script: string;
-  parse(stdout: string): AgentResult;
+  parse(stdout: string, stderr?: string): AgentResult;
 };
 
 const PROMPT = "Read /workspace/sergeant-brief.md and do what it says. Your last step is writing /workspace/sergeant-report.md.";
@@ -82,6 +84,9 @@ const CodexEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn.failed"), error: z.object({ message: z.string() }) }),
 ]);
 
+const CODEX_AUTH_FAILURE = /(?:\b401\b|unauthori[sz]ed|authentication failed|invalid[_ -]?grant|refresh token.{0,80}(?:expired|invalid|revoked)|(?:expired|invalid|revoked).{0,80}refresh token)/i;
+const CODEX_AUTH_DETAIL = "Codex authentication failed; replace the installation's Codex credential or switch to an OpenAI API key";
+
 /**
  * `CODEX_CREDENTIAL` is the installation's Codex secret: the JSON of a `codex login`'s `auth.json`
  * (a ChatGPT workspace login), or an OpenAI API key. Either way it becomes the container's own
@@ -106,7 +111,7 @@ ${CODEX_LOGIN}
 exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-git-repo-check \\
   --dangerously-bypass-approvals-and-sandbox "${PROMPT}"
 `,
-  parse(stdout) {
+  parse(stdout, stderr = "") {
     let sessionId: string | undefined;
     let tokens: Tokens | undefined;
     let failure: string | undefined;
@@ -133,10 +138,17 @@ exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-g
         failure = undefined;
       }
     }
+    // Structured turn failures are authoritative. Login failures happen before JSON starts and are
+    // written to stderr. Never scan successful item text, which could merely discuss a 401.
+    const authenticationFailed = (failure !== undefined && CODEX_AUTH_FAILURE.test(failure)) || (tokens === undefined && CODEX_AUTH_FAILURE.test(stderr));
     return {
       ok: tokens !== undefined && failure === undefined,
       // OpenAI's errors quote part of an API key; a run record never holds any of it.
-      ...(failure !== undefined ? { detail: failure.replace(/sk-[\w*.-]+/g, "sk-[redacted]").slice(0, 300) } : tokens === undefined && { detail: "no completed turn" }),
+      ...(authenticationFailed
+        ? { detail: CODEX_AUTH_DETAIL, failureReason: "authentication" as const }
+        : failure !== undefined
+          ? { detail: failure.replace(/sk-[\w*.-]+/g, "sk-[redacted]").slice(0, 300) }
+          : tokens === undefined && { detail: "no completed turn" }),
       ...(sessionId && { sessionId }),
       ...(tokens && { tokens }),
       models: [],

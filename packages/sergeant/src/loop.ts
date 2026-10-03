@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { conversationRevision, linearUploads, issueRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { drawAudit, exists, finishReviews, observeCompletion, postOutcome } from "./after-merge.ts";
+import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
 import { cancelPending, driveCancel } from "./cancel.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
@@ -184,6 +185,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       stopping = stop;
       continue;
     }
+    await postAuthAlerts(conversation.issue.id, runs, conversation.agentComments, deps.linear, log);
     await resolveDue(conversation);
     const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length) }, configured, ctx);
     if (holds.hold) {

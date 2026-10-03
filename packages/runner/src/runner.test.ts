@@ -9,11 +9,11 @@ import { containerRunner, type ContainerRunnerOptions } from "./runner.ts";
 // A fake host: records every command and plays Docker from `docker`. No real process is launched.
 function fakeHost() {
   const calls: { cmd: string; args: string[]; opts: ExecOptions }[] = [];
-  const docker = { reachable: true, running: true, logs: "" };
+  const docker = { reachable: true, running: true, logs: "", logErrors: "" };
   const exec: Exec = async (cmd, args, opts = {}) => {
     calls.push({ cmd, args, opts });
     if (cmd !== "docker" || args[0] === "run" || args[0] === "rm") return { code: 0, stdout: "", stderr: "" };
-    if (args[0] === "logs") return { code: 0, stdout: docker.logs, stderr: "" };
+    if (args[0] === "logs") return { code: 0, stdout: docker.logs, stderr: docker.logErrors };
     if (!docker.reachable) return { code: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" };
     if (args[0] === "stop") docker.running = false;
     const status = args.includes("{{.State.Running}}") ? String(docker.running) : `${docker.running ? "running" : "exited"} 0`;
@@ -221,8 +221,20 @@ test("a Codex run records its summed tokens and no cost; a Claude run its report
   expect(codex.report).not.toBeNull();
 
   const failed = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, '{"type":"turn.failed","error":{"message":"401: Incorrect API key provided: sk-proj***abcd."}}', "");
-  expect(failed).toMatchObject({ status: "failed", issueRevision: issueRevision(spec.conversation.issue), reportError: expect.stringContaining("401: Incorrect API key provided: sk-[redacted]") });
+  expect(failed).toMatchObject({
+    status: "failed",
+    issueRevision: issueRevision(spec.conversation.issue),
+    failureReason: "authentication",
+    reportError: expect.stringContaining("Codex authentication failed"),
+  });
   expect(JSON.stringify(failed)).not.toContain("abcd");
+
+  const login = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
+  login.host.docker.running = false;
+  login.host.docker.logErrors = "OAuth refresh token was revoked: secret-token-value";
+  const loginFailed = await login.runner.status("run_t1");
+  expect(loginFailed).toMatchObject({ status: "failed", failureReason: "authentication", reportError: expect.stringContaining("replace the installation's Codex credential") });
+  expect(JSON.stringify(loginFailed)).not.toContain("secret-token-value");
 
   const claude = await ended({}, '{"is_error":false,"session_id":"s","total_cost_usd":1.25,"modelUsage":{"claude-sonnet-5-5":{}}}');
   expect(claude).toMatchObject({ status: "succeeded", provider: "anthropic/claude-code", model: "claude-sonnet-5-5", costUsd: 1.25 });

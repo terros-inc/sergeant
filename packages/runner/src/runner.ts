@@ -146,7 +146,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
 
   async function finalize(meta: RunMeta, exitCode: number): Promise<RunRecord> {
     const logs = await exec("docker", ["logs", meta.container]);
-    const agent = AGENTS[meta.adapter].parse(logs.stdout);
+    const agent = AGENTS[meta.adapter].parse(logs.stdout, logs.stderr);
     const base = {
       runId: meta.runId,
       status: exitCode === 0 && agent.ok ? "succeeded" : "failed",
@@ -155,6 +155,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       ...recorded(meta),
       ...(agent.costUsd !== undefined && { costUsd: agent.costUsd }),
       ...(agent.tokens && { tokens: agent.tokens }),
+      ...(agent.failureReason && { failureReason: agent.failureReason }),
     } as const;
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };

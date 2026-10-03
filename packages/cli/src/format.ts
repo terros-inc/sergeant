@@ -45,6 +45,7 @@ export function showTask(d: TaskDetail): string {
 export function showRun({ task, run }: RunDetail): string {
   const cost = run.costUsd === undefined && run.tokens ? `cost unknown, ${run.tokens.input} input and ${run.tokens.output} output tokens` : usd(run.costUsd);
   const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${cost}`];
+  if (run.failureReason) lines.push(`failure reason: ${run.failureReason}`);
   if (!run.report) {
     lines.push(run.reportError ? `no report: ${run.reportError}` : "no report yet");
   } else if (run.role === "worker") {
