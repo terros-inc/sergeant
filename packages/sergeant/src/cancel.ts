@@ -28,6 +28,8 @@ const CancelIntent = z.object({
   at: z.iso.datetime(),
   /** The task's runs when the stop was first driven: set once, before any is canceled. */
   runIds: z.array(RunId).optional(),
+  /** Those of `runIds` whose start the runner never confirmed (loop.ts), set with them. */
+  unconfirmedStarts: z.array(RunId).optional(),
   /** The PRs this stop closed, for the issue comment and the API's answer. */
   closed: z.array(ClosedPullRequest).default([]),
 });
@@ -112,13 +114,15 @@ export type StopProgress = {
 export async function driveCancel(dir: string, ref: string, deps: Ports, enrolled: RepoSlug[], log: (line: string) => void): Promise<StopProgress> {
   const intent = await readIntent(dir);
   if (!intent) return { stopping: [], closedPullRequests: [] };
-  const state = await readTaskState(join(dir, "state.json")).catch(() => undefined);
-  if (!intent.runIds) {
+  if (!intent.runIds || !intent.unconfirmedStarts) {
     // The task's loop takes no turn once a stop is recorded, and a start already past its live check
-    // finished under the task's lock before this drive began, so these are all the runs to stop.
-    intent.runIds = runIdsOf(state);
+    // finished under the task's lock before this drive began, so these are all the runs to stop. They
+    // are kept in the intent, since `state.json` is set aside before the intent is removed.
+    const state = await readTaskState(join(dir, "state.json")).catch(() => undefined);
+    if (!intent.runIds) log(`${ref}: stopping: ${intent.reason}`);
+    intent.runIds ??= runIdsOf(state);
+    intent.unconfirmedStarts = state?.unconfirmedStarts ?? [];
     await writeIntent(dir, intent);
-    log(`${ref}: stopping: ${intent.reason}`);
   }
   const stopping: RunId[] = [];
   const runs: RunRecord[] = [];
@@ -133,11 +137,11 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
         stopping.push(runId);
         continue;
       }
-      // A run whose status could not be read may have reported a PR Linear has not linked yet: read it
-      // again now it is stopped, and keep the stop pending until it can be, so that PR is not missed.
+      // Only a run whose first status read failed is read again, now it is stopped: it may have reported
+      // a PR Linear has not linked yet, so the stop stays pending until it reads, or that PR is missed.
       run ??= await deps.runner.status(runId).catch(() => undefined);
       // A start never confirmed that the runner still does not know never started (loop.ts): no report.
-      if (!run && state?.unconfirmedStarts.includes(runId)) continue;
+      if (!run && intent.unconfirmedStarts.includes(runId)) continue;
     }
     if (run) runs.push(run);
     else {

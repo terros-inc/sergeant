@@ -41,9 +41,13 @@ const worker = (status: RunRecord["status"]): RunRecord => ({ runId: "run_w1", r
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
-/** Fakes for UNF-1 with a running worker whose PR #7 is open; `live` is what Linear says now. */
+/**
+ * Fakes for UNF-1 with a running worker whose PR #7 is open; `live` is what Linear says now. As the
+ * real runner, a running run's status has no report, and a cancel keeps the one its worker `wrote`.
+ */
 function fakes(live: { conversation: Conversation }) {
   const runs = [worker("running")];
+  const wrote = new Map<string, RunRecord["report"]>();
   const seen = { turns: 0, starts: 0, canceled: [] as string[], closed: [] as { number: number; comment: string }[], comments: [] as { key: string; body: string }[] };
   const deps: ServiceDeps = {
     agentUserId: agent.id,
@@ -70,7 +74,7 @@ function fakes(live: { conversation: Conversation }) {
       cancel: async (id) => {
         seen.canceled.push(id);
         const run = runs.find((r) => r.runId === id);
-        if (run) run.status = "canceled";
+        if (run) Object.assign(run, { status: "canceled", report: wrote.get(id) ?? null });
       },
     },
     reasoner: {
@@ -80,7 +84,7 @@ function fakes(live: { conversation: Conversation }) {
       },
     },
   };
-  return { deps, seen };
+  return { deps, seen, wrote };
 }
 
 const state = (runIds: string[]) =>
@@ -206,12 +210,11 @@ async function stopWithFlakyStatus(failures: number) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
   const live = { conversation: issue("started", "In Progress") };
   live.conversation.issue.linkedPullRequests = [];
-  const { deps, seen } = fakes(live);
-  const reported: RunRecord = {
-    runId: "run_w1", role: "worker", status: "running", provider: "p", model: "m",
-    report: { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] },
-  };
-  deps.runner.status = async () => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : { ...reported, status: seen.canceled.length > 0 ? "canceled" : "running" });
+  const { deps, seen, wrote } = fakes(live);
+  // The worker has exited with its report written, not yet finalized, when its status read fails.
+  wrote.set("run_w1", { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] });
+  const status = deps.runner.status;
+  deps.runner.status = async (id) => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : status(id));
   const task = taskDir(dir, "UNF-1");
   await mkdir(task, { recursive: true });
   await writeFile(join(task, "state.json"), state(["run_w1"]));
@@ -238,6 +241,26 @@ test("a stop whose run status stays unreadable after the cancel stays pending, s
   expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
   expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("No open PR to close") }]);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
+// A start the runner never confirmed and still does not know never started, so it does not hold the
+// stop. That is in the intent, so it holds after a crash once `state.json` is set aside.
+test("a stop's never-started run does not hold it pending once state.json is set aside", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const { deps, seen } = fakes({ conversation: issue("started", "In Progress") });
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), JSON.stringify({ ...JSON.parse(state(["run_w1", "run_lost"])), unconfirmedStarts: ["run_lost"] }));
+  await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
+  const postComment = deps.linear.postComment;
+  deps.linear.postComment = async () => Promise.reject(new Error("Linear unreachable"));
+  await expect(driveCancel(task, "UNF-1", deps, [repo], () => {})).rejects.toThrow(/Linear/);
+
+  deps.linear.postComment = postComment;
+  await rm(join(task, "state.json"));
+  expect(await driveCancel(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }] });
+  expect(seen.comments).toHaveLength(1);
   expect(await readdir(task)).not.toContain("cancel.json");
 });
 
