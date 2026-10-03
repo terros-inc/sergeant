@@ -104,25 +104,31 @@ test("a run uses one account's credential, records it, and a quota failure moves
   expect(env).toEqual(["sk-ant-oat01-installation", "sk-ant-oat01-ada"]);
 });
 
-test("a terminal record keeps the provider choice and account recorded at launch", async () => {
+// A terminal record keeps the launch metadata from run.json, and stays readable as written when
+// run.json is malformed: run.json only adds detail.
+test("a terminal record keeps the provider choice and account recorded at launch, and is read as written without them", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "sergeant-recorded-choice-test-"));
-  const runDir = join(rootDir, "run_done");
-  await mkdir(runDir);
   const providerChoice = {
     adapter: "codex-local",
     reason: "more weekly quota",
     readings: [{ adapter: "codex-local", account: "installation-codex", readAt: "2026-10-03T12:00:00.000Z", weekly: { remainingPercent: 80 }, fiveHour: { remainingPercent: 90 } }],
   };
   const account = { id: "installation-codex", group: "owner", holder: "the installation" } as const;
-  await writeFile(join(runDir, "run.json"), JSON.stringify({
+  const ended = async (runId: string, meta: string) => {
+    await mkdir(join(rootDir, runId));
+    await writeFile(join(rootDir, runId, "run.json"), meta);
+    // A terminal record may have been written by a process that did not yet copy the launch metadata.
+    await writeFile(join(rootDir, runId, "record.json"), JSON.stringify({
+      runId, role: "worker", status: "succeeded", provider: "openai/codex", model: "gpt-5", report: null,
+    }));
+  };
+  await ended("run_done", JSON.stringify({
     runId: "run_done", role: "worker", adapter: "codex-local", model: "gpt-5", repositories: ["o/r"],
     container: "sergeant-run_done", startedAt: "2026-10-03T12:00:00.000Z", providerChoice, account,
     accountReason: "owner's account installation-codex",
   }));
-  // A terminal record may have been written by a process that did not yet copy the launch metadata.
-  await writeFile(join(runDir, "record.json"), JSON.stringify({
-    runId: "run_done", role: "worker", status: "succeeded", provider: "openai/codex", model: "gpt-5", report: null,
-  }));
+  await ended("run_bad_json", "{ not json");
+  await ended("run_bad_meta", JSON.stringify({ runId: "run_bad_meta", providerChoice, account }));
   const runner = containerRunner({
     rootDir,
     models: { worker: { "claude-code-local": "opus", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
@@ -133,4 +139,7 @@ test("a terminal record keeps the provider choice and account recorded at launch
   });
 
   expect(await runner.status("run_done")).toMatchObject({ providerChoice, account, accountReason: "owner's account installation-codex" });
+  for (const runId of ["run_bad_json", "run_bad_meta"]) {
+    expect(await runner.status(runId)).toEqual({ runId, role: "worker", status: "succeeded", provider: "openai/codex", model: "gpt-5", report: null });
+  }
 });

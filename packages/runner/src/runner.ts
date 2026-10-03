@@ -96,11 +96,9 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     try {
       const record = JSON.parse(await readFile(paths(runId).record, "utf8"));
       // run.json is authoritative for launch-time facts. Keep serving them even for a terminal
-      // record written without the newer optional fields (for example, across a host update).
-      const meta = await readMeta(runId).catch((e: NodeJS.ErrnoException) => {
-        if (e.code === "ENOENT") return undefined;
-        throw e;
-      });
+      // record written without the newer optional fields (for example, across a host update). They
+      // are extra detail only: a missing or unreadable run.json leaves the record as written.
+      const meta = await readMeta(runId).catch(() => undefined);
       return RunRecord.parse({ ...record, ...(meta && recorded(meta)) });
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;

@@ -127,7 +127,7 @@ test("a run view includes its provider choice and credential-free account", asyn
 
   expect(await call(port, "GET", `/v1/runs/${run.runId}`)).toEqual({
     status: 200,
-    json: { task: "UNF-1", run: { ...run, providerChoice, account, accountReason: "owner's account installation-codex" } },
+    json: { task: "UNF-1", run },
   });
 }, 30_000);
 
