@@ -1,5 +1,6 @@
 import type { Conversation, HumanPullRequestFeedback, PullRequestFacts, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
 import { conversationRevision } from "@terros/sergeant-contracts";
+import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // Briefs for the walking skeleton, after 05 §2–4 and 06 §2–4, trimmed to what this runner supports.
 // The Task section is the issue and every human comment verbatim; no comment is ever dropped
@@ -21,7 +22,7 @@ ${c.issue.description}
 
 ### Human comments, oldest first
 
-${comments}`;
+${comments}${renderLinkedIssueBackground(c)}`;
 }
 
 export function workerBrief(

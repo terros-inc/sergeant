@@ -1,6 +1,7 @@
 import { commentIdFor, Conversation, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { followupFiler } from "./followup.ts";
+import { readLinkedIssueBackground } from "./linked-issues.ts";
 import {
   actor,
   clearDelegate,
@@ -17,6 +18,8 @@ import {
   issueProgress,
   issueProgressShape,
   issueQuery,
+  linkedIssue,
+  linkedIssueQuery,
   issueWorkflow,
   issueWorkflowShape,
   moveState,
@@ -137,7 +140,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         .filter((item) => !humanAuthor(item))
         .map(({ id, createdAt, body, parentId }) => ({ id, createdAt, body, ...(parentId && { parentId }) }));
 
-      return Conversation.parse({
+      const conversation = Conversation.parse({
         issue: {
           id: first.id,
           identifier: first.identifier,
@@ -156,6 +159,16 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         humanComments: humanComments.sort(byTime),
         agentComments: agentComments.sort(byTime),
       });
+      const linkedIssueBackground = await readLinkedIssueBackground(
+        conversation,
+        async (id) => {
+          const { issue } = await request(linkedIssueQuery, { id }, z.object({ issue: linkedIssue.nullable() }));
+          if (!issue) throw new Error("issue not found");
+          return issue;
+        },
+        log,
+      );
+      return Conversation.parse({ ...conversation, linkedIssueBackground });
     },
 
     async postComment({ issueId, body, key, parentId }) {

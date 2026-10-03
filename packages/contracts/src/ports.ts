@@ -7,7 +7,7 @@ import type { RunId, RunRecord } from "./runs.ts";
 // returning it; the core never trusts an unvalidated external payload.
 
 export interface LinearPort {
-  /** The issue and every human-authored comment, live. */
+  /** The issue, every human-authored comment, and bounded explicit linked-issue background, live. */
   readConversation(issueId: string): Promise<Conversation>;
   /**
    * Posts a comment as Sergeant's agent, at most once per `key`: Linear's client-supplied comment id

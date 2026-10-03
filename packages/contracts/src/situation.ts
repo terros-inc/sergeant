@@ -32,6 +32,7 @@ export const SituationReport = z.object({
   generatedAt: z.iso.datetime({ offset: true }),
   /** What this turn saw; a merge it proposes carries it (M10). */
   conversationRevision: ConversationRevision,
+  /** Task instructions and separately labeled linked-issue reference material. */
   conversation: Conversation,
   /**
    * Every Linear upload a human referenced in the description or a comment (`linearUploads`); with
