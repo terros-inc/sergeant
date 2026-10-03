@@ -263,8 +263,25 @@ test("a confirmed stop stays pending inside the status-read limit and does not r
   expect(await readdir(task)).toEqual(expect.arrayContaining(["cancel.json", "state.json"]));
 });
 
+test("a current stop closes issue links added after its first unreadable status snapshot", async () => {
+  const { seen, live, retryNow, drive } = await stopWithFlakyStatus(3);
+  expect(await drive()).toMatchObject({ stopping: ["run_w1"] });
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }];
+  await retryNow();
+  expect(await drive()).toMatchObject({ stopping: ["run_w1"] });
+  await retryNow();
+
+  expect(await drive()).toEqual({
+    stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }, { repo, number: 9, url: pr(9).url }],
+  });
+  expect(seen.closed.map(({ number }) => number)).toEqual([7, 9]);
+});
+
 test("an unreadable confirmed stop is deferred after the limit, lets the issue restart, and later closes the old worker's PR", async () => {
   const { deps, seen, live, task, retryNow, drive } = await stopWithFlakyStatus(4);
+  // #7 is the old task's linked worker PR. It must be closed before restart is admitted, even though
+  // the unreadable run's report (and its unlinked #9) is not available yet.
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }];
   expect(await drive()).toMatchObject({ stopping: ["run_w1"] });
   await retryNow();
   expect(await drive()).toMatchObject({ stopping: ["run_w1"] });
@@ -276,17 +293,28 @@ test("an unreadable confirmed stop is deferred after the limit, lets the issue r
   expect(await readdir(task)).not.toContain("cancel.json");
   expect(await readdir(task)).not.toContain("state.json");
   expect(seen.canceled).toEqual(["run_w1"]);
+  expect(seen.closed).toEqual([{ number: 7, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
 
   // The old stop remains durable, but no longer excludes this Todo issue from intake.
   await intakeStartsFresh(deps, seen, live);
   const fresh = await readFile(join(task, "state.json"), "utf8");
+  // #10 was opened by the fresh task. The deferred stop's snapshot excludes it.
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }, { repo, number: 10 }];
 
   // Its slower retry eventually reads the worker report and closes its unlinked PR, without setting
-  // aside the fresh task's state.
+  // aside the fresh task's state or touching the fresh task's linked PR.
   await retryNow();
-  expect(await drivePendingCancels(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
-  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
-  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("No open PR to close") }]);
+  expect(await drivePendingCancels(task, "UNF-1", deps, [repo], () => {})).toEqual({
+    stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }, { repo, number: 9, url: pr(9).url }],
+  });
+  expect(seen.closed).toEqual([
+    { number: 7, comment: "Closed: the task was canceled by Ada: wrong approach." },
+    { number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." },
+  ]);
+  expect(seen.comments).toEqual([{
+    key: expect.stringMatching(/^cancel:i1:/),
+    body: expect.stringMatching(/^Sergeant finished stopping the earlier task for this issue:.*Closed .*#7.*#9/),
+  }]);
   expect(await readdir(task)).not.toContain(deferred[0]);
   expect(await readFile(join(task, "state.json"), "utf8")).toBe(fresh);
 });

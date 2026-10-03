@@ -208,6 +208,10 @@ async function driveIntent(file: string, dir: string, ref: string, deps: Ports, 
     }
     await writeIntent(file, intent);
     if (defer) {
+      // All runs are confirmed canceled, so no old worker can push again. Close the snapshotted
+      // linked PRs before admitting a fresh task: otherwise it can resume one that this deferred
+      // stop later closes. Later issue links may belong to that fresh task and are never consulted.
+      await closeOpenPullRequests(intent.linkedPullRequests ?? [], [], intent, file, ref, deps, enrolled, log);
       await rename(join(dir, "state.json"), join(dir, `state.stopped-${intent.at.replace(/[:.]/g, "-")}.json`)).catch((e: NodeJS.ErrnoException) => {
         if (e.code !== "ENOENT") throw e;
       });
@@ -218,18 +222,9 @@ async function driveIntent(file: string, dir: string, ref: string, deps: Ports, 
   }
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open.
   const { issue } = await deps.linear.readConversation(ref);
-  for (const pr of await openPullRequests(intent.linkedPullRequests ?? issue.linkedPullRequests, runs, enrolled, deps)) {
-    const key = prCloseKey(pr);
-    if (intent.prCloseKeys.includes(key)) continue;
-    await deps.github.closePullRequest({ repo: pr.repo, number: pr.number, comment: `Closed: ${intent.reason}.` });
-    intent.prCloseKeys.push(key);
-    if (!intent.closed.some((closed) => closed.repo === pr.repo && closed.number === pr.number)) {
-      intent.closed.push({ repo: pr.repo, number: pr.number, url: pr.url });
-    }
-    await writeIntent(file, intent);
-    log(`${ref}: closed ${pr.url}`);
-  }
-  await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: stopComment(intent) });
+  const linked = current ? [...(intent.linkedPullRequests ?? []), ...issue.linkedPullRequests] : (intent.linkedPullRequests ?? []);
+  await closeOpenPullRequests(linked, runs, intent, file, ref, deps, enrolled, log);
+  await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: stopComment(intent, current) });
   if (current) {
     await rename(join(dir, "state.json"), join(dir, `state.stopped-${intent.at.replace(/[:.]/g, "-")}.json`)).catch((e: NodeJS.ErrnoException) => {
       if (e.code !== "ENOENT") throw e;
@@ -241,6 +236,23 @@ async function driveIntent(file: string, dir: string, ref: string, deps: Ports, 
 
 /** One durable close effect per PR head: a retry may close a later head, never the same one twice. */
 const prCloseKey = (pr: Pick<PullRequestFacts, "repo" | "number" | "headSha">) => `close-pr:${pr.repo}#${pr.number}:${pr.headSha}`;
+
+async function closeOpenPullRequests(
+  linked: PullRequestRef[], runs: RunRecord[], intent: CancelIntent, file: string, ref: string,
+  deps: Ports, enrolled: RepoSlug[], log: (line: string) => void,
+): Promise<void> {
+  for (const pr of await openPullRequests(linked, runs, enrolled, deps)) {
+    const key = prCloseKey(pr);
+    if (intent.prCloseKeys.includes(key)) continue;
+    await deps.github.closePullRequest({ repo: pr.repo, number: pr.number, comment: `Closed: ${intent.reason}.` });
+    intent.prCloseKeys.push(key);
+    if (!intent.closed.some((closed) => closed.repo === pr.repo && closed.number === pr.number)) {
+      intent.closed.push({ repo: pr.repo, number: pr.number, url: pr.url });
+    }
+    await writeIntent(file, intent);
+    log(`${ref}: closed ${pr.url}`);
+  }
+}
 
 /**
  * The task's PRs still open: those Linear links to the issue or its workers reported, in enrolled
@@ -255,9 +267,11 @@ async function openPullRequests(linked: PullRequestRef[], runs: RunRecord[], enr
   return prs.filter((p) => p.state === "open" && p.author === deps.workerLogin);
 }
 
-function stopComment(intent: CancelIntent): string {
+function stopComment(intent: CancelIntent, current: boolean): string {
   const closed = intent.closed.length > 0 ? `Closed ${intent.closed.map((p) => `[${p.repo}#${p.number}](${p.url})`).join(", ")}.` : "No open PR to close.";
-  return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled. ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
+  const subject = current ? "Sergeant stopped working on this issue" : "Sergeant finished stopping the earlier task for this issue";
+  const restart = current ? "\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task." : "";
+  return `${subject}: ${intent.reason}. Its runs are canceled. ${closed}${restart}`;
 }
 
 /**
