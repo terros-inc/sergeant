@@ -41,7 +41,7 @@ function fakes(issues: DelegatedIssue[]) {
   const turns: string[] = [];
   const holding = new Map<string, () => void>();
   const blocked = new Set<string>();
-  const checks = { state: "pending" as "pending" | "passed" };
+  const checks = { state: "pending" as "pending" | "passed", githubDown: false };
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
@@ -59,7 +59,9 @@ function fakes(issues: DelegatedIssue[]) {
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
     github: {
-      readPullRequest: async (): Promise<PullRequestFacts> => ({
+      readPullRequest: async (): Promise<PullRequestFacts> => {
+        if (checks.githubDown) throw new Error("GitHub 503");
+        return {
         repo: "o/r",
         number: 1,
         url: "https://github.com/o/r/pull/1",
@@ -73,7 +75,8 @@ function fakes(issues: DelegatedIssue[]) {
         mergeable: true,
         checks: { sha: head, required: [{ name: "validate", state: checks.state }] },
         humanFeedback: [],
-      }),
+        };
+      },
       mergePullRequest: async () => Promise.reject(new Error("unused")),
     },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
@@ -99,7 +102,7 @@ function fakes(issues: DelegatedIssue[]) {
     const now = new Date().toISOString();
     conversations.set(id, { ...c, humanComments: [...c.humanComments, { id: `reply-${id}`, author: { id: "u1", name: "Human" }, createdAt: now, updatedAt: now, body: "A" }] });
   };
-  return { delegated, deps, turns, blocked, checks, finish, answer };
+  return { delegated, deps, turns, blocked, checks, finish, answer, conversation };
 }
 
 let dir = "";
@@ -220,4 +223,34 @@ test("unanswered past the next grace, the slot is released; a later reply queues
   await vi.waitFor(() => expect(f.turns).toEqual(["CI", "NEWER", "REVIEW", "CI"]), { timeout: 5_000 });
   expect(logs).toContainEqual("CI: admitted to a task slot again");
   await f.finish("CI");
+});
+
+test("a GitHub outage that clears within the grace continues at once in the same slot", async () => {
+  const f = fakes([issue("CI", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  f.blocked.add("CI");
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0.05 }, logs);
+  await f.finish("CI");
+  f.checks.githubDown = true;
+  await vi.waitFor(() => expect(logs).toContainEqual("CI: waiting: GitHub unreadable (GitHub 503)"), { timeout: 5_000 });
+  f.checks.githubDown = false;
+  f.checks.state = "passed";
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "CI"]), { timeout: 5_000 });
+  expect(f.conversation("CI").agentComments).toEqual([]);
+  expect(lostSlot(logs, "CI")).toEqual([]);
+});
+
+test("a GitHub outage past the grace asks a human, then past the next grace releases the slot", async () => {
+  const f = fakes([issue("CI", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  f.blocked.add("CI");
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0 }, logs);
+  // GitHub goes down during the first turn.
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI"]), { timeout: 5_000 });
+  f.checks.githubDown = true;
+  await f.finish("CI");
+  await vi.waitFor(() => expect(f.turns).toEqual(["CI", "NEWER"]), { timeout: 5_000 });
+  expect(f.conversation("CI").agentComments.map((c) => c.body)).toEqual([expect.stringContaining("an outage: GitHub unreadable (GitHub 503)")]);
+  expect(logs).toContainEqual("CI: still unavailable past the grace with no change: task slot released until something changes");
+  await f.finish("NEWER");
 });

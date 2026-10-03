@@ -22,9 +22,9 @@ import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
-import { noteEdit, openQuestion } from "./question.ts";
+import { noteEdit, openQuestion, questionComment } from "./question.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
-import { blockedFooter, blockedQuestion } from "./slots.ts";
+import { blockedFooter, blockedQuestion, unavailableQuestion } from "./slots.ts";
 import { applyTurn, loadState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -107,6 +107,29 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const read = await Promise.all(state.runIds.map((id) => deps.runner.status(id).catch((e: Error) => ({ unknown: id, error: e.message }))));
     return { runs: read.filter((r): r is RunRecord => !("unknown" in r)), unknown: read.filter((r) => "unknown" in r) };
   };
+  // Linear, GitHub, or the runner unreadable is an external wait like any other (TECH-5015): the task
+  // keeps its slot and retries every poll, continuing at once when the read recovers. Past the grace
+  // it asks a human, retried every poll and only while Linear just confirmed the delegation; past
+  // another grace its slot is released. Only in memory: a restart starts the wait afresh.
+  let outage: { since: number; asked?: boolean } | undefined;
+  const outageWait = async (what: string, issueId?: string) => {
+    outage ??= { since: Date.now() };
+    const waited = Date.now() - outage.since;
+    if (issueId && !outage.asked && waited >= graceMs) {
+      const ask = unavailableQuestion(what, Math.round(waited / 60_000), Math.round(graceMs / 60_000));
+      const key = `unavailable:${issueId}:${outage.since}`;
+      outage.asked = await deps.linear.postComment({ issueId, body: questionComment(ask, blockedFooter), key }).then(
+        () => true,
+        (e: Error) => (log(`asking about the outage failed: ${e.message}`), false),
+      );
+    }
+    if (opts.slot?.state === "held" && waited >= 2 * graceMs) {
+      log("still unavailable past the grace with no change: task slot released until something changes");
+      opts.slot.release();
+    }
+    log(`waiting: ${what}`);
+    await wait(pollMs);
+  };
   const budgetOf = (runs: RunRecord[], unknownRuns: number, questionId?: string) =>
     budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, ...(questionId && { questionId }), runs, unknownRuns });
 
@@ -136,7 +159,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const { runs, unknown } = await readRuns();
     await recordReviews(runs);
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
-    const conversation = await deps.linear.readConversation(opts.issueId);
+    const conversation = await deps.linear.readConversation(opts.issueId).catch((e: Error) => e);
+    if (conversation instanceof Error) {
+      await outageWait(`Linear unreadable (${conversation.message})`);
+      continue;
+    }
     // What a webhook names to end this loop's wait (webhooks.ts): the issue, its PRs, and their heads.
     const watch = (prs: { repo: string; number: number; headSha?: string }[]) => {
       if (!opts.wake) return;
@@ -173,8 +200,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     if (unknown.length > 0) {
-      log(`waiting: status unavailable for ${unknown.map((u) => `${u.unknown} (${u.error})`).join(", ")}`);
-      await wait(pollMs);
+      await outageWait(`status unavailable for ${unknown.map((u) => `${u.unknown} (${u.error})`).join(", ")}`, conversation.issue.id);
       continue;
     }
     // An edit while Sergeant waits on a reply gets one short notice (TECH-5034); retried next poll if it fails.
@@ -187,6 +213,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const question = openQuestion(conversation);
     if (question) {
       unposted = undefined;
+      outage = undefined;
       if (live.length === 0) releasePast(question.createdAt);
       log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);
       await wait(pollMs);
@@ -200,7 +227,12 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     unposted = undefined;
-    const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
+    const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps).catch((e: Error) => e);
+    if (pullRequests instanceof Error) {
+      await outageWait(`GitHub unreadable (${pullRequests.message})`, conversation.issue.id);
+      continue;
+    }
+    outage = undefined;
     watch(pullRequests);
     await postHandoffs(conversation.issue.id);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the

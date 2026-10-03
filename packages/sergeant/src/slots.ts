@@ -73,9 +73,21 @@ export function blockedQuestion(s: SituationReport, minutes: number, grace: numb
     "",
     "What should Sergeant do?",
     "",
-    `If the wait clears on GitHub (a merge, checks, a review), Sergeant continues without a reply. Otherwise it needs one: it keeps this task's slot for ${grace} more minutes, then frees it for other work until someone replies.`,
+    `If the wait clears on GitHub (a merge, checks, a review), Sergeant continues without a reply. Otherwise it needs one: it keeps this task's slot for ${grace} more minutes, then frees it for other work; a reply or a change on GitHub then queues the task for a slot again.`,
   ];
   return { kind: "ask_human", question: lines.join("\n").slice(0, 4_000) };
+}
+
+/** The question a task asks once Linear, GitHub, or the runner has been unreadable for the grace. */
+export function unavailableQuestion(what: string, minutes: number, grace: number): Extract<ProposedAction, { kind: "ask_human" }> {
+  const question = [
+    `Sergeant has waited ${minutes} minutes on an outage: ${what}.`,
+    "",
+    "What should Sergeant do?",
+    "",
+    `Sergeant retries every poll and continues as soon as the read succeeds. It keeps this task's slot for ${grace} more minutes, then frees it for other work; once the read succeeds, a reply or any other change queues the task for a slot again.`,
+  ].join("\n");
+  return { kind: "ask_human", question: question.slice(0, 4_000) };
 }
 
 /** The blocked question's closing line, in place of the usual "does nothing more until someone replies". */

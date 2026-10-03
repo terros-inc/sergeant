@@ -89,7 +89,8 @@ test("works every delegated issue unattended within the task limit, and resumes 
   // Each issue got exactly one turn: an unchanged task readmitted on a later intake takes none.
   expect(turns.map((t) => t.issue).sort()).toEqual(issues);
   expect(logs).toContainEqual(expect.stringContaining("intake failed, retrying next interval: Linear is down"));
-  expect(logs).toContainEqual(expect.stringContaining("UNF-2: loop failed, retrying on a later intake: Linear timed out"));
+  // A failed read is an external wait: the loop keeps its slot and retries next poll (TECH-5015).
+  expect(logs).toContainEqual("UNF-2: waiting: Linear unreadable (Linear timed out)");
 
   // A human comments while the process is down; the restarted process rereads every task and takes a
   // turn only for the one that changed.
