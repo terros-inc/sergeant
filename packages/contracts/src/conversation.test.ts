@@ -77,4 +77,7 @@ test("finds human uploads in Markdown and folds attachments into the revision", 
   expect(rev).not.toBe(conversationRevision(base));
   const edited = { ...attachment, updatedAt: "2026-10-02T07:00:00.000Z" };
   expect(conversationRevision({ ...base, issue: { ...base.issue, attachments: [edited] } })).not.toBe(rev);
+  // A GitHub integration's PR record syncing does not churn it (and so cannot refuse a merge).
+  const pr = { id: "att2", title: "PR", source: "github", url: "https://github.com/o/r/pull/1", updatedAt: at };
+  expect(conversationRevision({ ...base, issue: { ...base.issue, attachments: [pr] } })).toBe(conversationRevision(base));
 });

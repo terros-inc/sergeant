@@ -79,6 +79,9 @@ export function commentIdFor(key: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
+/** Linear `sourceType`s that are a human's file or link rather than an integration's record. */
+const GENERIC_SOURCES = new Set<string | null>([null, "upload", "url", "api"]);
+
 const uploadUrl = /https:\/\/uploads\.linear\.app\/[^\s<>()[\]"'`]+/g;
 
 /**
@@ -102,7 +105,7 @@ type PullRequestFeedbackFacts = {
 /**
  * A deterministic hash of what humans have said: the issue title and description, each human
  * comment's id, updatedAt, and body hash, and each human review or comment on the task's PRs (id,
- * updatedAt, review state, body hash), and each human-added attachment's id and updatedAt (uploads
+ * updatedAt, review state, body hash), and each human-added file or link attachment's id and updatedAt (uploads
  * pasted into the text are already in it). A merge proposed against one revision is refused once the live
  * revision differs (M10), so no merge overtakes human input that no turn has seen. Without PRs it is
  * the Linear conversation's alone, which is what a question's key uses (questions are answered in Linear).
@@ -114,7 +117,10 @@ export function conversationRevision(conversation: Conversation, pullRequests: r
   const feedback = byKey(
     pullRequests.flatMap((p) => p.humanFeedback.map((f) => [`${p.repo}#${p.number}:${f.id}`, f.updatedAt, f.state, sha256(f.body)] as const)),
   );
-  const attachments = byKey((conversation.issue.attachments ?? []).map((a) => [a.id, a.updatedAt] as const));
+  // Only generic sources: an integration's record (a GitHub PR or issue) syncs on its own schedule.
+  const attachments = byKey(
+    (conversation.issue.attachments ?? []).filter((a) => GENERIC_SOURCES.has(a.source)).map((a) => [a.id, a.updatedAt] as const),
+  );
   // Unchanged for a task with no human PR feedback or attachments, so earlier revisions still match.
   if (attachments.length > 0) return sha256(JSON.stringify([title, description, comments, feedback, attachments]));
   return sha256(JSON.stringify(feedback.length > 0 ? [title, description, comments, feedback] : [title, description, comments]));

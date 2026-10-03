@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { linearUploads, type Conversation } from "@terros/sergeant-contracts";
 
@@ -87,6 +88,24 @@ export async function fetchAttachments(
     }
   }
   return result;
+}
+
+/**
+ * The same files, in memory, for a reasoning turn: fetched here on the control plane with the same
+ * caps and skip notes as a run's, so reasoning sees what the run will (TECH-4994).
+ */
+export async function reasoningFiles(
+  conversation: Conversation,
+  opts: { fetchUpload?: FetchUpload; fetch?: typeof globalThis.fetch; limits?: AttachmentLimits },
+): Promise<Attachments & { files: (FetchedAttachment & { data: Uint8Array })[] }> {
+  const dir = await mkdtemp(join(tmpdir(), "sergeant-reasoning-files-"));
+  try {
+    const got = await fetchAttachments(conversation, dir, { ...opts, fetch: opts.fetch ?? globalThis.fetch });
+    const files = await Promise.all(got.files.map(async (f) => ({ ...f, data: await readFile(join(dir, f.name)) })));
+    return { files, skipped: got.skipped };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 const mb = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`;

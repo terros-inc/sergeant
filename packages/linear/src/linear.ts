@@ -264,8 +264,25 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     },
 
     async fetchUpload(url, init) {
-      if (new URL(url).origin !== "https://uploads.linear.app") throw new Error(`not a Linear upload: ${url}`);
-      return fetchFn(url, { headers: { Authorization: options.apiKey }, ...(init?.signal && { signal: init.signal }) });
+      const origin = "https://uploads.linear.app";
+      if (new URL(url).origin !== origin) throw new Error(`not a Linear upload: ${url}`);
+      // Redirects are followed by hand so the token goes only to Linear's upload origin: a hop
+      // elsewhere (signed storage) is fetched without it, and only over https.
+      let next = url;
+      for (let hop = 0; hop < 5; hop++) {
+        const own = new URL(next).origin === origin;
+        const res = await fetchFn(next, {
+          redirect: "manual",
+          ...(own && { headers: { Authorization: options.apiKey } }),
+          ...(init?.signal && { signal: init.signal }),
+        });
+        const location = res.headers.get("location");
+        if (res.status < 300 || res.status >= 400 || !location) return res;
+        await res.body?.cancel();
+        next = new URL(location, next).href;
+        if (!next.startsWith("https://")) throw new Error("Linear upload redirected off https");
+      }
+      throw new Error("too many redirects fetching a Linear upload");
     },
 
     async undelegate(issueId) {
