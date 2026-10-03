@@ -200,6 +200,47 @@ test("a human's task cancel closes the PR its worker reported, and only Sergeant
   expect(await readFile(join(task, "state.json"), "utf8").catch(() => undefined)).toBeUndefined();
 });
 
+// TECH-5070: a worker's PR Linear has not linked yet is known only from its run's report, so a stop
+// whose run status read failed must not finish without it, or that PR stays open.
+async function stopWithFlakyStatus(failures: number) {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const live = { conversation: issue("started", "In Progress") };
+  live.conversation.issue.linkedPullRequests = [];
+  const { deps, seen } = fakes(live);
+  const reported: RunRecord = {
+    runId: "run_w1", role: "worker", status: "running", provider: "p", model: "m",
+    report: { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] },
+  };
+  deps.runner.status = async () => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : { ...reported, status: seen.canceled.length > 0 ? "canceled" : "running" });
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), state(["run_w1"]));
+  await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
+  return { deps, seen, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
+}
+
+test("a stop whose run status read fails once reads it again after the cancel and closes the worker's unlinked PR", async () => {
+  const { seen, drive } = await stopWithFlakyStatus(1);
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.canceled).toEqual(["run_w1"]);
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`Closed [${repo}#9]`) }]);
+});
+
+test("a stop whose run status stays unreadable after the cancel stays pending, says nothing, and finishes once it reads", async () => {
+  const { seen, task, drive } = await stopWithFlakyStatus(4);
+  for (let i = 0; i < 2; i++) expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.closed).toEqual([]);
+  expect(seen.comments).toEqual([]);
+  expect(await readdir(task)).toEqual(expect.arrayContaining(["cancel.json", "state.json"]));
+
+  // The next intake drives the same stop, and the run's status reads again.
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("No open PR to close") }]);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
 test("a stop the loop could not finish and serve's intake finished is said once on the issue", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
   await writeFile(join(dir, "state.json"), state(["run_w1"]));
