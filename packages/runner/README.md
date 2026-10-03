@@ -46,8 +46,8 @@ Linear, Docker socket, or Sergeant state. `node src/live-check.ts` prints what a
 
 Commits are authored and committed as `gitIdentity`, the installation's human identity, through
 `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. The image's Claude Code settings turn off its co-author trailer; Codex
-has no such setting, so the image's global git `commit-msg` hook strips `Co-authored-by: Codex`. The
-brief forbids agent attribution. An agent never appears as a GitHub contributor.
+has no equivalent setting and may add its co-author trailer. The image does not set `core.hooksPath`,
+so repository-provided hooks run normally. The brief tells agents not to add agent attribution.
 
 ## Codex (`codex-local`, TECH-5009)
 

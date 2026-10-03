@@ -18,16 +18,11 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/c
 USER node
 WORKDIR /workspace
 # No git identity here: the runner sets the installation's human identity through GIT_AUTHOR_* and
-# GIT_COMMITTER_*, and Claude Code adds no agent co-author trailer or attribution line. Codex has no
-# setting for its co-author trailer, so a global commit-msg hook removes it (a repository that sets
-# its own core.hooksPath bypasses the hook; the brief still forbids the trailer). git pushes to
-# GitHub with the run's GH_TOKEN (`gh` reads it directly); a reviewer has none.
+# GIT_COMMITTER_*, and Claude Code adds no agent co-author trailer or attribution line. Repository
+# hooks run normally; the image does not override core.hooksPath. git pushes to GitHub with the run's
+# GH_TOKEN (`gh` reads it directly); a reviewer has none.
 RUN git config --global init.defaultBranch main \
   && git config --global credential.https://github.com.helper \
     '!f() { test "$1" = get && test -n "$GH_TOKEN" && echo username=x-access-token && echo "password=$GH_TOKEN"; }; f' \
-  && mkdir -p /home/node/.config/git/hooks \
-  && printf '#!/bin/sh\nsed -i "/^Co-authored-by: Codex <noreply@openai.com>\\s*$/Id" "$1"\n' > /home/node/.config/git/hooks/commit-msg \
-  && chmod +x /home/node/.config/git/hooks/commit-msg \
-  && git config --global core.hooksPath /home/node/.config/git/hooks \
   && mkdir -p /home/node/.claude \
   && echo '{"includeCoAuthoredBy": false, "attribution": {"commit": "", "pr": ""}}' > /home/node/.claude/settings.json
