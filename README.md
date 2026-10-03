@@ -184,7 +184,14 @@ and the V2 agent asks one **Question for you**, summarizing spend, runs, and PRs
 extend or accept as-is. It is posted like any question, under a key of the task and the window, so a
 restart finds it on Linear instead of asking again, and nothing happens until a human replies after it.
 A reply opens a fresh window like any answer, so "extend" needs nothing more: the next turn carries on
-with the work. On "accept as-is" reasoning proposes nothing, and the loop ends on its idle guard. A task
+with the work, and a steer is carried out in it. On "accept as-is" (the option's number, or the same in
+the human's own words) reasoning proposes `accept_as_is` instead (TECH-5118): the loop ends `accepted`
+with nothing more asked, and `state.json` is set aside so intake does not resume it, leaving its PRs
+and the issue for a human. Gate rule Q2 refuses it unless a human replied to the budget question, and
+unless the live conversation is still the one reasoning read, so a reply posted while it reasoned is
+read by the next turn instead. An `accepted.json` marker keeps intake from starting the issue afresh
+while it stays delegated and in Todo; moving the issue out of Todo (or undelegating it, or
+`sgt task wake`) clears it, so back in Todo it starts a fresh task, as after a stop. A task
 that runs away in its fresh window is stopped at that window's end and asked once more. The outcome comment after a merge is the one
 effect B1 does not hold back: it reports a merge that already happened, and withholding it would hide
 the merge from the human. A run's id is saved before the runner starts it, so a crash in between still
@@ -423,8 +430,8 @@ On a controlled issue delegated to the V2 agent whose work takes more than a few
    the runs (the worker `canceled`), any PR, and the extend / accept-as-is options. No run starts and
    nothing merges while it waits.
 2. Reply "extend". The loop logs `a human answered (...): a fresh budget window ...`, and the next turn
-   resumes the work in it. Replying "accept as-is" instead opens a window that nothing uses; the loop
-   ends `idle`.
+   resumes the work in it. Replying "accept as-is" instead ends the loop `accepted`, with no further
+   question, the PR left open, and the issue left in its state.
 3. With `--budget-usd 1`, the first finished run's reported cost exhausts the spend instead
    (`spent $... of $1.00`), with the same question.
 4. On another issue, undelegate it while a worker runs: the loop logs `canceled run_...` and stops only

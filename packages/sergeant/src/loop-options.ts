@@ -40,6 +40,6 @@ export type LoopOptions = {
 };
 
 export type LoopResult = {
-  outcome: "done" | "merged_not_done" | "stopped" | "idle";
+  outcome: "done" | "merged_not_done" | "stopped" | "accepted" | "idle";
   detail: string;
 };

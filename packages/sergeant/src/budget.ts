@@ -1,10 +1,12 @@
-import type { BudgetStatus, ProposedAction, PullRequestFacts, RunRecord, SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { latestAnswer, latestQuestion } from "./question.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
 // the window's start; spend is the reported cost of the window's finished runs and turns. When either
 // is exhausted, the loop cancels running work through the runner and asks the human, through the
 // ordinary question path (UNF-727), whether to continue. A human's answer to any of Sergeant's
-// questions, that one included, opens a fresh window (TECH-5059): "extend" needs nothing more.
+// questions, that one included, opens a fresh window (TECH-5059): "extend" needs nothing more. A reply
+// to it that accepts the work as it is ends the task instead (TECH-5118, accept_as_is).
 
 export type BudgetWindow = BudgetStatus["window"];
 
@@ -35,6 +37,21 @@ export function openWindow(state: { turnCostUsd: number; runIds: string[]; budge
  * already asked from Linear alone and never asks it twice. The first window keeps its pre-TECH-5059 key.
  */
 export const budgetQuestionKey = (issueId: string, since: string | undefined) => `budget-question:${issueId}:${since ?? 0}`;
+
+/**
+ * TECH-5118: whether a human has replied to Sergeant's budget question, the question it asked last (or a
+ * clarifying question in that question's thread). Read from the conversation alone, so it survives a
+ * restart: a window opens at the task's start or at a human comment's time, so every budget question's
+ * id is one of the keys of those times.
+ */
+export function answeredBudgetQuestion(conversation: Conversation): boolean {
+  const asked = latestQuestion(conversation);
+  if (!asked || !latestAnswer(conversation)) return false;
+  const { issue, humanComments } = conversation;
+  const windows = [undefined, ...humanComments.map((c) => c.createdAt)];
+  const thread = asked.parentId ?? asked.id;
+  return windows.some((since) => commentIdFor(budgetQuestionKey(issue.id, since)) === thread);
+}
 
 /** The task's budget now, from what `state.json` keeps (start, window, turn spend) and the run records. */
 export function budgetStatus(input: {

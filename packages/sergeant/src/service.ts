@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { apiHandler } from "./api.ts";
+import { heldAcceptances } from "./accepted.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
@@ -191,13 +192,15 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     // local tasks reclaim every slot on each periodic intake.
     for (const ref of resumable.sort(byRank)) admit(ref, ended.has(ref) || freeSlots() <= 0);
     if (failed) throw failed;
-    // New work: a delegated issue in Todo, not one whose stop is still under way nor one a Linear
-    // "blocked by" issue still holds up (TECH-5066); it starts at the first intake after its last
-    // blocker is completed or canceled. A task already under way resumes above, blocked or not.
+    // New work: a delegated issue in Todo, not one whose stop is still under way, one a human accepted
+    // as it is and has not touched since (accepted.ts, TECH-5118), nor one a Linear "blocked by" issue
+    // still holds up (TECH-5066); it starts at the first intake after its last blocker is completed or
+    // canceled. A task already under way resumes above, blocked or not.
+    const accepted = await heldAcceptances(opts.stateDir, listed ?? [], (ref) => wakes.get(ref)?.pending === true, log);
     const loggedBefore = blocked;
     blocked = new Map();
     const todo = (listed ?? []).filter((issue) => {
-      if (issue.state.type !== "unstarted") return false;
+      if (issue.state.type !== "unstarted" || accepted.has(issue.identifier)) return false;
       if (issue.blockedBy.length === 0) return true;
       const line = `${issue.identifier} waiting on blocker ${issue.blockedBy.join(", ")}`;
       if (loggedBefore.get(issue.identifier) !== line) log(line);

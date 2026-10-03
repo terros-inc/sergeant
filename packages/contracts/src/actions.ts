@@ -57,6 +57,13 @@ export const AskHuman = z.object({
 });
 
 /**
+ * TECH-5118: the human's reply to Sergeant's budget question accepts the work as it is. The task ends
+ * with no fresh window, no further question, and no more work; its PRs and the issue are left as they
+ * are for a human. Allowed only once a human has replied to the budget question.
+ */
+export const AcceptAsIs = z.object({ kind: z.literal("accept_as_is") });
+
+/**
  * A Linear issue for work outside this task that someone should do: a worker's suggestion, or a
  * non-blocking review finding merged as is (07 §11). Filed in the task's team and project, linked to
  * the task's issue, and delegated to nobody.
@@ -79,6 +86,7 @@ export const ProposedAction = z.discriminatedUnion("kind", [
   SendRun,
   MergePr,
   AskHuman,
+  AcceptAsIs,
   CreateFollowup,
 ]);
 export type ProposedAction = z.infer<typeof ProposedAction>;
