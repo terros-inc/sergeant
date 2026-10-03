@@ -55,6 +55,8 @@ export const PullRequestFacts = z.object({
   /** When GitHub merged it; null before then, absent where a source does not know it. */
   mergedAt: z.iso.datetime({ offset: true }).nullish(),
   baseRef: z.string().min(1),
+  /** The base branch's head commit GitHub compares the PR against; absent where a source does not know it. */
+  baseSha: Sha.optional(),
   /** The PR description; GitHub's empty body is "". M9 reads its closing reference. */
   body: z.string(),
   /** null while GitHub has not computed mergeability yet. */

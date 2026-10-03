@@ -5,19 +5,20 @@ import type { ActionOutcome, Ports } from "./execute.ts";
 // What the loop reads and compares on each poll (loop.ts).
 
 /**
- * A merge that did not happen for a reason the poll may never show (TECH-4991): GitHub still computing
- * mergeability at merge time though the turn's poll saw it mergeable (M7), or the merge call failing
- * (a temporary 405 such as "Base branch was modified", a network error). The next poll can then look
- * exactly like this turn's, so the loop leaves the fingerprint uncommitted and takes another turn
- * rather than going quiet, across a restart too. An M7 denial the poll already showed is left to the
- * fingerprint: `mergeable` changing wakes the turn.
+ * The PRs whose merge M7 denied though the turn's poll saw them mergeable (TECH-5062): the merge's own
+ * live read found GitHub still computing, or conflicting. The turn's fingerprint records them as
+ * unknown (`mergeable: null`), what GitHub last said, so a later poll's definite value is a fact change
+ * that wakes exactly one turn, and polls that still show it computing wake none. Any other merge that
+ * did not happen (a failed call, a policy refusal) is committed as polled: the next turn waits for a
+ * fact to change, such as the head, the base, mergeability, checks, reviews, or a human comment.
  */
-export function mergeNotSettled(o: ActionOutcome, situation: SituationReport): boolean {
-  const a = o.action;
-  if (a.kind !== "merge_pr") return false;
-  if (o.status === "failed") return true;
-  const polled = situation.pullRequests.find((p) => p.repo === a.repo && p.number === a.number);
-  return o.status === "denied" && o.rule === "M7" && polled?.mergeable === true;
+export function unsettledMerges(outcomes: ActionOutcome[], situation: SituationReport): string[] {
+  return outcomes.flatMap((o) => {
+    const a = o.action;
+    if (a.kind !== "merge_pr" || o.status !== "denied" || o.rule !== "M7") return [];
+    const polled = situation.pullRequests.find((p) => p.repo === a.repo && p.number === a.number);
+    return polled?.mergeable === true ? [`${a.repo}#${a.number}`] : [];
+  });
 }
 
 /**
@@ -51,8 +52,11 @@ export async function readPullRequests(runs: RunRecord[], linked: PullRequestRef
   return Promise.all([...refs.values()].map((r) => deps.github.readPullRequest(r.repo, r.number)));
 }
 
-/** What a turn depends on. `generatedAt` and recentTurns are excluded: they change every poll. */
-export function fingerprintOf(s: SituationReport): string {
+/**
+ * What a turn depends on. `generatedAt` and recentTurns are excluded: they change every poll. The PRs
+ * in `unsettled` count as GitHub still computing their mergeability (`unsettledMerges`).
+ */
+export function fingerprintOf(s: SituationReport, unsettled: string[] = []): string {
   const facts = {
     conversation: s.conversationRevision,
     // A PR newly linked to the issue can make a refused review or merge allowable.
@@ -60,7 +64,8 @@ export function fingerprintOf(s: SituationReport): string {
     runs: s.runs.map((r) => [r.runId, r.status]),
     // A fresh budget window can allow what the last one refused.
     budget: s.budget.windowStart,
-    prs: s.pullRequests.map((p) => [p.repo, p.number, p.state, p.draft, p.headSha, p.mergeable, p.checks]),
+    // A moved base can let a merge GitHub rejected ("Base branch was modified") through.
+    prs: s.pullRequests.map((p) => [p.repo, p.number, p.state, p.draft, p.headSha, p.baseSha, unsettled.includes(`${p.repo}#${p.number}`) ? null : p.mergeable, p.checks]),
   };
   return createHash("sha256").update(JSON.stringify(facts)).digest("hex");
 }

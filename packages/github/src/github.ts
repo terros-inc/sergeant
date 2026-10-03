@@ -13,7 +13,7 @@ const pullRequest = z.object({
   mergeable: z.boolean().nullable(),
   merge_commit_sha: z.string().nullable(),
   head: z.object({ sha: z.string() }),
-  base: z.object({ ref: z.string().min(1) }),
+  base: z.object({ ref: z.string().min(1), sha: z.string() }),
 });
 const checkRun = z.object({
   name: z.string().min(1),
@@ -245,6 +245,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         mergedSha: live.merged_at ? live.merge_commit_sha : null,
         mergedAt: live.merged_at ? new Date(live.merged_at).toISOString() : null,
         baseRef: live.base.ref,
+        baseSha: live.base.sha,
         body: live.body ?? "",
         mergeable: live.mergeable,
         checks: { sha: headSha, required },
@@ -284,8 +285,9 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         if (!(error instanceof GitHubHttpError) || error.status !== 405) throw error;
         // 405 is repository policy (a required review Sergeant cannot give, such as a code owner's)
         // unless this exact head already merged, or it is temporary: the base moved mid-merge, or
-        // GitHub had not finished computing mergeability (TECH-4991). Those reject, so a later turn
-        // retries rather than parking the PR for a human. A moved head is 409 and still rejects.
+        // GitHub had not finished computing mergeability (TECH-4991). Those reject, so a turn once the
+        // facts change (TECH-5062) retries rather than parking the PR for a human. A moved head is 409
+        // and still rejects.
         try {
           return await alreadyMerged(repo, number, expectedHeadSha, error);
         } catch (e) {
