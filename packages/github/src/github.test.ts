@@ -13,7 +13,7 @@ const pr = {
   mergeable: true,
   merge_commit_sha: null,
   head: { sha: head },
-  base: { ref: "main" },
+  base: { ref: "main", sha: "b".repeat(40) },
 };
 
 const json = (value: unknown, status = 200, headers?: HeadersInit) =>

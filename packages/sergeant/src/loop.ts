@@ -12,7 +12,7 @@ import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { checkHolds, checkStop, holdForBudget, type PollContext } from "./poll-checks.ts";
-import { cancelRuns, describePr, fingerprintOf, landedOf, mergeNotSettled, readPullRequests } from "./poll.ts";
+import { cancelRuns, describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
 import { resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
@@ -276,18 +276,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     const failedAsk = outcomes.find((o) => o.action.kind === "ask_human" && o.status === "failed");
     if (failedAsk) unposted = { action: failedAsk.action, situation };
-    const retryMerge = outcomes.some((o) => mergeNotSettled(o, situation));
-    applyTurn(
-      state,
-      { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: failedAsk || retryMerge ? undefined : fingerprint },
-      log,
-    );
+    // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
+    // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
+    const unsettled = unsettledMerges(outcomes, situation);
+    const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
+    applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed }, log);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
     await postHandoffs(conversation.issue.id);
-    if (retryMerge) {
-      log("the merge did not happen for a reason the next poll may not show: another turn after the next poll");
-      await wait(pollMs);
-    }
   }
 }
