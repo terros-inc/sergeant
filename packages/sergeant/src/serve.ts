@@ -28,7 +28,7 @@ const { values } = parseArgs({
     "state-dir": { type: "string" },
     port: { type: "string", default: "8080" },
     host: { type: "string", default: "127.0.0.1" },
-    "max-tasks": { type: "string", default: "2" },
+    "max-tasks": { type: "string" },
     "intake-seconds": { type: "string", default: "120" },
     "poll-seconds": { type: "string", default: "60" },
     "reasoning-model": { type: "string", default: "opus" },
@@ -53,7 +53,8 @@ const service = await startService(
     stateDir,
     port: count(values.port, "--port", 0),
     host: values.host,
-    maxTasks: count(values["max-tasks"], "--max-tasks", 1),
+    // An explicit --max-tasks wins; else the config's maxTasks; else the service default (2).
+    maxTasks: values["max-tasks"] !== undefined ? count(values["max-tasks"], "--max-tasks", 1) : config.maxTasks,
     intakeSeconds: count(values["intake-seconds"], "--intake-seconds", 1),
     pollSeconds: count(values["poll-seconds"], "--poll-seconds", 1),
     budget: taskBudget(config),

@@ -140,6 +140,28 @@ test("an issue listed twice in one intake still runs one turn at a time", async 
   expect(counts).toMatchObject({ turns: 1, maxInTurn: 1 });
 });
 
+// TECH-4988: the concurrent task limit comes from the config's `maxTasks` (serve.ts passes it as this
+// option), and without it the service admits 2. With four issues always delegated and turns that
+// hold a slot, at most `maxTasks` loops run at once.
+test("serve admits at most maxTasks tasks at once: 3 from the config, 2 by default", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+  const ids = ["UNF-1", "UNF-2", "UNF-3", "UNF-4"];
+  const atMost = async (stateDir: string, maxTasks: number | undefined, expected: number) => {
+    const { deps, counts } = oneIssue(ids, 50);
+    const { maxTasks: _default, ...base } = options();
+    const service = await startService({ ...base, stateDir, ...(maxTasks !== undefined && { maxTasks }) }, deps);
+    try {
+      await vi.waitFor(() => expect(counts.turns).toBe(expected), { timeout: 5_000 });
+      await sleep(150);
+      expect(counts.maxInTurn).toBe(expected);
+    } finally {
+      await service.stop();
+    }
+  };
+  await atMost(join(dir, "config-3"), 3, 3);
+  await atMost(join(dir, "default-2"), undefined, 2);
+});
+
 test("a second service on the same state directory is refused until the first stops", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
   const { deps, counts } = oneIssue(["UNF-1"], 50);

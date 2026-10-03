@@ -88,6 +88,8 @@ export const InstallationConfig = z.strictObject({
     .default({ auditSampleRate: 0.2 }),
   /** The budget window a task gets when it starts (TECH-4964); each one unset keeps its default (120 minutes, $25). */
   budget: z.strictObject({ minutes: z.number().positive().optional(), usd: z.number().positive().optional() }).optional(),
+  /** The most task loops `serve` runs at once (TECH-4988); `serve --max-tasks` wins, and without either it is 2. */
+  maxTasks: z.number().int().positive().optional(),
 });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;
 

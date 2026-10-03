@@ -67,6 +67,8 @@ input. Optional `review.auditSampleRate` (0 to 1, default 0.2) is the fraction o
 skipped fresh review which get an audit review. Optional `budget` is the budget window a task gets
 when it starts, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
 numbers, each optional; unset, 120 minutes and $25; see the task budget under Commands). Optional
+`maxTasks` (a positive integer) is the most task loops `serve` runs at once; `serve --max-tasks` wins
+over it, and without either it is 2. Optional
 `linear.webhookSecret` and `github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
 webhooks; `serve` has each webhook endpoint only when its secret is set. Optional `humans` says who
 may use `sgt` and the client API, each with their own Linear login (see [The `sgt` CLI](#the-sgt-cli)):
@@ -178,7 +180,8 @@ V2 agent, in every repository the installation config enrolls, with nobody start
 It is a thin shell over the canary's per-task loop, not a workflow engine:
 
 - **Intake** lists open (not completed or canceled) issues delegated to `agentUserId` every
-  `--intake-seconds` (120) and runs each one's loop, at most `--max-tasks` (2) at a time; the issue
+  `--intake-seconds` (120) and runs each one's loop, at most `maxTasks` at a time — the config's
+  `maxTasks`, or `--max-tasks` when given, or 2 by default; the issue
   whose loop ended longest ago gets a free slot first. A task waiting for a human or a run holds its
   slot.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
