@@ -118,7 +118,10 @@ const codex: Agent = {
   script: `
 wall="$1"; model="$2"
 ${CODEX_LOGIN}
-/home/node/install-codex-commit-msg-hook.sh
+/home/node/install-codex-git-hooks.sh || exit 1
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=core.hooksPath
+export GIT_CONFIG_VALUE_0=/home/node/.config/git/codex-hooks
 exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-git-repo-check \\
   --dangerously-bypass-approvals-and-sandbox "${PROMPT}"
 `,

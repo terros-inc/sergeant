@@ -19,13 +19,13 @@ USER node
 WORKDIR /workspace
 # No git identity here: the runner sets the installation's human identity through GIT_AUTHOR_* and
 # GIT_COMMITTER_*, and Claude Code adds no agent co-author trailer or attribution line. Codex has no
-# reliable setting for its co-author trailer, so its adapter installs a chaining commit-msg hook in
-# each repository. Keeping core.hooksPath unset means every repository hook still runs for both
-# adapters. git pushes to GitHub with the run's GH_TOKEN (`gh` reads it directly); a reviewer has none.
-COPY --chown=node:node install-codex-commit-msg-hook.sh /home/node/install-codex-commit-msg-hook.sh
+# reliable setting for its co-author trailer. Only its process gets an environment-scoped hook
+# dispatcher; repository hooks remain untouched and Claude Code sees no override. git pushes to
+# GitHub with the run's GH_TOKEN (`gh` reads it directly); a reviewer has none.
+COPY --chown=node:node install-codex-git-hooks.sh codex-git-hook-dispatcher.sh /home/node/
 RUN git config --global init.defaultBranch main \
   && git config --global credential.https://github.com.helper \
     '!f() { test "$1" = get && test -n "$GH_TOKEN" && echo username=x-access-token && echo "password=$GH_TOKEN"; }; f' \
-  && chmod +x /home/node/install-codex-commit-msg-hook.sh \
+  && chmod +x /home/node/install-codex-git-hooks.sh /home/node/codex-git-hook-dispatcher.sh \
   && mkdir -p /home/node/.claude \
   && echo '{"includeCoAuthoredBy": false, "attribution": {"commit": "", "pr": ""}}' > /home/node/.claude/settings.json

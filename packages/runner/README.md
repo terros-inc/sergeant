@@ -46,17 +46,19 @@ Linear, Docker socket, or Sergeant state. `node src/live-check.ts` prints what a
 
 Commits are authored and committed as `gitIdentity`, the installation's human identity, through
 `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. The image's Claude Code settings turn off its co-author trailer; Codex
-has no reliable setting, so only the Codex adapter installs a `commit-msg` wrapper in each cloned
-repository. The wrapper first runs an existing repository hook (including one selected by a local
-`core.hooksPath`) and then strips a case-insensitive `Co-authored-by` trailer whose name is Codex,
-without assuming a particular email address. No global `core.hooksPath` is set, so all other
-repository hooks run normally for both adapters. The brief forbids agent attribution. An agent never
+has no reliable setting, so only the Codex process receives a command-scoped `core.hooksPath`
+through `GIT_CONFIG_*` environment variables. It points to an image-owned dispatcher for every Git
+hook name. At hook time the dispatcher reads the repository's local `core.hooksPath` (or uses its
+actual Git directory), runs that hook at its original path, and preserves a failure. A successful
+`commit-msg` then strips the Codex trailer. This remains effective if a package install changes the
+repository hook path after startup, does not touch the worktree, supports repositories whose `.git`
+is a file, and does not affect Claude Code. The brief forbids agent attribution. An agent never
 appears as a GitHub contributor.
 
 Codex CLI 0.160.0's git-attribution policy can instruct a logged-in Team user to emit the exact
 `Co-authored-by: Codex <noreply@openai.com>` trailer, depending on the account's
-`commit_attribution_enabled` setting. The broader name-based match also tolerates case, whitespace,
-and a changed Codex email. `git commit --no-verify` skips this hook, and commits created directly by
+`commit_attribution_enabled` setting. Matching tolerates case and whitespace but is limited to that
+observed Codex identity. `git commit --no-verify` skips this hook, and commits created directly by
 an API never enter the local Git hook path; the worker rules still forbid attribution on those paths,
 but the runner cannot mechanically remove it before it is written remotely.
 
