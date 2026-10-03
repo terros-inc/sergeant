@@ -21,8 +21,7 @@ const unknown = [{ unknown: "run_gone", error: "503" }];
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
-async function holdOn(live: string[]): Promise<Slot> {
-  const slot = new Slot(() => {});
+async function holdOn(live: string[], slot = new Slot(() => {})): Promise<Slot> {
   const ctx = { opts: { slot }, deps: {} as Ports, state: { startedAt: now, budget: { window: DEFAULT_BUDGET } } as TaskState, log: () => {}, save: async () => {} } as unknown as PollContext;
   expect(await checkHolds({ conversation, live, unknown, budgetOf: () => budget }, DEFAULT_BUDGET, ctx)).toEqual({ hold: "unknown" });
   return slot;
@@ -34,6 +33,16 @@ test("an unreadable runner with nothing confirmed running starts the slot's grac
 
 test("an unreadable runner does not start the grace of a task with a run confirmed running", async () => {
   expect((await holdOn(["run_running", "run_gone"])).waitingSince).toBeUndefined();
+});
+
+test("a confirmed running status clears grace started while every run was unreadable", async () => {
+  const slot = await holdOn(["run_gone"]);
+  expect(slot.waitingSince).toBeTypeOf("number");
+
+  await holdOn(["run_running", "run_gone"], slot);
+
+  expect(slot.waitingSince).toBeUndefined();
+  expect(slot.released).toBe(false);
 });
 
 test("a recorded run whose status rejects holds the loop as unknown", async () => {
