@@ -131,6 +131,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         enrolledRepositories: opts.enrolledRepositories,
         dir: join(opts.stateDir, "tasks", issueId),
         ...(opts.pollSeconds !== undefined && { pollSeconds: opts.pollSeconds }),
+        ...(opts.waitingGraceMinutes !== undefined && { waitingGraceMinutes: opts.waitingGraceMinutes }),
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
         ...(opts.budget && { budget: opts.budget }),
         ...(opts.auditSampleRate !== undefined && { auditSampleRate: opts.auditSampleRate }),

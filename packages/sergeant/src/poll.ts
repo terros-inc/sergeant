@@ -8,9 +8,8 @@ import type { ActionOutcome, Ports } from "./execute.ts";
  * The PRs whose merge M7 denied though the turn's poll saw them mergeable (TECH-5062): the merge's own
  * live read found GitHub still computing, or conflicting. The turn's fingerprint records them as
  * unknown (`mergeable: null`), what GitHub last said, so a later poll's definite value is a fact change
- * that wakes exactly one turn, and polls that still show it computing wake none. Any other merge that
- * did not happen (a failed call, a policy refusal) is committed as polled: the next turn waits for a
- * fact to change, such as the head, the base, mergeability, checks, reviews, or a human comment.
+ * that wakes exactly one turn, and polls that still show it computing wake none. Failed calls and
+ * policy refusals use the separate, timestamped bounded retry in loop.ts (TECH-5077).
  */
 export function unsettledMerges(outcomes: ActionOutcome[], situation: SituationReport): string[] {
   return outcomes.flatMap((o) => {
@@ -18,6 +17,19 @@ export function unsettledMerges(outcomes: ActionOutcome[], situation: SituationR
     if (a.kind !== "merge_pr" || o.status !== "denied" || o.rule !== "M7") return [];
     const polled = situation.pullRequests.find((p) => p.repo === a.repo && p.number === a.number);
     return polled?.mergeable === true ? [`${a.repo}#${a.number}`] : [];
+  });
+}
+
+/** Merge calls that reached GitHub but did not happen: faults and explicit repository refusals. */
+export function failedMerges(outcomes: ActionOutcome[], situation: SituationReport) {
+  return outcomes.flatMap((o) => {
+    const action = o.action;
+    if (action.kind !== "merge_pr") return [];
+    if (o.status === "denied" && o.refused) return [o.refused];
+    if (o.status !== "failed") return [];
+    const pr = situation.pullRequests.find((p) => p.repo === action.repo && p.number === action.number && p.headSha === action.expectedHeadSha);
+    if (!pr) return [];
+    return [{ repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: situation.conversationRevision, reason: o.error, at: new Date().toISOString() }];
   });
 }
 

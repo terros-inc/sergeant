@@ -15,6 +15,8 @@ export type LoopOptions = {
   /** The fraction of merged heads that skipped fresh review which get an audit review (06 §8). */
   auditSampleRate?: number;
   pollSeconds?: number;
+  /** The service's existing waiting grace; also delays the one bounded retry after a merge failure. */
+  waitingGraceMinutes?: number;
   /**
    * Minutes with nothing changing and nothing running before the loop ends. No turn count ends a task
    * (TECH-5059): a runaway is bounded by its budget window, and every effect is keyed or taken only

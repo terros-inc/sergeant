@@ -203,7 +203,7 @@ export function unaskedInputs(runs: RunRecord[], agentComments: AgentComment[]):
 /**
  * L1 (no unreviewed, red, or unmergeable merge), M2 (only this task's PRs), M9 (no early or missing completion),
  * L4 (no merge that overtakes unseen human input or a human's requested changes), M12 (no retry
- * of a merge GitHub refused by policy while nothing changed), M13 (no review standing given against an
+ * after a bounded merge handoff while nothing changed), M13 (no review standing given against an
  * earlier title or description), and M14 (no merge past an input a run could not read, unasked).
  * `conversationRevision` is the one the proposing turn saw, attached by the core, not by reasoning.
  */
@@ -270,7 +270,7 @@ export function checkMerge(
 
   const refused = facts.refusedMerges.find((r) => r.repo === repo && r.number === number && r.headSha === sha);
   if (refused?.conversationRevision === facts.liveConversationRevision) {
-    return deny("M12", `GitHub refused merging this head by repository policy (${refused.reason}) and nothing has changed since; a human merges it`);
+    return deny("M12", `GitHub did not merge this head after its bounded attempts (${refused.reason}) and nothing has changed since; a human merges it`);
   }
 
   // A merge ends its turn, so it must not leave a run working on the task, including one its turn started.

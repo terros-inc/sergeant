@@ -73,11 +73,12 @@ const TaskState = z.object({
     })
     .optional(),
   /**
-   * Merges GitHub refused by repository policy, one per PR (the latest head), with when the
-   * ready-for-human-merge comment was confirmed posted (TECH-4987). Lost, a merge is tried once more
-   * and refused again, and the comment's key posts nothing new.
+   * Merges whose sole re-check also failed or was refused, one per PR (the latest head), with when the
+   * ready-for-human-merge comment was confirmed posted (TECH-4987, TECH-5077).
    */
-  refusedMerges: z.array(RefusedMerge.extend({ commentPostedAt: z.iso.datetime().optional() })).default([]),
+  refusedMerges: z.array(RefusedMerge.extend({ commentPostedAt: z.iso.datetime().optional(), fingerprint: z.string().optional() })).default([]),
+  /** A first failed/refused merge, eligible for its sole automatic re-check after the waiting grace. */
+  mergeRetries: z.array(RefusedMerge.extend({ fingerprint: z.string() })).default([]),
   /** Per finished review: the later-known facts its last `reviews.jsonl` line carried. */
   reviewsRecorded: z.record(z.string(), z.string()).default({}),
 });
@@ -110,10 +111,6 @@ export function applyTurn(
     if (started) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== started.runId);
     const { followup } = o;
     if (followup && !state.followups.some((f) => f.key === followup.key)) state.followups.push(followup);
-  }
-  for (const o of outcomes) {
-    const refused = o.status === "denied" ? o.refused : undefined;
-    if (refused) state.refusedMerges = [...state.refusedMerges.filter((r) => r.repo !== refused.repo || r.number !== refused.number), refused];
   }
   // After the follow-ups, so a merge lists those filed earlier in the same turn.
   for (const o of done) {

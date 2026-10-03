@@ -84,7 +84,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
   const wake = new Wake();
 
   const result = await runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, completionWaitMinutes: 0, wake, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, waitingGraceMinutes: 0, completionWaitMinutes: 0, wake, log: () => {} },
     {
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
@@ -108,10 +108,10 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
       reasoner: {
         async turn(situation) {
           seen.push(situation);
-          // A webhook owes another turn after each of the first two, with nothing changed; during the
-          // third, the code owner approves.
-          if (seen.length < 3) wake.request();
-          if (seen.length === 3) livePr = { ...livePr, humanFeedback: [ownerApproval] };
+          // A wake owes another turn after the first three; after M12 proves the handoff holds, the
+          // code owner approves during the fourth.
+          if (seen.length < 4) wake.request();
+          if (seen.length === 4) livePr = { ...livePr, humanFeedback: [ownerApproval] };
           return { output: { summary: "merge", actions: [merge] }, model: "m", promptVersion: "p" };
         },
       },
@@ -119,12 +119,13 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
   );
 
   expect(result.outcome).toBe("done");
-  // Turn 1 tries and is refused; turns 2 and 3 are refused by the Gate without asking GitHub; turn 4
-  // sees the approval and merges.
-  expect(attempts).toEqual([1, 4]);
+  // Turn 1 tries and is refused; turn 2 is the sole re-check and hands off; turn 3 is refused by M12;
+  // turn 4 notices the concurrent approval (M10), and turn 5 merges it.
+  expect(attempts).toEqual([1, 2, 5]);
   expect(seen[1]?.recentTurns.at(-1)?.outcomes[0]).toMatch(/denied by GitHub \(refused by repository policy: Waiting on code owner review/);
-  expect(seen[1]?.refusedMerges).toMatchObject([{ repo, number: 7, headSha: head }]);
-  expect(seen[2]?.recentTurns.at(-1)?.outcomes[0]).toMatch(/denied by M12/);
+  expect(seen[1]?.refusedMerges).toEqual([]);
+  expect(seen[2]?.refusedMerges).toMatchObject([{ repo, number: 7, headSha: head }]);
+  expect(seen[3]?.recentTurns.at(-1)?.outcomes[0]).toMatch(/denied by M12/);
 
   const handoffs = comments.filter((c) => c.key.startsWith("merge-handoff:"));
   expect(handoffs).toEqual([{ issueId: "i1", key: `merge-handoff:i1:${repo}#7:${head}`, body: expect.stringContaining("Ready for a human to merge") }]);

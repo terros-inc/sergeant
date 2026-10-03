@@ -11,6 +11,7 @@ import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
+import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
 import { outcomeComment } from "./outcome.ts";
 import { checkHolds, checkStop, holdForBudget, type PollContext } from "./poll-checks.ts";
 import { cancelRuns, describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
@@ -37,6 +38,7 @@ export { readTaskState, type TaskState } from "./task-state.ts";
 export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reasoner }): Promise<LoopResult> {
   const log = opts.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
   const pollMs = (opts.pollSeconds ?? 60) * 1000;
+  const retryGraceMs = (opts.waitingGraceMinutes ?? 15) * 60_000;
   const wait = (ms: number) => (opts.wake ? opts.wake.sleep(ms, opts.signal) : pause(ms, opts.signal));
   const files = {
     state: join(opts.dir, "state.json"),
@@ -204,7 +206,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     unposted = undefined;
     const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
-    await postHandoffs(conversation.issue.id);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
@@ -225,7 +226,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
       continue;
     }
-    const situation = SituationReport.parse({
+    let situation = SituationReport.parse({
       taskId: `canary_${conversation.issue.identifier}`,
       generatedAt: new Date().toISOString(),
       conversationRevision: conversationRevision(conversation, pullRequests),
@@ -240,15 +241,22 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       budget,
       recentTurns: state.recentTurns,
     });
+    let fingerprint = fingerprintOf(situation);
+    if (reconcileMergeRetries(state, fingerprint)) {
+      await save();
+      situation = SituationReport.parse({ ...situation, refusedMerges: state.refusedMerges });
+      fingerprint = fingerprintOf(situation);
+    }
+    await postHandoffs(conversation.issue.id);
     await postRereviewRequests(situation, deps, deps.linear, log);
     if (await holdForBudget(situation, conversation, holds, ctx)) {
       await wait(pollMs);
       continue;
     }
 
-    const fingerprint = fingerprintOf(situation);
+    const retryDue = dueMergeRetries(state, retryGraceMs);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
-    if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
+    if (running.length > 0 || (fingerprint === state.lastFingerprint && retryDue.length === 0 && !opts.wake?.pending)) {
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
       if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
         return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMinutes)} minutes` };
@@ -283,6 +291,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const unsettled = unsettledMerges(outcomes, situation);
     const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed }, log);
+    recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
     await postHandoffs(conversation.issue.id);
