@@ -29,7 +29,7 @@ const CancelIntent = z.object({
   at: z.iso.datetime(),
   /** The task's runs when the stop was first driven: set once, before any is canceled. */
   runIds: z.array(RunId).optional(),
-  /** Those of `runIds` whose start the runner never confirmed (loop.ts), set with them. */
+  /** Those of `runIds` whose start the runner never confirmed (loop.ts), set with them; one leaves once its status reads. */
   unconfirmedStarts: z.array(RunId).optional(),
   /** The PRs this stop closed, for the issue comment and the API's answer. */
   closed: z.array(ClosedPullRequest).default([]),
@@ -139,6 +139,11 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   const runs: RunRecord[] = [];
   for (const runId of intent.runIds) {
     let run = await deps.runner.status(runId).catch(() => undefined);
+    if (run && intent.unconfirmedStarts.includes(runId)) {
+      // The runner knows it, so it started: kept in the intent, so a later drive's failed read holds the stop.
+      intent.unconfirmedStarts = intent.unconfirmedStarts.filter((id) => id !== runId);
+      await writeIntent(dir, intent);
+    }
     if (!run || run.status === "running") {
       const canceled = await deps.runner.cancel(runId).then(
         () => (log(`${ref}: canceled ${runId}`), true),
