@@ -16,7 +16,9 @@ export const QUOTA_CACHE_MS = 5 * 60_000;
 class Unreadable extends Error {}
 
 type Window = NonNullable<QuotaReading["weekly"]>;
-const left = (usedPercent: number) => Math.max(0, Math.min(100, Math.round(100 - usedPercent)));
+// Exact, not rounded: 80.4% used is 19.6% left, below the floor. Only float noise is dropped, so a
+// header's 0.57 reads as 43% left rather than 43.00000000000001%.
+const left = (usedPercent: number) => Math.max(0, Math.min(100, Number((100 - usedPercent).toFixed(6))));
 const unixTime = (seconds: number | null | undefined) => (seconds ? { resetsAt: new Date(seconds * 1000).toISOString() } : {});
 
 /** `GET /api/oauth/usage`, what Claude Code's `/usage` reads: percent used per window, with its reset. */
@@ -55,11 +57,13 @@ export type QuotaOptions = {
 export function providerQuota(opts: QuotaOptions): ReadQuota {
   const fetchFn = opts.fetch ?? globalThis.fetch;
   const now = opts.now ?? Date.now;
-  const get = (url: string, init: RequestInit = {}) => fetchFn(url, { ...init, signal: AbortSignal.timeout(READ_TIMEOUT_MS) });
+  const get = (url: string, init: RequestInit = {}) => fetchFn(url, { signal: AbortSignal.timeout(READ_TIMEOUT_MS), ...init });
 
   async function claude(): Promise<Omit<QuotaReading, "adapter" | "readAt">> {
     const auth = { Authorization: `Bearer ${opts.claudeOAuthToken}`, "anthropic-beta": "oauth-2025-04-20" };
-    const usage = await get("https://api.anthropic.com/api/oauth/usage", { headers: auth });
+    // One limit for the whole read, the header fallback included.
+    const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
+    const usage = await get("https://api.anthropic.com/api/oauth/usage", { headers: auth, signal });
     if (usage.ok) {
       const body = ClaudeUsage.parse(await usage.json());
       return windows(claudeWindow(body.seven_day), claudeWindow(body.five_hour));
@@ -67,6 +71,7 @@ export function providerQuota(opts: QuotaOptions): ReadQuota {
     if (usage.status !== 401 && usage.status !== 403) throw new Unreadable(`usage endpoint answered ${usage.status}`);
     const probe = await get("https://api.anthropic.com/v1/messages", {
       method: "POST",
+      signal,
       headers: { ...auth, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1, messages: [{ role: "user", content: "." }] }),
     });

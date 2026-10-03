@@ -14,11 +14,14 @@ export type Choice = ProviderChoice & { adapter: Adapter };
 const known = (c: Candidate) => c.quota.weekly !== undefined && c.quota.fiveHour !== undefined;
 const usable = (c: Candidate) => known(c) && (c.quota.fiveHour?.remainingPercent ?? 0) >= FIVE_HOUR_FLOOR_PERCENT;
 const byWeeklyLeft = (a: Candidate, b: Candidate) => (b.quota.weekly?.remainingPercent ?? 0) - (a.quota.weekly?.remainingPercent ?? 0);
-const percent = (c: Candidate) => `${c.adapter} ${c.quota.weekly?.remainingPercent}% weekly, ${c.quota.fiveHour?.remainingPercent}% 5-hour left`;
+// Readings are compared exact; only the recorded reason rounds them.
+const shown = (w: { remainingPercent: number } | undefined) => (w ? Math.round(w.remainingPercent * 10) / 10 : "?");
+const percent = (c: Candidate) => `${c.adapter} ${shown(c.quota.weekly)}% weekly, ${shown(c.quota.fiveHour)}% 5-hour left`;
 
 /**
  * The worker gets the provider with the most weekly capacity left, unless its 5-hour window is below
- * the floor; then the next one that is not. Any unknown quota keeps the configured provider.
+ * the floor; then the next one that is not, or else the next one anyway (the owner's rule flips even
+ * when both are below). Any unknown quota keeps the configured provider.
  */
 export function chooseWorker(candidates: Candidate[], configured: Adapter): Choice {
   const readings = candidates.map((c) => c.quota);
@@ -29,11 +32,11 @@ export function chooseWorker(candidates: Candidate[], configured: Adapter): Choi
   const ranked = [...candidates].sort(byWeeklyLeft);
   const best = ranked[0];
   if (!best) return { adapter: configured, reason: `no provider to choose from; configured ${configured}`, readings };
-  const chosen = ranked.find(usable) ?? best;
+  const chosen = usable(best) ? best : (ranked.find(usable) ?? ranked[1] ?? best);
   const reason =
     chosen === best
-      ? `most weekly left: ${percent(chosen)}${usable(chosen) ? "" : `; every 5-hour window is below ${FIVE_HOUR_FLOOR_PERCENT}%`}`
-      : `${best.adapter} has the most weekly left but its 5-hour window is below ${FIVE_HOUR_FLOOR_PERCENT}%: ${percent(chosen)}`;
+      ? `most weekly left: ${percent(chosen)}${usable(chosen) ? "" : `; no other provider`}`
+      : `${best.adapter} has the most weekly left but its 5-hour window is below ${FIVE_HOUR_FLOOR_PERCENT}% (${percent(best)}): ${percent(chosen)}${usable(chosen) ? "" : `, also below`}`;
   return { adapter: chosen.adapter, reason, readings };
 }
 

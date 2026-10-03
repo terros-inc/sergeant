@@ -19,7 +19,7 @@ function fakeFetch(answer: (url: string, init: RequestInit) => Response) {
 test("reads Claude's and Codex's weekly and 5-hour percent left, with their resets", async () => {
   const { fetch, calls } = fakeFetch((url) =>
     url.includes("anthropic")
-      ? json({ five_hour: { utilization: 81, resets_at: "2026-10-03T15:00:00+00:00" }, seven_day: { utilization: 17, resets_at: null } })
+      ? json({ five_hour: { utilization: 80.4, resets_at: "2026-10-03T15:00:00+00:00" }, seven_day: { utilization: 17, resets_at: null } })
       : json({
           rate_limit: {
             primary_window: { used_percent: 57, limit_window_seconds: 604_800, reset_at: 1_791_000_000 },
@@ -31,7 +31,8 @@ test("reads Claude's and Codex's weekly and 5-hour percent left, with their rese
 
   expect(await read("claude-code-local")).toMatchObject({
     weekly: { remainingPercent: 83 },
-    fiveHour: { remainingPercent: 19, resetsAt: "2026-10-03T15:00:00.000Z" },
+    // Unrounded: 80.4% used is 19.6% left, below the 20% floor, never rounded up to it.
+    fiveHour: { remainingPercent: 19.6, resetsAt: "2026-10-03T15:00:00.000Z" },
   });
   expect(await read("codex-local")).toMatchObject({
     weekly: { remainingPercent: 43, resetsAt: new Date(1_791_000_000_000).toISOString() },
@@ -48,7 +49,7 @@ test("a Claude token the usage endpoint refuses is read from the Messages rate-l
       ? json({ error: { type: "permission_error" } }, 403)
       : new Response("{}", {
           headers: {
-            "anthropic-ratelimit-unified-5h-utilization": "0.25",
+            "anthropic-ratelimit-unified-5h-utilization": "0.8",
             "anthropic-ratelimit-unified-5h-reset": "1790000000",
             "anthropic-ratelimit-unified-7d-utilization": "0.6",
           },
@@ -56,7 +57,7 @@ test("a Claude token the usage endpoint refuses is read from the Messages rate-l
   );
   expect(await providerQuota({ claudeOAuthToken: CLAUDE, codexCredential: CODEX, fetch })("claude-code-local")).toMatchObject({
     weekly: { remainingPercent: 40 },
-    fiveHour: { remainingPercent: 75, resetsAt: new Date(1_790_000_000_000).toISOString() },
+    fiveHour: { remainingPercent: 20, resetsAt: new Date(1_790_000_000_000).toISOString() },
   });
 });
 

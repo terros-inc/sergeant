@@ -23,9 +23,11 @@ test("a 5-hour window below 20% flips the worker to the other provider", () => {
   const flipped = chooseWorker([quota("claude-code-local", 83, 19), quota("codex-local", 43, 60)], "claude-code-local");
   expect(flipped.adapter).toBe("codex-local");
   expect(flipped.reason).toMatch(/5-hour window is below 20%/);
-  // At the floor is still usable; and when both are below it, flipping helps nothing.
+  // At the floor is still usable; just below it is not, unrounded; and the owner's rule flips even
+  // when the other provider is below the floor too.
   expect(chooseWorker([quota("claude-code-local", 83, 20), quota("codex-local", 43, 60)], "codex-local").adapter).toBe("claude-code-local");
-  expect(chooseWorker([quota("claude-code-local", 83, 5), quota("codex-local", 43, 10)], "codex-local").adapter).toBe("claude-code-local");
+  expect(chooseWorker([quota("claude-code-local", 83, 19.6), quota("codex-local", 43, 60)], "claude-code-local").adapter).toBe("codex-local");
+  expect(chooseWorker([quota("claude-code-local", 83, 5), quota("codex-local", 43, 10)], "claude-code-local").adapter).toBe("codex-local");
 });
 
 // A quota read must never block or guess: an unreadable provider keeps the configured `runners` role.
