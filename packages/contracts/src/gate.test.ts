@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { checkMerge, type MergeFacts } from "./gate.ts";
+import { checkMerge, rereviewRequests, type MergeFacts } from "./gate.ts";
 import type { MergePr } from "./actions.ts";
 import type { HumanPullRequestFeedback } from "./github.ts";
 import type { RefusedMerge } from "./situation.ts";
@@ -194,4 +194,38 @@ test("refuses to merge past an input a run could not read until a question names
   expect(checkMerge(merge, facts({ runs: [reviewer(), unread], agentComments: [asked] }))).toEqual({ allowed: true });
   const quoted = { ...asked, id: "c2", body: `Linked document: ${doc}` };
   expect(checkMerge(merge, facts({ runs: [reviewer(), unread], agentComments: [quoted] }))).toMatchObject({ allowed: false, rule: "M14" });
+});
+
+// TECH-4992: after a successor addressed a human's requested changes, the task sat blocked by M8 with
+// nobody told. Sergeant asks that human to re-review only once M8 is all that is left: never while
+// checks are red or pending, the head lacks review standing, or the request was already lifted.
+test("asks a human to re-review only when their requested changes are all that blocks the head", () => {
+  const review = (author: string, state: HumanPullRequestFeedback["state"], commitId: string, hour: number): HumanPullRequestFeedback => {
+    const at = `2026-10-03T0${hour}:00:00.000Z`;
+    return { id: `review:${hour}`, kind: "review", author, state, body: "", path: null, line: null, commitId, createdAt: at, updatedAt: at, url: `https://github.com/x/y/pull/7#r${hour}` };
+  };
+  const requested = review("captain", "CHANGES_REQUESTED", moved, 1);
+  const ask = (over: Partial<MergeFacts["pr"]> = {}, runs = [reviewer(), worker(true)]) =>
+    rereviewRequests({ ...facts().pr, humanFeedback: [requested], ...over }, runs);
+
+  expect(ask()).toEqual(["captain"]);
+  expect(ask({}, [worker(false)])).toEqual(["captain"]);
+  expect(ask({ checks: { sha: head, required: [{ name: "ci", state: "pending" }] } })).toEqual([]);
+  expect(ask({ checks: { sha: head, required: [{ name: "ci", state: "failed" }] } })).toEqual([]);
+  expect(ask({ checks: { sha: moved, required: [{ name: "ci", state: "passed" }] } })).toEqual([]);
+  expect(ask({}, [reviewer({ reviewed: [{ ...pr, headSha: moved }] }), worker(true)])).toEqual([]);
+  expect(ask({}, [reviewer({ verdict: "changes_requested" }), worker(true)])).toEqual([]);
+  expect(ask({}, [worker(true)])).toEqual([]);
+  expect(ask({ humanFeedback: [requested, review("captain", "APPROVED", head, 2)] })).toEqual([]);
+  expect(ask({ humanFeedback: [{ ...requested, state: "DISMISSED" }] })).toEqual([]);
+  // Requested on this very head: nothing has addressed it yet.
+  expect(ask({ humanFeedback: [review("captain", "CHANGES_REQUESTED", head, 1)] })).toEqual([]);
+  expect(ask({ state: "merged" })).toEqual([]);
+  expect(ask({ draft: true })).toEqual([]);
+  expect(ask({ checks: { sha: head, required: [] } })).toEqual([]);
+  // A conflicting PR, or one GitHub is still computing, would be refused by M7 after the approval.
+  expect(ask({ mergeable: false })).toEqual([]);
+  expect(ask({ mergeable: null })).toEqual([]);
+  // A review whose commit GitHub no longer reports was not left on this head.
+  expect(ask({ humanFeedback: [{ ...requested, commitId: null }] })).toEqual(["captain"]);
 });

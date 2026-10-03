@@ -117,12 +117,36 @@ export type MergeFacts = Ownership & {
  * as on GitHub.
  */
 export function outstandingChangeRequests(feedback: HumanPullRequestFeedback[]): string[] {
-  const latest = new Map<string, HumanPullRequestFeedback["state"]>();
+  return standingChangeRequests(feedback).map((r) => r.author);
+}
+
+/** Each human's latest decisive review, where it requests changes. */
+function standingChangeRequests(feedback: HumanPullRequestFeedback[]): HumanPullRequestFeedback[] {
+  const latest = new Map<string, HumanPullRequestFeedback>();
   const decisive = feedback
     .filter((f) => f.kind === "review" && f.state !== "COMMENTED")
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
-  for (const review of decisive) latest.set(review.author, review.state);
-  return [...latest].filter(([, state]) => state === "CHANGES_REQUESTED").map(([author]) => author);
+  for (const review of decisive) latest.set(review.author, review);
+  return [...latest.values()].filter((r) => r.state === "CHANGES_REQUESTED");
+}
+
+/**
+ * The humans to ask on the issue to re-review or dismiss (TECH-4992): their requested changes (M8)
+ * are what keeps this PR's head from merging. The PR is open, ready, and mergeable (M7), every
+ * required check passed on its head, the head has review standing (an approving review of it, or its
+ * worker's not_required), and each named human requested changes on an earlier head, which this head
+ * has since addressed. A review whose commit GitHub no longer reports (commitId null, say after a force
+ * push) was not left on this head, so it counts as addressed: asking costs nothing, and M8 still holds.
+ * Empty when there is no one to ask yet.
+ */
+export function rereviewRequests(pr: PullRequestFacts, runs: RunRecord[]): string[] {
+  if (pr.state !== "open" || pr.draft || pr.mergeable !== true) return [];
+  const { checks } = pr;
+  if (checks.sha !== pr.headSha || checks.required.length === 0 || checks.required.some((c) => c.state !== "passed")) return [];
+  const head = { repo: pr.repo, number: pr.number, sha: pr.headSha };
+  const standings = runs.map((r): ReviewStanding => (r.role === "reviewer" ? { kind: "reviewed", reviewRunId: r.runId } : { kind: "not_required", workerRunId: r.runId }));
+  if (!standings.some((s) => checkStanding(s, head, runs) === null)) return [];
+  return standingChangeRequests(pr.humanFeedback).filter((r) => r.commitId !== pr.headSha).map((r) => r.author);
 }
 
 /** The first line of every question Sergeant asks on an issue (07 §4). */

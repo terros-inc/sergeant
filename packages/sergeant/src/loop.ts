@@ -23,6 +23,7 @@ import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
 import { noteEdit, openQuestion } from "./question.ts";
+import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { humanWait } from "./slots.ts";
 import { applyTurn, loadState } from "./task-state.ts";
@@ -196,6 +197,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
     await postHandoffs(conversation.issue.id);
+    await postRereviewRequests(conversation, pullRequests, runs, deps.linear, log);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
