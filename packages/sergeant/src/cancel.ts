@@ -34,8 +34,14 @@ const CancelIntent = z.object({
   closed: z.array(ClosedPullRequest).default([]),
   /** Completed GitHub close effects, keyed per PR and exact head so a re-drive skips them. */
   prCloseKeys: z.array(z.string()).default([]),
+  /** Drives on which a canceled run's status was still unreadable. */
+  unreadableStatusAttempts: z.number().int().nonnegative().default(0),
+  /** Whether the durable, idempotent warning about an unreadable status was posted. */
+  unreadableStatusSurfaced: z.boolean().default(false),
 });
 type CancelIntent = z.infer<typeof CancelIntent>;
+
+const SURFACE_UNREADABLE_STATUS_AFTER = 3;
 
 /** The request cannot be carried out as asked; nothing was recorded. */
 export class CancelConflict extends Error {}
@@ -78,7 +84,7 @@ export const stopReason = (issue: Conversation["issue"]) =>
  */
 export async function recordStop(dir: string, reason: string, requestId: string = randomUUID()): Promise<void> {
   if ((await readIntent(dir)) || !(await exists(join(dir, "state.json")))) return;
-  await writeIntent(dir, { reason, requestId, at: new Date().toISOString(), closed: [], prCloseKeys: [] });
+  await writeIntent(dir, { reason, requestId, at: new Date().toISOString(), closed: [], prCloseKeys: [], unreadableStatusAttempts: 0, unreadableStatusSurfaced: false });
 }
 
 /**
@@ -130,6 +136,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     await writeIntent(dir, intent);
   }
   const stopping: RunId[] = [];
+  const unreadable: RunId[] = [];
   const runs: RunRecord[] = [];
   for (const runId of intent.runIds) {
     let run = await deps.runner.status(runId).catch(() => undefined);
@@ -151,7 +158,23 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     if (run) runs.push(run);
     else {
       stopping.push(runId);
+      unreadable.push(runId);
       log(`${ref}: status of ${runId} unreadable after its cancel, retrying`);
+    }
+  }
+  if (unreadable.length > 0 && !intent.unreadableStatusSurfaced) {
+    intent.unreadableStatusAttempts++;
+    await writeIntent(dir, intent);
+    if (intent.unreadableStatusAttempts >= SURFACE_UNREADABLE_STATUS_AFTER) {
+      const { issue } = await deps.linear.readConversation(ref);
+      await deps.linear.postComment({
+        issueId: issue.id,
+        key: `cancel-stalled:${issue.id}:${intent.requestId}`,
+        body: stalledStopComment(unreadable, intent.unreadableStatusAttempts),
+      });
+      intent.unreadableStatusSurfaced = true;
+      await writeIntent(dir, intent);
+      log(`${ref}: surfaced stalled stop after ${intent.unreadableStatusAttempts} unreadable status attempts`);
     }
   }
   if (stopping.length > 0) return { stopping, closedPullRequests: intent.closed };
@@ -195,6 +218,10 @@ async function openPullRequests(linked: PullRequestRef[], runs: RunRecord[], enr
 function stopComment(intent: CancelIntent): string {
   const closed = intent.closed.length > 0 ? `Closed ${intent.closed.map((p) => `[${p.repo}#${p.number}](${p.url})`).join(", ")}.` : "No open PR to close.";
   return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled. ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
+}
+
+function stalledStopComment(runIds: RunId[], attempts: number): string {
+  return `Sergeant is still trying to stop this task, but could not read the canceled run status after ${attempts} attempts: ${runIds.map((id) => `\`${id}\``).join(", ")}. The stop remains pending so a worker-reported PR is not missed. Please check the runner; Sergeant will keep retrying.`;
 }
 
 /**

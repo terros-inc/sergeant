@@ -250,6 +250,33 @@ test("a stop whose run status stays unreadable after the cancel stays pending, s
   expect(await readdir(task)).not.toContain("cancel.json");
 });
 
+test("a stop whose canceled run stays unreadable warns the issue once and remains pending", async () => {
+  const { seen, task, drive } = await stopWithFlakyStatus(8);
+
+  for (let i = 0; i < 2; i++) expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([]);
+
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([
+    {
+      key: expect.stringMatching(/^cancel-stalled:i1:/),
+      body: expect.stringMatching(/could not read.*after 3 attempts: `run_w1`.*remains pending.*worker-reported PR.*keep retrying/),
+    },
+  ]);
+  expect(await readdir(task)).toContain("cancel.json");
+
+  // A later intake neither duplicates the warning nor gives up the TECH-5070 wait.
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toHaveLength(1);
+  expect(await readdir(task)).toContain("cancel.json");
+
+  // Once status is readable, the normal stop still finds and closes the worker-reported PR.
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments.map((comment) => comment.key)).toEqual([expect.stringMatching(/^cancel-stalled:i1:/), expect.stringMatching(/^cancel:i1:/)]);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
 // A start the runner never confirmed and still does not know never started, so it does not hold the
 // stop. That is in the intent, so it holds after a crash once `state.json` is set aside.
 test("a stop's never-started run does not hold it pending once state.json is set aside", async () => {
