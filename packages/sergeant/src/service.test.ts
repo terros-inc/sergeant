@@ -13,6 +13,8 @@ import { startService, type ServiceDeps } from "./service.ts";
 
 const agent = { id: "agent-v2", name: "Sergeant" };
 const issues = ["UNF-1", "UNF-2", "UNF-3"];
+/** An open Todo issue with no priority, as intake lists it. */
+const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" } });
 
 let dir = "";
 const children: ChildProcess[] = [];
@@ -45,7 +47,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
     workerLogin: "sergeant-worker[bot]",
     delegatedIssues: async () => {
       if (intakeFailures-- > 0) throw new Error("Linear is down");
-      return issues;
+      return issues.map(todo);
     },
     linear: {
       readConversation: async (id) => {
@@ -111,7 +113,7 @@ function oneIssue(ids: string[], turnMs: number) {
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
-    delegatedIssues: async () => ids,
+    delegatedIssues: async () => ids.map(todo),
     linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")), moveIssueToStarted: async () => ({ moved: false as const }) },
     github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
@@ -158,7 +160,7 @@ test("public /health says only whether serve is healthy; task ids and intake err
   let failing = false;
   const delegatedIssues = async () => {
     if (failing) throw new Error("Linear refused UNF-1's team");
-    return ["UNF-1"];
+    return [todo("UNF-1")];
   };
   const service = await startService({ ...options(), port: 0 }, { ...deps, delegatedIssues });
   const get = (path: string) => fetch(`http://127.0.0.1:${service.port}${path}`);
