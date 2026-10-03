@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { linearUploads, type Conversation } from "@terros/sergeant-contracts";
+import { fetchPublic, type FetchLink } from "./public-fetch.ts";
 
 /** Fetches a Linear upload with the installation's Linear token, on the control plane (TECH-4994). */
 export type FetchUpload = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
@@ -20,15 +21,17 @@ const FETCH_TIMEOUT_MS = 60_000;
 /**
  * Downloads the human-added files of the task into `dir`: every Linear upload referenced in the text
  * or attached, and each other attachment only when it is a plain HTTPS file (not a web page or an
- * integration's record). Anything that fails or is over a size cap is skipped with a reason, never
- * fatal. The Linear token stays here; the run gets only the bytes.
+ * integration's record), and only from public addresses (TECH-5036). Anything that fails or is over
+ * a size cap is skipped with a reason, never fatal. The Linear token stays here; the run gets only
+ * the bytes.
  */
 export async function fetchAttachments(
   conversation: Conversation,
   dir: string,
-  opts: { fetchUpload?: FetchUpload; fetch: typeof globalThis.fetch; limits?: AttachmentLimits },
+  opts: { fetchUpload?: FetchUpload; fetchLink?: FetchLink; limits?: AttachmentLimits },
 ): Promise<Attachments> {
   const limits = opts.limits ?? DEFAULT_ATTACHMENT_LIMITS;
+  const fetchLink = opts.fetchLink ?? fetchPublic;
   const result: Attachments = { files: [], skipped: [] };
   const wanted = new Map<string, { title: string; source: string | null }>();
   for (const a of conversation.issue.attachments ?? []) if (!wanted.has(a.url)) wanted.set(a.url, { title: a.title, source: a.source });
@@ -60,14 +63,14 @@ export async function fetchAttachments(
     }
     try {
       const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-      const res = upload ? await opts.fetchUpload!(url, { signal }) : await opts.fetch(url, { signal, redirect: "follow" });
+      const res = upload ? await opts.fetchUpload!(url, { signal }) : await fetchLink(url, { signal });
       if (!res.ok) {
         await res.body?.cancel();
         skip(`download failed (${res.status})`);
         continue;
       }
       const contentType = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0]!.trim();
-      if (!upload && ((res.url && !res.url.startsWith("https://")) || contentType === "text/html")) {
+      if (!upload && contentType === "text/html") {
         await res.body?.cancel();
         skip("a web page, not a file");
         continue;
@@ -96,11 +99,11 @@ export async function fetchAttachments(
  */
 export async function reasoningFiles(
   conversation: Conversation,
-  opts: { fetchUpload?: FetchUpload; fetch?: typeof globalThis.fetch; limits?: AttachmentLimits },
+  opts: { fetchUpload?: FetchUpload; fetchLink?: FetchLink; limits?: AttachmentLimits },
 ): Promise<Attachments & { files: (FetchedAttachment & { data: Uint8Array })[] }> {
   const dir = await mkdtemp(join(tmpdir(), "sergeant-reasoning-files-"));
   try {
-    const got = await fetchAttachments(conversation, dir, { ...opts, fetch: opts.fetch ?? globalThis.fetch });
+    const got = await fetchAttachments(conversation, dir, opts);
     const files = await Promise.all(got.files.map(async (f) => ({ ...f, data: await readFile(join(dir, f.name)) })));
     return { files, skipped: got.skipped };
   } finally {
