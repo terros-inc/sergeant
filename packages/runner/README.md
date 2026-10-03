@@ -96,6 +96,18 @@ Terros now has its own Codex Team account, and nothing personal is ever used.
   The run record's `providerChoice` holds the choice, its reason, and the readings (`sgt run <id>`).
   A role's `--worker-model`/`--reviewer-model` applies to its configured adapter; on the other one it
   runs that adapter's default model.
+- **Model accounts (TECH-5113).** `claudeOAuthToken` and `codexCredential` are the installation's own
+  accounts (`installation-claude`, `installation-codex`); `accounts()` lists more, read at each launch:
+  the owner's further ones, then people's registered ones. Owner-first across providers: while any
+  owner's account of either provider is usable (5-hour window at least 20%, week not spent), only the
+  owner's usable accounts take part; people's registered ones only when none is. `accounts.ts` picks
+  each provider's account among those (`chooseAccount`), and TECH-5117's choice compares each
+  provider's pick; a provider with no account taking part is left out, so a reviewer may then share its
+  worker's provider (`sameProviderAsWorker`). With nothing usable anywhere, every account takes part as
+  before. Only the chosen account's credential enters the container. A run whose agent reports a quota or
+  authentication failure (`failureReason`, from Claude Code's result text or Codex's failed turn) sets
+  its account aside for an hour, so the next launch takes the next account. The record's `account` and
+  `accountReason` say whose subscription paid and why.
 - **Resume (V6).** Codex can resume a thread (`codex exec resume <id>`), but its session lives in the
   run's container, removed at the end, and this runner resumes no adapter. A continuation is a fresh
   run from the pushed branches and earlier reports in its brief. The thread id is in `agent.json`.

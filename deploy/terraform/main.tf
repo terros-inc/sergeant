@@ -91,6 +91,17 @@ data "aws_iam_policy_document" "host" {
     ]
   }
 
+  # People register their own model accounts through the API (TECH-5113): the host writes this one
+  # secret's value, nothing else, and never creates or deletes a secret.
+  dynamic "statement" {
+    for_each = var.registered_accounts_secret == null ? [] : [var.registered_accounts_secret]
+    content {
+      sid       = "WriteRegisteredAccounts"
+      actions   = ["secretsmanager:PutSecretValue"]
+      resources = ["arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:${statement.value}-??????"]
+    }
+  }
+
   statement {
     sid       = "ReadInstallationConfig"
     actions   = ["ssm:GetParameter"]

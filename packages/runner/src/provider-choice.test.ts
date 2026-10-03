@@ -29,7 +29,7 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
     return { code: 0, stdout: "", stderr: "" };
   };
   const left: Record<Adapter, [number, number]> = { "claude-code-local": [83, 90], "codex-local": [43, 90] };
-  const quota = async (adapter: Adapter): Promise<QuotaReading> => ({
+  const quota = async ({ adapter }: { adapter: Adapter }): Promise<QuotaReading> => ({
     adapter,
     readAt: "2026-10-03T12:00:00.000Z",
     weekly: { remainingPercent: left[adapter][0] },
@@ -62,4 +62,40 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
   await runner.start(reviewer);
   expect(launched[1]).toContain("codex exec");
   expect(await runner.status("run_r")).toMatchObject({ provider: "openai/codex", model: "gpt-5", providerChoice: { adapter: "codex-local" } });
+});
+
+// TECH-5113 acceptance: the run records whose account paid, only that account's credential enters
+// the container, and a run that fails on the account's quota sends the next launch to the next account.
+test("a run uses one account's credential, records it, and a quota failure moves the next run on", async () => {
+  const env: (string | undefined)[] = [];
+  let logs = '{"is_error":true,"result":"Claude AI usage limit reached|1791000000"}';
+  const exec: Exec = async (cmd, args, opts) => {
+    if (cmd === "docker" && args[0] === "run") env.push(opts?.env?.CLAUDE_CODE_OAUTH_TOKEN);
+    if (cmd === "docker" && args[0] === "inspect") return { code: 0, stdout: "exited 1\n", stderr: "" };
+    if (cmd === "docker" && args[0] === "logs") return { code: 0, stdout: logs, stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const ada = { id: "person:ada:claude-code-local", adapter: "claude-code-local", credential: "sk-ant-oat01-ada", group: "registered", holder: "Ada Example <ada@example.com>" } as const;
+  const runner = containerRunner({
+    rootDir: await mkdtemp(join(tmpdir(), "sergeant-account-test-")),
+    models: { worker: { "claude-code-local": "opus", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
+    claudeOAuthToken: "sk-ant-oat01-installation",
+    accounts: async () => [ada],
+    quota: async ({ id, adapter }) => ({ adapter, account: id, readAt: "2026-10-03T12:00:00.000Z", weekly: { remainingPercent: 50 }, fiveHour: { remainingPercent: 90 } }),
+    gitIdentity: { name: "Ada Example", email: "ada@example.com" },
+    githubTokens: async () => "ghs_test",
+    exec,
+  });
+
+  await runner.start(worker);
+  expect(await runner.status("run_w")).toMatchObject({
+    status: "failed",
+    failureReason: "quota",
+    account: { id: "installation-claude", group: "owner", holder: "the installation" },
+    accountReason: expect.stringContaining("owner's account installation-claude"),
+  });
+  logs = '{"is_error":false}';
+  await runner.start({ ...worker, runId: "run_w2" });
+  expect(await runner.status("run_w2")).toMatchObject({ account: { id: ada.id, group: "registered", holder: "Ada Example <ada@example.com>" } });
+  expect(env).toEqual(["sk-ant-oat01-installation", "sk-ant-oat01-ada"]);
 });

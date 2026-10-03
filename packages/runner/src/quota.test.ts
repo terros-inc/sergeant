@@ -1,8 +1,10 @@
 import { expect, test } from "vitest";
-import { providerQuota, QUOTA_CACHE_MS } from "./quota.ts";
+import { accountQuota, QUOTA_CACHE_MS, type QuotaAccount } from "./quota.ts";
 
 const CLAUDE = "sk-ant-oat01-quota-test";
 const CODEX = JSON.stringify({ tokens: { access_token: "codex-access-test", account_id: "acct-1" } });
+const claude = (credential = CLAUDE): QuotaAccount => ({ id: "terros-claude", adapter: "claude-code-local", credential });
+const codex = (credential = CODEX): QuotaAccount => ({ id: "terros-codex", adapter: "codex-local", credential });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 function fakeFetch(answer: (url: string, init: RequestInit) => Response) {
@@ -27,14 +29,14 @@ test("reads Claude's and Codex's weekly and 5-hour percent left, with their rese
           },
         }),
   );
-  const read = providerQuota({ claudeOAuthToken: CLAUDE, codexCredential: CODEX, fetch });
+  const read = accountQuota({ fetch });
 
-  expect(await read("claude-code-local")).toMatchObject({
+  expect(await read(claude())).toMatchObject({
     weekly: { remainingPercent: 83 },
     // Unrounded: 80.4% used is 19.6% left, below the 20% floor, never rounded up to it.
     fiveHour: { remainingPercent: 19.6, resetsAt: "2026-10-03T15:00:00.000Z" },
   });
-  expect(await read("codex-local")).toMatchObject({
+  expect(await read(codex())).toMatchObject({
     weekly: { remainingPercent: 43, resetsAt: new Date(1_791_000_000_000).toISOString() },
     fiveHour: { remainingPercent: 88 },
   });
@@ -55,7 +57,7 @@ test("a Claude token the usage endpoint refuses is read from the Messages rate-l
           },
         }),
   );
-  expect(await providerQuota({ claudeOAuthToken: CLAUDE, codexCredential: CODEX, fetch })("claude-code-local")).toMatchObject({
+  expect(await accountQuota({ fetch })(claude())).toMatchObject({
     weekly: { remainingPercent: 40 },
     fiveHour: { remainingPercent: 20, resetsAt: new Date(1_790_000_000_000).toISOString() },
   });
@@ -66,12 +68,12 @@ test("a Claude token the usage endpoint refuses is read from the Messages rate-l
 test("a failed read is unknown, never throws, and never records the credential", async () => {
   const down = fakeFetch(() => json({}, 500)).fetch;
   const broken = "{ not json sk-ant-oat01-secret";
-  const read = providerQuota({ claudeOAuthToken: CLAUDE, codexCredential: broken, fetch: down });
-  expect(await read("claude-code-local")).toMatchObject({ error: "usage endpoint answered 500" });
-  const codex = await read("codex-local");
-  expect(codex.weekly).toBeUndefined();
-  expect(JSON.stringify(codex)).not.toContain("secret");
-  expect(await providerQuota({ claudeOAuthToken: CLAUDE, codexCredential: "sk-proj-key", fetch: down })("codex-local")).toMatchObject({
+  const read = accountQuota({ fetch: down });
+  expect(await read(claude())).toMatchObject({ account: "terros-claude", error: "usage endpoint answered 500" });
+  const unreadable = await read(codex(broken));
+  expect(unreadable.weekly).toBeUndefined();
+  expect(JSON.stringify(unreadable)).not.toContain("secret");
+  expect(await read(codex("sk-proj-key"))).toMatchObject({
     error: "an OpenAI API key has no subscription quota",
   });
 });
@@ -79,12 +81,15 @@ test("a failed read is unknown, never throws, and never records the credential",
 test("a burst of launches shares one reading until it is a few minutes old", async () => {
   let clock = 0;
   const { fetch, calls } = fakeFetch(() => json({ five_hour: { utilization: 1 }, seven_day: { utilization: 1 } }));
-  const read = providerQuota({ claudeOAuthToken: CLAUDE, codexCredential: CODEX, fetch, now: () => clock });
-  await Promise.all([read("claude-code-local"), read("claude-code-local")]);
+  const read = accountQuota({ fetch, now: () => clock });
+  await Promise.all([read(claude()), read(claude())]);
   clock += QUOTA_CACHE_MS - 1;
-  await read("claude-code-local");
+  await read(claude());
   expect(calls).toHaveLength(1);
-  clock += 1;
-  await read("claude-code-local");
+  // A replaced credential is read afresh, not served the old one's reading.
+  await read(claude("sk-ant-oat01-replaced"));
   expect(calls).toHaveLength(2);
+  clock += 1;
+  await read(claude());
+  expect(calls).toHaveLength(3);
 });

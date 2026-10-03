@@ -31,6 +31,9 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | `POST /v1/tasks/:ref/wake` | `reason?` → `{ wakeAt }` | appends `human_cli` wake reason | team members | idempotent enough: a duplicate wake coalesces |
 | `POST /v1/tasks/:ref/cancel` | `reason` → `{ closed }` | `cancel_task` closing action: cancels runs, removes delegation, posts one line, closes the task last (03 §10) | team members | key `close:<taskId>`, shared by every closing action so a task has at most one |
 | `POST /v1/runs/:id/cancel` | `reason` → status | `cancel_run` action (actor human) | team members | key `cancel:<runId>` |
+| `GET /v1/accounts` | → model accounts (never credentials), whose, and the runs each paid for | — | yes | TECH-5113 |
+| `POST /v1/accounts/:adapter/register` | `credential` → account, quota read with it | stores the caller's own account in the registered-accounts secret, replacing theirs | team members, as themselves | one per person and adapter |
+| `POST /v1/accounts/:adapter/remove` | → `removed` | removes the caller's own account | team members, as themselves | idempotent |
 | `POST /v1/pause` / `POST /v1/resume` | `reason` → state | writes `system_state.pause`; audit action | approvers | resume of a pause is idempotent |
 | `POST /v1/drain`, `POST /v1/drain/cancel` | owned drain token (ADR-0040, kept) | stop starting turns and runs; ready when no start or turn is mid-flight | no | deploys quiesce in seconds; runs survive restarts |
 | `GET /v1/review-quality` | `since?, by?` → metrics (06 §9) | — | yes | |
@@ -114,6 +117,7 @@ sgt task wake <ref> [--reason]                       # take a turn now
 sgt task cancel <ref> --reason "…"                   # stop; removes delegation
 
 sgt run list [--task <ref>] | show <run> | report <run> | transcript <run> | cancel <run>
+sgt account list | register <adapter> (credential on stdin) | remove <adapter>
 
 sgt review quality [--since 30d] [--by category|provider|mode]
 

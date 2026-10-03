@@ -226,3 +226,26 @@ test("-v and --version print Sergeant's git version and exit 0 without touching 
     expect(parsed).toEqual({ version: expect.stringMatching(/^\d+\.\d+\.\d+\+([0-9a-f]{7,}|unknown)$/) });
   }
 });
+
+// TECH-5113: a credential is read from stdin, never an argument a shell history or process list keeps,
+// and only the API's answer, which never holds it, is printed.
+test("account register posts the credential read from stdin and prints the account without it", async () => {
+  const account = { id: "person:u1:codex-local", group: "registered", holder: "Ada Example <ada@example.com>", adapter: "codex-local", mine: true };
+  const { api, seen } = await fakeApi({
+    "POST /v1/accounts/codex-local/register": { json: { account, replaced: false, quota: { adapter: "codex-local", readAt: "t", weekly: { remainingPercent: 82 }, fiveHour: { remainingPercent: 99 } } } },
+    "GET /v1/accounts": { json: { accounts: [{ ...account, usage: { runs: 3, costUsd: 0, unknownCostRuns: 3 } }] } },
+  });
+  const credential = '{"tokens":{"access_token":"secret-access"}}';
+
+  const empty = await sgtWith({ stdin: async () => "\n" }, api, "account", "register", "codex-local");
+  expect(empty.code).toBe(2);
+  expect(seen).toEqual([]);
+
+  const done = await sgtWith({ stdin: async () => `${credential}\n` }, api, "account", "register", "codex-local");
+  expect(done).toMatchObject({ code: 0, out: expect.stringContaining("registered person:u1:codex-local for Ada Example <ada@example.com>: 82% weekly, 99% 5-hour left") });
+  expect(JSON.parse(seen[0]?.body ?? "")).toEqual({ credential });
+  expect(done.out + done.err).not.toContain("secret-access");
+
+  const list = await sgt(api, "account", "list");
+  expect(list.out).toMatch(/person:u1:codex-local\s+registered\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
+});

@@ -4,8 +4,11 @@ import { RepoSlug } from "./conversation.ts";
 export const RunId = z.string().regex(/^run_[\w-]+$/);
 export type RunId = z.infer<typeof RunId>;
 
-/** A machine-readable terminal failure that Sergeant handles outside ordinary agent reasoning. */
-export const RunFailureReason = z.enum(["authentication"]);
+/**
+ * A machine-readable terminal failure that Sergeant handles outside ordinary agent reasoning. On
+ * either, the runner sets the run's model account aside, so the next launch takes the next one (TECH-5113).
+ */
+export const RunFailureReason = z.enum(["authentication", "quota"]);
 export type RunFailureReason = z.infer<typeof RunFailureReason>;
 
 const FAIL_SAFE = "fail-safe: missing or unjustified skip, so review is required";
@@ -93,6 +96,8 @@ const QuotaWindow = z.object({ remainingPercent: z.number(), resetsAt: z.string(
  */
 export const QuotaReading = z.object({
   adapter: z.string(),
+  /** The model account read (TECH-5113); absent on records made before it. */
+  account: z.string().optional(),
   readAt: z.string(),
   weekly: QuotaWindow.optional(),
   fiveHour: QuotaWindow.optional(),
@@ -109,6 +114,19 @@ export const ProviderChoice = z.object({
   sameProviderAsWorker: z.boolean().optional(),
 });
 export type ProviderChoice = z.infer<typeof ProviderChoice>;
+
+/**
+ * The model account a run used (TECH-5113): whose subscription paid for it. `owner` is the
+ * installation owner's own account (its config); `registered`, one a person registered with `sgt`.
+ * Never the credential.
+ */
+export const RunAccount = z.object({
+  id: z.string(),
+  group: z.enum(["owner", "registered"]),
+  /** Who it belongs to, as a human reads it: the account's configured name, or the person's Linear name. */
+  holder: z.string(),
+});
+export type RunAccount = z.infer<typeof RunAccount>;
 
 const RunBase = {
   runId: RunId,
@@ -141,6 +159,10 @@ const RunBase = {
   issueRevision: z.string().optional(),
   /** Absent when the installation has one provider, and on records made before TECH-5117. */
   providerChoice: ProviderChoice.optional(),
+  /** Absent on records made before TECH-5113. */
+  account: RunAccount.optional(),
+  /** Why the account was chosen: owner's accounts first, then registered ones, each by quota (TECH-5113). */
+  accountReason: z.string().optional(),
 };
 
 /** One worker or reviewer run as the runner reports it. A reviewer is always its own fresh run. */

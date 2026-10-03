@@ -24,6 +24,17 @@ test("the control-plane and worker GitHub Apps must differ, however the App ID i
   expect(InstallationConfig.parse(config(42, "43")).github.workerApp.appId).toBe(43);
 });
 
+// TECH-5113: the owner's further accounts name whose subscription paid, so names must not pass for the
+// installation's own; a Codex account needs the codex config's model; a literal credential is refused.
+test("the owner's further model accounts are named secret references", () => {
+  const account = (name: string, adapter = "claude-code-local", credentialSecret = "sergeant/claude-2") => ({ ...config(1, 2), modelAccounts: [{ name, adapter, credentialSecret }] });
+  expect(InstallationConfig.parse(account("terros-claude-2")).modelAccounts).toHaveLength(1);
+  expect(InstallationConfig.parse(config(1, 2)).modelAccounts).toEqual([]);
+  expect(InstallationConfig.safeParse(account("installation-claude")).success).toBe(false);
+  expect(InstallationConfig.safeParse(account("terros-codex-2", "codex-local")).success).toBe(false);
+  expect(InstallationConfig.safeParse(account("terros-claude-2", "claude-code-local", "sk-ant-oat01-literal")).success).toBe(false);
+});
+
 test("reviewer profiles are validated and GitHub logins are matched case-insensitively", () => {
   const profile = "https://linear.app/acme/profiles/ada";
   const parsed = InstallationConfig.parse({

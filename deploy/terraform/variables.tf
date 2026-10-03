@@ -32,8 +32,19 @@ variable "secret_names" {
 
   # They become IAM resource patterns, so a wildcard or an ARN here would widen the grant.
   validation {
-    condition     = length(var.secret_names) >= 4 && length(var.secret_names) <= 7 && length(distinct(var.secret_names)) == length(var.secret_names) && alltrue([for name in var.secret_names : can(regex("^[A-Za-z0-9/_+=.@-]+$", name))])
-    error_message = "Expected four to seven distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, the model token, and optionally the Linear and GitHub webhook signing secrets and the Codex credential."
+    condition     = length(var.secret_names) >= 4 && length(var.secret_names) <= 12 && length(distinct(var.secret_names)) == length(var.secret_names) && alltrue([for name in var.secret_names : can(regex("^[A-Za-z0-9/_+=.@-]+$", name))])
+    error_message = "Expected four to twelve distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, the model token, and optionally the Linear and GitHub webhook signing secrets, the Codex credential, the owner's further model accounts, and the registered-accounts secret."
+  }
+}
+
+variable "registered_accounts_secret" {
+  description = "The installation config's `registeredAccountsSecret` (TECH-5113), also listed in `secret_names`: the one secret the host may also write, holding the model accounts people register with `sgt`. Null, nobody can register."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.registered_accounts_secret == null || (can(regex("^[A-Za-z0-9/_+=.@-]+$", var.registered_accounts_secret)) && contains(var.secret_names, var.registered_accounts_secret))
+    error_message = "Expected a literal Secrets Manager name (no wildcards or ARNs) that is also in secret_names."
   }
 }
 

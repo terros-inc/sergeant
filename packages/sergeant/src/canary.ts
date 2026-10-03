@@ -19,7 +19,8 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
-import { containerRunner, providerQuota, reasoningFiles } from "@terros/sergeant-runner";
+import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
+import { modelAccounts } from "./accounts.ts";
 import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
@@ -47,6 +48,8 @@ const repo = RepoSlug.parse(values.repo ?? fail("--repo is required"));
 const dir = resolve(values.dir ?? fail("--dir is required"));
 
 const installation = await connect(config, [repo]);
+// The installation's own model accounts, the config's further ones, then people's registered ones (TECH-5113).
+const accounts = modelAccounts(config, installation, (line) => console.log(`[${new Date().toISOString()}] ${line}`));
 // The reasoning CLI inherits this process's environment: with the token set it authenticates as
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;
@@ -72,11 +75,7 @@ const result = await runLoop(
     runner: containerRunner({
       rootDir: join(dir, "runs"),
       ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
-      claudeOAuthToken: installation.modelToken,
-      ...(installation.codexCredential !== undefined && {
-        codexCredential: installation.codexCredential,
-        quota: providerQuota({ claudeOAuthToken: installation.modelToken, codexCredential: installation.codexCredential }),
-      }),
+      ...accounts.runner,
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
       fetchUpload: installation.linear.fetchUpload,

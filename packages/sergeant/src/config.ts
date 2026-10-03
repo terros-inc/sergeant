@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { RepoSlug, type GitHubPort, type RunGitHubTokens, type RunSpec } from "@terros/sergeant-contracts";
 import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
 import { createLinearPort } from "@terros/sergeant-linear";
-import { ADAPTERS, type Adapter } from "@terros/sergeant-runner";
+import { ADAPTERS, type Adapter, type ModelAccount } from "@terros/sergeant-runner";
 import { z } from "zod";
 import type { BudgetWindow } from "./budget.ts";
 
@@ -129,10 +129,42 @@ export const InstallationConfig = z.strictObject({
       model: z.string().min(1),
     })
     .optional(),
-}).refine((c) => c.codex || !Object.values(c.runners ?? {}).includes("codex-local"), {
-  message: "a codex-local runner needs the codex credential",
-  path: ["codex"],
-});
+  /**
+   * The owner's further model accounts (TECH-5113), after `modelTokenSecret` and `codex.credentialSecret`
+   * and before any person's registered one. Each is a Secrets Manager id of a credential in the same
+   * form as those, and its `name` is how runs record whose subscription paid.
+   */
+  modelAccounts: z
+    .array(
+      z.strictObject({
+        name: z
+          .string()
+          .regex(/^[\w.-]{1,64}$/, "expected a short name: letters, digits, _ . -")
+          .refine((n) => !n.startsWith("installation-"), "installation-claude and installation-codex name the two accounts above"),
+        adapter: z.enum(ADAPTERS),
+        credentialSecret: SecretRef,
+      }),
+    )
+    .default([]),
+  /**
+   * Secrets Manager id of the one secret that holds the accounts people register with `sgt account
+   * register` (TECH-5113), created by the operator as `{"accounts":[]}`; the host must be able to put
+   * its value. Absent, nobody can register an account.
+   */
+  registeredAccountsSecret: SecretRef.optional(),
+})
+  .refine((c) => c.codex || !Object.values(c.runners ?? {}).includes("codex-local"), {
+    message: "a codex-local runner needs the codex credential",
+    path: ["codex"],
+  })
+  .refine((c) => c.codex || !c.modelAccounts.some((a) => a.adapter === "codex-local"), {
+    message: "a codex-local model account needs the codex config, for its model",
+    path: ["modelAccounts"],
+  })
+  .refine((c) => new Set(c.modelAccounts.map((a) => a.name)).size === c.modelAccounts.length, {
+    message: "model account names must be distinct",
+    path: ["modelAccounts"],
+  });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;
 
 type Role = RunSpec["role"];
@@ -170,7 +202,7 @@ export async function loadConfig(file: string): Promise<InstallationConfig> {
   return InstallationConfig.parse(JSON.parse(await readFile(file, "utf8")));
 }
 
-const run = promisify(execFile);
+export const run = promisify(execFile);
 
 export function secretResolver(config: InstallationConfig) {
   const { awsRegion, awsProfile } = config.secrets;
@@ -200,6 +232,8 @@ export type Installation = {
   modelToken: string;
   /** The Codex credential, when the config has one. */
   codexCredential?: string;
+  /** The config's `modelAccounts`, credentials resolved: the owner's, after the two above. */
+  ownerAccounts: ModelAccount[];
   /** Webhook signing secrets, for the sources the config gives one. */
   webhookSecrets: { linear?: string; github?: string };
 };
@@ -220,6 +254,9 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     optional(config.github.webhookSecret),
     optional(config.codex?.credentialSecret),
   ]);
+  const ownerAccounts = await Promise.all(
+    config.modelAccounts.map(async ({ name, adapter, credentialSecret }) => ({ id: name, adapter, group: "owner" as const, holder: name, credential: await secret(credentialSecret) })),
+  );
   const app = (ref: z.infer<typeof GitHubAppRef>, privateKey: string) =>
     githubApp({ appId: ref.appId, installationId: ref.installationId, privateKey });
   const controlPlaneApp = app(config.github.controlPlaneApp, controlPlaneKey);
@@ -250,6 +287,7 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     githubTokens: runTokens(workerApp),
     modelToken,
     ...(codexCredential !== undefined && { codexCredential }),
+    ownerAccounts,
     webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },
   };
 }

@@ -248,6 +248,16 @@ deterministic code: the worker gets the most weekly capacity left unless its 5-h
 unknown reading keeps the `runners` default, so a quota read never blocks a launch. The run record's
 `providerChoice` keeps the choice and the readings behind it.
 
+**Model accounts (TECH-5113).** A provider may have several accounts: the installation's own, the
+config's `modelAccounts` (both the owner's), then those people register through `/v1/accounts`. The
+owner's accounts come first across providers: while any owner's account of either provider is usable
+(5-hour window at least 20%, week not spent), only those take part, and registered ones only when none
+is. Each provider's account is its usable one with the most weekly capacity left, and the provider
+choice above compares the providers that have one (a reviewer shares its worker's provider when only
+that one does). With nothing usable, each provider runs the installation's own account as before. A run that fails on the account's quota
+or authentication (`failureReason`) sets the account aside for an hour, in memory, so the next launch
+takes the next one. The run record's `account` says whose subscription paid, never the credential.
+
 An adapter may wrap a tiny native helper (for example a Rust binary that owns process groups and clean
 termination) if OS process handling genuinely needs one. Sergeant itself stays TypeScript.
 

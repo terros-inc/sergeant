@@ -240,18 +240,18 @@ test.each([
   expect(await run.runner.status("run_t1")).toMatchObject({
     status: "failed",
     failureReason: "authentication",
-    reportError: expect.stringContaining("replace the installation's Codex credential"),
+    reportError: expect.stringContaining("replace the account's Codex credential"),
   });
 });
 
 test("non-auth Codex failures and unrelated stderr do not report authentication", async () => {
+  // A usage limit is the account's quota (TECH-5113), which sets the account aside, never an auth alert.
   const turn = await ended(
     { adapters: { worker: "codex-local" }, codexCredential: CODEX },
     '{"type":"turn.failed","error":{"message":"The model hit its usage limit."}}',
     "",
   );
-  expect(turn).toMatchObject({ status: "failed", reportError: expect.stringContaining("The model hit its usage limit.") });
-  expect(turn.failureReason).toBeUndefined();
+  expect(turn).toMatchObject({ status: "failed", reportError: expect.stringContaining("The model hit its usage limit."), failureReason: "quota" });
 
   const timeout = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
   timeout.host.docker.running = false;
