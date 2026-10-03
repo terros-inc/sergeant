@@ -117,11 +117,6 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   };
   // Ends the intake loop's wait: a webhook naming a delegated issue with no loop, or a delegation change.
   const intakeWake = new Wake();
-  let refillRequested = false;
-  const requestRefill = () => {
-    refillRequested = true;
-    intakeWake.interrupt();
-  };
 
   /** Runs the task's loop; `released`, it holds no slot until it has work to do (`Slot.work`). */
   const admit = (issueId: string, released = false) => {
@@ -160,7 +155,6 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         if (slots.get(issueId) === slot) slots.delete(issueId);
         ended.set(issueId, { at: Date.now(), outcome, detail });
         schedule();
-        requestRefill();
       });
     active.set(issueId, loop);
     slots.set(issueId, slot);
@@ -173,12 +167,10 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const freeSlots = () => maxTasks - [...slots.values()].filter((s) => !s.released).length;
   const schedule = (freshIssues: DelegatedIssue[] = []) => {
     if (abort.signal.aborted) return;
-    let released = false;
     for (const [issueId, slot] of slots) {
       if (slot.released || slot.waitingSince === undefined || Date.now() - slot.waitingSince < graceMs) continue;
       slot.released = true;
       slot.waitingSince = undefined;
-      released = true;
       log(`${issueId}: waiting past the grace; its task slot is free until it has work again`);
     }
     let free = freeSlots();
@@ -200,9 +192,6 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       log(`${issueId}: has work again; admitted to a task slot`);
       wakeOf(issueId).interrupt();
     }
-    // Only a fresh intake may admit a new issue. If a loop or grace release freed the slot, refresh
-    // Linear first instead of admitting from the previous intake's now-stale list.
-    if (freshIssues.length === 0 && released && freeSlots() > 0) requestRefill();
   };
 
   // A task stop recorded and not yet done (cancel.ts): driven at once, again at every intake until the
@@ -229,7 +218,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   };
   const drive = (ref: string) => driveCancel(taskDir(opts.stateDir, ref), ref, deps, opts.enrolledRepositories, log);
 
-  const intake = async (resumeEnded = true) => {
+  const intake = async () => {
     for (const ref of await pendingCancels(opts.stateDir)) {
       await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
     }
@@ -246,12 +235,15 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     // admission order; one past them runs its live checks with no slot. One seen through after its
     // merge does not resume. An unreadable `state.json` holds up no other task, nor discovery.
     const resumable: string[] = [];
-    for (const ref of resumeEnded ? await readdir(join(opts.stateDir, "tasks")).catch(() => []) : []) {
+    for (const ref of await readdir(join(opts.stateDir, "tasks")).catch(() => [])) {
       if (active.has(ref)) continue;
       const task = await readTaskState(join(taskDir(opts.stateDir, ref), "state.json")).catch((e: Error) => log(`${ref}: not resumed: ${e.message}`));
       if (task && !task.merged?.completedAt) resumable.push(ref);
     }
-    for (const ref of resumable.sort(byRank)) admit(ref, freeSlots() <= 0);
+    // A loop that already ended resumes cheaply and asks for a slot only if its live checks find work.
+    // This leaves the same intake free to admit newly listed Todo work instead of letting unchanged
+    // local tasks reclaim every slot on each periodic intake.
+    for (const ref of resumable.sort(byRank)) admit(ref, ended.has(ref) || freeSlots() <= 0);
     if (failed) throw failed;
     // New work: a delegated issue in Todo, not one whose stop is still under way nor one a Linear
     // "blocked by" issue still holds up (TECH-5066); it starts at the first intake after its last
@@ -277,9 +269,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     while (!abort.signal.aborted) {
       const at = new Date().toISOString();
       try {
-        const resumeEnded = !refillRequested;
-        refillRequested = false;
-        await intake(resumeEnded);
+        await intake();
         lastIntake = { at };
       } catch (e) {
         lastIntake = { at, error: (e as Error).message };
