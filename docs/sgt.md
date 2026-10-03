@@ -90,6 +90,20 @@ sgt run report <run>                           # the run's Markdown report
 
 ## 6. Model accounts
 
-Coming soon: registering your own model provider account with your installation
-([TECH-5113](https://linear.app/terros/issue/TECH-5113/sergeant-a-pool-of-model-accounts-per-installation-with-people)).
-The command will be added here when it ships.
+Sergeant runs workers and reviewers on the installation owner's Claude and Codex accounts first. If
+none of them has room (most weekly capacity left, 5-hour window at least 20%), it uses accounts people
+registered. You can register your own subscription, one per agent CLI, and remove it at any time:
+
+```sh
+claude setup-token | sgt account register claude-code-local    # your Claude subscription
+codex login && sgt account register codex-local < ~/.codex/auth.json   # your ChatGPT login for Codex
+sgt account list                                # every account, whose it is, and the runs it paid for
+sgt account remove codex-local                  # remove yours; runs already on it finish on it
+```
+
+- The credential is read from stdin, never from an argument, and is kept only in the installation's
+  Secrets Manager. Sergeant checks it by reading its quota before storing it. Registering again
+  replaces your earlier one.
+- You can only register or remove your own account. `sgt run show <run>` says which account a run used.
+- The installation must be configured for registration (`registeredAccountsSecret`, deploy/README.md);
+  otherwise `register` says so.
