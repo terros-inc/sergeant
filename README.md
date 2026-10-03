@@ -187,7 +187,10 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   a run holds its slot. A task starts only from Todo (TECH-4989): an issue in Triage or Backlog waits
   until a human moves it there, and a started issue runs only if its task is already under way. A
   task whose issue was moved to Backlog, Canceled, or Done before Sergeant's merge is run outside the
-  limit, only so its loop stops it.
+  limit, only so its loop stops it. Intake never lists an issue undelegated while `serve` was down,
+  or closed longer ago than a week, so at startup `serve` reads the issue of each unmerged task under
+  `--state-dir` live and stops those no longer delegated or in Backlog, Canceled, or Done the same way
+  (TECH-4997). An issue it cannot read is logged and left alone.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
   Linear links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when they changed, so
   a missed webhook costs only latency. Its state is `<state dir>/tasks/<issue>/`; runs live under

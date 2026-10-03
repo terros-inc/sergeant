@@ -10,6 +10,7 @@ import type { BudgetWindow } from "./budget.ts";
 import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
+import { strandedTasks } from "./sweep.ts";
 import { Wake } from "./wake.ts";
 import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 
@@ -180,6 +181,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   };
 
   const intakeLoop = (async () => {
+    // Once at startup: a task whose issue was undelegated or closed while no loop ran, which intake no
+    // longer lists, is run only so its loop stops it (sweep.ts, TECH-4997).
+    for (const ref of await strandedTasks(opts.stateDir, deps, log)) if (!abort.signal.aborted) admit(ref);
     while (!abort.signal.aborted) {
       const at = new Date().toISOString();
       try {
