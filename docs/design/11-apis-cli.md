@@ -30,7 +30,6 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | `GET /v1/runs/:id/transcript` | → redacted transcript link | — | approvers | |
 | `POST /v1/tasks/:ref/wake` | `reason?` → `{ wakeAt }` | appends `human_cli` wake reason | team members | idempotent enough: a duplicate wake coalesces |
 | `POST /v1/tasks/:ref/cancel` | `reason` → `{ closed }` | `cancel_task` closing action: cancels runs, removes delegation, posts one line, closes the task last (03 §10) | team members | key `close:<taskId>`, shared by every closing action so a task has at most one |
-| `POST /v1/tasks/:ref/grants` | `addActiveWallClockSeconds?, addCostUsd?, reason` → new limits | `grant_budget` action | approvers | key `grant-cli:<taskId>:<requestId>`; K4's cap applies |
 | `POST /v1/runs/:id/cancel` | `reason` → status | `cancel_run` action (actor human) | team members | key `cancel:<runId>` |
 | `POST /v1/pause` / `POST /v1/resume` | `reason` → state | writes `system_state.pause`; audit action | approvers | resume of a pause is idempotent |
 | `POST /v1/drain`, `POST /v1/drain/cancel` | owned drain token (ADR-0040, kept) | stop starting turns and runs; ready when no start or turn is mid-flight | no | deploys quiesce in seconds; runs survive restarts |
@@ -113,7 +112,6 @@ sgt task show <UNF-123 | tsk_…>                      # status, human wait, rep
 sgt task audit <ref>                                 # AuditEvent timeline
 sgt task wake <ref> [--reason]                       # take a turn now
 sgt task cancel <ref> --reason "…"                   # stop; removes delegation
-sgt task grant <ref> [--time +2h] [--cost +25]       # approvers
 
 sgt run list [--task <ref>] | show <run> | report <run> | transcript <run> | cancel <run>
 
@@ -132,6 +130,7 @@ sgt admin status | health | logs | exec | restart | drain | undrain <installatio
 
 Hosts update themselves from green commits of `main` (10 §6), so there is no `sgt admin upgrade`.
 
-Removed from S1: `sgt tool …` (capability/tool authorization), phase, wait, grant (other than
-budget), repo-scope, fresh-run, retry, rethink, decision-answer commands, and safety governor views.
-`sgt task show` absorbs what an operator needs to see.
+Removed from S1: `sgt tool …` (capability/tool authorization), phase, wait, all grant commands,
+repo-scope, fresh-run, retry, rethink, decision-answer commands, and safety governor views. Budget
+continuation happens through a human answer to Sergeant's question, which opens a fresh wall-time and
+money window; `sgt task show` absorbs what an operator needs to see.
