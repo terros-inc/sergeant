@@ -18,6 +18,7 @@ const agent = { id: "agent-v2", name: "Sergeant" };
 const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] });
 const secrets = { linear: "linear-secret", github: "github-secret" };
 const head = "a".repeat(40);
+const webhookGapMs = 50;
 const pr: PullRequestFacts = {
   repo: "o/r",
   number: 7,
@@ -85,7 +86,7 @@ async function start() {
     },
   };
   service = await startService(
-    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, webhookGapSeconds: 0.5, log: () => {} },
+    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, webhookGapSeconds: webhookGapMs / 1000, log: () => {} },
     deps,
   );
   const port = service.port;
@@ -127,14 +128,16 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
   // A check on the PR's watched head rereads at once, but nothing changed, so no turn.
   expect(await post("github", { repository: { full_name: "O/R" }, check_suite: { head_sha: head, pull_requests: [] } })).toBe(200);
   await vi.waitFor(() => expect(reads("UNF-1")).toBe(before + 1), { timeout: 2_000 });
-  // A burst, then a steady stream for 1.5 s, rereads at most once per 0.5 s gap (each event would
+  // A burst, then a steady stream across three gaps, rereads at most once per 50 ms gap (each event would
   // reread without the cap), and still owes no turn.
   const pullRequest = () => post("github", { repository: { full_name: "o/r" }, pull_request: { number: 7 } }, { event: "pull_request" });
+  const streamStarted = Date.now();
   await Promise.all(Array.from({ length: 10 }, pullRequest));
-  for (let i = 0; i < 30; i++) await Promise.all([pullRequest(), sleep(50)]);
-  await sleep(700);
+  for (let i = 0; i < 30; i++) await Promise.all([pullRequest(), sleep(5)]);
+  await sleep(70);
+  const streamElapsed = Date.now() - streamStarted;
   expect(reads("UNF-1") - (before + 1)).toBeGreaterThanOrEqual(2);
-  expect(reads("UNF-1") - (before + 1)).toBeLessThanOrEqual(6);
+  expect(reads("UNF-1") - (before + 1)).toBeLessThanOrEqual(Math.ceil(streamElapsed / webhookGapMs) + 1);
   expect(counts.turns).toEqual(["UNF-1"]);
 
   // A human comments: the comment's webhook, naming the issue only by id, gets it a turn now.
