@@ -122,7 +122,7 @@ export function outstandingChangeRequests(feedback: HumanPullRequestFeedback[]):
 }
 
 /**
- * L1 (no unreviewed or red merge), M2 (only this task's PRs), M9 (no early or missing completion),
+ * L1 (no unreviewed, red, or unmergeable merge), M2 (only this task's PRs), M9 (no early or missing completion),
  * L4 (no merge that overtakes unseen human input or a human's requested changes), and M12 (no retry
  * of a merge GitHub refused by policy while nothing changed).
  * `conversationRevision` is the one the proposing turn saw, attached by the core, not by reasoning.
@@ -152,6 +152,12 @@ export function checkMerge(
 
   const standing = checkStanding(action.reviewStanding, { repo, number, sha }, facts.runs);
   if (standing) return deny("M6", standing);
+
+  // M7: GitHub must say the PR can merge. Still computing (null) or conflicting is not a refusal by
+  // policy: a later read that changes `mergeable` wakes a turn (TECH-4991), so wait instead of trying.
+  if (pr.mergeable !== true) {
+    return deny("M7", pr.mergeable === false ? "GitHub reports the PR not mergeable (conflicts with its base)" : "GitHub is still computing whether the PR is mergeable");
+  }
 
   // M9: the PR body agrees with the worker's report on whether this merge completes the issue
   // (`Fixes` for the closing PR, `Part of` for the rest), and the closing PR merges last. Unknown fails closed.

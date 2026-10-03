@@ -9,7 +9,7 @@ export const FiledFollowup = z.object({ key: z.string(), title: z.string(), iden
 export type FiledFollowup = z.infer<typeof FiledFollowup>;
 
 /**
- * A merge GitHub refused by repository policy (405, not mergeable, or a required review Sergeant
+ * A merge GitHub refused by repository policy (405 or `merged: false`: a required review Sergeant
  * cannot give, such as a code owner's). Sergeant told the issue the PR is ready for a human to merge;
  * M12 refuses another try at the same head until the conversation, PR feedback included, changes.
  */

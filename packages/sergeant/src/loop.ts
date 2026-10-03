@@ -23,7 +23,7 @@ import type { Reasoner } from "@terros/sergeant-reasoning";
 import { z } from "zod";
 import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
 import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
-import { askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
+import { type ActionOutcome, askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import { outcomeComment } from "./outcome.ts";
@@ -381,10 +381,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     const failedAsk = outcomes.find((o) => o.action.kind === "ask_human" && o.status === "failed");
     if (failedAsk) unposted = { action: failedAsk.action, situation };
+    const retryMerge = outcomes.some((o) => mergeNotSettled(o, situation));
     state.turns += 1;
     state.turnCostUsd += turn.costUsd ?? 0;
     state.lastTurnAt = at;
-    state.lastFingerprint = failedAsk ? undefined : fingerprint;
+    state.lastFingerprint = failedAsk || retryMerge ? undefined : fingerprint;
     state.recentTurns = [...state.recentTurns, { at, summary: turn.output.summary, outcomes: described }].slice(-8);
     const done = outcomes.flatMap((o) => (o.status === "done" ? [o] : []));
     for (const o of done) {
@@ -413,7 +414,27 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
     await postHandoffs(conversation.issue.id);
+    if (retryMerge) {
+      log("the merge did not happen for a reason the next poll may not show: another turn after the next poll");
+      await wait(pollMs);
+    }
   }
+}
+
+/**
+ * A merge that did not happen for a reason the poll may never show (TECH-4991): GitHub still computing
+ * mergeability at merge time though the turn's poll saw it mergeable (M7), or the merge call failing
+ * (a temporary 405 such as "Base branch was modified", a network error). The next poll can then look
+ * exactly like this turn's, so the loop leaves the fingerprint uncommitted and takes another turn
+ * rather than going quiet, across a restart too. An M7 denial the poll already showed is left to the
+ * fingerprint: `mergeable` changing wakes the turn.
+ */
+function mergeNotSettled(o: ActionOutcome, situation: SituationReport): boolean {
+  const a = o.action;
+  if (a.kind !== "merge_pr") return false;
+  if (o.status === "failed") return true;
+  const polled = situation.pullRequests.find((p) => p.repo === a.repo && p.number === a.number);
+  return o.status === "denied" && o.rule === "M7" && polled?.mergeable === true;
 }
 
 /**
@@ -466,6 +487,9 @@ async function loadState(file: string, issueId: string, window: BudgetWindow): P
     (await readTaskState(file, window)) ??
     TaskState.parse({ issueId, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget });
   if (state.issueId !== issueId) throw new Error(`${file} belongs to ${state.issueId}, not ${issueId}`);
+  // Before TECH-4991 a temporary 405 "Pull Request is not mergeable" was recorded as a policy refusal,
+  // which M12 would keep holding until a human touched the conversation; it is not one, so drop it.
+  state.refusedMerges = state.refusedMerges.filter((r) => !/pull request is not mergeable/i.test(r.reason));
   return state;
 }
 
