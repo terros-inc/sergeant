@@ -1,7 +1,4 @@
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
   ApiError,
@@ -10,6 +7,7 @@ import {
   LoginConfig,
   RunDetail,
   RunList,
+  sergeantVersion,
   TaskDetail,
   TaskList,
   WakeResponse,
@@ -43,7 +41,7 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
 one through an SSM port-forward). Each API URL has its own login. --json prints the API's JSON
-unchanged, errors included. -v/--version prints the CLI version and exits without an API call.`;
+unchanged, errors included. -v/--version prints Sergeant's version (from git) and exits without an API call.`;
 
 export type Io = {
   env: Record<string, string | undefined>;
@@ -180,25 +178,6 @@ const caller = (me: WhoAmI) =>
 
 const ONE_WORD = ["login", "logout", "whoami"];
 
-/** The CLI version: the package version, plus the short git commit of the checkout it runs from when
- * one is available (a published install has no `.git`, so the commit is omitted). No API call. */
-export function version(): { version: string; commit?: string } {
-  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
-  let commit: string | undefined;
-  try {
-    commit =
-      execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-        cwd: fileURLToPath(new URL(".", import.meta.url)),
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim() || undefined;
-  } catch {
-    commit = undefined;
-  }
-  return { version: pkg.version, ...(commit && { commit }) };
-}
-
 /** Runs one `sgt` invocation; returns the exit code: 0 ok, 1 the API refused or failed, 2 usage. */
 export async function main(argv: string[], io: Io): Promise<number> {
   let json = argv.includes("--json");
@@ -217,8 +196,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
     });
     json = values.json ?? false;
     if (values.version) {
-      const v = version();
-      io.out(`${json ? JSON.stringify(v) : `sgt ${v.version}${v.commit ? ` (${v.commit})` : ""}`}\n`);
+      // Sergeant's version from git (contracts' sergeantVersion), never the package.json number.
+      const { version } = sergeantVersion();
+      io.out(`${json ? JSON.stringify({ version }) : `sgt ${version}`}\n`);
       return 0;
     }
     if (values.help || positionals.length === 0) {

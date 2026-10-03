@@ -67,6 +67,11 @@ install -d -m 0755 /var/log/sergeant
 systemctl enable --now docker
 docker build -q -t sergeant-runner:local "$repo/packages/runner/container"
 (cd "$repo" && corepack pnpm install --frozen-lockfile --config.confirmModulesPurge=false)
+# Sergeant's version from git; a fallback (no tag, shallow clone) is logged, never fatal.
+version=$(cd "$repo/packages/contracts" && node --input-type=module -e \
+  'const v = (await import("./src/version.ts")).sergeantVersion(); console.log(v.version + (v.fallback ? ` (fallback: ${v.fallback})` : ""))') ||
+  version="unknown (the version check failed)"
+echo "installing Sergeant $version"
 
 # --- Host configuration from this checkout. ---
 install -m 0755 "$here/sergeant-update.sh" /usr/local/sbin/sergeant-update
@@ -100,7 +105,7 @@ systemctl enable sergeant
 systemctl restart sergeant
 for _ in $(seq 60); do
   if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
-    echo "serve is up at $(sed -n 's/^sha=//p' /etc/sergeant/release): $(curl -sS http://127.0.0.1:8080/status)"
+    echo "serve is up at $version: $(curl -sS http://127.0.0.1:8080/status)"
     exit 0
   fi
   sleep 5

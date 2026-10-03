@@ -191,6 +191,13 @@ minutes, then systemd kills it). Running worker and reviewer containers keep run
 process picks them up from the state dir. `cat /etc/sergeant/release` on the host shows the deployed
 ref and commit. To roll back, update to the previous commit.
 
+Sergeant's version comes from git, not `package.json`: the nearest `vMAJOR.MINOR.PATCH` tag, plus
+the commits since it, plus the short SHA (`v2.0.0` and 37 commits later at `aad6046` is
+`2.0.37+aad6046`). `sgt -v`, `/status`, and the update log all report it. Every commit on `main`
+gets a higher number by itself; minor and major bumps are deliberate: a human tags `v2.1.0` (or
+`v3.0.0`) on `main`, and counting restarts there. Without a tag or the history to count (a shallow
+clone, no git), the version is `0.0.0+<sha>` and the update log says why; that never fails an update.
+
 ### Change the per-task budget
 
 The installation config's `budget` is the window each task gets when it starts; without it, 120
