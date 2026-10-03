@@ -56,6 +56,9 @@ takeTurn(taskId)                                          // owner: Scheduler
   turn = Ledger.claimTurn(taskId)                         // CAS on tasks.turn_claim; null → busy or not open
   if turn is null: return
   reasons = Ledger.takeWakeReasons(taskId, turn)
+  answer = latestHumanAnswerToSergeantsLatestQuestion(taskId)
+  if answer is newer than task.budget.windowStart:
+    BudgetMeter.openWindow(taskId, answer.createdAt, config.budget)
   if not BudgetMeter.mayRunTurn(taskId, reasons):         // §9
     Ledger.finishTurn(turn, completed, decision: budgetHold(reasons)); return
   situation = FactReader.assemble(taskId, reasons)        // live reads; failures become `unavailable` facts
@@ -70,7 +73,6 @@ takeTurn(taskId)                                          // owner: Scheduler
     else if step.tool == end_turn: decision = step.params; break
     else if step is text without end_turn: nudge("call end_turn"), at most twice
     else: session.toolResult(propose(taskId, turn, situation, step))
-    if turnLimitsExceeded(turn): decision = forcedEnd("turn limit"); break
   verdict = validateDecision(decision, situation)         // §5
   Ledger.finishTurn(turn, decision, verdict, session.usage)
   Sessions.save(taskId, session)                          // best-effort
@@ -86,7 +88,9 @@ takeTurn(taskId)                                          // owner: Scheduler
   comment ("Sergeant cannot currently process this task; an operator was notified") and escalates. A
   completed turn resets the counter.
 - **Idempotency**: a turn is not idempotent; its effects are, through action keys.
-- **Limits**: `maxTurnCostUsd` (default $1.50), `maxTurnSeconds` (300), `maxToolCalls` (40).
+- **Invocation bounds**: an individual model call has `maxTurnCostUsd` (default $1.50),
+  `maxTurnSeconds` (300), and `maxToolCalls` (40). These bound one invocation; no count of turns ends
+  a task. The task budget is wall time and money only (§9).
 
 ## 4. Tools
 
@@ -174,10 +178,6 @@ Rule ids refer to §7, `06` §6, and `08` §7.
   re-reads Linear and refuses the merge if the conversation changed, so a fresh turn decides (§5). Gate:
   G1–G3, M1–M11 (08 §7). Key: `merge:<taskId>:<repo>#<n>:<expectedHeadSha>`.
 
-**`grant_budget(commentId, addActiveWallClockSeconds?, addCostUsd?)`** → `{ newLimits }`
-- Reasoning read an approver's comment as a budget extension and cites it. The same action kind is used
-  when an approver runs `sgt task grant`. Gate: K1–K4. Key: `grant:<taskId>:<commentId>`.
-
 **`escalate(severity: attention | security, summary)`** → `{ opsIssueUrl }`
 - Files or comments on an issue in `linear.opsTeamId`, mentioning approvers. Gate: E1.
   Key: `escalate:<taskId>:<turnId>:<n>`.
@@ -234,8 +234,11 @@ Three plain facts keep a human decision from being silently abandoned (L4):
 What a comment means is judgment. Reasoning may answer it, act on it, or let it pass; prompts and evals,
 not the Gate, check that judgment. The one durable semantic record is the `HumanWait`: an open question
 Sergeant asked stays open until a turn reads a reply as its answer (`answeredQuestion`) or withdraws it.
-A turn that ends without `end_turn` (turn limit, or no `end_turn` after two nudges) is `incomplete` and
-is re-woken with backoff (`previous_turn_incomplete`).
+Independently, the first human comment after Sergeant's latest question opens a fresh budget window at
+the comment's timestamp, with zero spend and the installation's current wall-time and money budget. One
+answer opens one window, including across a restart; a comment that does not answer a Sergeant question
+opens none. A turn that still has no `end_turn` after two nudges is `incomplete` and is re-woken with
+backoff (`previous_turn_incomplete`).
 
 ## 6. Proposing an action
 
@@ -287,10 +290,6 @@ nothing is left for reasoning to notice and correct in another turn.
 | P2 | auth | link_pr, unlink_pr | PR exists; an unlink target is not merged |
 | D1–D6 | L1 | record_review_disposition | evidence rules (06 §6) |
 | M1–M11 | L1, L2, L4 | merge_pr | merge rules (08 §7) |
-| K1 | L3 | grant_budget (reasoning) | the comment is on this task's issue and is not Sergeant's |
-| K2 | L3 | grant_budget | the grantor is an approver |
-| K3 | L3 | grant_budget (reasoning) | the comment is newer than the latest `ask_human` with `purpose = budget_extension` (or the guardrail's budget notice), and no grant already cites it |
-| K4 | L3 | grant_budget | each grant adds at most the original budget (one more window) |
 | E1 | bound | escalate | ≤ 3 per task per day |
 | X1 | L3 | mark_complete | no non-terminal runs |
 | X4 | L4 | mark_complete | no open human wait |
@@ -347,7 +346,11 @@ history pointers to older comments, review dispositions, and actions.
 
 ## 9. Reasoning and the budget
 
+- A task's budget is one window of wall time and money. No count of turns ends the task.
 - Turns count toward the task's `costUsd`.
+- The first human answer after any Sergeant question opens a fresh window from the answer, with zero
+  spend and the installation's current budget. Continuing after a budget question needs no separate
+  action or approval rule.
 - Over the soft threshold, turns run normally and the Situation Report says so.
 - After exhaustion, turns run while spend < limit + `reasoningReserveUsd`, so reasoning can write a
   useful ask (S1 retro F5). Beyond the reserve, turns run only for `linear_comment` and `human_cli`
@@ -447,7 +450,8 @@ Product content, versioned and iterated with evals. Required content:
    carries the closing reference. Use `mark_complete` only for non-code outcomes.
 9. **Budget.** Near the limit, steer the worker to wrap up. When exhausted, ask (`purpose:
    budget_extension`) with context: what is done, what remains, PR and CI state, spend so far, and a
-   recommended extension.
+   recommended next window. Any human answer opens that fresh window; interpret whether the answer says
+   to continue, stop, or do something else.
 10. **Linear.** Comment at most for: start (a short plan), questions, real blockers, and outcomes. Never
     per run, per push, or per CI result.
 11. **Ending a turn.** Always `end_turn` with a 1–3 sentence summary, the answered question if a reply
@@ -460,7 +464,7 @@ Product content, versioned and iterated with evals. Required content:
 | Merge without green required checks on the exact head | M5, and GitHub branch protection |
 | Merge of a head with no fresh-review standing | M6 + D1–D6 |
 | Merge or completion that overtakes a comment or issue edit made since the proposing turn's snapshot | M10, X5 (re-read Linear; refuse on a changed conversation revision; a fresh turn decides) |
-| Runaway time or concurrency; spend past budget where usage is observable | BudgetMeter, B1–B3, R1–R3, `enforce_budget`, K1–K4 |
+| Runaway time or concurrency; spend past budget where usage is observable | BudgetMeter, B1–B3, R1–R3, `enforce_budget`; every fresh window requires a human answer to a Sergeant question |
 | A human comment or question silently dropped | §5: every Linear change wakes a turn that sees every comment; `HumanWait`; M10, X4, X5 |
 | Two implementation workers on one task | R1 (an unreachable worker may be replaced only after its cancellation was requested) |
 | A worker reaching production, admin, personal, or control-plane authority | the runner zone holds none of it (09 §3) |
