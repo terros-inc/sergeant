@@ -40,6 +40,8 @@ export type ServiceOptions = {
   idleMinutes?: number;
   /** The budget window of a task that starts; a task already started keeps its stored one (loop.ts). */
   budget?: Partial<BudgetWindow>;
+  /** Each task loop's audit sample rate (loop.ts); omitted, the loop's default. */
+  auditSampleRate?: number;
   /** Port for `GET /health` and `GET /status`; omitted, no server. 0 picks a free one. */
   port?: number;
   /** Interface the server listens on: loopback unless set. Never publish `/status`. */
@@ -110,6 +112,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         ...(opts.pollSeconds !== undefined && { pollSeconds: opts.pollSeconds }),
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
         ...(opts.budget && { budget: opts.budget }),
+        ...(opts.auditSampleRate !== undefined && { auditSampleRate: opts.auditSampleRate }),
         log: (line) => log(`${issueId}: ${line}`),
         signal: abort.signal,
         wake: wakeOf(issueId),

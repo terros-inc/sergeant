@@ -1,10 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Conversation } from "@terros/sergeant-contracts";
+import type { Conversation, PullRequestFacts } from "@terros/sergeant-contracts";
 import { startService, type ServiceDeps } from "./service.ts";
 
 // The service must make progress with nobody waking a task: every delegated issue gets its turns
@@ -173,6 +173,40 @@ test("public /health says only whether serve is healthy; task ids and intake err
   expect(await (await get("/health")).text()).toBe('{"ok":false}');
   expect(await (await get("/status")).json()).toMatchObject({ ok: false, tasks: ["UNF-1"], lastIntake: { error: "Linear refused UNF-1's team" } });
   await service.stop();
+});
+
+// TECH-4968: the installation's `review.auditSampleRate` (serve.ts) must reach every task loop, not
+// only the canary's; omitted, the loop's default rate applies. A task resumed just after its merge
+// draws the audit at once; a stable hash of the head decides, at 0.2 drawing head 5… but not head a….
+test("each task loop audits merged heads at the service's audit sample rate, or the default without one", async () => {
+  const audited = async (headSha: string, auditSampleRate?: number) => {
+    dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));
+    const taskDir = join(dir, "tasks", "UNF-1");
+    await mkdir(taskDir, { recursive: true });
+    const at = new Date().toISOString();
+    const merged = { repo: "o/r", number: 7, headSha, mergedSha: "c".repeat(40), at, outcomePostedAt: at };
+    await writeFile(join(taskDir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: at, turns: 1, runIds: [], recentTurns: [], merged }));
+    const { deps } = oneIssue(["UNF-1"], 0);
+    const started: string[] = [];
+    const pr: PullRequestFacts = { repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", state: "merged", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: merged.mergedSha, baseRef: "main", body: "Fixes UNF-1", mergeable: null, checks: { sha: headSha, required: [] }, humanFeedback: [] };
+    const runner: ServiceDeps["runner"] = {
+      start: async (spec) => void started.push(spec.runId),
+      status: async (runId) => ({ runId, role: "reviewer", status: "running", provider: "anthropic/claude-code", model: "opus", report: null }),
+      cancel: async () => {},
+    };
+    const service = await startService({ ...options(), ...(auditSampleRate !== undefined && { auditSampleRate }) }, { ...deps, runner, github: { ...deps.github, readPullRequest: async () => pr } });
+    const drawn = async () => JSON.parse(await readFile(join(taskDir, "state.json"), "utf8")).merged.auditDrawnAt;
+    await vi.waitFor(async () => expect(await drawn()).toBeDefined(), { timeout: 5_000 });
+    await service.stop();
+    await rm(dir, { recursive: true, force: true });
+    return started;
+  };
+  const [drawnAtDefault, notDrawnAtDefault] = ["5".repeat(40), "a".repeat(40)];
+
+  expect(await audited(drawnAtDefault)).toEqual([`run_audit-${drawnAtDefault}`]);
+  expect(await audited(drawnAtDefault, 0)).toEqual([]);
+  expect(await audited(notDrawnAtDefault)).toEqual([]);
+  expect(await audited(notDrawnAtDefault, 1)).toEqual([`run_audit-${notDrawnAtDefault}`]);
 });
 
 // Separate processes started together, each holding the service if it gets it: exactly one does,
