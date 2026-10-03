@@ -19,7 +19,7 @@ async function stopWithFlakyStatus(failures: number) {
   // The worker has exited with its report written, not yet finalized, when its status read fails.
   wrote.set("run_w1", { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] });
   const status = deps.runner.status;
-  deps.runner.status = async (id) => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : status(id));
+  deps.runner.status = async (id) => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : structuredClone(await status(id)));
   const task = taskDir(dir, "UNF-1");
   await mkdir(task, { recursive: true });
   await writeFile(join(task, "state.json"), state(["run_w1"]));
@@ -39,6 +39,14 @@ test("a stop whose run status read fails once reads it again after the cancel an
   expect(seen.canceled).toEqual(["run_w1"]);
   expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`Closed [${repo}#9]`) }]);
+});
+
+test("a stop rereads a running run after cancel and closes the PR in its final report", async () => {
+  const { seen, drive } = await stopWithFlakyStatus(0);
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.canceled).toEqual(["run_w1"]);
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("No open PR to close") }]);
 });
 
 test("a stop whose run status stays unreadable after the cancel stays pending, says nothing, and finishes once it reads", async () => {

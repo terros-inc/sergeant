@@ -148,9 +148,9 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
         stopping.push(runId);
         continue;
       }
-      // Only a run whose first status read failed is read again, now it is stopped: it may have reported
-      // a PR Linear has not linked yet, so the stop stays pending until it reads, or that PR is missed.
-      run ??= await deps.runner.status(runId).catch(() => undefined);
+      // Read every canceled run again, now it is stopped: it may have reported a PR Linear has not
+      // linked yet, so the stop stays pending until its final record reads, or that PR is missed.
+      run = await deps.runner.status(runId).catch(() => undefined);
       // A start never confirmed that the runner still does not know never started (loop.ts): no report.
       if (!run && intent.unconfirmedStarts.includes(runId)) continue;
     }
