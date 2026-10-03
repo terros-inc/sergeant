@@ -15,9 +15,9 @@ import type { DelegatedIssue } from "@terros/sergeant-linear";
 const markerFile = (dir: string) => join(dir, "accepted.json");
 
 /**
- * TECH-5120: once per acceptance, keyed by the human reply that accepted, so a turn retried after a
- * crash or a failed post (it commits no fingerprint) posts nothing new; a later acceptance, after the
- * task was re-triggered, is a new reply and gets its own.
+ * TECH-5120: once per acceptance, keyed by the human reply that accepted, so an ending replayed after a
+ * crash or a failed post posts nothing new; a later acceptance, after the task was re-triggered, is a
+ * new reply and gets its own.
  */
 export const acceptedKey = (issueId: string, replyId: string) => `accepted:${issueId}:${replyId}`;
 
@@ -28,14 +28,9 @@ export function acceptedComment(pullRequests: Pick<PullRequestFacts, "repo" | "n
   return `Sergeant has stopped: the work was accepted as it is. ${left} yours to merge or close.`;
 }
 
-/** Posts the acceptance's comment; a Linear failure throws, so the loop fails and its turn is retried. */
-export async function postAccepted(
-  issueId: string,
-  replyId: string,
-  pullRequests: Pick<PullRequestFacts, "repo" | "number" | "url" | "state">[],
-  linear: Pick<LinearPort, "postComment">,
-): Promise<void> {
-  await linear.postComment({ issueId, key: acceptedKey(issueId, replyId), body: acceptedComment(pullRequests) });
+/** Posts the acceptance's comment; a Linear failure throws, so the loop fails and its ending is replayed. */
+export async function postAccepted(issueId: string, replyId: string, body: string, linear: Pick<LinearPort, "postComment">): Promise<void> {
+  await linear.postComment({ issueId, key: acceptedKey(issueId, replyId), body });
 }
 
 /** Records that a human accepted the task in `dir` as it is; written before `state.json` is set aside. */
