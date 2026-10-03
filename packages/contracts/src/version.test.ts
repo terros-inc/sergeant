@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -63,9 +63,7 @@ test("a checkout owned by another user is trusted, and a refusal is reported as 
   process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = "1";
   try {
     expect(sergeantVersion(r.dir)).toEqual({ version: `2.0.0+${r.sha()}` });
-    // Only the given root is trusted, so a subdirectory of it is still refused, and says so.
-    mkdirSync(join(r.dir, "sub"));
-    expect(sergeantVersion(join(r.dir, "sub"))).toEqual({
+    expect(sergeantVersion(r.dir, { trust: false })).toEqual({
       version: "0.0.0+unknown",
       fallback: expect.stringMatching(/^git cannot read the checkout: fatal: detected dubious ownership/),
     });

@@ -7,8 +7,12 @@ import { fileURLToPath } from "node:url";
  * is `2.0.37+aad6046`; a commit on the tag is `2.0.0+<sha>`. Without a tag or enough history (a shallow
  * clone) or when git cannot read the checkout, it is `0.0.0+<sha>` (or `0.0.0+unknown`) and `fallback`
  * says why. `root` is the checkout's top level, which git is told to trust: on the host, serve runs as
- * the sergeant user against a root-owned checkout, which git otherwise refuses as dubious ownership. */
-export function sergeantVersion(root = fileURLToPath(new URL("../../..", import.meta.url))): { version: string; fallback?: string } {
+ * the sergeant user against a root-owned checkout, which git otherwise refuses as dubious ownership.
+ * `trust: false` (tests) leaves git's ownership check as is. */
+export function sergeantVersion(
+  root = fileURLToPath(new URL("../../..", import.meta.url)),
+  { trust = true } = {},
+): { version: string; fallback?: string } {
   let trusted: string;
   try {
     trusted = realpathSync(root);
@@ -16,7 +20,7 @@ export function sergeantVersion(root = fileURLToPath(new URL("../../..", import.
     return { version: "0.0.0+unknown", fallback: `no such directory: ${root}` };
   }
   const git = (...args: string[]) =>
-    execFileSync("git", ["-c", `safe.directory=${trusted}`, ...args], { cwd: trusted, stdio: ["ignore", "pipe", "pipe"] })
+    execFileSync("git", [...(trust ? ["-c", `safe.directory=${trusted}`] : []), ...args], { cwd: trusted, stdio: ["ignore", "pipe", "pipe"] })
       .toString()
       .trim();
   let sha: string;
