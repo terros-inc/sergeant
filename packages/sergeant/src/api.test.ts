@@ -18,6 +18,8 @@ const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "202
 
 const agent = { id: "agent-v2", name: "Sergeant" };
 
+// Tests that wait get 30 s, so a slow CI runner never hits vitest's 5 s default before a 5 s wait ends.
+
 let dir = "";
 let service: Service | undefined;
 afterEach(async () => {
@@ -102,7 +104,7 @@ test("a wake makes an unchanged task take a turn now, and a task without a deleg
   }, { timeout: 5_000 });
 
   expect(await call(port, "POST", "/v1/tasks/UNF-7/wake", {})).toMatchObject({ status: 409, json: { error: { code: "conflict" } } });
-});
+}, 30_000);
 
 test("a run cancel notes it on the issue and cancels through the runner; a task cancel undelegates and cancels the rest", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
@@ -147,7 +149,7 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   // Repeating it changes nothing: no second comment.
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" })).json).toEqual({ ref: "UNF-1", undelegated: false, stopping: [], closedPullRequests: [] });
   expect(f.comments.map((c) => c.key)).toEqual(["cancel-run:run_r1", "cancel:i-UNF-1:req-1"]);
-});
+}, 30_000);
 
 // A task cancel's success must not depend on this process surviving: a restart finds the recorded
 // cancel and finishes it, though the issue is no longer delegated and intake would never admit it,
@@ -185,7 +187,7 @@ test.each([
   // that had already said it posts nothing new.
   expect(f.comments.map((c) => c.key)).toEqual(["cancel:i-UNF-1:req-1"]);
   expect(f.turns()).toBe(0);
-});
+}, 30_000);
 
 // A start already past its delegation check when a task cancel begins must not escape it: the
 // cancel waits for that start and stops its run, so nothing is left running across a restart.
@@ -224,7 +226,7 @@ test("a task cancel stops a run whose start had already passed the delegation ch
   await start(f.deps);
   expect(await exists(join(dir, "tasks", "UNF-1", "cancel.json"))).toBe(false);
   expect(runs).toEqual([expect.objectContaining({ status: "canceled" })]);
-});
+}, 30_000);
 
 // The hosted proxy forwards to loopback, and a browser page can rebind a name to 127.0.0.1 or post a
 // form at it: none of them is an operator on the host, even where loopback is trusted.
@@ -246,7 +248,7 @@ test("a trusted loopback still refuses a proxied request, a foreign Host, and a 
   await expect(start(f.deps, { trustLoopback: true, host: "0.0.0.0" })).rejects.toThrow(/--trust-loopback/);
   // `localhost` is resolved when bound, and a resolver may send it anywhere.
   await expect(start(f.deps, { trustLoopback: true, host: "localhost" })).rejects.toThrow(/--trust-loopback/);
-});
+}, 30_000);
 
 // The API fails closed: with no login, a login Linear rejects or cannot check, or a Linear user the
 // installation does not admit, nothing is read or changed; an admitted user is named where they act.
@@ -295,4 +297,4 @@ test("only an admitted Linear user may call the API, and approvers are told apar
   expect((await call(port, "GET", "/v1/whoami", undefined, as("approver"))).json).toMatchObject({ user: { id: "Grace" }, approver: true });
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" }, as("member"))).json).toMatchObject({ undelegated: true });
   expect(f.comments).toEqual([expect.objectContaining({ body: expect.stringContaining("the task was canceled by Ada: wrong approach") })]);
-});
+}, 30_000);
