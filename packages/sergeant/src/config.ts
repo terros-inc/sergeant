@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { RepoSlug, type GitHubPort, type LinearPort, type RunGitHubTokens } from "@terros/sergeant-contracts";
+import { RepoSlug, type GitHubPort, type RunGitHubTokens } from "@terros/sergeant-contracts";
 import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
-import { createLinearPort, type DelegatedIssue } from "@terros/sergeant-linear";
+import { createLinearPort } from "@terros/sergeant-linear";
 import { z } from "zod";
 import type { BudgetWindow } from "./budget.ts";
 
@@ -121,12 +121,7 @@ export function secretResolver(config: InstallationConfig) {
 }
 
 export type Installation = {
-  linear: LinearPort & {
-    delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>;
-    undelegate(issueId: string): Promise<void>;
-    /** A Linear upload, fetched with the agent token on the control plane (TECH-4994). */
-    fetchUpload(url: string, init?: { signal?: AbortSignal }): Promise<Response>;
-  };
+  linear: ReturnType<typeof createLinearPort>;
   /** The V2 agent's Linear user, verified against the token. */
   agentUserId: string;
   /** The Linear workspace the agent is in: the only one whose users may call the API. */

@@ -13,6 +13,7 @@ const review = z.object({
   commit_id: z.string().nullable(),
   submitted_at: z.string().nullish(),
   html_url: z.url(),
+  author_association: z.string().optional(),
 });
 const reviewComment = z.object({
   id: z.number().int(),
@@ -25,8 +26,12 @@ const reviewComment = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   html_url: z.url(),
+  author_association: z.string().optional(),
 });
-const issueComment = z.object({ id: z.number().int(), user, body: z.string().nullable(), created_at: z.string(), updated_at: z.string(), html_url: z.url() });
+const issueComment = z.object({
+  id: z.number().int(), user, body: z.string().nullable(), created_at: z.string(), updated_at: z.string(), html_url: z.url(),
+  author_association: z.string().optional(),
+});
 /** Pages of feedback read per list; more than this fails the read rather than hiding a review. */
 const MAX_FEEDBACK_PAGES = 10;
 const REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"]);
@@ -60,7 +65,7 @@ export async function readHumanFeedback(request: Get, repo: string, number: numb
     const at = iso(r.submitted_at);
     feedback.push(HumanPullRequestFeedback.parse({
       id: `review:${r.id}`, kind: "review", author, state: r.state, body: r.body ?? "", path: null, line: null,
-      commitId: r.commit_id, createdAt: at, updatedAt: at, url: r.html_url,
+      commitId: r.commit_id, createdAt: at, updatedAt: at, url: r.html_url, association: r.author_association,
     }));
   }
   for (const c of reviewComments) {
@@ -68,7 +73,7 @@ export async function readHumanFeedback(request: Get, repo: string, number: numb
     if (!author) continue;
     feedback.push(HumanPullRequestFeedback.parse({
       id: `review_comment:${c.id}`, kind: "review_comment", author, state: null, body: c.body, path: c.path,
-      line: c.line ?? c.original_line ?? null, commitId: c.commit_id, createdAt: iso(c.created_at), updatedAt: iso(c.updated_at), url: c.html_url,
+      line: c.line ?? c.original_line ?? null, commitId: c.commit_id, createdAt: iso(c.created_at), updatedAt: iso(c.updated_at), url: c.html_url, association: c.author_association,
     }));
   }
   for (const c of comments) {
@@ -76,7 +81,7 @@ export async function readHumanFeedback(request: Get, repo: string, number: numb
     if (!author) continue;
     feedback.push(HumanPullRequestFeedback.parse({
       id: `comment:${c.id}`, kind: "comment", author, state: null, body: c.body ?? "", path: null, line: null,
-      commitId: null, createdAt: iso(c.created_at), updatedAt: iso(c.updated_at), url: c.html_url,
+      commitId: null, createdAt: iso(c.created_at), updatedAt: iso(c.updated_at), url: c.html_url, association: c.author_association,
     }));
   }
   return feedback.sort((a, b) => a.createdAt.localeCompare(b.createdAt));

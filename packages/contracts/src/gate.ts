@@ -89,7 +89,7 @@ export function reportedClosing(runs: RunRecord[], pr: PullRequestRef): boolean 
 }
 
 /** A GitHub/Linear closing keyword naming the issue, e.g. `Fixes UNF-1`, `closes: UNF-1`, or one before its URL. */
-const hasClosingReference = (body: string, identifier: string) =>
+export const hasClosingReference = (body: string, identifier: string) =>
   new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\b[:\\s]+(?:\\S*/)?${identifier}\\b`, "i").test(body);
 
 export type MergeFacts = Ownership & {

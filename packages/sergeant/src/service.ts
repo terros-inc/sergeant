@@ -11,6 +11,7 @@ import { isLoopbackHost, type Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
 import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
+import { sweepFeedbackEvery, type FeedbackDeps } from "./feedback.ts";
 import { runLoop, type LoopResult } from "./loop.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { Wake } from "./wake.ts";
@@ -25,7 +26,9 @@ import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 // recorded API cancel not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
 // delegated, and a restarted process rereads everything and continues, repeating some work. One
 // process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
-// The same server answers the client API (api.ts) that the `sgt` CLI uses.
+// The same server answers the client API (api.ts) that the `sgt` CLI uses. Feedback that arrives
+// after a task's work landed is swept separately (feedback.ts) and may file an ordinary Backlog
+// follow-up, which nothing here starts: a human moves it to Todo and delegates it, like any issue.
 
 export type ServiceOptions = {
   enrolledRepositories: RepoSlug[];
@@ -43,6 +46,10 @@ export type ServiceOptions = {
   budget?: Partial<BudgetWindow>;
   /** Each task loop's audit sample rate (loop.ts); omitted, the loop's default. */
   auditSampleRate?: number;
+  /** Minutes between post-merge feedback sweeps (feedback.ts), when `deps.feedback` is given. */
+  feedbackSweepMinutes?: number;
+  /** How long after work lands its feedback is still watched. */
+  feedbackLookbackDays?: number;
   /** Port for `GET /health` and `GET /status`; omitted, no server. 0 picks a free one. */
   port?: number;
   /** Interface the server listens on: loopback unless set. Never publish `/status`. */
@@ -64,6 +71,8 @@ export type ServiceDeps = Ports & {
   delegatedIssues: () => Promise<DelegatedIssue[]>;
   /** Removes the issue's delegation to the V2 agent: a human's cancel through the API. */
   undelegate?: (issueId: string) => Promise<void>;
+  /** Reads and judgment for post-merge feedback; without them, feedback on landed work is not swept. */
+  feedback?: Pick<FeedbackDeps, "completedIssues" | "issueProgress" | "judge">;
 };
 
 export type Service = {
@@ -222,6 +231,18 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   })();
 
+  // Post-merge feedback (feedback.ts), on its own slower cadence so it never holds up intake.
+  const feedbackLoop = deps.feedback
+    ? sweepFeedbackEvery((opts.feedbackSweepMinutes ?? 10) * 60_000, { stateDir: opts.stateDir, enrolledRepositories: opts.enrolledRepositories, log, signal: abort.signal, ...(opts.feedbackLookbackDays !== undefined && { lookbackDays: opts.feedbackLookbackDays }) }, {
+        ...deps.feedback,
+        openIssues: async () => (await deps.delegatedIssues()).map((issue) => issue.identifier),
+        linear: deps.linear,
+        github: deps.github,
+        agentUserId: deps.agentUserId,
+        workerLogin: deps.workerLogin,
+      })
+    : Promise.resolve();
+
   const api = apiHandler({
     stateDir: opts.stateDir,
     enrolledRepositories: opts.enrolledRepositories,
@@ -307,6 +328,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     async stop() {
       abort.abort();
       await intakeLoop;
+      await feedbackLoop;
       await Promise.all(active.values());
       await Promise.allSettled(locks.values());
       if (server) await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));

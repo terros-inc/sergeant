@@ -95,6 +95,25 @@ export const delegatedPage = z.object({
     pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
   }),
 });
+// TECH-4985: issues delegated to the agent completed since a time, where post-merge feedback is swept.
+export const completedQuery = `
+  query SergeantCompleted($agent: ID!, $since: DateTimeOrDuration!, $after: String) {
+    issues(first: 100, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { eq: "completed" } }, completedAt: { gt: $since } }) {
+      nodes { identifier }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+export const completedPage = z.object({
+  issues: z.object({
+    nodes: z.array(z.object({ identifier: z.string().min(1) })),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  }),
+});
+export const issueProgress = `query SergeantIssueProgress($id: String!) { issue(id: $id) { state { type } completedAt } }`;
+export const issueProgressShape = z.object({
+  issue: z.object({ state: z.object({ type: z.string() }), completedAt: z.iso.datetime({ offset: true }).nullable() }).nullable(),
+});
 const workflowState = z.object({ id: z.string().min(1), name: z.string(), type: z.string(), position: z.number() });
 export const followupOrigin = `
   query SergeantFollowupOrigin($id: String!) {

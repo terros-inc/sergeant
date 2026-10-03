@@ -196,7 +196,7 @@ test("reads human reviews and comments on the PR, never a bot's", async () => {
     if (path.endsWith("/pulls/7/reviews?per_page=100&page=1")) {
       return json([
         { id: 1, user: bot, state: "APPROVED", body: "gate passed", commit_id: head, submitted_at: at, html_url: `${url}#r1` },
-        { id: 2, user: human, state: "CHANGES_REQUESTED", body: "remove references to terros-wiki", commit_id: head, submitted_at: "2026-10-03T02:00:00Z", html_url: `${url}#r2` },
+        { id: 2, user: human, state: "CHANGES_REQUESTED", body: "remove references to terros-wiki", commit_id: head, submitted_at: "2026-10-03T02:00:00Z", html_url: `${url}#r2`, author_association: "MEMBER" },
         { id: 3, user: human, state: "PENDING", body: "draft", commit_id: head, submitted_at: null, html_url: `${url}#r3` },
       ]);
     }
@@ -219,6 +219,8 @@ test("reads human reviews and comments on the PR, never a bot's", async () => {
     ["comment:6", "captain", null, null, null],
   ]);
   expect(humanFeedback[0]).toMatchObject({ body: "not here", updatedAt: "2026-10-03T02:01:00.000Z", commitId: head });
+  // TECH-4985 turns only feedback from people with a role in the repository into follow-ups.
+  expect(humanFeedback.map((f) => f.association)).toEqual([undefined, "MEMBER", undefined]);
 });
 
 // TECH-4987: on a repository that requires a code owner's review, GitHub refuses the merge (405) after

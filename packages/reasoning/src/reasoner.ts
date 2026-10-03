@@ -41,15 +41,9 @@ export function claudeCliReasoner(
 ): Reasoner {
   const model = opts.model ?? "opus";
   const runCli = opts.runCli ?? spawnClaude;
-  const schema = JSON.stringify(z.toJSONSchema(TurnOutput, { target: "draft-7", io: "input" }));
   return {
     async turn(situation) {
-      const args = [
-        "-p", "--output-format", "json", "--json-schema", schema,
-        "--model", model, "--max-budget-usd", String(opts.maxTurnCostUsd ?? 1.5),
-        "--system-prompt", SYSTEM_PROMPT,
-        "--tools", "", "--strict-mcp-config", "--safe-mode", "--no-session-persistence",
-      ];
+      const args = cliArgs(TurnOutput, SYSTEM_PROMPT, model, opts.maxTurnCostUsd ?? 1.5);
       const report = `Situation Report:\n\n${JSON.stringify(SituationReport.parse(situation), null, 2)}`;
       const files = opts.files
         ? await opts.files(situation).catch((e: Error) => ({ files: [], skipped: [{ url: "(all)", title: "", reason: `fetch failed: ${e.message}` }] }))
@@ -72,6 +66,37 @@ export function claudeCliReasoner(
       }
     },
   };
+}
+
+/** The CLI's arguments for one isolated answer in `schema`'s shape: no tools, MCP servers, customizations, or session. */
+function cliArgs(schema: z.ZodType, systemPrompt: string, model: string, maxCostUsd: number): string[] {
+  const jsonSchema = JSON.stringify(z.toJSONSchema(schema, { target: "draft-7", io: "input" }));
+  return [
+    "-p", "--output-format", "json", "--json-schema", jsonSchema,
+    "--model", model, "--max-budget-usd", String(maxCostUsd),
+    "--system-prompt", systemPrompt,
+    "--tools", "", "--strict-mcp-config", "--safe-mode", "--no-session-persistence",
+  ];
+}
+
+/** One structured text-only answer from the `claude` CLI, isolated like a reasoning turn: `input` in, `schema`'s output out. */
+export async function answer<T>(
+  schema: z.ZodType<T>,
+  systemPrompt: string,
+  input: string,
+  opts: { model: string; maxTurnCostUsd?: number; timeoutMs?: number; runCli?: RunCli },
+): Promise<{ output: T; costUsd?: number }> {
+  const cwd = await mkdtemp(join(tmpdir(), "sergeant-reasoning-"));
+  try {
+    const args = cliArgs(schema, systemPrompt, opts.model, opts.maxTurnCostUsd ?? 1.5);
+    const stdout = await (opts.runCli ?? spawnClaude)(args, input, { cwd, timeoutMs: opts.timeoutMs ?? 300_000 });
+    const cli = CliResult.parse(JSON.parse(stdout));
+    if (cli.is_error) throw new Error(`reasoning failed: ${cli.result ?? "unknown error"}`);
+    const output = schema.parse(cli.structured_output ?? JSON.parse(cli.result ?? ""));
+    return { output, ...(cli.total_cost_usd !== undefined && { costUsd: cli.total_cost_usd }) };
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 }
 
 /** The final `result` event of a stream-json run. */
