@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   checkBudget,
   checkDelegation,
+  checkIssueState,
   checkFollowup,
   checkGrant,
   checkMerge,
@@ -10,7 +11,9 @@ import {
   commentIdFor,
   conversationRevision,
   issueRevision,
+  type Conversation,
   type FiledFollowup,
+  type GateVerdict,
   type GitHubPort,
   type LinearPort,
   type ProposedAction,
@@ -70,6 +73,15 @@ export type ActionOutcome =
   | { action: ProposedAction; status: "failed"; error: string };
 
 /**
+ * The live read's check before every effect: the issue is delegated to the V2 agent (A1) and not in
+ * Backlog, Canceled, or Done (A2, TECH-4989).
+ */
+export function checkLive(issue: Conversation["issue"], agentUserId: string): GateVerdict {
+  const delegation = checkDelegation(issue, agentUserId);
+  return delegation.allowed ? checkIssueState(issue) : delegation;
+}
+
+/**
  * Performs one proposed action if the Gate allows it. This is the only path from reasoning to an
  * effect. Merge facts are re-read live here, never taken from the turn's snapshot.
  */
@@ -97,8 +109,8 @@ export async function execute(action: ProposedAction, situation: SituationReport
             ports.linear.readConversation(conversation.issue.id),
             Promise.all(subjects.map((s) => ports.github.readPullRequest(s.repo, s.number))),
           ]);
-          const delegation = checkDelegation(issue, ports.agentUserId);
-          if (!delegation.allowed) return denied(delegation);
+          const active = checkLive(issue, ports.agentUserId);
+          if (!active.allowed) return denied(active);
           const verdict = checkStart(action, {
             runs,
             enrolledRepositories,
@@ -160,15 +172,15 @@ export async function execute(action: ProposedAction, situation: SituationReport
         // of the Linear issue with its linked PRs and conversation, the Gate over them, and GitHub's
         // SHA-guarded merge, with nothing that waits in between. A PR the issue does not link, or that
         // the worker App did not open, is refused (M2). A push or a human edit that lands before the reads denies the merge (M4,
-        // M10); the changed facts change the loop's fingerprint, which wakes a new reasoning turn. An undelegation denies it too (A1), and the loop then stops. One landing
+        // M10); the changed facts change the loop's fingerprint, which wakes a new reasoning turn. An undelegation or a stop state denies it too (A1, A2), and the loop then stops. One landing
         // between the reads and the merge is the accepted race (08 §7), and GitHub's `sha` guard
         // still refuses a moved head.
         const [pr, live] = await Promise.all([
           ports.github.readPullRequest(action.repo, action.number),
           ports.linear.readConversation(conversation.issue.id),
         ]);
-        const delegation = checkDelegation(live.issue, ports.agentUserId);
-        if (!delegation.allowed) return denied(delegation);
+        const active = checkLive(live.issue, ports.agentUserId);
+        if (!active.allowed) return denied(active);
         // The revision covers human feedback on the task's PRs too: the deciding turn's, and the same
         // PRs with the one being merged re-read live, so feedback on it since the turn denies (M10).
         const liveRevision = conversationRevision(live, situation.pullRequests.map((p) => (p.repo === pr.repo && p.number === pr.number ? pr : p)));
@@ -210,8 +222,8 @@ export async function execute(action: ProposedAction, situation: SituationReport
         if (filed) return { action, status: "done", result: { identifier: filed.identifier, alreadyFiled: true }, followup: filed };
         const verdict = checkFollowup({ filed: situation.followups });
         if (!verdict.allowed) return denied(verdict);
-        const delegation = checkDelegation((await ports.linear.readConversation(conversation.issue.id)).issue, ports.agentUserId);
-        if (!delegation.allowed) return denied(delegation);
+        const active = checkLive((await ports.linear.readConversation(conversation.issue.id)).issue, ports.agentUserId);
+        if (!active.allowed) return denied(active);
         const late = inBudget();
         if (!late.allowed) return denied(late);
         const { identifier, url } = conversation.issue;
@@ -250,8 +262,8 @@ export async function askHuman(
 ): Promise<ActionOutcome> {
   const { issue } = situation.conversation;
   try {
-    const delegation = checkDelegation((await ports.linear.readConversation(issue.id)).issue, ports.agentUserId);
-    if (!delegation.allowed) return { action, status: "denied", rule: delegation.rule, reason: delegation.reason };
+    const active = checkLive((await ports.linear.readConversation(issue.id)).issue, ports.agentUserId);
+    if (!active.allowed) return { action, status: "denied", rule: active.rule, reason: active.reason };
     const thread = ownQuestion(situation.conversation, action.followsUp);
     const parentId = thread && (thread.parentId ?? thread.id);
     await ports.linear.postComment({ issueId: issue.id, body: questionComment(action), key, ...(parentId && { parentId }) });

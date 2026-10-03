@@ -1,29 +1,33 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { sergeantVersion, type ApiError, type RepoSlug } from "@terros/sergeant-contracts";
+import { sergeantVersion, STOP_STATE_TYPES, type ApiError, type RepoSlug } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
 import { fromThisHost, send } from "./api-http.ts";
 import { isLoopbackHost, type Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
-import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
-import type { Ports } from "./execute.ts";
+import { cancelPending, driveCancel, pendingCancels, recordCancel, recordStop, stopReason, taskDir } from "./cancel.ts";
+import { checkLive, type Ports } from "./execute.ts";
 import { sweepFeedbackEvery, type FeedbackDeps } from "./feedback.ts";
-import { runLoop, type LoopResult } from "./loop.ts";
+import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { Wake } from "./wake.ts";
 import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
-// existing loop (loop.ts), at most `maxTasks` holding a slot at a time (slots.ts). Each task loop already re-reads its runs,
+// existing loop (loop.ts), at most `maxTasks` holding a slot at a time (slots.ts). A task starts only
+// from Todo (TECH-4989): an issue in Triage or Backlog waits until a human moves it there, and only a
+// task already under way runs in a started state. Every intake also reconciles each local task with no
+// loop against Linear, and stops one whose issue is undelegated or in Backlog, Canceled, or Done
+// (cancel.ts), outside the task slots. Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
 // when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) only ends a loop's wait
 // or runs an intake sooner. Nothing is kept but each task's own `state.json` and a
-// recorded API cancel not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
+// recorded stop not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
 // delegated, and a restarted process rereads everything and continues, repeating some work. One
 // process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
 // The same server answers the client API (api.ts) that the `sgt` CLI uses. Feedback that arrives
@@ -97,7 +101,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string }>();
   let lastIntake: { at: string; error?: string } | undefined;
   let intakeStartedAt = 0;
-  // The open issues delegated to the V2 agent at the last intake, in admission order, and each task's wake (API).
+  // The delegated issues intake would run at the last intake, in admission order, and each task's wake (API).
   let ordered: DelegatedIssue[] = [];
   let delegated: string[] = [];
   const wakes = new Map<string, Wake>();
@@ -181,9 +185,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   };
 
-  // A task cancel recorded through the API and not yet confirmed (cancel.ts): driven at once, again
-  // at every intake until the runner confirms its runs stopped, and so after a restart too, whether or
-  // not the issue is still delegated. One step per task at a time, so a request's own drive is the one
+  // A task stop recorded and not yet done (cancel.ts): driven at once, again at every intake until the
+  // runner confirms its runs stopped, and so after a restart too, whatever the issue's delegation or
+  // state is by then. One step per task at a time, so a request's own drive is the one
   // that answers it; it is not held to the task limit. The same per-task lock holds a run's start from
   // its delegation check to the runner (execute.ts), so a cancel lists every run that got past it.
   const locks = new Map<string, Promise<unknown>>();
@@ -203,15 +207,52 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     void next.finally(() => active.has(ref) && wakeOf(ref).interrupt()).catch(() => {});
     return next;
   };
-  const drive = (ref: string) => driveCancel(opts.stateDir, ref, deps, log);
+  const drive = (ref: string) => driveCancel(taskDir(opts.stateDir, ref), ref, deps, opts.enrolledRepositories, log);
+
+  /**
+   * Whether intake runs the issue's task: from Todo, or one already under way and not stopping. An issue
+   * in Triage or Backlog with no task waits, and one a human started with no task is not Sergeant's.
+   */
+  const runnable = async ({ identifier, state }: DelegatedIssue) => {
+    const dir = taskDir(opts.stateDir, identifier);
+    if (await cancelPending(dir)) return false;
+    if (state.type === "unstarted") return true;
+    return !STOP_STATE_TYPES.includes(state.type) && (await readTaskState(join(dir, "state.json")).catch(() => undefined)) !== undefined;
+  };
+
+  /**
+   * The local task directories are the work to reconcile: each task under way with no loop to check it
+   * (ended idle, released, or never run since a restart) is read live, and stopped when its issue is
+   * undelegated or in Backlog, Canceled, or Done (cancel.ts). A task past Sergeant's closing merge is
+   * its loop's to finish.
+   */
+  const reconcile = async () => {
+    for (const ref of await readdir(join(opts.stateDir, "tasks")).catch(() => [])) {
+      if (active.has(ref)) continue;
+      const dir = taskDir(opts.stateDir, ref);
+      const task = await readTaskState(join(dir, "state.json")).catch(() => undefined);
+      if (!task || task.merged) continue;
+      // One task's failed read or stop is logged and retried next intake; it holds up no other task,
+      // nor the discovery of new Todo work.
+      await (async () => {
+        const { issue } = await deps.linear.readConversation(ref);
+        if (checkLive(issue, deps.agentUserId).allowed) return;
+        await serialized(ref, async () => {
+          await recordStop(dir, stopReason(issue));
+          await drive(ref);
+        });
+      })().catch((e: Error) => log(`${ref}: not reconciled, retrying next intake: ${e.message}`));
+    }
+  };
 
   const intake = async () => {
     for (const ref of await pendingCancels(opts.stateDir)) {
       await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
     }
     const startedAt = Date.now();
-    const issues = new Map((await deps.delegatedIssues()).map((issue) => [issue.identifier, issue]));
-    ordered = [...issues.values()].sort(admissionOrder);
+    await reconcile();
+    const issues = await Promise.all((await deps.delegatedIssues()).map(async (issue) => ((await runnable(issue)) ? [issue] : [])));
+    ordered = issues.flat().sort(admissionOrder);
     delegated = ordered.map((issue) => issue.identifier);
     intakeStartedAt = startedAt;
     schedule();
@@ -254,7 +295,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       if (end) return { status: end.outcome, detail: end.detail };
       return delegated.includes(ref) ? { status: "queued" } : undefined;
     },
-    known: () => [...new Set([...active.keys(), ...delegated])],
+    // A task stopped in this process stays known, so its stop shows.
+    known: () => [...new Set([...active.keys(), ...delegated, ...ended.keys()])],
     async wake(ref) {
       wakeOf(ref).request();
       if (active.has(ref)) return "active";
@@ -266,8 +308,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     },
     cancelTask: (ref, req, by) =>
       serialized(ref, async () => {
-        await recordCancel(opts.stateDir, ref, { ...req, by }, deps);
-        return drive(ref);
+        const undelegated = await recordCancel(opts.stateDir, ref, { ...req, by }, deps);
+        return { undelegated, stopping: await drive(ref) };
       }),
     ...(opts.humans && { callerOf: opts.humans.callerOf, linearClientId: opts.humans.linearClientId }),
     trustLoopback: opts.trustLoopback ?? false,

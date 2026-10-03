@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PullRequestFacts, PullRequestRef, RepoSlug, RunId, RunRecord, SituationReport } from "@terros/sergeant-contracts";
+import { reportedClosing, type PullRequestFacts, type PullRequestRef, type RepoSlug, type RunId, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import type { ActionOutcome, Ports } from "./execute.ts";
 
 // What the loop reads and compares on each poll (loop.ts).
@@ -34,6 +34,10 @@ export async function cancelRuns(runIds: RunId[], deps: Ports, log: (line: strin
   }
   return unconfirmed;
 }
+
+/** The worker's own PR it reported closing the issue, merged. */
+export const landedOf = (pullRequests: PullRequestFacts[], runs: RunRecord[], workerLogin: string) =>
+  pullRequests.find((p) => p.state === "merged" && p.author === workerLogin && reportedClosing(runs, p) === true);
 
 /**
  * Every PR in an enrolled repository that Linear links to the issue or a worker reported, re-read

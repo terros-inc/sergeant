@@ -17,7 +17,7 @@ export const issuePage = z.object({
   url: z.url(),
   title: z.string(),
   description: z.string().nullable(),
-  state: z.object({ name: z.string() }),
+  state: z.object({ name: z.string(), type: z.string() }),
   delegate: actor.nullable(),
   attachments: z.object({
     nodes: z.array(
@@ -45,7 +45,7 @@ export const issueQuery = `
   query SergeantIssue($id: String!, $after: String) {
     issue(id: $id) {
       id identifier url title description
-      state { name }
+      state { name type }
       delegate { id name }
       attachments(first: 100) { nodes { id title url sourceType updatedAt creator { id name } } }
       comments(first: 50, after: $after) {
@@ -148,5 +148,3 @@ export const issueWorkflowShape = z.object({
     .nullable(),
 });
 
-/** State types that a delegated issue may still be sitting in before its first worker starts. */
-export const unstartedTypes = new Set(["triage", "backlog", "unstarted"]);

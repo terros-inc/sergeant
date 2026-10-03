@@ -40,7 +40,8 @@ const conversation = (identifier: string): Conversation => ({
     url: `https://linear.app/x/issue/${identifier}`,
     title: "T",
     description: "D",
-    state: "In Progress",
+    state: "Todo",
+    stateType: "unstarted",
     delegate: agent,
     linkedPullRequests: identifier === "UNF-1" ? [{ repo: "o/r", number: 7 }] : [],
   },
@@ -74,7 +75,7 @@ async function start() {
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
       moveIssueToStarted: async () => ({ moved: false as const }),
     },
-    github: { readPullRequest: async () => pr, mergePullRequest: async () => Promise.reject(new Error("unused")) },
+    github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("unused")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {

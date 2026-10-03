@@ -67,7 +67,7 @@ test.each([
   const stale = { repo, number: 7, url: pr.url, headSha: head, conversationRevision: "0".repeat(64), reason: "Pull Request is not mergeable", at: "2026-10-02T00:00:00.000Z", commentPostedAt: "2026-10-02T00:00:01.000Z" };
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: ["run_worker", "run_review"], recentTurns: [], refusedMerges: [stale] }));
   let live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -89,6 +89,7 @@ test.each([
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
       github: {
+        closePullRequest: async () => {},
         readPullRequest: async () => {
           if (path.startsWith("M7") && notReadyOnce) return (notReadyOnce = false), { ...livePr, mergeable: null };
           return livePr;

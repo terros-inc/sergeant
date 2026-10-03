@@ -7,7 +7,7 @@ import { claudeCliFeedbackJudge } from "./feedback.ts";
 
 const input: FeedbackCase = {
   origin: {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Done", delegate: null, linkedPullRequests: [] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Done", stateType: "completed", delegate: null, linkedPullRequests: [] },
     humanComments: [],
     agentComments: [],
   },

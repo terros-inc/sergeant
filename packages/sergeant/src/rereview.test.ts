@@ -34,7 +34,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
   dir = await mkdtemp(join(tmpdir(), "sergeant-rereview-test-"));
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: records.map((r) => r.runId), recentTurns: [] }));
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -57,7 +57,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
         createFollowupIssue: async () => { throw new Error("unused"); },
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
-      github: { readPullRequest: async () => livePr, mergePullRequest: async () => { throw new Error("unused"); } },
+      github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); } },
       runner: { start: async () => {}, status: async (id) => records.find((r) => r.runId === id) ?? Promise.reject(new Error("unknown")), cancel: async () => {} },
       reasoner: {
         async turn() {

@@ -60,6 +60,7 @@ const spec = (pullRequests: PullRequestFacts[]): Extract<RunSpec, { role: "revie
       title: "T",
       description: "D",
       state: "In Progress",
+      stateType: "started",
       delegate: null,
       linkedPullRequests: [],
     },

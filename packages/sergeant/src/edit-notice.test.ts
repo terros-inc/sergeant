@@ -15,6 +15,7 @@ const original: Conversation = {
     title: "Add the skill",
     description: "Link the standard.",
     state: "In Progress",
+    stateType: "started",
     delegate: null,
     linkedPullRequests: [],
   },
