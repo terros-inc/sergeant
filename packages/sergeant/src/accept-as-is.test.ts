@@ -124,7 +124,7 @@ test("accept_as_is after an answer to any other question is refused, and the tas
   expect(result.outcome).toBe("idle");
   const { budget, recentTurns } = await saved();
   expect(budget.since).toBe(answeredAt);
-  expect(recentTurns.at(-1)?.outcomes).toEqual(["accept_as_is: denied by Q2 (no human has replied to Sergeant's budget question)"]);
+  expect(recentTurns.at(-1)?.outcomes).toEqual(["accept_as_is: denied by Q2 (no human has replied to Sergeant's budget question in this budget window)"]);
 });
 
 test("a turn retried after its acknowledgment reached Linear posts no second one", async () => {
@@ -185,4 +185,53 @@ test("a failed resolve of the accepted budget question keeps the task until a re
   const files = await readdir(dir);
   expect(files).not.toContain("state.json");
   expect(files.some((f) => /^state\.accepted-.+\.json$/.test(f))).toBe(true);
+});
+
+// TECH-5137: a re-triggered task is a fresh task, but until it asks a new question the latest answer
+// is still the earlier task's "accept as-is". Ending on it again posted the acknowledgment under that
+// reply's key, which Linear already had, so the second ending was silent.
+const oldReply = human("c-old", ago(590), "2");
+const earlier: AgentComment[] = [
+  { ...budgetAsked, createdAt: ago(600) },
+  { id: commentIdFor(acceptedKey("i1", oldReply.id)), createdAt: ago(589), body: acknowledged },
+];
+
+test("a re-triggered task refuses accept_as_is on the earlier task's reply, and goes on", async () => {
+  const { result, posted } = await scenario({
+    state: { startedAt: ago(30), runIds: [], turnCostUsd: 0 },
+    conversation: { agentComments: earlier, humanComments: [oldReply] },
+    runner: runner([]),
+    reasoner: async () => turnOf([accept]),
+    onPoll: (_poll, live) => live,
+  });
+
+  expect(result.outcome).toBe("idle");
+  expect(posted).toEqual([]);
+  expect((await saved()).recentTurns.at(-1)?.outcomes).toEqual([
+    "accept_as_is: denied by Q2 (no human has replied to Sergeant's budget question in this budget window)",
+  ]);
+  expect(await readdir(dir)).not.toContain("accepted.json");
+});
+
+test("a re-triggered task accepts a reply to its own budget question, with an acknowledgment of its own", async () => {
+  // The fresh task answered a question of its own, opening a window that ran out; its budget question
+  // for that window was answered "2".
+  const question = { id: "q1", createdAt: ago(260), body: `${QUESTION_HEADING}\n\nAt once, or after 30 days?` };
+  const answered = human("c1", ago(250), "At once.");
+  const asked = { ...budgetAsked, id: commentIdFor(budgetQuestionKey("i1", answered.createdAt)), createdAt: ago(60) };
+  const reply = human("c2", ago(1), "2");
+  const { result, live } = await scenario({
+    state: { startedAt: ago(300), runIds: ["run_w"], turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: answered.createdAt, priorRuns: [] } },
+    conversation: { agentComments: [...earlier, question, asked], humanComments: [oldReply, answered, reply] },
+    runner: runner([]),
+    reasoner: async () => turnOf([accept]),
+    onPoll: (_poll, live) => live,
+  });
+
+  expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
+  // Not deduplicated against the earlier task's: Linear shows both acknowledgments.
+  expect(live.agentComments.filter((c) => c.body === acknowledged).map((c) => c.id)).toEqual([
+    commentIdFor(acceptedKey("i1", oldReply.id)),
+    commentIdFor(acceptedKey("i1", reply.id)),
+  ]);
 });
