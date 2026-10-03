@@ -148,7 +148,7 @@ test("gives the run the issue's files read-only, fetched on the host, skipping o
       fetchedWithToken.push(url);
       return url === shot ? new Response(new Uint8Array([0x89, 0x50]), { headers: { "content-type": "image/png" } }) : new Response("ERROR boom\n");
     },
-    fetch: async () => new Response(new Uint8Array(2048), { headers: { "content-type": "application/octet-stream" } }),
+    fetchLink: async () => new Response(new Uint8Array(2048), { headers: { "content-type": "application/octet-stream" } }),
   });
   await runner.start({ ...spec, conversation });
 

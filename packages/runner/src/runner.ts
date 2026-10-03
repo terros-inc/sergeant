@@ -17,6 +17,7 @@ import { AGENTS, ADAPTERS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL, type Exec } from "./exec.ts";
+import type { FetchLink } from "./public-fetch.ts";
 
 export type Role = RunSpec["role"];
 export type Limits = { maxWallSeconds: number; maxCostUsd: number };
@@ -61,6 +62,8 @@ export type ContainerRunnerOptions = {
    * a run read-only under `.sergeant/attachments/`; the token never does (TECH-4994).
    */
   fetchUpload?: FetchUpload;
+  /** Downloads a generic link attachment; defaults to `fetchPublic`. Injected in tests. */
+  fetchLink?: FetchLink;
   attachmentLimits?: AttachmentLimits;
 };
 
@@ -218,7 +221,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       // The task's files, for worker and reviewer alike; mounted read-only, never fatal.
       const attachmentsDir = join(p.dir, "attachments");
       const attachments = await fetchAttachments(spec.conversation, attachmentsDir, {
-        fetch: fetchFn,
+        ...(opts.fetchLink && { fetchLink: opts.fetchLink }),
         ...(opts.fetchUpload && { fetchUpload: opts.fetchUpload }),
         ...(opts.attachmentLimits && { limits: opts.attachmentLimits }),
       });
