@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { InstallationConfig, taskBudget } from "./config.ts";
+import { InstallationConfig, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const config = (controlPlaneAppId: number | string, workerAppId: number | string) => ({
@@ -46,4 +46,24 @@ test("a task starts with the installation config's budget window, or the default
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// TECH-5009: an installation that names no runner keeps today's Claude Code workers and reviewers, and
+// a Codex role can't start without the installation's own Codex credential behind it.
+test("each role runs Claude Code unless the config selects Codex for it, with the installation's credential", () => {
+  const none = { worker: undefined, reviewer: undefined };
+  expect(runnerRoles(InstallationConfig.parse(config(1, 2)), none)).toEqual({
+    adapters: { worker: "claude-code-local", reviewer: "claude-code-local" },
+    models: { worker: "opus", reviewer: "opus" },
+  });
+
+  const codexReviewer = { ...config(1, 2), runners: { reviewer: "codex-local" } };
+  expect(InstallationConfig.safeParse(codexReviewer).success).toBe(false);
+  expect(InstallationConfig.safeParse({ ...codexReviewer, codex: { credentialSecret: "sk-proj-abc", model: "m" } }).success).toBe(false);
+  const parsed = InstallationConfig.parse({ ...codexReviewer, codex: { credentialSecret: "sergeant/codex", model: "gpt-5.5-codex" } });
+  expect(runnerRoles(parsed, none)).toEqual({
+    adapters: { worker: "claude-code-local", reviewer: "codex-local" },
+    models: { worker: "opus", reviewer: "gpt-5.5-codex" },
+  });
+  expect(runnerRoles(parsed, { worker: "sonnet", reviewer: "gpt-6" }).models).toEqual({ worker: "sonnet", reviewer: "gpt-6" });
 });

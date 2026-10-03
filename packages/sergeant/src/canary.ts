@@ -12,14 +12,15 @@
 //   It reads the conversation, files follow-up issues, and posts the one outcome comment after the merge.
 // - GitHub: the control-plane App reads facts and merges; workers push and open PRs with a worker-App
 //   token scoped to their run's repositories. There is no operator `gh` login and no bridge.
-// - Model: the Sergeant model token, for reasoning here and for worker and reviewer containers.
+// - Model: the Sergeant model token, for reasoning here and for Claude Code worker and reviewer
+//   containers; and the installation's Codex credential for a role the config runs on `codex-local`.
 import { resolve } from "node:path";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
-import { connect, loadConfig, taskBudget } from "./config.ts";
+import { connect, loadConfig, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const { values } = parseArgs({
@@ -29,8 +30,8 @@ const { values } = parseArgs({
     repo: { type: "string" },
     dir: { type: "string" },
     "reasoning-model": { type: "string", default: "opus" },
-    "worker-model": { type: "string", default: "opus" },
-    "reviewer-model": { type: "string", default: "opus" },
+    "worker-model": { type: "string" },
+    "reviewer-model": { type: "string" },
     /**
      * The task's budget window (UNF-728): hard wall time, and best-effort spend. Fixed when the task
      * starts. Each flag given overrides the installation config's `budget` (TECH-4964).
@@ -69,8 +70,9 @@ const result = await runLoop(
     github: installation.github,
     runner: containerRunner({
       rootDir: join(dir, "runs"),
-      models: { worker: values["worker-model"], reviewer: values["reviewer-model"] },
+      ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
       claudeOAuthToken: installation.modelToken,
+      ...(installation.codexCredential !== undefined && { codexCredential: installation.codexCredential }),
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
       fetchUpload: installation.linear.fetchUpload,

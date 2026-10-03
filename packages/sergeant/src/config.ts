@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { RepoSlug, type GitHubPort, type RunGitHubTokens } from "@terros/sergeant-contracts";
+import { RepoSlug, type GitHubPort, type RunGitHubTokens, type RunSpec } from "@terros/sergeant-contracts";
 import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
 import { createLinearPort } from "@terros/sergeant-linear";
+import { ADAPTERS, type Adapter } from "@terros/sergeant-runner";
 import { z } from "zod";
 import type { BudgetWindow } from "./budget.ts";
 
@@ -11,7 +12,7 @@ import type { BudgetWindow } from "./budget.ts";
 // secret references only. Secret references are AWS Secrets Manager ids, resolved at startup and
 // never printed. Nothing installation-specific or personal lives in code.
 
-const LITERAL_CREDENTIAL = /^(lin_(api|oauth|wh)_|gh[pousr]_|github_pat_|sk-ant-)/;
+const LITERAL_CREDENTIAL = /^(lin_(api|oauth|wh)_|gh[pousr]_|github_pat_|sk-)/;
 const SecretRef = z
   .string()
   .regex(/^[\w/+=.@:-]+$/, "expected a Secrets Manager secret id or ARN")
@@ -107,8 +108,40 @@ export const InstallationConfig = z.strictObject({
   maxTasks: z.number().int().positive().optional(),
   /** Minutes a task waiting on a human keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */
   waitingGraceMinutes: z.number().nonnegative().optional(),
+  /** The agent CLI each role runs (TECH-5009). A role not named runs Claude Code, as it always has. */
+  runners: z.strictObject({ worker: z.enum(ADAPTERS).optional(), reviewer: z.enum(ADAPTERS).optional() }).optional(),
+  /** The installation's Codex login, required when `runners` names `codex-local`. */
+  codex: z
+    .strictObject({
+      /**
+       * Secrets Manager id of the Codex credential: the JSON of the `auth.json` a `codex login` with the
+       * installation's own ChatGPT workspace account writes, or an OpenAI API key. Never a personal login.
+       */
+      credentialSecret: SecretRef,
+      /** The model Codex runs for a Codex role, unless `serve`/`canary` names that role's model. */
+      model: z.string().min(1),
+    })
+    .optional(),
+}).refine((c) => c.codex || !Object.values(c.runners ?? {}).includes("codex-local"), {
+  message: "a codex-local runner needs the codex credential",
+  path: ["codex"],
 });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;
+
+type Role = RunSpec["role"];
+
+/**
+ * Each role's adapter and model, for `containerRunner` (TECH-5009). A role's model flag wins; without
+ * one, a Codex role runs `codex.model` and a Claude Code role "opus", today's default.
+ */
+export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role, string | undefined>) {
+  const adapter = (role: Role): Adapter => config.runners?.[role] ?? "claude-code-local";
+  const model = (role: Role) => modelFlags[role] ?? (adapter(role) === "codex-local" && config.codex ? config.codex.model : "opus");
+  return {
+    adapters: { worker: adapter("worker"), reviewer: adapter("reviewer") },
+    models: { worker: model("worker"), reviewer: model("reviewer") },
+  };
+}
 
 /** The config's `budget` as a loop's budget option: a task started from now on gets it; a running one keeps its own. */
 export function taskBudget(config: InstallationConfig): Partial<BudgetWindow> {
@@ -148,6 +181,8 @@ export type Installation = {
   workerApp: GitHubApp;
   githubTokens: RunGitHubTokens;
   modelToken: string;
+  /** The Codex credential, when the config has one. */
+  codexCredential?: string;
   /** Webhook signing secrets, for the sources the config gives one. */
   webhookSecrets: { linear?: string; github?: string };
 };
@@ -159,13 +194,14 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
   if (unknown.length > 0) throw new Error(`not enrolled in the installation config: ${unknown.join(", ")}`);
   const secret = secretResolver(config);
   const optional = (ref: string | undefined) => (ref === undefined ? undefined : secret(ref));
-  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook] = await Promise.all([
+  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook, codexCredential] = await Promise.all([
     secret(config.linear.tokenSecret),
     secret(config.github.controlPlaneApp.privateKeySecret),
     secret(config.github.workerApp.privateKeySecret),
     secret(config.modelTokenSecret),
     optional(config.linear.webhookSecret),
     optional(config.github.webhookSecret),
+    optional(config.codex?.credentialSecret),
   ]);
   const app = (ref: z.infer<typeof GitHubAppRef>, privateKey: string) =>
     githubApp({ appId: ref.appId, installationId: ref.installationId, privateKey });
@@ -196,6 +232,7 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     workerApp,
     githubTokens: runTokens(workerApp),
     modelToken,
+    ...(codexCredential !== undefined && { codexCredential }),
     webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },
   };
 }

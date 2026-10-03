@@ -77,6 +77,10 @@ may use `sgt` and the client API, each with their own Linear login (see [The `sg
 Optional `release` makes the host update itself to green commits of `main`: `{ "channel": "main" }`
 or `{ "channel": "soaked", "soakMinutes": 90 }`, with `"paused": true` to stop (`deploy/README.md`,
 Automatic updates).
+Optional `runners` chooses each role's agent (TECH-5009): `{ "reviewer": "codex-local" }` runs reviewers
+on the Codex CLI; a role not named runs Claude Code, as before. A `codex-local` role needs `codex`:
+`{ "credentialSecret": "<Codex credential secret id>", "model": "<Codex model>" }`; the secret's
+format and how to create it are in [`packages/runner/README.md`](packages/runner/README.md#codex-codex-local-tech-5009).
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs
 contents and pull requests write, checks and commit statuses read, and metadata read. The worker App

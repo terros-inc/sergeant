@@ -7,15 +7,16 @@ The walking skeleton's runner (UNF-705): `containerRunner` implements `RunnerPor
 
 - **One run, one container, one session.** `start` mints the run's GitHub token, clones the run's
   repositories on the host into a new workspace with it, writes the brief (`src/brief.ts`) there,
-  and launches `claude -p` in a new `sergeant-runner:local` container. The workspace is the only mount. A reviewer is a separate
+  and launches the role's agent CLI (`src/agents.ts`) in a new `sergeant-runner:local` container:
+  `claude -p` (`claude-code-local`, the default) or `codex exec` (`codex-local`, below). The workspace is the only mount. A reviewer is a separate
   container and session, built from the issue, the PR, and recorded reports. It inherits nothing from
-  the worker's session. The session id, cost, and resolved model of each run are kept in
-  `agent.json` beside its record. `RunRecord.provider`/`model` record who did the work.
+  the worker's session. The adapter, session (or Codex thread) id, cost or tokens, and resolved
+  model of each run are kept in `agent.json` beside its record. `RunRecord.provider`/`model` record who did the work.
 - **Reports.** The agent writes `/workspace/sergeant-report.md`. The host reads it only if it is a
   regular file, never a symlink, and parses it with the contract schemas (`WorkerReport` or
   `ReviewReport`). A worker reports the PRs it opened and their exact heads.
-- **Limits and cancellation.** `timeout` inside the container caps wall time, and `--max-budget-usd`
-  caps cost. `cancel` stops the container and records `canceled` only once Docker shows it stopped or
+- **Limits and cancellation.** `timeout` inside the container caps wall time, and for Claude Code
+  `--max-budget-usd` caps cost (Codex has no such cap). `cancel` stops the container and records `canceled` only once Docker shows it stopped or
 gone; otherwise it throws so the caller retries. Likewise `status` throws while Docker cannot
 answer; a run counts as lost only when Docker says its container no longer exists. There are no leases, adoption, restart recovery, or
   `send`.
@@ -27,7 +28,10 @@ answer; a run counts as lost only when Docker says its container no longer exist
 A container gets only these, each passed by name so no value is on a command line, and there is no
 generic environment input:
 
-- `claudeOAuthToken`, the Sergeant model token, as `CLAUDE_CODE_OAUTH_TOKEN`.
+- For a Claude Code run, `claudeOAuthToken`, the Sergeant model token, as `CLAUDE_CODE_OAUTH_TOKEN`.
+- For a Codex run instead, `codexCredential`, the installation's Codex credential, as
+  `CODEX_CREDENTIAL`. The container turns it into its own `~/.codex/auth.json` (outside the workspace)
+  and unsets the variable before Codex starts. A Codex run never gets the Claude token, nor the reverse.
 - For a worker only, `GH_TOKEN`: an installation token of the **worker GitHub App**, minted per run
   by the injected `githubTokens` and scoped to exactly the run's repositories with `contents` and
   `pull_requests` write and `checks`, `actions`, and `metadata` read. It is the worker's only GitHub
@@ -41,20 +45,61 @@ head; it never enters the reviewer's container. A run gets no host home, AWS, `g
 Linear, Docker socket, or Sergeant state. `node src/live-check.ts` prints what a run can see.
 
 Commits are authored and committed as `gitIdentity`, the installation's human identity, through
-`GIT_AUTHOR_*`/`GIT_COMMITTER_*`. The image's Claude Code settings turn off its co-author trailer, and
-the brief forbids agent attribution. An agent never appears as a GitHub contributor.
+`GIT_AUTHOR_*`/`GIT_COMMITTER_*`. The image's Claude Code settings turn off its co-author trailer; Codex
+has no such setting, so the image's global git `commit-msg` hook strips `Co-authored-by: Codex`. The
+brief forbids agent attribution. An agent never appears as a GitHub contributor.
 
-Codex is not a runner here: the only Codex login is personal (UNF-710), so reviewers are a separate
-Claude session.
+## Codex (`codex-local`, TECH-5009)
+
+The installation config chooses the agent per role: `"runners": { "reviewer": "codex-local" }` makes
+reviews come from a different provider than the Claude Code worker. A role not named runs Claude Code,
+exactly as before. The earlier blocker, that the only Codex login was personal (UNF-710), is gone:
+Terros now has its own Codex Team account, and nothing personal is ever used.
+
+- **Credential.** One Secrets Manager secret per installation, named by the config's
+  `codex.credentialSecret` (for example `sergeant/<installation>/codex-credential`), never in source.
+  Its value is either the JSON of the `auth.json` that `codex login` writes after signing in as the
+  installation's Codex Team account (`{"auth_mode":"chatgpt","tokens":{…},"last_refresh":…}`), or an
+  OpenAI API key (`sk-…`) of a project the installation owns. Create it from a throwaway Codex home, so
+  no personal login is touched:
+
+  ```sh
+  export CODEX_HOME=$(mktemp -d)
+  codex login --device-auth              # sign in as the installation's Team account
+  aws secretsmanager create-secret --name sergeant/<installation>/codex-credential \
+    --secret-string "file://$CODEX_HOME/auth.json"     # or put-secret-value to replace it
+  rm -rf "$CODEX_HOME"
+  ```
+
+  Codex refreshes a ChatGPT login's tokens as they age and writes them to `auth.json`; in a run that
+  is the container's own copy, discarded at the end, so the secret keeps the tokens it was given. If
+  Codex runs start failing on authentication (the run's `reportError` says 401 or refresh), sign in
+  again and replace the secret. An API key does not age this way, but bills that API project per token
+  instead of the Team plan.
+- **Model.** `codex.model` in the config, unless `serve`/`canary` gets `--worker-model`/`--reviewer-model`.
+- **Usage.** `codex exec --json` reports tokens, not dollars. The run record keeps `tokens` (input,
+  cached input, output, reasoning output) and no `costUsd`, so the task budget counts the run as
+  unknown cost (`sgt` shows its tokens with `sgt run`); nothing guesses a price. With no spend cap, the wall-time
+  limit is the run's only backstop.
+- **Resume (V6).** Codex can resume a thread (`codex exec resume <id>`), but its session lives in the
+  run's container, removed at the end, and this runner resumes no adapter. A continuation is a fresh
+  run from the pushed branches and earlier reports in its brief. The thread id is in `agent.json`.
+- **Sandbox.** Codex runs with `--dangerously-bypass-approvals-and-sandbox`: the container is the
+  sandbox, as with Claude Code's `bypassPermissions`.
 
 ## Manual live check
 
 Not part of CI. It starts a container the way a worker run is started, with placeholder credential
-values, and prints its user, environment variable names, and which host credential paths exist:
+values, and prints its user, environment variable names, which host credential paths exist, and the
+agent CLI's version:
 
 ```sh
 docker build -t sergeant-runner:local container
-node src/live-check.ts
+node src/live-check.ts                          # Claude Code
+node src/live-check.ts --adapter codex-local    # Codex: only CODEX_CREDENTIAL and GH_TOKEN enter
 ```
+
+With a real Codex credential, `packages/sergeant/src/live-check.ts` (for a config that selects
+`codex-local`) logs Codex in inside the image as a run does and checks it reads the login.
 
 Real worker and reviewer runs are exercised by the canary (`packages/sergeant`).

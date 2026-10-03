@@ -85,6 +85,19 @@ const RunBase = {
   model: z.string(),
   /** The model cost the run reported when it ended, in USD; absent while running or when not reported. */
   costUsd: z.number().nonnegative().optional(),
+  /**
+   * The tokens the run reported when it ended, for a provider that reports no dollar figure (Codex,
+   * TECH-5009). Its `costUsd` is then absent, so the budget counts its cost as unknown; nothing
+   * estimates one from these.
+   */
+  tokens: z
+    .object({
+      input: z.number().int().nonnegative(),
+      cachedInput: z.number().int().nonnegative(),
+      output: z.number().int().nonnegative(),
+      reasoningOutput: z.number().int().nonnegative(),
+    })
+    .optional(),
   /** Why the report is null: missing, malformed, or failed validation. */
   reportError: z.string().optional(),
   /**

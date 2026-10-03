@@ -222,9 +222,24 @@ This is not a capability broker: every worker gets the same development authorit
 | Adapter | Execution | Expected capabilities | Notes |
 |---|---|---|---|
 | `claude-code-local` | Claude Code headless in the runner zone on the Sergeant host (or in a container on the captain's laptop during the trial) | liveUsage (token counts × pricing), messaging (a steering file read at turn boundaries, modeled on Firstmate's inbox), resume, freshSubagents, list | first adapter; subscription profiles and account selection inside it |
-| `codex-local` | Codex CLI in the same zone | resume, usage reporting | second adapter; a different-provider reviewer |
+| `codex-local` | Codex CLI (`codex exec`) in the same zone | usage reporting (tokens, `costBasis: unknown`) | second adapter; a different-provider reviewer (built, TECH-5009) |
 | `cloud-…` | provider cloud agents | varies | allowed when its identity meets §9's hard boundary |
 | `fake` | in-process script | all, configurable | tests only; never launches real processes (S1 UNF-383) |
+
+**`codex-local` (TECH-5009; resolves V6).** Installation config picks the adapter per role
+(`runners.worker`, `runners.reviewer`); a role not named runs `claude-code-local`. A Codex run uses the
+same container, workspace, worker-App token, git identity, and network as a Claude Code run; only the
+model credential differs (the installation's Codex credential in Secrets Manager, in place of the
+Claude token). Checked against Codex CLI 0.160.0:
+
+- **Usage**: `codex exec --json` reports tokens per turn (`turn.completed.usage`: input, cached input,
+  output, reasoning output) and no dollar figure. The run record keeps the summed tokens and no
+  `costUsd`, so the budget counts the run's cost as unknown; nothing estimates one. Codex has no spend
+  cap like `--max-budget-usd`, so the wall-time limit is a Codex run's only backstop.
+- **Resume**: the CLI supports it (`codex exec resume <thread id>`), but its sessions live in the run's
+  container, which is removed when the run ends, and the local runner resumes neither adapter. The
+  fallback is a fresh run from pushed branches and the earlier runs' reports in the brief (05 §2), as
+  for Claude Code here. The thread id is kept in the run's `agent.json` for a future `resume`.
 
 An adapter may wrap a tiny native helper (for example a Rust binary that owns process groups and clean
 termination) if OS process handling genuinely needs one. Sergeant itself stays TypeScript.

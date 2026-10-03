@@ -13,8 +13,9 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments, type AttachmentLimits, type FetchUpload } from "./attachments.ts";
+import { AGENTS, ADAPTERS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
-import { AGENT_SCRIPT, AgentOutput, agentFile, gitIdentityEnv, isGone } from "./container.ts";
+import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL, type Exec } from "./exec.ts";
 
 export type Role = RunSpec["role"];
@@ -25,13 +26,20 @@ export type ContainerRunnerOptions = {
   rootDir: string;
   /** Built from `container/Dockerfile`. */
   image?: string;
-  /** Claude model per role; each run is a new `claude -p` session in a new container. */
+  /** The model per role, for that role's adapter; each run is a new agent session in a new container. */
   models: Record<Role, string>;
+  /** The agent CLI per role (TECH-5009). A role not named here runs Claude Code. */
+  adapters?: Partial<Record<Role, Adapter>>;
   /**
-   * The Sergeant Claude worker token. It enters every container, always and only as
+   * The Sergeant Claude worker token. It enters every Claude Code container, always and only as
    * `CLAUDE_CODE_OAUTH_TOKEN`. There is deliberately no generic environment input.
    */
   claudeOAuthToken: string;
+  /**
+   * The installation's Codex credential (`auth.json` JSON or an OpenAI API key), required when a role
+   * runs `codex-local`. It enters only Codex containers, only as `CODEX_CREDENTIAL`.
+   */
+  codexCredential?: string;
   /**
    * Mints each run's GitHub token from the worker App, scoped to the run's repositories. A worker's
    * write token is its only GitHub credential and enters its container as `GH_TOKEN`; a reviewer's
@@ -56,7 +64,7 @@ export type ContainerRunnerOptions = {
   attachmentLimits?: AttachmentLimits;
 };
 
-export const PROVIDER = "anthropic/claude-code";
+export const PROVIDER = AGENTS["claude-code-local"].provider;
 
 const DEFAULT_LIMITS: Record<Role, Limits> = {
   worker: { maxWallSeconds: 3_600, maxCostUsd: 10 },
@@ -66,6 +74,8 @@ const DEFAULT_LIMITS: Record<Role, Limits> = {
 const RunMeta = z.object({
   runId: z.string(),
   role: z.enum(["worker", "reviewer"]),
+  /** Absent in a run started before TECH-5009, which was Claude Code's. */
+  adapter: z.enum(ADAPTERS).default("claude-code-local"),
   model: z.string(),
   repositories: z.array(z.string()),
   container: z.string(),
@@ -77,10 +87,10 @@ type RunMeta = z.infer<typeof RunMeta>;
 const recorded = (meta: RunMeta) => (meta.issueRevision !== undefined ? { issueRevision: meta.issueRevision } : {});
 
 /**
- * The local runner (04 §10 `claude-code-local`, laptop shape): every worker and reviewer is a new
- * `claude -p` session in a new container whose only mount is the run's own workspace. Its credentials
- * are the model token and, for a worker, the worker-App token it pushes branches and opens PRs with.
- * Repositories are cloned on the host before launch.
+ * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
+ * reviewer is a new `claude -p` or `codex exec` session in a new container whose only mount is the
+ * run's own workspace. Its credentials are its agent's model credential and, for a worker, the
+ * worker-App token it pushes branches and opens PRs with. Repositories are cloned on the host before launch.
  *
  * Basic cancellation only: no leases, adoption, or restart recovery. `send` is not supported.
  */
@@ -88,7 +98,11 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   const root = resolve(opts.rootDir);
   const image = opts.image ?? "sergeant-runner:local";
   if (!opts.claudeOAuthToken) throw new Error("containerRunner needs claudeOAuthToken");
-  const token = opts.claudeOAuthToken;
+  const adapterOf = (role: Role): Adapter => opts.adapters?.[role] ?? "claude-code-local";
+  const credentials: Record<Adapter, string | undefined> = { "claude-code-local": opts.claudeOAuthToken, "codex-local": opts.codexCredential };
+  for (const role of ["worker", "reviewer"] as const) {
+    if (!credentials[adapterOf(role)]) throw new Error(`containerRunner needs codexCredential: the ${role} runs codex-local`);
+  }
   const exec = opts.exec ?? hostExec;
   const execOk = checked(exec);
   const fetchFn = opts.fetch ?? globalThis.fetch;
@@ -130,20 +144,18 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   async function finalize(meta: RunMeta, exitCode: number): Promise<RunRecord> {
     const p = paths(meta.runId);
     const logs = await exec("docker", ["logs", meta.container]);
-    const line = logs.stdout.trim().split("\n").reverse().find((l) => l.startsWith("{"));
-    const agent = line ? AgentOutput.safeParse(JSON.parse(line)).data : undefined;
-    const succeeded = exitCode === 0 && agent?.is_error === false;
-    const resolved = Object.keys(agent?.modelUsage ?? {});
+    const agent = AGENTS[meta.adapter].parse(logs.stdout);
     const base = {
       runId: meta.runId,
-      status: succeeded ? "succeeded" : "failed",
-      provider: PROVIDER,
-      model: resolved.length ? resolved.join(",") : meta.model,
+      status: exitCode === 0 && agent.ok ? "succeeded" : "failed",
+      provider: AGENTS[meta.adapter].provider,
+      model: agent.models.length ? agent.models.join(",") : meta.model,
       ...recorded(meta),
-      ...(agent?.total_cost_usd !== undefined && { costUsd: agent.total_cost_usd }),
+      ...(agent.costUsd !== undefined && { costUsd: agent.costUsd }),
+      ...(agent.tokens && { tokens: agent.tokens }),
     } as const;
-    const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent?.subtype ? ` (${agent.subtype})` : ""}`;
-    const facts = { exitCode, sessionId: agent?.session_id, costUsd: agent?.total_cost_usd, models: resolved };
+    const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
+    const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
     const reportPath = await agentFile(p.workspace, "sergeant-report.md");
     const markdown = reportPath && (await readFile(reportPath, "utf8"));
@@ -240,9 +252,12 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       await writeFile(join(p.workspace, "sergeant-brief.md"), brief);
 
       const limits = opts.limits?.[spec.role] ?? DEFAULT_LIMITS[spec.role];
+      const adapter = adapterOf(spec.role);
+      const agent = AGENTS[adapter];
       const meta: RunMeta = {
         runId: spec.runId,
         role: spec.role,
+        adapter,
         model: opts.models[spec.role],
         repositories: spec.repositories,
         container: `sergeant-${spec.runId}`,
@@ -251,8 +266,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       };
       await writeFile(p.meta, JSON.stringify(meta, null, 2));
       // `--env NAME` copies the value from the docker CLI's own environment, so no token is ever on
-      // a command line. These are the only credentials that cross into the container: the model
-      // token, and a worker's own scoped GitHub token. The git identity variables are not secret.
+      // a command line. These are the only credentials that cross into the container: its agent's
+      // model credential, and a worker's own scoped GitHub token. The git identity variables are not secret.
       const worker = spec.role === "worker";
       await execOk(
         "docker",
@@ -261,13 +276,13 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
           "--volume", `${p.workspace}:/workspace`,
           ...(attachments.files.length ? ["--volume", `${attachmentsDir}:${ATTACHMENTS_PATH}:ro`] : []),
-          "--env", "CLAUDE_CODE_OAUTH_TOKEN",
+          "--env", agent.credentialEnv,
           ...(worker ? ["--env", "GH_TOKEN"] : []),
           ...gitIdentityEnv(opts.gitIdentity),
-          image, "sh", "-c", AGENT_SCRIPT, "sh",
+          image, "sh", "-c", agent.script, "sh",
           String(limits.maxWallSeconds), meta.model, String(limits.maxCostUsd),
         ],
-        { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token, ...(worker && { GH_TOKEN: githubToken }) } },
+        { env: { ...process.env, [agent.credentialEnv]: credentials[adapter], ...(worker && { GH_TOKEN: githubToken }) } },
       );
     },
 
@@ -276,7 +291,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       if (done) return done;
       const meta = await readMeta(runId);
       const inspect = await exec("docker", ["inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", meta.container]);
-      const base = { runId, provider: PROVIDER, model: meta.model, role: meta.role, report: null, ...recorded(meta) };
+      const base = { runId, provider: AGENTS[meta.adapter].provider, model: meta.model, role: meta.role, report: null, ...recorded(meta) };
       if (inspect.code !== 0) {
         // Unknown is not death (04 §6): only Docker saying the container does not exist is loss.
         if (!isGone(inspect)) throw new Error(`status of ${runId} unavailable: ${inspect.stderr.trim().slice(-500)}`);
@@ -298,7 +313,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       if (!isGone(inspect) && !(inspect.code === 0 && inspect.stdout.trim() === "false")) {
         throw new Error(`cancel of ${runId} not confirmed: ${(stop.stderr || inspect.stderr || inspect.stdout).trim().slice(-500)}`);
       }
-      await finish(meta, { runId, role: meta.role, status: "canceled", provider: PROVIDER, model: meta.model, report: null, ...recorded(meta) }, {});
+      await finish(meta, { runId, role: meta.role, status: "canceled", provider: AGENTS[meta.adapter].provider, model: meta.model, report: null, ...recorded(meta) }, {});
     },
 
     async report(runId) {
