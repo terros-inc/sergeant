@@ -2,16 +2,19 @@ import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { commentIdFor, QUESTION_HEADING, type AgentComment, type HumanComment, type ProposedAction } from "@terros/sergeant-contracts";
+import { acceptedKey } from "./accepted.ts";
 import { budgetQuestionKey } from "./budget.ts";
-import { cleanup, dir, human, saved, scenario, start, turnOf, worker } from "./budget-scenario.ts";
+import { cleanup, dir, human, pr, saved, scenario, start, turnOf, worker } from "./budget-scenario.ts";
 
 // TECH-5118: "accept as-is" in reply to the budget question ends the task. Before, the reply opened a
 // fresh window like any answer, reasoning proposed nothing, and once that window ran out the task asked
 // the budget question again: TECH-4978 was answered "stop" three times and asked a fourth. Any other
-// reply to it still opens a fresh window and the work goes on (TECH-5059).
+// reply to it still opens a fresh window and the work goes on (TECH-5059). TECH-5120: the accepted
+// ending says so in one keyed comment, so the human knows Sergeant has stopped and the rest is theirs.
 
 afterEach(cleanup);
 
+const acknowledged = `Sergeant has stopped: the work was accepted as it is. [${pr.repo}#${pr.number}](${pr.url}) and this issue are yours to merge or close.`;
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const accept: ProposedAction = { kind: "accept_as_is" };
 const budgetAsked: AgentComment = {
@@ -49,7 +52,7 @@ test.each<[string, AgentComment[], HumanComment[]]>([
   expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
   expect(turns).toBe(1);
   expect(started).toEqual([]);
-  expect(posted).toEqual([]);
+  expect(posted).toEqual([acknowledged]);
   // Set aside like a stopped task's, so intake resumes it no more.
   const files = await readdir(dir);
   expect(files).not.toContain("state.json");
@@ -122,4 +125,37 @@ test("accept_as_is after an answer to any other question is refused, and the tas
   const { budget, recentTurns } = await saved();
   expect(budget.since).toBe(answeredAt);
   expect(recentTurns.at(-1)?.outcomes).toEqual(["accept_as_is: denied by Q2 (no human has replied to Sergeant's budget question)"]);
+});
+
+test("a turn retried after its acknowledgment reached Linear posts no second one", async () => {
+  const reply = human("c1", ago(1), "2");
+  const keys: string[] = [];
+  // Linear takes the comment but the response is lost: the loop fails before setting the task aside.
+  const failed = await scenario({
+    state: exhausted,
+    conversation: { agentComments: [budgetAsked], humanComments: [reply] },
+    runner: runner([]),
+    reasoner: async () => turnOf([accept]),
+    onPoll: (_poll, live) => live,
+    beforePost: ({ key }) => {
+      keys.push(key);
+      throw new Error("socket hang up");
+    },
+  }).catch((e: Error) => e);
+  expect(failed).toBeInstanceOf(Error);
+  expect(await readdir(dir)).toContain("state.json");
+
+  // The next intake resumes the task; the turn it committed no fingerprint for is taken again.
+  const delivered = { id: commentIdFor(acceptedKey("i1", reply.id)), createdAt: ago(0.5), body: acknowledged };
+  const { result, live } = await scenario({
+    conversation: { agentComments: [budgetAsked, delivered], humanComments: [reply] },
+    runner: runner([]),
+    reasoner: async () => turnOf([accept]),
+    onPoll: (_poll, live) => live,
+    beforePost: ({ key }) => void keys.push(key),
+  });
+
+  expect(result.outcome).toBe("accepted");
+  expect(keys).toEqual([acceptedKey("i1", reply.id), acceptedKey("i1", reply.id)]);
+  expect(live.agentComments.filter((c) => c.body === acknowledged)).toHaveLength(1);
 });

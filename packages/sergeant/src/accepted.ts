@@ -1,5 +1,6 @@
 import { readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { LinearPort, PullRequestFacts } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 
 // TECH-5118: a task a human accepted as it is stays ended. Its loop sets `state.json` aside, so intake
@@ -12,6 +13,30 @@ import type { DelegatedIssue } from "@terros/sergeant-linear";
 // after the acceptance is not a request for more work.
 
 const markerFile = (dir: string) => join(dir, "accepted.json");
+
+/**
+ * TECH-5120: once per acceptance, keyed by the human reply that accepted, so a turn retried after a
+ * crash or a failed post (it commits no fingerprint) posts nothing new; a later acceptance, after the
+ * task was re-triggered, is a new reply and gets its own.
+ */
+export const acceptedKey = (issueId: string, replyId: string) => `accepted:${issueId}:${replyId}`;
+
+/** The one line that tells the human Sergeant has stopped and what is left is theirs. */
+export function acceptedComment(pullRequests: Pick<PullRequestFacts, "repo" | "number" | "url" | "state">[]): string {
+  const open = pullRequests.filter((p) => p.state === "open").map((p) => `[${p.repo}#${p.number}](${p.url})`);
+  const left = open.length > 0 ? `${open.join(", ")} and this issue are` : "This issue is";
+  return `Sergeant has stopped: the work was accepted as it is. ${left} yours to merge or close.`;
+}
+
+/** Posts the acceptance's comment; a Linear failure throws, so the loop fails and its turn is retried. */
+export async function postAccepted(
+  issueId: string,
+  replyId: string,
+  pullRequests: Pick<PullRequestFacts, "repo" | "number" | "url" | "state">[],
+  linear: Pick<LinearPort, "postComment">,
+): Promise<void> {
+  await linear.postComment({ issueId, key: acceptedKey(issueId, replyId), body: acceptedComment(pullRequests) });
+}
 
 /** Records that a human accepted the task in `dir` as it is; written before `state.json` is set aside. */
 export const markAccepted = (dir: string, at: string) => writeFile(markerFile(dir), JSON.stringify({ at }));

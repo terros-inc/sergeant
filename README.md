@@ -187,7 +187,8 @@ A reply opens a fresh window like any answer, so "extend" needs nothing more: th
 with the work, and a steer is carried out in it. On "accept as-is" (the option's number, or the same in
 the human's own words) reasoning proposes `accept_as_is` instead (TECH-5118): the loop ends `accepted`
 with nothing more asked, and `state.json` is set aside so intake does not resume it, leaving its PRs
-and the issue for a human. Gate rule Q2 refuses it unless a human replied to the budget question, and
+and the issue for a human. One line on the issue says so (TECH-5120), posted under a key of the
+accepting reply, so a retried turn posts no second one. Gate rule Q2 refuses it unless a human replied to the budget question, and
 unless the live conversation is still the one reasoning read, so a reply posted while it reasoned is
 read by the next turn instead. An `accepted.json` marker keeps intake from starting the issue afresh
 while it stays delegated and in Todo; moving the issue out of Todo (or undelegating it, or
@@ -434,7 +435,8 @@ On a controlled issue delegated to the V2 agent whose work takes more than a few
    nothing merges while it waits.
 2. Reply "extend". The loop logs `a human answered (...): a fresh budget window ...`, and the next turn
    resumes the work in it. Replying "accept as-is" instead ends the loop `accepted`, with no further
-   question, the PR left open, and the issue left in its state.
+   question, the PR left open, the issue left in its state, and one comment saying Sergeant has stopped
+   and the PR and issue are the human's to merge or close.
 3. With `--budget-usd 1`, the first finished run's reported cost exhausts the spend instead
    (`spent $... of $1.00`), with the same question.
 4. On another issue, undelegate it while a worker runs: the loop logs `canceled run_...` and stops only
