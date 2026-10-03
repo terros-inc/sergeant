@@ -15,8 +15,9 @@ export interface LinearPort {
    */
   postComment(req: { issueId: string; body: string; key: string }): Promise<void>;
   /**
-   * Creates an issue in the origin issue's team and project, related to it as `relation` says, with
-   * no delegate or assignee. At most once per `key`, like `postComment`: a retry, even after a crash
+   * Creates an issue in the origin issue's team and project, in the team's first `backlog` state
+   * (never Triage), related to it as `relation` says, with no delegate. It is assigned to the origin's
+   * assignee, else to the human who delegated the origin to Sergeant, else to nobody. At most once per `key`, like `postComment`: a retry, even after a crash
    * between creating the issue and linking it, files no second issue.
    */
   createFollowupIssue(req: {
