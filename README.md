@@ -208,8 +208,9 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   a task starts only from Todo (TECH-4989): an issue in Triage or Backlog waits until a human moves it
   there. A Todo issue with a Linear "blocked by" issue that is neither completed nor canceled waits
   too (TECH-5066), logging `<issue> waiting on blocker <issue>`, and starts at the first intake after
-  its last blocker finishes; a task already under way is not held back. Starting it moves the issue from Todo to In Progress, the only state Sergeant moves an issue
-  to. Every intake also resumes each local task (`state.json`) with no loop, whether or not Linear
+  its last blocker finishes; one with more than 20 inverse relations waits as if blocked, since
+  Sergeant reads only 20. A task already under way is not held back. Starting it moves the issue
+  from Todo to In Progress, the only state Sergeant moves an issue to. Every intake also resumes each local task (`state.json`) with no loop, whether or not Linear
   lists it, into a free slot in the same order, or with no slot until it has work to do. Its loop's
   own live checks then continue it, stop it (undelegated, or in Backlog, Canceled, or Done without its
   closing PR merged), or see it through after the merge; a stop never needs a task slot, and a task

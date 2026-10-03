@@ -196,6 +196,7 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
                     blocker("blocks", "UNF-4", "canceled"),
                     blocker("related", "UNF-6", "started"),
                   ],
+                  pageInfo: { hasNextPage: false },
                 },
               },
             ],
@@ -207,4 +208,32 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
   expect(await linear.delegatedIssues("agent")).toEqual([
     { identifier: "UNF-5", priority: 2, createdAt: at(0), state: { name: "Todo", type: "unstarted" }, blockedBy: ["UNF-1", "UNF-2"] },
   ]);
+});
+
+// TECH-5066: only the first 20 inverse relations are read, so an issue with more must wait rather than
+// start while an unread open blocker may hold it up.
+test("delegatedIssues holds back an issue whose relations it could not read in full", async () => {
+  const relations = Array.from({ length: 20 }, (_, i) => ({ type: "related", issue: { identifier: `UNF-${i + 10}`, state: { type: "started" } } }));
+  const linear = createLinearPort({
+    apiKey: "test",
+    sergeantUserIds: [],
+    fetch: async () =>
+      Response.json({
+        data: {
+          issues: {
+            nodes: [
+              {
+                identifier: "UNF-5",
+                priority: 2,
+                createdAt: at(0),
+                state: { name: "Todo", type: "unstarted" },
+                inverseRelations: { nodes: relations, pageInfo: { hasNextPage: true } },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }),
+  });
+  expect((await linear.delegatedIssues("agent"))[0]?.blockedBy).toEqual(["relations past the first 20, unread"]);
 });
