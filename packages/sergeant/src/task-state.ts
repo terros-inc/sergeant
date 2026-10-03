@@ -42,9 +42,12 @@ const TaskState = z.object({
   turnCostUsd: z.number().default(0),
   budget: z
     .object({
-      /** Fixed when the task starts; a restart with other flags does not change it, only a grant extends it. */
+      /** Fixed when the window opens; a restart with other flags does not change it (budget.ts). */
       window: BudgetStatus.shape.window,
-      grants: z.array(z.object({ commentId: z.string(), at: z.iso.datetime() })),
+      /** When the window opened, if not at the task's start: a human's answer (TECH-5059). */
+      since: z.iso.datetime({ offset: true }).optional(),
+      /** Runs of earlier windows, which this one does not count. */
+      priorRuns: z.array(RunId).default([]),
     }),
   merged: z
     .object({
@@ -91,9 +94,8 @@ export function applyTurn(
   state.recentTurns = [...state.recentTurns, { at, summary: turn.summary, outcomes: described }].slice(-8);
   const done = outcomes.flatMap((o) => (o.status === "done" ? [o] : []));
   for (const o of done) {
-    const { started, granted } = o;
+    const { started } = o;
     if (started) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== started.runId);
-    if (granted && !state.budget.grants.some((g) => g.commentId === granted.commentId)) state.budget.grants.push({ commentId: granted.commentId, at });
     const { followup } = o;
     if (followup && !state.followups.some((f) => f.key === followup.key)) state.followups.push(followup);
   }
@@ -117,7 +119,7 @@ export function applyTurn(
 
 /** The task's state, or a new task starting now with `window`; a task's stored window always wins. */
 export async function loadState(file: string, issueId: string, window: BudgetWindow): Promise<State> {
-  const budget = { window, grants: [] };
+  const budget = { window };
   const state =
     (await readTaskState(file, window)) ??
     TaskState.parse({ issueId, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget });
@@ -134,5 +136,5 @@ export async function readTaskState(file: string, window: BudgetWindow = DEFAULT
   if (raw === undefined) return undefined;
   const stored = JSON.parse(raw) as { budget?: object };
   // A task saved before it had a window adopts the one it is resumed with, once.
-  return TaskState.parse({ ...stored, budget: { window, grants: [], ...stored.budget } });
+  return TaskState.parse({ ...stored, budget: { window, ...stored.budget } });
 }

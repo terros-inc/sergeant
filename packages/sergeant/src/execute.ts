@@ -4,7 +4,6 @@ import {
   checkDelegation,
   checkIssueState,
   checkFollowup,
-  checkGrant,
   checkMerge,
   checkSend,
   checkStart,
@@ -59,8 +58,6 @@ export type ActionOutcome =
       merged?: { pr: PullRequestFacts; mergedSha: string };
       /** The follow-up issue filed or already on record under the action's key. */
       followup?: FiledFollowup;
-      /** The human comment that extended the budget by one window. */
-      granted?: { commentId: string };
     }
   | {
       action: ProposedAction;
@@ -89,10 +86,10 @@ export async function execute(action: ProposedAction, situation: SituationReport
   const denied = (v: { rule: string; reason: string }): ActionOutcome => ({ action, status: "denied", rule: v.rule, reason: v.reason });
   const { conversation, runs, enrolledRepositories } = situation;
   // B1 before every new effect: once the wall time or the observed spend is exhausted, only asking the
-  // human and a grant that cites their reply remain (UNF-728). Checked here and again after the live
-  // reads, immediately before the effect, since the deadline can pass while they wait.
+  // human remains (UNF-728); their answer opens a fresh window (TECH-5059). Checked here and again after
+  // the live reads, immediately before the effect, since the deadline can pass while they wait.
   const inBudget = () => checkBudget(situation.budget, new Date());
-  if (action.kind !== "ask_human" && action.kind !== "grant_budget") {
+  if (action.kind !== "ask_human") {
     const budget = inBudget();
     if (!budget.allowed) return denied(budget);
   }
@@ -237,12 +234,6 @@ export async function execute(action: ProposedAction, situation: SituationReport
           key: `followup:${situation.taskId}:${action.key}`,
         });
         return { action, status: "done", result: { identifier: issue.identifier }, followup: { key: action.key, title: action.title, ...issue } };
-      }
-      case "grant_budget": {
-        // Recorded by the loop, which then opens the new window; nothing outside Sergeant changes.
-        const verdict = checkGrant(action, { budget: situation.budget, conversation });
-        if (!verdict.allowed) return denied(verdict);
-        return { action, status: "done", result: { commentId: action.commentId }, granted: { commentId: action.commentId } };
       }
     }
   } catch (e) {

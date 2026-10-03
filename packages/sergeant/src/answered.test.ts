@@ -19,12 +19,13 @@ const replyTo = (live: Conversation, id: string, body: string): Conversation => 
   return { ...live, humanComments: [...live.humanComments, human(id, at, body)] };
 };
 
-test("a budget question answered \"Extend\" is resolved after the grant", async () => {
+test("a budget question answered \"Extend\" is resolved after the turn that continues", async () => {
   const threeHoursAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  const budgetQuestion = commentIdFor(budgetQuestionKey("i1", undefined));
   const { resolved, posted } = await scenario({
     state: { startedAt: threeHoursAgo, runIds: [] },
     runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },
-    reasoner: async (situation) => (situation.budget.grants.length === 0 ? turnOf([{ kind: "grant_budget", commentId: "c1" }]) : turnOf([])),
+    reasoner: async (situation) => ({ ...turnOf([]), output: { summary: "s", actions: [], ...(situation.recentTurns.length === 0 && { answered: budgetQuestion }) } }),
     onPoll: async (poll, live) => {
       if (poll > 20) await writeFile(join(dir, "STOP"), "");
       return live.agentComments.length > 0 && live.humanComments.length === 0 ? replyTo(live, "c1", "Extend") : live;
@@ -32,8 +33,8 @@ test("a budget question answered \"Extend\" is resolved after the grant", async 
   });
 
   expect(posted).toHaveLength(1);
-  expect((await saved()).budget.grants).toHaveLength(1);
-  expect(resolved).toEqual([commentIdFor(budgetQuestionKey("i1", 0))]);
+  expect((await saved()).budget.since).toBeDefined();
+  expect(resolved).toEqual([budgetQuestion]);
 });
 
 test("a question answered with an option is resolved after the turn that applies it", async () => {

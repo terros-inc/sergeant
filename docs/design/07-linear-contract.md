@@ -81,7 +81,7 @@ revision the proposing turn saw: if a comment or edit arrived since, the Gate re
 decides (M10, X5). A human's "stop" therefore can never be overtaken by a merge decided before it
 (03 §5).
 
-**Resolving the thread** (TECH-5052). Once Sergeant has acted on an answer (granted the budget, or a
+**Resolving the thread** (TECH-5052). Once Sergeant has acted on an answer (a
 turn that names the question it `answered` asked nothing and had every action done), it resolves its
 own question's thread with Linear's `commentResolve`, so an open thread only means "still needs a
 human". A clarifying question is a reply in the same thread (`followsUp`), which stays open. Never a
@@ -135,9 +135,10 @@ Sergeant recommends **one more window (+2h / +$25)** because <reason>.
 Reply to extend (an approver), or say stop.
 ```
 
-An approver's reply that Sergeant reads as an extension becomes `grant_budget`, citing the comment;
-the Gate checks the author and that the comment is newer than the ask (03 §7, K1–K4).
-`sgt task grant` does the same from the CLI.
+A human's answer to any of Sergeant's questions, this one included, gives the task a fresh budget
+window (TECH-5059): from the answer, with zero spend and the installation's current budget. An
+extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
+K1–K4, and `sgt task grant` in 03 §7 and 11).
 
 ## 7. Completion: PRs, automation, and Done
 

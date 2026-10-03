@@ -110,7 +110,7 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   const f = fakes([running("run_w1", "worker"), running("run_r1", "reviewer")]);
   // A task already under way: its loop resumes holding two running runs and waits on them.
   await mkdir(join(dir, "tasks", "UNF-1"), { recursive: true });
-  const state = { issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_w1", "run_r1"], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 }, grants: [] } };
+  const state = { issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_w1", "run_r1"], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 } } };
   await writeFile(join(dir, "tasks", "UNF-1", "state.json"), JSON.stringify(state));
   const port = await start(f.deps);
   await vi.waitFor(async () => expect((await call(port, "GET", "/v1/tasks/UNF-1")).json.task.status).toBe("active"), { timeout: 5_000 });
@@ -164,7 +164,7 @@ test.each([
   const task = join(dir, "tasks", "UNF-1");
   await mkdir(task, { recursive: true });
   // `run_lost` was saved before its start was confirmed: the runner does not know it, so it is unknown.
-  const state = { issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_w1", "run_lost"], unconfirmedStarts: ["run_lost"], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 }, grants: [] } };
+  const state = { issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_w1", "run_lost"], unconfirmedStarts: ["run_lost"], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 } } };
   await writeFile(join(task, "state.json"), JSON.stringify(state));
   await writeFile(join(task, "cancel.json"), JSON.stringify({ reason: "wrong approach", requestId: "req-1", at: new Date().toISOString(), ...recorded }));
 
