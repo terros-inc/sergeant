@@ -125,47 +125,7 @@ export const issueProgress = `query SergeantIssueProgress($id: String!) { issue(
 export const issueProgressShape = z.object({
   issue: z.object({ state: z.object({ type: z.string() }), completedAt: z.iso.datetime({ offset: true }).nullable() }).nullable(),
 });
-const workflowState = z.object({ id: z.string().min(1), name: z.string(), type: z.string(), position: z.number() });
-export const followupOrigin = `
-  query SergeantFollowupOrigin($id: String!) {
-    issue(id: $id) {
-      id
-      assignee { id }
-      delegate { id }
-      team { id states(first: 100) { nodes { id name type position } } }
-      project { id }
-    }
-  }
-`;
-export const followupOriginShape = z.object({
-  issue: z.object({
-    id: z.string(),
-    assignee: z.object({ id: z.string() }).nullable(),
-    delegate: z.object({ id: z.string() }).nullable(),
-    team: z.object({ id: z.string(), states: z.object({ nodes: z.array(workflowState) }) }),
-    project: z.object({ id: z.string() }).nullable(),
-  }),
-});
-// The first 100 history entries in Linear's default order, which is not verified to be newest first:
-// on a long-lived issue the delegation may be past this page, and the follow-up is then unassigned.
-export const delegationHistory = `
-  query SergeantDelegationHistory($id: String!) {
-    issue(id: $id) { history(first: 100) { nodes { createdAt actor { id } toDelegate { id } } } }
-  }
-`;
-export const delegationHistoryShape = z.object({
-  issue: z.object({
-    history: z.object({
-      nodes: z.array(z.object({ createdAt: z.string(), actor: z.object({ id: z.string() }).nullable(), toDelegate: z.object({ id: z.string() }).nullable() })),
-    }),
-  }),
-});
-export const createIssue = `
-  mutation SergeantFollowup($input: IssueCreateInput!) {
-    issueCreate(input: $input) { success issue { identifier url } }
-  }
-`;
-export const issueById = `query SergeantIssueById($id: String!) { issue(id: $id) { identifier url } }`;
+export const workflowState = z.object({ id: z.string().min(1), name: z.string(), type: z.string(), position: z.number() });
 export const issueWorkflow = `
   query SergeantIssueWorkflow($id: String!) {
     issue(id: $id) {
@@ -190,10 +150,3 @@ export const issueWorkflowShape = z.object({
 
 /** State types that a delegated issue may still be sitting in before its first worker starts. */
 export const unstartedTypes = new Set(["triage", "backlog", "unstarted"]);
-export const createRelation = `
-  mutation SergeantRelation($input: IssueRelationCreateInput!) {
-    issueRelationCreate(input: $input) { success }
-  }
-`;
-export const relationById = `query SergeantRelationById($id: String!) { issueRelation(id: $id) { id } }`;
-export const issueRef = z.object({ identifier: z.string().min(1), url: z.url() });
