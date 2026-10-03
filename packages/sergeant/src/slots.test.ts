@@ -254,3 +254,27 @@ test("a GitHub outage past the grace asks a human, then past the next grace rele
   expect(logs).toContainEqual("CI: still unavailable past the grace with no change: task slot released until something changes");
   await f.finish("NEWER");
 });
+
+test("a task with a running run keeps its slot through a long read outage", async () => {
+  const f = fakes([issue("RUN", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  const runs: { runId: string; role: "worker"; status: "running"; provider: string; model: string; report: null }[] = [];
+  f.deps.runner.start = async (spec) => void runs.push({ runId: spec.runId, role: "worker", status: "running", provider: "p", model: "m", report: null });
+  f.deps.runner.status = async (id) => runs.find((r) => r.runId === id) ?? Promise.reject(new Error("no run"));
+  const turn = f.deps.reasoner.turn;
+  f.deps.reasoner.turn = async (situation) => {
+    if (situation.conversation.issue.identifier !== "RUN" || runs.length > 0) return turn(situation);
+    f.turns.push("RUN");
+    return { output: { summary: "start", actions: [{ kind: "start_worker" as const, objective: "Do RUN.", repositories: ["o/r"] }] }, model: "m", promptVersion: "p" };
+  };
+  const read = f.deps.linear.readConversation;
+  let linearDown = false;
+  f.deps.linear.readConversation = async (id) => (linearDown ? Promise.reject(new Error("Linear 503")) : read(id));
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0 }, logs);
+  await vi.waitFor(() => expect(runs).toHaveLength(1), { timeout: 5_000 });
+  linearDown = true;
+  await vi.waitFor(() => expect(logs).toContainEqual("RUN: waiting: Linear unreadable (Linear 503)"), { timeout: 5_000 });
+  await sleep(200);
+  expect(f.turns).toEqual(["RUN"]);
+  expect(lostSlot(logs, "RUN")).toEqual([]);
+});

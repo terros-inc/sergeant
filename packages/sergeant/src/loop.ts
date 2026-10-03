@@ -112,7 +112,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // it asks a human, retried every poll and only while Linear just confirmed the delegation; past
   // another grace its slot is released. Only in memory: a restart starts the wait afresh.
   let outage: { since: number; asked?: boolean } | undefined;
-  const outageWait = async (what: string, issueId?: string) => {
+  const outageWait = async (what: string, running: number, issueId?: string) => {
     outage ??= { since: Date.now() };
     const waited = Date.now() - outage.since;
     if (issueId && !outage.asked && waited >= graceMs) {
@@ -123,7 +123,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
         (e: Error) => (log(`asking about the outage failed: ${e.message}`), false),
       );
     }
-    if (opts.slot?.state === "held" && waited >= 2 * graceMs) {
+    // Active work holds its slot (TECH-5015): only known running runs count, so an unknown run does not.
+    if (opts.slot?.state === "held" && waited >= 2 * graceMs && running === 0) {
       log("still unavailable past the grace with no change: task slot released until something changes");
       opts.slot.release();
     }
@@ -158,10 +159,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     const { runs, unknown } = await readRuns();
     await recordReviews(runs);
+    const runningCount = runs.filter((r) => r.status === "running").length;
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
     const conversation = await deps.linear.readConversation(opts.issueId).catch((e: Error) => e);
     if (conversation instanceof Error) {
-      await outageWait(`Linear unreadable (${conversation.message})`);
+      await outageWait(`Linear unreadable (${conversation.message})`, runningCount);
       continue;
     }
     // What a webhook names to end this loop's wait (webhooks.ts): the issue, its PRs, and their heads.
@@ -200,7 +202,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     if (unknown.length > 0) {
-      await outageWait(`status unavailable for ${unknown.map((u) => `${u.unknown} (${u.error})`).join(", ")}`, conversation.issue.id);
+      await outageWait(`status unavailable for ${unknown.map((u) => `${u.unknown} (${u.error})`).join(", ")}`, runningCount, conversation.issue.id);
       continue;
     }
     // An edit while Sergeant waits on a reply gets one short notice (TECH-5034); retried next poll if it fails.
@@ -229,7 +231,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     unposted = undefined;
     const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps).catch((e: Error) => e);
     if (pullRequests instanceof Error) {
-      await outageWait(`GitHub unreadable (${pullRequests.message})`, conversation.issue.id);
+      await outageWait(`GitHub unreadable (${pullRequests.message})`, runningCount, conversation.issue.id);
       continue;
     }
     outage = undefined;
