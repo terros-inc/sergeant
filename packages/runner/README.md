@@ -98,9 +98,13 @@ Terros now has its own Codex Team account, and nothing personal is ever used.
   runs that adapter's default model.
 - **Model accounts (TECH-5113).** `claudeOAuthToken` and `codexCredential` are the installation's own
   accounts (`installation-claude`, `installation-codex`); `accounts()` lists more, read at each launch:
-  the owner's further ones, then people's registered ones. `accounts.ts` picks each provider's account
-  in that order with the rule above (`chooseAccount`), and TECH-5117's choice compares each provider's
-  pick. Only the chosen account's credential enters the container. A run whose agent reports a quota or
+  the owner's further ones, then people's registered ones. Owner-first across providers: while any
+  owner's account of either provider is usable (5-hour window at least 20%, week not spent), only the
+  owner's usable accounts take part; people's registered ones only when none is. `accounts.ts` picks
+  each provider's account among those (`chooseAccount`), and TECH-5117's choice compares each
+  provider's pick; a provider with no account taking part is left out, so a reviewer may then share its
+  worker's provider (`sameProviderAsWorker`). With nothing usable anywhere, every account takes part as
+  before. Only the chosen account's credential enters the container. A run whose agent reports a quota or
   authentication failure (`failureReason`, from Claude Code's result text or Codex's failed turn) sets
   its account aside for an hour, so the next launch takes the next account. The record's `account` and
   `accountReason` say whose subscription paid and why.

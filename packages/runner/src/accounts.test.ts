@@ -43,20 +43,37 @@ test("the owner's usable account wins over a registered one with more week left"
   expect((await pick([terrosCodex, ada], { "installation-codex": [30, 5], [ada.id]: [80, 10] })).account.id).toBe("installation-codex");
 });
 
-// TECH-5117's provider rule still decides the provider; each provider is represented by its chosen
-// account, so the 2026-10-03 morning (Terros Codex at 53%, Claude with room) sends the worker to Claude,
-// and a registered Claude account with room stands in for a Terros Claude whose 5-hour window is spent.
-test("the provider is TECH-5117's choice between each provider's chosen account", async () => {
+// Owner-first across providers (the owner, 2026-10-03): a usable owner's account of either provider
+// serves before any registered one. Terros Claude's 5-hour window is spent, so the worker runs on
+// Terros Codex at 53% rather than a registered Claude account with more of its week left.
+test("a usable owner's account of the other provider wins over a registered one", async () => {
   const ada = account("person:ada:claude-code-local", "claude-code-local", "registered");
   const accounts = [terrosClaude, terrosCodex, ada];
   const left: Record<string, [number, number]> = { "installation-claude": [83, 10], "installation-codex": [53, 90], [ada.id]: [70, 90] };
   const chosen = await pick(accounts, left);
-  expect(chosen.account.id).toBe(ada.id);
-  expect(chosen.providerChoice).toMatchObject({ adapter: "claude-code-local", readings: [{ account: ada.id }, { account: "installation-codex" }] });
+  expect(chosen.account.id).toBe("installation-codex");
+  expect(chosen.providerChoice).toMatchObject({ adapter: "codex-local", reason: "the only provider with a usable owner's account" });
 
-  // Its reviewer runs on the other provider, the owner's Codex.
-  const reviewer = await pick(accounts, left, { role: "reviewer", workerAdapter: "claude-code-local" });
-  expect(reviewer.account.id).toBe("installation-codex");
+  // Its reviewer stays on the owner's accounts too: the same provider as its worker, and says so.
+  const reviewer = await pick(accounts, left, { role: "reviewer", workerAdapter: "codex-local" });
+  expect(reviewer).toMatchObject({ account: { id: "installation-codex" }, providerChoice: { sameProviderAsWorker: true } });
+
+  // With both of the owner's usable, TECH-5117's rule decides between them: the 2026-10-03 morning
+  // (Terros Codex at 53%, Claude with room) sends the worker to Claude and its reviewer to Codex.
+  const both = { ...left, "installation-claude": [83, 90] } as Record<string, [number, number]>;
+  expect((await pick(accounts, both)).account.id).toBe("installation-claude");
+  expect((await pick(accounts, both, { role: "reviewer", workerAdapter: "claude-code-local" })).account.id).toBe("installation-codex");
+});
+
+test("registered accounts serve only once every owner's account of either provider is unusable", async () => {
+  const adaClaude = account("person:ada:claude-code-local", "claude-code-local", "registered");
+  const adaCodex = account("person:ada:codex-local", "codex-local", "registered");
+  const accounts = [terrosClaude, terrosCodex, adaClaude, adaCodex];
+  const left: Record<string, [number, number]> = { "installation-claude": [83, 10], "installation-codex": [0, 90], [adaClaude.id]: [40, 90], [adaCodex.id]: [70, 90] };
+  const worker = await pick(accounts, left);
+  expect(worker).toMatchObject({ account: { id: adaCodex.id }, accountReason: expect.stringContaining("no owner's account usable") });
+  // The reviewer, among the registered ones, goes to the other provider as TECH-5117 wants.
+  expect((await pick(accounts, left, { role: "reviewer", workerAdapter: "codex-local" })).account.id).toBe(adaClaude.id);
 });
 
 // A run that failed on the account's quota or login must not be retried on the same account while

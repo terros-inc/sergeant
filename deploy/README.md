@@ -185,9 +185,10 @@ To go back, remove `runners` (or set the role to `claude-code-local`) and update
 
 ### Several model accounts (TECH-5113)
 
-Runs use the owner's model accounts first (the model token, the Codex credential, then the config's
-`modelAccounts`), then accounts people register with `sgt`, each launch on the account with the most
-weekly capacity left whose 5-hour window is at least 20% (`packages/runner/README.md`). Every run
+Runs use the owner's model accounts first, across both providers (the model token, the Codex
+credential, then the config's `modelAccounts`), and accounts people register with `sgt` only when no
+owner's account of either provider is usable; each launch runs on the account with the most weekly
+capacity left whose 5-hour window is at least 20% (`packages/runner/README.md`). Every run
 records its `account`, and `sgt account list` shows what each one paid for.
 
 1. **The owner's further accounts.** Store each credential (the same forms as the model token and the

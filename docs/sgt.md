@@ -90,9 +90,10 @@ sgt run report <run>                           # the run's Markdown report
 
 ## 6. Model accounts
 
-Sergeant runs workers and reviewers on the installation owner's Claude and Codex accounts first. If
-none of them has room (most weekly capacity left, 5-hour window at least 20%), it uses accounts people
-registered. You can register your own subscription, one per agent CLI, and remove it at any time:
+Sergeant runs workers and reviewers on the installation owner's Claude and Codex accounts first: while
+any owner account of either provider has room (5-hour window at least 20%, week not spent), it uses the
+one with the most weekly capacity left. Only when none of them has room does it use accounts people
+registered, by the same rule. You can register your own subscription, one per agent CLI, and remove it at any time:
 
 ```sh
 claude setup-token | sgt account register claude-code-local    # your Claude subscription

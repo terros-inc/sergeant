@@ -65,6 +65,9 @@ export function chooseReviewer(candidates: Candidate[], worker: Adapter | undefi
   };
 }
 
+/** An account a run may use: its quota is known, its 5-hour window at the floor or above, and its week not spent. */
+export const ready = (c: Candidate) => usable(c) && (c.quota.weekly?.remainingPercent ?? 0) > 0;
+
 /** A model account of one provider, in the owner's order: the owner's own accounts, then people's. */
 export type AccountCandidate<A> = Candidate & { account: A; group: "owner" | "registered" };
 
@@ -78,7 +81,6 @@ export function chooseAccount<A>(candidates: AccountCandidate<A>[]): AccountCand
   const first = candidates[0];
   if (!first) throw new Error("chooseAccount needs at least one account");
   const name = (c: AccountCandidate<A>) => c.quota.account ?? c.adapter;
-  const ready = (c: AccountCandidate<A>) => usable(c) && (c.quota.weekly?.remainingPercent ?? 0) > 0;
   for (const group of ["owner", "registered"] as const) {
     const best = candidates.filter((c) => c.group === group && ready(c)).sort(byWeeklyLeft)[0];
     if (best) return { ...best, reason: `${group === "owner" ? "owner's account" : "registered account"} ${name(best)}, ${percent(best).replace(`${best.adapter} `, "")}${group === "registered" ? "; no owner's account usable" : ""}` };
