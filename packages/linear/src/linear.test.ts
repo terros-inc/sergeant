@@ -2,6 +2,14 @@ import { expect, test } from "vitest";
 import { createLinearPort } from "./linear.ts";
 
 const at = (minute: number) => `2026-10-02T06:${String(minute).padStart(2, "0")}:00.000Z`;
+const attachment = (id: string, url: string, sourceType: string | null) => ({
+  id,
+  title: id,
+  url,
+  sourceType,
+  updatedAt: at(0),
+  creator: { id: "human", name: "Human" },
+});
 const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | null) => ({
   data: {
     issue: {
@@ -14,10 +22,12 @@ const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | nu
       delegate: { id: "sergeant-user", name: "Sergeant" },
       attachments: {
         nodes: [
-          { url: "https://github.com/o/canary/pull/7", sourceType: "github" },
+          { ...attachment("a1", "https://github.com/o/canary/pull/7", "github"), creator: null },
           // Not the GitHub integration's PR link: a plain link anyone could add, and a linked issue.
-          { url: "https://github.com/o/canary/pull/9", sourceType: null },
-          { url: "https://github.com/o/canary/issues/3", sourceType: "github" },
+          attachment("a2", "https://github.com/o/canary/pull/9", null),
+          attachment("a3", "https://github.com/o/canary/issues/3", "github"),
+          // Sergeant's own attachment is not human input (TECH-4994).
+          { ...attachment("a4", "https://uploads.linear.app/o/x/own.png", "upload"), creator: { id: "sergeant-user", name: "Sergeant" } },
         ],
       },
       comments: { nodes: comments, pageInfo: { hasNextPage, endCursor } },
@@ -70,6 +80,7 @@ test("reads every page, separates human-authored comments from the rest, and lin
   expect(conversation.humanComments.map((c) => c.id)).toEqual(["external-1", "human-2"]);
   expect(conversation.agentComments.map((c) => c.id)).toEqual(["bot", "sergeant"]);
   expect(conversation.issue.linkedPullRequests).toEqual([{ repo: "o/canary", number: 7 }]);
+  expect(conversation.issue.attachments?.map((a) => a.id)).toEqual(["a2", "a3"]);
 });
 
 // The outcome comment is posted once per merge. A retry after a lost response or a crash before the

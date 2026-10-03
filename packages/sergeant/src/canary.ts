@@ -73,6 +73,7 @@ const result = await runLoop(
       claudeOAuthToken: installation.modelToken,
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
+      fetchUpload: installation.linear.fetchUpload,
     }),
     reasoner: claudeCliReasoner({ model: values["reasoning-model"] }),
   },

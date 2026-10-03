@@ -121,7 +121,12 @@ export function secretResolver(config: InstallationConfig) {
 }
 
 export type Installation = {
-  linear: LinearPort & { delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>; undelegate(issueId: string): Promise<void> };
+  linear: LinearPort & {
+    delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>;
+    undelegate(issueId: string): Promise<void>;
+    /** A Linear upload, fetched with the agent token on the control plane (TECH-4994). */
+    fetchUpload(url: string, init?: { signal?: AbortSignal }): Promise<Response>;
+  };
   /** The V2 agent's Linear user, verified against the token. */
   agentUserId: string;
   /** The Linear workspace the agent is in: the only one whose users may call the API. */

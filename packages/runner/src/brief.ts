@@ -27,6 +27,8 @@ ${comments}`;
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
   existingBranches: string[],
+  /** `renderAttachments`: the issue's files the run was given (TECH-4994). */
+  files = "",
 ): string {
   const id = spec.conversation.issue.identifier;
   return `# Sergeant worker brief — ${id} · ${spec.runId}
@@ -38,7 +40,7 @@ ${renderTask(spec.conversation)}
 ## Objective for this run (from Sergeant)
 
 ${spec.objective}
-${renderContext(spec.context)}
+${files}${renderContext(spec.context)}
 ## Environment
 
 - Repositories you may change, cloned at their default branch under \`/workspace/<owner>/<name>\`:
@@ -191,6 +193,7 @@ export function reviewerBrief(
   subjects: ReviewSubject[],
   workerClaims: string[],
   previousReviews: ReviewReport[] = [],
+  files = "",
 ): string {
   const what = subjects
     .map((s) => `- ${s.url} — base \`${s.baseRef}\` — head \`${s.headSha}\` (review exactly this SHA)
@@ -216,7 +219,7 @@ ${human}
 ## Task (verbatim from Linear — the current source, not a summary)
 
 ${renderTask(spec.conversation)}
-
+${files}
 ## What to review
 
 ${what}

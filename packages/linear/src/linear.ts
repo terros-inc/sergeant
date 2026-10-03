@@ -58,6 +58,11 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   viewer(): Promise<{ id: string; name: string; organizationId: string }>;
   /** The open issues (not completed or canceled) delegated to `agentUserId`. */
   delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>;
+  /**
+   * Fetches a Linear upload (`https://uploads.linear.app/...`) with the agent token, on the control
+   * plane: runs get the file, never the token (TECH-4994). Any other URL is refused.
+   */
+  fetchUpload(url: string, init?: { signal?: AbortSignal }): Promise<Response>;
   /** Removes the issue's delegate: a human's cancel (`sgt task cancel`). Idempotent. */
   undelegate(issueId: string): Promise<void>;
 } {
@@ -151,6 +156,10 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
           state: first.state.name,
           delegate: first.delegate,
           linkedPullRequests: linkedPullRequests(first.attachments.nodes),
+          // Only a human's: Sergeant's own, and an integration's with no creator, are not human input.
+          attachments: first.attachments.nodes
+            .filter((a) => a.creator && !sergeantUsers.has(a.creator.id))
+            .map(({ id, title, sourceType, url, updatedAt }) => ({ id, title, source: sourceType, url, updatedAt })),
         },
         humanComments: humanComments.sort(byTime),
         agentComments: agentComments.sort(byTime),
@@ -252,6 +261,11 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         after = issues.pageInfo.hasNextPage ? issues.pageInfo.endCursor : null;
       } while (after);
       return delegated;
+    },
+
+    async fetchUpload(url, init) {
+      if (new URL(url).origin !== "https://uploads.linear.app") throw new Error(`not a Linear upload: ${url}`);
+      return fetchFn(url, { headers: { Authorization: options.apiKey }, ...(init?.signal && { signal: init.signal }) });
     },
 
     async undelegate(issueId) {
