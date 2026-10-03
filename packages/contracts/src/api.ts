@@ -159,6 +159,8 @@ export const RegisterAccountResponse = z.object({
   replaced: z.boolean(),
   /** The quota read with it at registration, which proved it works. */
   quota: QuotaReading,
+  /** What the person accepts by registering (09 §3a): their credential is exposed to worker containers, and how to remove and rotate it. */
+  notice: z.string(),
 });
 export type RegisterAccountResponse = z.infer<typeof RegisterAccountResponse>;
 

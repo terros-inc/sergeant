@@ -36,11 +36,22 @@ export async function accountsRoute(
   if (at.verb === "register") {
     const { credential } = parse(RegisterAccountRequest, await body(req));
     const res = await refusing(registry.register(me, adapter, credential));
-    return ok({ account: { ...res.account, mine: true }, replaced: res.replaced, quota: res.quota } satisfies RegisterAccountResponse);
+    return ok({ account: { ...res.account, mine: true }, replaced: res.replaced, quota: res.quota, notice: exposureNotice(adapter) } satisfies RegisterAccountResponse);
   }
   if (at.verb === "remove") return ok({ adapter, removed: await refusing(registry.remove(me, adapter)) } satisfies RemoveAccountResponse);
   throw notFound(at.pathname);
 }
+
+// The accepted risk (09 §3a), told to everyone who registers: a run's model credential is in its
+// container, so a compromised run can copy it, and removing it from Sergeant does not revoke a copy.
+const ROTATE: Record<AccountAdapter, string> = {
+  "claude-code-local": "revoke the token in your Claude account settings and make a new one with `claude setup-token`",
+  "codex-local": "sign out of all ChatGPT sessions in your ChatGPT security settings and `codex login` again",
+};
+
+export const exposureNotice = (adapter: AccountAdapter): string =>
+  `Your credential is used inside Sergeant's worker and reviewer containers while runs work on it, so it could be exposed if a run is compromised, for example by prompt injection. ` +
+  `To stop Sergeant using it, run \`sgt account remove ${adapter}\`. That does not revoke a copy: to rotate it, ${ROTATE[adapter]}.`;
 
 const refusing = <T>(p: Promise<T>): Promise<T> =>
   p.catch((e: Error) => {

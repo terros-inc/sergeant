@@ -105,6 +105,11 @@ sgt account remove codex-local                  # remove yours; runs already on 
 - The credential is read from stdin, never from an argument, and is kept only in the installation's
   Secrets Manager. Sergeant checks it by reading its quota before storing it. Registering again
   replaces your earlier one.
+- **Your credential is used inside Sergeant's worker and reviewer containers** while a run works on it,
+  so a compromised or prompt-injected run could copy it. `sgt account remove` stops Sergeant using it
+  but does not revoke a copy: to rotate it, revoke the token in your Claude account settings and make a
+  new one with `claude setup-token`, or sign out of all ChatGPT sessions and `codex login` again.
+  `register` says this each time. This risk is accepted on purpose (design/09-security.md §3a).
 - You can only register or remove your own account. `sgt run show <run>` says which account a run used.
 - The installation must be configured for registration (`registeredAccountsSecret`, deploy/README.md);
   otherwise `register` says so.

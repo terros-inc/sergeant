@@ -91,6 +91,12 @@ test("a person registers, replaces, and removes only their own account, and its 
     json: { account: { id: "person:u-ada:claude-code-local", group: "registered", holder: "Ada Example <ada@example.com>", mine: true }, replaced: false, quota: { weekly: { remainingPercent: 70 } } },
   });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([expect.objectContaining({ userId: "u-ada", credential: CLAUDE })]);
+  // The accepted exposure (09 §3a) is said at registration: where the credential goes, that it can leak, and the way out.
+  const { notice } = registered.json;
+  expect(notice).toContain("inside Sergeant's worker and reviewer containers");
+  expect(notice).toContain("could be exposed if a run is compromised");
+  expect(notice).toContain("`sgt account remove claude-code-local`");
+  expect(notice).toContain("`claude setup-token`");
 
   // Bob sees it is not his, and his remove leaves Ada's alone; a loopback operator is nobody's.
   const listed = await call("GET", "/v1/accounts", "bob");
