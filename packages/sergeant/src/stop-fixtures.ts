@@ -1,6 +1,11 @@
 import type { Conversation, PullRequestFacts, RunRecord } from "@terros/sergeant-contracts";
 import type { ServiceDeps } from "./service.ts";
 
+// TECH-4989: Sergeant starts a delegated issue only from Todo, and a task either runs or is stopped.
+// Backlog, Canceled, or Done without Sergeant's merge, an undelegation, and `sgt task cancel` all take
+// the one stop: its runs stop, nothing new starts, its open PRs are closed with a comment, the issue is
+// told once, and the task is set aside, so the issue back in Todo is a fresh task.
+
 export const agent = { id: "agent-v2", name: "Sergeant" };
 export const repo = "o/r";
 export const head = "a".repeat(40);
@@ -26,6 +31,10 @@ export const issue = (stateType: string, state: string): Conversation => ({
 });
 export const worker = (status: RunRecord["status"]): RunRecord => ({ runId: "run_w1", role: "worker", status, provider: "p", model: "m", report: null });
 
+/**
+ * Fakes for UNF-1 with a running worker whose PR #7 is open; `live` is what Linear says now. As the
+ * real runner, a running run's status has no report, and a cancel keeps the one its worker `wrote`.
+ */
 export function fakes(live: { conversation: Conversation }) {
   const runs = [worker("running")];
   const wrote = new Map<string, RunRecord["report"]>();

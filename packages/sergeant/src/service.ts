@@ -4,18 +4,31 @@ import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
-import { sweepFeedbackEvery } from "./feedback.ts";
 import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
 import { admissionOrder, Slot } from "./slots.ts";
+import { startFeedbackLoop } from "./service-feedback.ts";
 import { lockStateDir } from "./service-lock.ts";
 import { createServiceServer } from "./service-http.ts";
 import type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
 import { Wake } from "./wake.ts";
 import { webhookHandler, type Nudge } from "./webhooks.ts";
 
-// The long-running Sergeant process is a thin shell over the per-task loop. Intake discovers Todo
-// work and resumes local tasks, slots bound concurrency, and webhooks only wake the polling loops.
-// Durable state remains per-task; the service lock ensures one process owns a state directory.
+// The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
+// engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
+// existing loop (loop.ts), at most `maxTasks` holding a slot at a time (slots.ts). Linear's list only
+// discovers new work, and a task starts only from Todo (TECH-4989): an issue in Triage or Backlog waits
+// until a human moves it there. Every task already under way locally (its `state.json`) with no loop
+// resumes at every intake, listed or not, holding no slot until it has work to do: its loop's own live
+// checks continue it, stop it (cancel.ts), or see it through after its merge. Each task loop already re-reads its runs,
+// its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
+// when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) only ends a loop's wait
+// or runs an intake sooner. Nothing is kept but each task's own `state.json` and a
+// recorded stop not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, failed) resumes on a
+// later intake, and a restarted process rereads everything and continues, repeating some work. One
+// process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
+// The same server answers the client API (api.ts) that the `sgt` CLI uses. Feedback that arrives
+// after a task's work landed is swept separately (feedback.ts) and may file an ordinary Backlog
+// follow-up, which nothing here starts: a human moves it to Todo and delegates it, like any issue.
 
 export type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
 
@@ -209,17 +222,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   })();
 
-  // Post-merge feedback (feedback.ts), on its own slower cadence so it never holds up intake.
-  const feedbackLoop = deps.feedback
-    ? sweepFeedbackEvery((opts.feedbackSweepMinutes ?? 10) * 60_000, { stateDir: opts.stateDir, enrolledRepositories: opts.enrolledRepositories, log, signal: abort.signal, ...(opts.feedbackLookbackDays !== undefined && { lookbackDays: opts.feedbackLookbackDays }) }, {
-        ...deps.feedback,
-        openIssues: async () => (await deps.delegatedIssues()).map((issue) => issue.identifier),
-        linear: deps.linear,
-        github: deps.github,
-        agentUserId: deps.agentUserId,
-        workerLogin: deps.workerLogin,
-      })
-    : Promise.resolve();
+  const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal);
 
   const api = apiHandler({
     stateDir: opts.stateDir,

@@ -17,6 +17,7 @@ test("a stop the loop could not finish and serve's intake finished is said once 
   await writeFile(join(dir, "state.json"), state(["run_w1"]));
   const live = { conversation: issue("backlog", "Backlog") };
   const { deps, seen } = fakes(live);
+  // The runner refuses the loop's cancels; intake's drive, under the same task lock, goes through.
   let chain: Promise<unknown> = Promise.resolve();
   deps.exclusive = <T>(step: () => Promise<T>) => {
     const next = chain.then(step);
@@ -33,6 +34,7 @@ test("a stop the loop could not finish and serve's intake finished is said once 
     intake = true;
     return driveCancel(dir, "UNF-1", deps, [repo], () => {}).finally(() => (intake = false));
   });
+  // The loop, still seeing Backlog, takes the stop as done rather than stopping the task again.
   expect(await loop).toMatchObject({ outcome: "stopped" });
   expect(seen.closed).toEqual([{ number: 7, comment: "Closed: the Linear issue was canceled or moved to Backlog." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`moved to Backlog. Its runs are canceled. Closed [${repo}#7]`) }]);
@@ -42,6 +44,7 @@ test("a stop the loop could not finish and serve's intake finished is said once 
   expect(files.filter((f) => f.startsWith("state.stopped-"))).toHaveLength(1);
 });
 
+/** The next intake of UNF-1, back in Todo: it starts a fresh task, with nothing of the stopped one's. */
 async function intakeStartsFresh(deps: ServiceDeps, seen: { starts: number }, live: { conversation: Conversation }) {
   live.conversation = issue("unstarted", "Todo");
   const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, log: () => {} }, deps);
@@ -56,6 +59,9 @@ async function intakeStartsFresh(deps: ServiceDeps, seen: { starts: number }, li
   expect(fresh.runIds).not.toContain("run_w1");
 }
 
+// The loop records a stop by state, and the human moves the issue back before it is done. The old task
+// must not continue: its runs and budget are the stopped task's, and its state.json is set aside, so a
+// run it started would have no id on disk for any later cancel or restart to find (UNF-728).
 test.each([["Todo", "unstarted"], ["In Progress", "started"]])(
   "an issue moved back to %s while its stop is still pending only finishes the stop, and intake then starts a fresh task",
   async (name, stateType) => {
@@ -65,6 +71,7 @@ test.each([["Todo", "unstarted"], ["In Progress", "started"]])(
     await writeFile(join(task, "state.json"), state(["run_w1"]));
     const live = { conversation: issue("backlog", "Backlog") };
     const { deps, seen } = fakes(live);
+    // The runner refuses every cancel until the issue is back, and a few polls after.
     let refuse = true;
     let refusals = 0;
     const cancel = deps.runner.cancel;
@@ -95,6 +102,8 @@ test.each([["Todo", "unstarted"], ["In Progress", "started"]])(
     await writeFile(join(task, "state.json"), state(["run_w1"]));
     const live = { conversation: issue("backlog", "Backlog") };
     const { deps, seen } = fakes(live);
+    // The runner refuses the loop's cancels; intake's drive, under the same task lock, goes through, and
+    // the human moves the issue back before the loop's next poll.
     let chain: Promise<unknown> = Promise.resolve();
     deps.exclusive = <T>(step: () => Promise<T>) => {
       const next = chain.then(step);
@@ -137,6 +146,7 @@ test.each([
   if (!live.conversation.issue.delegate) deps.delegatedIssues = async () => [];
   const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 3600, maxTasks: 0, log: () => {} }, deps);
   try {
+    // No task slot is free: a stop does not need one.
     await vi.waitFor(() => expect(seen.comments).toHaveLength(1), { timeout: 5_000 });
     await sleep(50);
   } finally {
@@ -149,6 +159,8 @@ test.each([
   expect(await readdir(task)).not.toContain("state.json");
 });
 
+// The closing PR merged after the task's loop ended (or before it saved the merge): the issue is Done
+// and Linear lists it no more, but the resumed loop sees the merge and completes, and stops nothing.
 test("an idle local task whose closing PR merged completes when resumed in Done: no stop, no stop comment, and no resume after", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
   const task = taskDir(dir, "UNF-1");
@@ -218,6 +230,7 @@ test("a task whose stop the runner has not confirmed frees its slot: with maxTas
   const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 0.05, pollSeconds: 0.02, maxTasks: 1, log: () => {} }, deps);
   try {
     await vi.waitFor(() => expect(seen.starts).toBe(1), { timeout: 5_000 });
+    // The runner never confirms UNF-1's cancel, so its stop stays pending.
     deps.runner.cancel = async () => Promise.reject(new Error("docker stop timed out"));
     Object.assign(live.conversation.issue, { state: "Backlog", stateType: "backlog" });
     todo = true;
