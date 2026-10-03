@@ -287,6 +287,9 @@ the host install and update scripts, and the runbook.
 
 ### The `sgt` CLI
 
+New to `sgt`? [`docs/sgt.md`](docs/sgt.md) is the user guide: install, log in, everyday commands.
+This section is the reference.
+
 `sgt` (UNF-714) only calls the client API and prints the answer: concise lines by default, the API's
 own JSON with `--json` (errors too, as `{"error":{"code","message"}}`; exit 1 for an API error, 2 for
 usage). It needs no AWS credentials. Run `sgt --help` for the commands: `login`, `logout`, `whoami`,
