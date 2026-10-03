@@ -77,11 +77,17 @@ export const ownQuestion = (conversation: Conversation, id: string | undefined) 
  * human comment after it. An answer gives the task a fresh budget window from the answer (budget.ts).
  */
 export function latestAnswer(conversation: Conversation): HumanComment | undefined {
-  const at = (c: { createdAt: string }) => Date.parse(c.createdAt);
-  const asked = conversation.agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING)).sort((a, b) => at(b) - at(a))[0];
+  const asked = latestQuestion(conversation);
   if (!asked) return undefined;
   return conversation.humanComments.filter((c) => at(c) > at(asked)).sort((a, b) => at(a) - at(b))[0];
 }
+
+/** Sergeant's latest question comment, its budget question included. */
+export function latestQuestion(conversation: Conversation): AgentComment | undefined {
+  return conversation.agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING)).sort((a, b) => at(b) - at(a))[0];
+}
+
+const at = (c: { createdAt: string }) => Date.parse(c.createdAt);
 
 /**
  * TECH-5057: resolve Sergeant's question threads in Linear so an open thread only ever means "still

@@ -31,10 +31,16 @@ export async function takeTurn(
   };
   // Q1: nothing else happens on the task until a human answers the question (UNF-727).
   const ask = turn.output.actions.find((a) => a.kind === "ask_human");
+  // Q2: a turn that ends the task on the human's word does nothing else either (TECH-5118).
+  const accept = ask ? undefined : turn.output.actions.find((a) => a.kind === "accept_as_is");
   let merged = false;
   for (const action of turn.output.actions) {
     if (ask && action !== ask) {
       outcomes.push({ action, status: "denied", rule: "Q1", reason: "this turn asks a human, so it does nothing else" });
+      continue;
+    }
+    if (accept && action !== accept) {
+      outcomes.push({ action, status: "denied", rule: "Q2", reason: "this turn accepts the work as it is, so it does nothing else" });
       continue;
     }
     // M11: a merge ends its turn, so nothing later in it runs (UNF-733).

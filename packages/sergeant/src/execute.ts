@@ -20,6 +20,7 @@ import {
   type RunRecord,
   type SituationReport,
 } from "@terros/sergeant-contracts";
+import { answeredBudgetQuestion } from "./budget.ts";
 import { ownQuestion, questionComment, questionKey } from "./question.ts";
 
 export type Ports = {
@@ -76,10 +77,10 @@ export async function execute(action: ProposedAction, situation: SituationReport
   const denied = (v: { rule: string; reason: string }): ActionOutcome => ({ action, status: "denied", rule: v.rule, reason: v.reason });
   const { conversation, runs, enrolledRepositories } = situation;
   // B1 before every new effect: once the wall time or the observed spend is exhausted, only asking the
-  // human remains (UNF-728); their answer opens a fresh window (TECH-5059). Checked here and again after
+  // human (or ending the task on their word) remains (UNF-728); their answer opens a fresh window (TECH-5059). Checked here and again after
   // the live reads, immediately before the effect, since the deadline can pass while they wait.
   const inBudget = () => checkBudget(situation.budget, new Date());
-  if (action.kind !== "ask_human") {
+  if (action.kind !== "ask_human" && action.kind !== "accept_as_is") {
     const budget = inBudget();
     if (!budget.allowed) return denied(budget);
   }
@@ -206,6 +207,11 @@ export async function execute(action: ProposedAction, situation: SituationReport
         // Keyed by the revision reasoning asked from, so a restart or a second ask before any human
         // reply posts nothing new, and the loop finds this comment to know it is waiting.
         return askHuman(action, situation, ports, questionKey(conversation.issue.id, conversationRevision(conversation)));
+      case "accept_as_is":
+        // No effect: the loop ends the task (TECH-5118). Only a human's reply to the budget question
+        // can accept the work as it is; an answer to any other question leaves the task going.
+        if (!answeredBudgetQuestion(conversation)) return denied({ rule: "Q2", reason: "no human has replied to Sergeant's budget question" });
+        return { action, status: "done", result: {} };
       case "create_followup": {
         const filed = situation.followups.find((f) => f.key === action.key);
         if (filed) return { action, status: "done", result: { identifier: filed.identifier, alreadyFiled: true }, followup: filed };
