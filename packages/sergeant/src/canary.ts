@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
-import { containerRunner } from "@terros/sergeant-runner";
+import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { connect, loadConfig, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
@@ -73,8 +73,12 @@ const result = await runLoop(
       claudeOAuthToken: installation.modelToken,
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
+      fetchUpload: installation.linear.fetchUpload,
     }),
-    reasoner: claudeCliReasoner({ model: values["reasoning-model"] }),
+    reasoner: claudeCliReasoner({
+      model: values["reasoning-model"],
+      files: (s) => reasoningFiles(s.conversation, { fetchUpload: installation.linear.fetchUpload }),
+    }),
   },
 );
 console.log(`CANARY RESULT ${JSON.stringify(result)}`);

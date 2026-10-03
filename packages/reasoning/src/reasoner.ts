@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SituationReport, TurnOutput } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { fileBlocks, type ReasoningFiles } from "./files.ts";
 import { PROMPT_VERSION, SYSTEM_PROMPT } from "./prompt.ts";
 
 export type TurnResult = { output: TurnOutput; costUsd?: number; model: string; promptVersion: string };
@@ -25,10 +26,18 @@ const CliResult = z.object({
 
 /**
  * Reasoning through the local `claude` CLI. Every turn is a fresh, unpersisted session in an empty
- * directory with no tools, MCP servers, or customizations, so the model can only answer.
+ * directory with no tools, MCP servers, or customizations, so the model can only answer. With
+ * `files`, the issue's files go after the Situation Report as image and text blocks through the CLI's
+ * stream-json input (TECH-4994); a failure to fetch them never fails the turn.
  */
 export function claudeCliReasoner(
-  opts: { model?: string; maxTurnCostUsd?: number; timeoutMs?: number; runCli?: RunCli } = {},
+  opts: {
+    model?: string;
+    maxTurnCostUsd?: number;
+    timeoutMs?: number;
+    runCli?: RunCli;
+    files?: (situation: SituationReport) => Promise<ReasoningFiles>;
+  } = {},
 ): Reasoner {
   const model = opts.model ?? "opus";
   const runCli = opts.runCli ?? spawnClaude;
@@ -41,11 +50,20 @@ export function claudeCliReasoner(
         "--system-prompt", SYSTEM_PROMPT,
         "--tools", "", "--strict-mcp-config", "--safe-mode", "--no-session-persistence",
       ];
-      const input = `Situation Report:\n\n${JSON.stringify(SituationReport.parse(situation), null, 2)}`;
+      const report = `Situation Report:\n\n${JSON.stringify(SituationReport.parse(situation), null, 2)}`;
+      const files = opts.files
+        ? await opts.files(situation).catch((e: Error) => ({ files: [], skipped: [{ url: "(all)", title: "", reason: `fetch failed: ${e.message}` }] }))
+        : { files: [], skipped: [] };
+      const blocks = fileBlocks(files);
+      // Plain text unless there are files: stream-json is the CLI's only way to take an image.
+      const input = blocks.length
+        ? `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: report }, ...blocks] } })}\n`
+        : report;
+      if (blocks.length) args.splice(1, 2, "--input-format", "stream-json", "--output-format", "stream-json", "--verbose");
       const cwd = await mkdtemp(join(tmpdir(), "sergeant-reasoning-"));
       try {
         const stdout = await runCli(args, input, { cwd, timeoutMs: opts.timeoutMs ?? 300_000 });
-        const cli = CliResult.parse(JSON.parse(stdout));
+        const cli = CliResult.parse(blocks.length ? streamResult(stdout) : JSON.parse(stdout));
         if (cli.is_error) throw new Error(`reasoning turn failed: ${cli.result ?? "unknown error"}`);
         const output = TurnOutput.parse(cli.structured_output ?? JSON.parse(cli.result ?? ""));
         return { output, model, promptVersion: PROMPT_VERSION, ...(cli.total_cost_usd !== undefined && { costUsd: cli.total_cost_usd }) };
@@ -54,6 +72,14 @@ export function claudeCliReasoner(
       }
     },
   };
+}
+
+/** The final `result` event of a stream-json run. */
+function streamResult(stdout: string): unknown {
+  const events = stdout.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as { type?: string });
+  const result = events.findLast((e) => e.type === "result");
+  if (!result) throw new Error("reasoning turn ended without a result");
+  return result;
 }
 
 const spawnClaude: RunCli = (args, stdin, { cwd, timeoutMs }) =>

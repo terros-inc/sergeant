@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -110,4 +110,52 @@ test("status is unavailable, not failed, while Docker cannot answer", async () =
   await expect(runner.status("run_t1")).rejects.toThrow(/unavailable/);
   host.docker.reachable = true;
   expect((await runner.status("run_t1")).status).toBe("running");
+});
+
+// TECH-4994: a screenshot pasted into the description and a log attached to the issue reach the run
+// as read-only files the brief names; the Linear token stays on the host; an oversized file is
+// skipped with a note, never fatal.
+test("gives the run the issue's files read-only, fetched on the host, skipping oversized ones", async () => {
+  const shot = "https://uploads.linear.app/org/a/shot";
+  const log = "https://uploads.linear.app/org/b/app.log";
+  const huge = "https://files.example.com/huge.bin";
+  const fetchedWithToken: string[] = [];
+  const conversation = {
+    ...spec.conversation,
+    issue: {
+      ...spec.conversation.issue,
+      description: `It breaks:\n\n![image.png](${shot})`,
+      attachments: [
+        { id: "a1", title: "app.log", source: "upload", url: log, updatedAt: "2026-10-02T06:00:00.000Z" },
+        { id: "a2", title: "huge.bin", source: null, url: huge, updatedAt: "2026-10-02T06:00:00.000Z" },
+      ],
+    },
+  };
+  const host = fakeHost();
+  const rootDir = await mkdtemp(join(tmpdir(), "sergeant-runner-test-"));
+  const runner = containerRunner({
+    rootDir,
+    models: { worker: "sonnet", reviewer: "opus" },
+    claudeOAuthToken: TOKEN,
+    gitIdentity: { name: "Ada Example", email: "ada@example.com" },
+    githubTokens: async () => GH,
+    exec: host.exec,
+    attachmentLimits: { perFileBytes: 1024, perTaskBytes: 4096 },
+    fetchUpload: async (url) => {
+      fetchedWithToken.push(url);
+      return url === shot ? new Response(new Uint8Array([0x89, 0x50]), { headers: { "content-type": "image/png" } }) : new Response("ERROR boom\n");
+    },
+    fetch: async () => new Response(new Uint8Array(2048), { headers: { "content-type": "application/octet-stream" } }),
+  });
+  await runner.start({ ...spec, conversation });
+
+  expect(fetchedWithToken).toEqual([log, shot]);
+  const files = join(rootDir, "run_t1", "attachments");
+  expect(await readFile(join(files, "01-app.log"), "utf8")).toBe("ERROR boom\n");
+  expect((await readFile(join(files, "02-shot.png"))).length).toBe(2);
+  const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
+  expect(run?.args).toContain(`${files}:/workspace/.sergeant/attachments:ro`);
+  const brief = await readFile(join(rootDir, "run_t1", "workspace", "sergeant-brief.md"), "utf8");
+  expect(brief).toContain("`/workspace/.sergeant/attachments/02-shot.png` — image/png");
+  expect(brief).toContain(`${huge} ("huge.bin") — not downloaded: over the`);
 });

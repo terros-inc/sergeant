@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { conversationRevision, type Conversation } from "./conversation.ts";
+import { conversationRevision, linearUploads, type Conversation } from "./conversation.ts";
 
 // M10 is only as good as this hash: if an edit stopped changing it, a merge could overtake a human's
 // edited instruction (L4); if read order changed it, every merge would be refused.
@@ -56,4 +56,28 @@ test("folds human feedback on the task's PRs into the revision", () => {
     conversationRevision(base, [{ repo: "o/r", number: 8, humanFeedback: [review] }]),
   ];
   for (const c of changed) expect(c).not.toBe(rev);
+});
+
+// TECH-4994: a screenshot pasted into the text and a file attached to the issue must reach the run,
+// and adding or changing an attachment must wake a turn (and deny a merge decided without it).
+test("finds human uploads in Markdown and folds attachments into the revision", () => {
+  const shot = "https://uploads.linear.app/org/abc/def/shot.png";
+  const log = "https://uploads.linear.app/org/abc/ghi";
+  const c: Conversation = {
+    ...base,
+    issue: { ...base.issue, description: `Broken:\n\n![screenshot.png](${shot})\n\nSee also ${shot}.` },
+    humanComments: [comment("c1", `[app.log](${log}) and <${log}>`)],
+    agentComments: [{ id: "a1", createdAt: at, body: "![mine](https://uploads.linear.app/org/sergeant/own.png)" }],
+  };
+  expect(linearUploads(c)).toEqual([shot, log]);
+
+  const attachment = { id: "att1", title: "app.log", source: "upload", url: log, updatedAt: at };
+  expect(conversationRevision({ ...base, issue: { ...base.issue, attachments: [] } })).toBe(conversationRevision(base));
+  const rev = conversationRevision({ ...base, issue: { ...base.issue, attachments: [attachment] } });
+  expect(rev).not.toBe(conversationRevision(base));
+  const edited = { ...attachment, updatedAt: "2026-10-02T07:00:00.000Z" };
+  expect(conversationRevision({ ...base, issue: { ...base.issue, attachments: [edited] } })).not.toBe(rev);
+  // A GitHub integration's PR record syncing does not churn it (and so cannot refuse a merge).
+  const pr = { id: "att2", title: "PR", source: "github", url: "https://github.com/o/r/pull/1", updatedAt: at };
+  expect(conversationRevision({ ...base, issue: { ...base.issue, attachments: [pr] } })).toBe(conversationRevision(base));
 });

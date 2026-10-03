@@ -11,6 +11,7 @@ import {
   type RunSpec,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments, type AttachmentLimits, type FetchUpload } from "./attachments.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { AGENT_SCRIPT, AgentOutput, agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL, type Exec } from "./exec.ts";
@@ -46,6 +47,12 @@ export type ContainerRunnerOptions = {
   exec?: Exec;
   githubApiUrl?: string;
   fetch?: typeof globalThis.fetch;
+  /**
+   * Downloads Linear uploads with the installation's Linear token, here on the host. The files reach
+   * a run read-only under `.sergeant/attachments/`; the token never does (TECH-4994).
+   */
+  fetchUpload?: FetchUpload;
+  attachmentLimits?: AttachmentLimits;
 };
 
 export const PROVIDER = "anthropic/claude-code";
@@ -191,6 +198,15 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         access: spec.role === "worker" ? "write" : "read",
       });
 
+      // The task's files, for worker and reviewer alike; mounted read-only, never fatal.
+      const attachmentsDir = join(p.dir, "attachments");
+      const attachments = await fetchAttachments(spec.conversation, attachmentsDir, {
+        fetch: fetchFn,
+        ...(opts.fetchUpload && { fetchUpload: opts.fetchUpload }),
+        ...(opts.attachmentLimits && { limits: opts.attachmentLimits }),
+      });
+      const files = renderAttachments(attachments);
+
       let brief: string;
       if (spec.role === "worker") {
         const existing: string[] = [];
@@ -200,7 +216,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           const remote = await execOk("git", ["branch", "-r", "--list", "origin/sergeant/*", "--format=%(refname:short)"], { cwd: dir });
           existing.push(...remote.split("\n").filter(Boolean).map((b) => `${repo}: ${b.replace(/^origin\//, "")}`));
         }
-        brief = workerBrief(spec, existing);
+        brief = workerBrief(spec, existing, files);
       } else {
         const subjects: ReviewSubject[] = [];
         for (const s of spec.subject) {
@@ -214,7 +230,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           subjects.push({ ...s, url: pr.html_url, title: pr.title, body: pr.body ?? "", baseRef: pr.base.ref, path: `/workspace/${rel}` });
         }
         const prior = await priorReports(spec.subject);
-        brief = reviewerBrief(spec, subjects, prior.claims, prior.reviews);
+        brief = reviewerBrief(spec, subjects, prior.claims, prior.reviews, files);
       }
       await writeFile(join(p.workspace, "sergeant-brief.md"), brief);
 
@@ -238,6 +254,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           "run", "--detach", "--name", meta.container, "--label", `sergeant.run=${spec.runId}`,
           "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
           "--volume", `${p.workspace}:/workspace`,
+          ...(attachments.files.length ? ["--volume", `${attachmentsDir}:${ATTACHMENTS_PATH}:ro`] : []),
           "--env", "CLAUDE_CODE_OAUTH_TOKEN",
           ...(worker ? ["--env", "GH_TOKEN"] : []),
           ...gitIdentityEnv(opts.gitIdentity),

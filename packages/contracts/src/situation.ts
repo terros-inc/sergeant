@@ -33,6 +33,11 @@ export const SituationReport = z.object({
   /** What this turn saw; a merge it proposes carries it (M10). */
   conversationRevision: ConversationRevision,
   conversation: Conversation,
+  /**
+   * Every Linear upload a human referenced in the description or a comment (`linearUploads`); with
+   * the issue's attachments, what runs are given as files under `.sergeant/attachments/` (TECH-4994).
+   */
+  uploads: z.array(z.string()).default([]),
   /** Repositories runs may be given; the canary's allowlist. */
   enrolledRepositories: z.array(RepoSlug),
   pullRequests: z.array(PullRequestFacts),

@@ -18,7 +18,18 @@ export const issuePage = z.object({
   description: z.string().nullable(),
   state: z.object({ name: z.string() }),
   delegate: actor.nullable(),
-  attachments: z.object({ nodes: z.array(z.object({ url: z.string(), sourceType: z.string().nullable() })) }),
+  attachments: z.object({
+    nodes: z.array(
+      z.object({
+        id: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+        sourceType: z.string().nullable(),
+        updatedAt: z.iso.datetime({ offset: true }),
+        creator: actor.nullable(),
+      }),
+    ),
+  }),
   comments: z.object({
     nodes: z.array(comment),
     pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
@@ -35,7 +46,7 @@ export const issueQuery = `
       id identifier url title description
       state { name }
       delegate { id name }
-      attachments(first: 100) { nodes { url sourceType } }
+      attachments(first: 100) { nodes { id title url sourceType updatedAt creator { id name } } }
       comments(first: 50, after: $after) {
         nodes {
           id body createdAt updatedAt

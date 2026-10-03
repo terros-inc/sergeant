@@ -18,7 +18,7 @@ import { parseArgs } from "node:util";
 import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
 import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
-import { containerRunner } from "@terros/sergeant-runner";
+import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { linearCallers } from "./auth.ts";
 import { connect, loadConfig, taskBudget } from "./config.ts";
 import { startService } from "./service.ts";
@@ -91,8 +91,12 @@ const service = await startService(
       claudeOAuthToken: installation.modelToken,
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
+      fetchUpload: installation.linear.fetchUpload,
     }),
-    reasoner: claudeCliReasoner({ model: values["reasoning-model"] }),
+    reasoner: claudeCliReasoner({
+      model: values["reasoning-model"],
+      files: (s) => reasoningFiles(s.conversation, { fetchUpload: installation.linear.fetchUpload }),
+    }),
     delegatedIssues: () => installation.linear.delegatedIssues(installation.agentUserId),
     undelegate: (issueId) => installation.linear.undelegate(issueId),
   },
