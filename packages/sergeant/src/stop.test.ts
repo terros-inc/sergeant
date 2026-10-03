@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Conversation, PullRequestFacts, RunRecord } from "@terros/sergeant-contracts";
-import { driveCancel, recordCancel, taskDir } from "./cancel.ts";
+import { driveCancel, drivePendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import { runLoop } from "./loop.ts";
 import { startService, type ServiceDeps } from "./service.ts";
 
@@ -220,12 +220,21 @@ async function stopWithFlakyStatus(failures: number) {
   // The worker has exited with its report written, not yet finalized, when its status read fails.
   wrote.set("run_w1", { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] });
   const status = deps.runner.status;
-  deps.runner.status = async (id) => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : status(id));
+  let statusReads = 0;
+  deps.runner.status = async (id) => (statusReads++, failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : status(id));
   const task = taskDir(dir, "UNF-1");
   await mkdir(task, { recursive: true });
   await writeFile(join(task, "state.json"), state(["run_w1"]));
   await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
-  return { deps, seen, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
+  const retryNow = async () => {
+    const name = (await readdir(task)).find((file) => file === "cancel.json" || file.startsWith("cancel.pending-"));
+    if (!name) throw new Error("no pending stop");
+    const file = join(task, name);
+    const intent = JSON.parse(await readFile(file, "utf8"));
+    intent.retryAt = new Date(0).toISOString();
+    await writeFile(file, JSON.stringify(intent));
+  };
+  return { deps, seen, live, task, retryNow, statusReads: () => statusReads, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
 }
 
 test("a stop whose run status read fails once reads it again after the cancel and closes the worker's unlinked PR", async () => {
@@ -236,18 +245,50 @@ test("a stop whose run status read fails once reads it again after the cancel an
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`Closed [${repo}#9]`) }]);
 });
 
-test("a stop whose run status stays unreadable after the cancel stays pending, says nothing, and finishes once it reads", async () => {
-  const { seen, task, drive } = await stopWithFlakyStatus(4);
-  for (let i = 0; i < 2; i++) expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+test("a confirmed stop stays pending inside the status-read limit and does not retry before it is due", async () => {
+  const { seen, task, retryNow, statusReads, drive } = await stopWithFlakyStatus(20);
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(statusReads()).toBe(2);
+  expect(seen.canceled).toEqual(["run_w1"]);
+
+  // A poll or intake inside the backoff reads only the intent, without another runner call or cancel.
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(statusReads()).toBe(2);
+  expect(seen.canceled).toEqual(["run_w1"]);
+  await retryNow();
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(statusReads()).toBe(3);
   expect(seen.closed).toEqual([]);
   expect(seen.comments).toEqual([]);
   expect(await readdir(task)).toEqual(expect.arrayContaining(["cancel.json", "state.json"]));
+});
 
-  // The next intake drives the same stop, and the run's status reads again.
-  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+test("an unreadable confirmed stop is deferred after the limit, lets the issue restart, and later closes the old worker's PR", async () => {
+  const { deps, seen, live, task, retryNow, drive } = await stopWithFlakyStatus(4);
+  expect(await drive()).toMatchObject({ stopping: ["run_w1"] });
+  await retryNow();
+  expect(await drive()).toMatchObject({ stopping: ["run_w1"] });
+  await retryNow();
+  expect(await drive()).toMatchObject({ stopping: ["run_w1"] });
+
+  const deferred = (await readdir(task)).filter((file) => file.startsWith("cancel.pending-"));
+  expect(deferred).toHaveLength(1);
+  expect(await readdir(task)).not.toContain("cancel.json");
+  expect(await readdir(task)).not.toContain("state.json");
+  expect(seen.canceled).toEqual(["run_w1"]);
+
+  // The old stop remains durable, but no longer excludes this Todo issue from intake.
+  await intakeStartsFresh(deps, seen, live);
+  const fresh = await readFile(join(task, "state.json"), "utf8");
+
+  // Its slower retry eventually reads the worker report and closes its unlinked PR, without setting
+  // aside the fresh task's state.
+  await retryNow();
+  expect(await drivePendingCancels(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
   expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("No open PR to close") }]);
-  expect(await readdir(task)).not.toContain("cancel.json");
+  expect(await readdir(task)).not.toContain(deferred[0]);
+  expect(await readFile(join(task, "state.json"), "utf8")).toBe(fresh);
 });
 
 // A start the runner never confirmed and still does not know never started, so it does not hold the

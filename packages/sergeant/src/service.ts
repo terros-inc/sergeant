@@ -9,7 +9,7 @@ import { apiHandler } from "./api.ts";
 import { fromThisHost, send } from "./api-http.ts";
 import { isLoopbackHost, type Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
-import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
+import { cancelPending, driveCancel, drivePendingCancels, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import { sweepFeedbackEvery, type FeedbackDeps } from "./feedback.ts";
 import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
@@ -194,9 +194,10 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   };
 
-  // A task stop recorded and not yet done (cancel.ts): driven at once, again at every intake until the
-  // runner confirms its runs stopped, and so after a restart too, whatever the issue's delegation or
-  // state is by then. One step per task at a time, so a request's own drive is the one
+  // A task stop recorded and not yet done (cancel.ts): driven at once and considered at every intake,
+  // with its persisted retry time avoiding repeated runner calls. A confirmed cancel whose final
+  // status stays unreadable is eventually deferred so intake can start a fresh task, while continuing
+  // slower retries of the old stop. One step per task at a time, so a request's own drive is the one
   // that answers it; it is not held to the task limit. The same per-task lock holds a run's start from
   // its delegation check to the runner (execute.ts), so a cancel lists every run that got past it.
   const locks = new Map<string, Promise<unknown>>();
@@ -217,10 +218,11 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     return next;
   };
   const drive = (ref: string) => driveCancel(taskDir(opts.stateDir, ref), ref, deps, opts.enrolledRepositories, log);
+  const drivePending = (ref: string) => drivePendingCancels(taskDir(opts.stateDir, ref), ref, deps, opts.enrolledRepositories, log);
 
   const intake = async () => {
     for (const ref of await pendingCancels(opts.stateDir)) {
-      await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
+      await serialized(ref, () => drivePending(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
     }
     const startedAt = Date.now();
     let listed: DelegatedIssue[] | undefined;
