@@ -2,6 +2,7 @@ import type { RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
 import type { AttachmentLimits, FetchUpload } from "./attachments.ts";
 import type { Adapter } from "./agents.ts";
 import type { Exec } from "./exec.ts";
+import type { ReadQuota } from "./quota.ts";
 import type { FetchLink } from "./public-fetch.ts";
 
 export type Role = RunSpec["role"];
@@ -12,10 +13,18 @@ export type ContainerRunnerOptions = {
   rootDir: string;
   /** Built from `container/Dockerfile`. */
   image?: string;
-  /** The model per role, for that role's adapter; each run is a new agent session in a new container. */
-  models: Record<Role, string>;
-  /** The agent CLI per role (TECH-5009). A role not named here runs Claude Code. */
+  /** The model each role runs on each adapter; each run is a new agent session in a new container. */
+  models: Record<Role, Record<Adapter, string>>;
+  /**
+   * The agent CLI per role (TECH-5009). A role not named here runs Claude Code. With `quota`, this is
+   * the fallback when a provider's quota is unknown.
+   */
   adapters?: Partial<Record<Role, Adapter>>;
+  /**
+   * Live quota per provider (TECH-5117). With it and the Codex credential, each launch picks its
+   * provider from quota read just before it (`choose.ts`) and records the readings on the run.
+   */
+  quota?: ReadQuota;
   /**
    * The Sergeant Claude worker token. It enters every Claude Code container, always and only as
    * `CLAUDE_CODE_OAUTH_TOKEN`. There is deliberately no generic environment input.

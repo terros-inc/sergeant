@@ -85,6 +85,17 @@ Terros now has its own Codex Team account, and nothing personal is ever used.
   cached input, output, reasoning output) and no `costUsd`, so the task budget counts the run as
   unknown cost (`sgt` shows its tokens with `sgt run`); nothing guesses a price. With no spend cap, the wall-time
   limit is the run's only backstop.
+- **Provider by quota (TECH-5117).** When the installation holds both credentials, `start` reads each
+  provider's live quota right before the launch (`quota.ts`: Claude's `/api/oauth/usage`, or the
+  `anthropic-ratelimit-unified-*` headers of a one-token Haiku request when the token may only run
+  inference; Codex's `chatgpt.com/backend-api/wham/usage` with a ChatGPT login), cached for five
+  minutes, and `choose.ts` decides deterministically. The worker gets the provider with the most weekly
+  capacity left unless its 5-hour window is below 20%; the reviewer gets the other provider than the
+  latest worker that reported its PR, unless that one is below the 5-hour floor (then the same, marked
+  `sameProviderAsWorker`). Any unknown reading keeps the `runners` default; a read never fails a launch.
+  The run record's `providerChoice` holds the choice, its reason, and the readings (`sgt run <id>`).
+  A role's `--worker-model`/`--reviewer-model` applies to its configured adapter; on the other one it
+  runs that adapter's default model.
 - **Resume (V6).** Codex can resume a thread (`codex exec resume <id>`), but its session lives in the
   run's container, removed at the end, and this runner resumes no adapter. A continuation is a fresh
   run from the pushed branches and earlier reports in its brief. The thread id is in `agent.json`.

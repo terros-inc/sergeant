@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug } from "@terros/sergeant-contracts";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
-import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
+import { containerRunner, providerQuota, reasoningFiles } from "@terros/sergeant-runner";
 import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
@@ -73,7 +73,10 @@ const result = await runLoop(
       rootDir: join(dir, "runs"),
       ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
       claudeOAuthToken: installation.modelToken,
-      ...(installation.codexCredential !== undefined && { codexCredential: installation.codexCredential }),
+      ...(installation.codexCredential !== undefined && {
+        codexCredential: installation.codexCredential,
+        quota: providerQuota({ claudeOAuthToken: installation.modelToken, codexCredential: installation.codexCredential }),
+      }),
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
       fetchUpload: installation.linear.fetchUpload,
