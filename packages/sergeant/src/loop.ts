@@ -251,7 +251,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
     await postHandoffs(conversation.issue.id);
-    await postRereviewRequests(conversation, pullRequests, runs, deps.linear, log);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
@@ -287,6 +286,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       budget,
       recentTurns: state.recentTurns,
     });
+    await postRereviewRequests(situation, deps.workerLogin, deps.linear, log);
     // One question per exhausted window, posted like any question but under a key of the task and the
     // window, and retried every poll until Linear shows it. Until a human replies after it, nothing
     // happens and no runaway guard ends the wait (UNF-727); the reply opens a fresh window (above) and

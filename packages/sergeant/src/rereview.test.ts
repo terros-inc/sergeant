@@ -5,8 +5,8 @@ import { afterEach, expect, test } from "vitest";
 import { commentIdFor, type Conversation, type HumanPullRequestFeedback, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
 
-// TECH-4992: once a successor addressed the captain's requested changes, the new head was reviewed and
-// green, yet the task sat blocked by M8 and nobody told the captain. Sergeant must ask on the issue once
+// TECH-4992: once a successor addressed the captain's requested changes, the new head would merge but
+// for M8, yet the task sat blocked and nobody told the captain. Sergeant must ask on the issue once
 // per head, never again on later polls or turns, and again when a newer head reaches the same point.
 
 const [first, second, third] = ["a", "b", "c"].map((c) => c.repeat(40)) as [string, string, string];
@@ -25,7 +25,11 @@ const approval = (runId: string, headSha: string): RunRecord => ({
   runId, role: "reviewer", status: "succeeded", provider: "p", model: "m",
   report: { reportVersion: "s2-review-report/1", reviewed: [{ repo, number: 7, headSha }], verdict: "approve", findings: [], summary: "" },
 });
-const records = [approval("run_review_2", second), approval("run_review_3", third)];
+const worker: RunRecord = {
+  runId: "run_worker_1", role: "worker", status: "succeeded", provider: "p", model: "m",
+  report: { reportVersion: "s2-worker-report/1", outcome: "completed", summary: "", knownGaps: [], followups: [], pullRequests: [{ repo, number: 7, url, headSha: second, closesIssue: true, review: { required: true, reason: "r" } }] },
+};
+const records = [worker, approval("run_review_2", second), approval("run_review_3", third)];
 
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));

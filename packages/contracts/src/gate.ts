@@ -144,22 +144,19 @@ function standingChangeRequests(feedback: HumanPullRequestFeedback[]): HumanPull
 }
 
 /**
- * The humans to ask on the issue to re-review or dismiss (TECH-4992): their requested changes (M8)
- * are what keeps this PR's head from merging. The PR is open, ready, and mergeable (M7), every
- * required check passed on its head, the head has review standing (an approving review of it, or its
- * worker's not_required), and each named human requested changes on an earlier head, which this head
- * has since addressed. A review whose commit GitHub no longer reports (commitId null, say after a force
- * push) was not left on this head, so it counts as addressed: asking costs nothing, and M8 still holds.
- * Empty when there is no one to ask yet.
+ * The humans to ask on the issue to re-review or dismiss (TECH-4992): each requested changes on an
+ * earlier head, which this head has since addressed, and the real merge gate would merge this head,
+ * under some run's review standing, but for M8 (TECH-5051). A review whose commit GitHub no longer
+ * reports (commitId null, say after a force push) was not left on this head, so it counts as addressed:
+ * asking costs nothing, and M8 still holds. Empty when there is no one to ask yet.
  */
-export function rereviewRequests(pr: PullRequestFacts, runs: RunRecord[]): string[] {
-  if (pr.state !== "open" || pr.draft || pr.mergeable !== true) return [];
-  const { checks } = pr;
-  if (checks.sha !== pr.headSha || checks.required.length === 0 || checks.required.some((c) => c.state !== "passed")) return [];
-  const head = { repo: pr.repo, number: pr.number, sha: pr.headSha };
+export function rereviewRequests(facts: MergeFacts): string[] {
+  const { pr, runs, liveConversationRevision: conversationRevision } = facts;
+  const asked = standingChangeRequests(pr.humanFeedback).filter((r) => r.commitId !== pr.headSha).map((r) => r.author);
+  // M8 is the only rule that reads human reviews; without them the gate decides everything else.
+  const withoutM8 = { ...facts, pr: { ...pr, humanFeedback: [] } };
   const standings = runs.map((r): ReviewStanding => (r.role === "reviewer" ? { kind: "reviewed", reviewRunId: r.runId } : { kind: "not_required", workerRunId: r.runId }));
-  if (!standings.some((s) => checkStanding(s, head, runs) === null)) return [];
-  return standingChangeRequests(pr.humanFeedback).filter((r) => r.commitId !== pr.headSha).map((r) => r.author);
+  return standings.some((reviewStanding) => checkMerge({ kind: "merge_pr", repo: pr.repo, number: pr.number, expectedHeadSha: pr.headSha, reviewStanding, conversationRevision }, withoutM8).allowed) ? asked : [];
 }
 
 /** The first line of every question Sergeant asks on an issue (07 §4). */
