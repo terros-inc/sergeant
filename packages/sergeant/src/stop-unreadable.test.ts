@@ -1,0 +1,127 @@
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, expect, test } from "vitest";
+import { driveCancel, recordCancel, taskDir } from "./cancel.ts";
+import { fakes, head, issue, pr, repo, state } from "./stop-fixtures.ts";
+
+let dir = "";
+afterEach(() => rm(dir, { recursive: true, force: true }));
+
+// A worker's PR Linear has not linked yet is known only from its run's report, so a stop whose run
+// status read failed must not finish without it, or that PR stays open.
+async function stopWithFlakyStatus(failures: number) {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const live = { conversation: issue("started", "In Progress") };
+  live.conversation.issue.linkedPullRequests = [];
+  const { deps, seen, wrote } = fakes(live);
+  wrote.set("run_w1", { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] });
+  const status = deps.runner.status;
+  deps.runner.status = async (id) => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : status(id));
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), state(["run_w1"]));
+  await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
+  return { deps, seen, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
+}
+
+async function ageStop(task: string) {
+  const file = join(task, "cancel.json");
+  const intent = JSON.parse(await readFile(file, "utf8"));
+  await writeFile(file, JSON.stringify({ ...intent, at: new Date(Date.now() - 16 * 60 * 1000).toISOString() }));
+}
+
+test("a stop whose run status read fails once reads it again after the cancel and closes the worker's unlinked PR", async () => {
+  const { seen, drive } = await stopWithFlakyStatus(1);
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.canceled).toEqual(["run_w1"]);
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`Closed [${repo}#9]`) }]);
+});
+
+test("a stop whose run status stays unreadable after the cancel stays pending, says nothing, and finishes once it reads", async () => {
+  const { seen, task, drive } = await stopWithFlakyStatus(4);
+  for (let i = 0; i < 2; i++) expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.closed).toEqual([]);
+  expect(seen.comments).toEqual([]);
+  expect(await readdir(task)).toEqual(expect.arrayContaining(["cancel.json", "state.json"]));
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("No open PR to close") }]);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
+test("a stop stalled on unreadable status warns only after 15 minutes and remains pending", async () => {
+  const { seen, task, drive } = await stopWithFlakyStatus(6);
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([]);
+  await ageStop(task);
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([{
+    key: expect.stringMatching(/^cancel-stalled:i1:/),
+    body: expect.stringMatching(/could not confirm.*after 2 attempts: `run_w1`.*worker-reported PR.*not restart.*restore the runner.*retrying/),
+  }]);
+  expect(await readdir(task)).toContain("cancel.json");
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toHaveLength(1);
+  expect(await readdir(task)).toContain("cancel.json");
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments.map((comment) => comment.key)).toEqual([expect.stringMatching(/^cancel-stalled:i1:/), expect.stringMatching(/^cancel:i1:/)]);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
+test.each(["unreadable status and failed cancel", "readable running status and failed cancel"])("a stop with %s is surfaced", async (failure) => {
+  const { deps, seen, task, drive } = await stopWithFlakyStatus(failure.startsWith("unreadable") ? 99 : 0);
+  deps.runner.cancel = async () => Promise.reject(new Error("Docker unavailable"));
+  await ageStop(task);
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments[0]).toMatchObject({ key: expect.stringMatching(/^cancel-stalled:i1:/), body: expect.stringContaining("could not confirm") });
+});
+
+test("a warning failure is retried without failing the stop and reuses its idempotency key", async () => {
+  const { deps, seen, task, drive } = await stopWithFlakyStatus(99);
+  await ageStop(task);
+  const post = deps.linear.postComment;
+  deps.linear.postComment = async (comment) => {
+    await post(comment);
+    deps.linear.postComment = post;
+    throw new Error("connection lost after Linear accepted comment");
+  };
+  await expect(drive()).resolves.toMatchObject({ stopping: ["run_w1"] });
+  await expect(drive()).resolves.toMatchObject({ stopping: ["run_w1"] });
+  expect(seen.commentAttempts).toHaveLength(2);
+  expect(new Set(seen.commentAttempts).size).toBe(1);
+  expect(seen.comments).toHaveLength(1);
+});
+
+test("a stop's never-started run does not hold it pending once state.json is set aside", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const { deps, seen } = fakes({ conversation: issue("started", "In Progress") });
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), JSON.stringify({ ...JSON.parse(state(["run_w1", "run_lost"])), unconfirmedStarts: ["run_lost"] }));
+  await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
+  const postComment = deps.linear.postComment;
+  deps.linear.postComment = async () => Promise.reject(new Error("Linear unreachable"));
+  await expect(driveCancel(task, "UNF-1", deps, [repo], () => {})).rejects.toThrow(/Linear/);
+  deps.linear.postComment = postComment;
+  await rm(join(task, "state.json"));
+  expect(await driveCancel(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }] });
+  expect(seen.comments).toHaveLength(1);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
+test("a legacy stop with state.json set aside does not hold pending on a never-started run", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const { deps, seen } = fakes({ conversation: issue("started", "In Progress") });
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  const closed = [{ repo, number: 7, url: pr(7).url }];
+  seen.closed.push({ number: 7, comment: "Closed: wrong approach." });
+  await writeFile(join(task, "cancel.json"), JSON.stringify({ reason: "wrong approach", requestId: "r1", at: new Date().toISOString(), runIds: ["run_w1", "run_lost"], closed }));
+  expect(await driveCancel(task, "UNF-1", deps, [repo], () => {})).toEqual({ stopping: [], closedPullRequests: closed });
+  expect(seen.canceled).toEqual(["run_w1", "run_lost"]);
+  expect(seen.comments).toHaveLength(1);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
