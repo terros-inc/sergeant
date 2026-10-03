@@ -9,7 +9,7 @@ import { linearCallers } from "./auth.ts";
 import { startService, type Service, type ServiceDeps, type ServiceOptions } from "./service.ts";
 
 /** An open Todo issue with no priority, as intake lists it. */
-const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" } });
+const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] });
 
 // The client API's actions must reach the task through the loop's own paths: a wake ends the loop's
 // wait and owes it a turn, a cancel undelegates and cancels the runs until the runner confirms them,

@@ -19,6 +19,7 @@ const issue = (identifier: string, status: "In Review" | "In Progress" | "Todo",
   priority,
   createdAt,
   state: { name: status, type: status === "Todo" ? "unstarted" : "started" },
+  blockedBy: [],
 });
 
 /**
@@ -132,6 +133,31 @@ test("free slots go to In Review, then In Progress, then Todo; then by priority;
     await vi.waitFor(() => expect(f.turns).toHaveLength(4 + n), { timeout: 5_000 });
   }
   expect(f.turns.slice(3)).toEqual(["PROGRESS-LOW-NEW", "TODO-URGENT-NEW", "TODO-NONE"]);
+});
+
+// TECH-5066: a delegated Todo issue blocked by an unfinished Linear issue must not start, nor take a
+// slot from work that can start; once its last blocker finishes it starts in its usual place in order.
+test("a Todo issue waits while a blocker is unfinished, then is admitted in its usual order", async () => {
+  const f = fakes([
+    { ...issue("BLOCKED-URGENT", "Todo", 1, "2026-10-03T00:00:00.000Z"), blockedBy: ["TECH-1"] },
+    issue("FREE-HIGH", "Todo", 2, "2026-10-01T00:00:00.000Z"),
+    issue("LATER-NONE", "Todo", 0, "2026-10-02T00:00:00.000Z"),
+  ]);
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1 }, logs);
+  await vi.waitFor(() => expect(f.turns).toEqual(["FREE-HIGH"]), { timeout: 5_000 });
+  // Many intakes later it still waits, and says so once.
+  await sleep(100);
+  expect(logs.filter((l) => l.includes("waiting on blocker"))).toEqual(["BLOCKED-URGENT waiting on blocker TECH-1"]);
+
+  // The blocker is Done: Linear lists it no more among the unfinished ones. The urgent issue now goes
+  // ahead of the one with no priority, as if it had never been blocked.
+  f.delegated[0] = { ...f.delegated[0]!, blockedBy: [] };
+  await sleep(100);
+  await f.finish("FREE-HIGH");
+  await vi.waitFor(() => expect(f.turns).toEqual(["FREE-HIGH", "BLOCKED-URGENT"]), { timeout: 5_000 });
+  await f.finish("BLOCKED-URGENT");
+  await vi.waitFor(() => expect(f.turns).toEqual(["FREE-HIGH", "BLOCKED-URGENT", "LATER-NONE"]), { timeout: 5_000 });
 });
 
 test("a task answered within the grace keeps its slot and continues without queueing", async () => {

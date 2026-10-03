@@ -86,20 +86,37 @@ export const clearDelegate = `
 export const delegatedQuery = `
   query SergeantDelegated($agent: ID!, $after: String) {
     issues(first: 100, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { nin: ["completed", "canceled"] } } }) {
-      nodes { identifier priority createdAt state { name type } }
+      nodes {
+        identifier priority createdAt state { name type }
+        inverseRelations(first: 50) { nodes { type issue { identifier state { type } } } }
+      }
       pageInfo { hasNextPage endCursor }
     }
   }
 `;
-/** An open issue delegated to the agent, with what its admission order needs (TECH-5008). */
-export const DelegatedIssue = z.object({
-  identifier: z.string().min(1),
-  /** Linear's priority: 1 Urgent, 2 High, 3 Medium, 4 Low, 0 none. */
-  priority: z.number(),
-  createdAt: z.iso.datetime({ offset: true }),
-  state: z.object({ name: z.string(), type: z.string() }),
-});
-export type DelegatedIssue = z.infer<typeof DelegatedIssue>;
+/**
+ * An open issue delegated to the agent, with what its admission order needs (TECH-5008) and the
+ * issues blocking it that are neither completed nor canceled (TECH-5066). Linear stores "X blocked
+ * by Y" as Y's `blocks` relation, so it is among X's inverse relations.
+ */
+export const DelegatedIssue = z
+  .object({
+    identifier: z.string().min(1),
+    /** Linear's priority: 1 Urgent, 2 High, 3 Medium, 4 Low, 0 none. */
+    priority: z.number(),
+    createdAt: z.iso.datetime({ offset: true }),
+    state: z.object({ name: z.string(), type: z.string() }),
+    inverseRelations: z.object({
+      nodes: z.array(z.object({ type: z.string(), issue: z.object({ identifier: z.string().min(1), state: z.object({ type: z.string() }) }) })),
+    }),
+  })
+  .transform(({ inverseRelations, ...issue }) => ({
+    ...issue,
+    blockedBy: inverseRelations.nodes
+      .filter((r) => r.type === "blocks" && r.issue.state.type !== "completed" && r.issue.state.type !== "canceled")
+      .map((r) => r.issue.identifier),
+  }));
+export type DelegatedIssue = z.output<typeof DelegatedIssue>;
 export const delegatedPage = z.object({
   issues: z.object({
     nodes: z.array(DelegatedIssue),
