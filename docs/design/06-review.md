@@ -53,6 +53,10 @@ Built by the deterministic core from durable artifacts, never from the implement
 ## Implementer's claims (unverified — check them, do not assume them)
 - Summary, decisions made and why, known gaps, validation reported: <from worker reports>
 
+## Human reviews and comments on these PRs (confirm each was addressed)
+<every human review, inline comment (file:line), and PR comment, read live as the reviewer starts:
+ author, review state, body; any one the head does not address is a blocking finding>
+
 ## Focus from Sergeant (optional)
 <e.g. "the token-refresh path; this repo's main deploys to staging on merge">
 

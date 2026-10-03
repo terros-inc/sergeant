@@ -69,15 +69,19 @@ export async function drawAudit(
       const runId = RunId.parse(`run_audit-${head.headSha}`);
       const skipped = implementerOf(runs, head)?.reported?.review.reason ?? "no reason on record";
       // A start that fails costs one audit sample, not the task: the merge is already done.
-      await deps.runner
-        .start({
-          runId,
-          role: "reviewer",
-          conversation,
-          repositories: [head.repo],
-          subject: [{ repo: head.repo, number: head.number, headSha: head.headSha }],
-          focus: auditFocus(head, skipped),
-        })
+      await deps.github
+        .readPullRequest(head.repo, head.number)
+        .then((pr) =>
+          deps.runner.start({
+            runId,
+            role: "reviewer",
+            conversation,
+            repositories: [head.repo],
+            subject: [{ repo: head.repo, number: head.number, headSha: head.headSha }],
+            pullRequests: [pr],
+            focus: auditFocus(head, skipped),
+          }),
+        )
         .then(
           () => {
             merged.audit = { runId };

@@ -1,4 +1,4 @@
-import type { Conversation, HumanPullRequestFeedback, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
+import type { Conversation, HumanPullRequestFeedback, PullRequestFacts, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
 import { conversationRevision } from "@terros/sergeant-contracts";
 
 // Briefs for the walking skeleton, after 05 §2–4 and 06 §2–4, trimmed to what this runner supports.
@@ -147,7 +147,15 @@ ${earlier.join("\n\n") || "(none)"}
 `;
 }
 
-/** One human review or comment on a PR, for the successor that must address it (TECH-4987). */
+/** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
+function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
+  return pullRequests
+    .filter((p) => p.humanFeedback.length)
+    .map((p) => `- ${p.url}, oldest first:\n${p.humanFeedback.map(renderHumanFeedback).join("\n")}`)
+    .join("\n");
+}
+
+/** One human review or comment on a PR, for a successor or reviewer that must check it (TECH-4987). */
 function renderHumanFeedback(f: HumanPullRequestFeedback): string {
   const what =
     f.kind === "review"
@@ -188,6 +196,17 @@ export function reviewerBrief(
     .map((s) => `- ${s.url} — base \`${s.baseRef}\` — head \`${s.headSha}\` (review exactly this SHA)
   Checked out at \`${s.path}\` (detached at the head; \`origin/${s.baseRef}\` is the base). Diff: \`git diff origin/${s.baseRef}...HEAD\``)
     .join("\n");
+  const human = renderSubjectFeedback(spec.pullRequests);
+  const humanFeedback = human && `
+## Human reviews and comments on these PRs (confirm each was addressed)
+
+A human's review or comment that asks for a change outranks the implementer's claims. For each one
+below, rule in your report, with evidence, whether the head under review addresses it (a later review
+by the same human may already have settled it), and report each request it does not address as a
+blocking finding.
+
+${human}
+`;
   const claims = subjects
     .map((s) => `### PR ${s.repo}#${s.number}: ${s.title}\n\n${s.body}`)
     .concat(workerClaims.map((c) => `### From the worker's report\n\n${c}`))
@@ -205,7 +224,7 @@ ${what}
 ## Implementer's claims (unverified — check them, do not assume them)
 
 ${claims}
-${previousReviews.length ? `\n## Previous reviews of these PRs (check whether their findings were addressed)\n\n${previousReviews.map(renderReview).join("\n\n")}\n` : ""}${spec.focus ? `\n## Focus from Sergeant\n\n${spec.focus}\n` : ""}
+${humanFeedback}${previousReviews.length ? `\n## Previous reviews of these PRs (check whether their findings were addressed)\n\n${previousReviews.map(renderReview).join("\n\n")}\n` : ""}${spec.focus ? `\n## Focus from Sergeant\n\n${spec.focus}\n` : ""}
 ## Environment
 
 A fresh session and workspace. You did not write this change and have no access to how it was

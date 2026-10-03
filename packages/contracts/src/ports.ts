@@ -72,7 +72,16 @@ export type RunSpec = {
        */
       context: { pullRequests: PullRequestFacts[]; runs: RunRecord[] };
     }
-  | { role: "reviewer"; subject: { repo: RepoSlug; number: number; headSha: Sha }[]; focus?: string }
+  | {
+      role: "reviewer";
+      subject: { repo: RepoSlug; number: number; headSha: Sha }[];
+      /**
+       * The subject PRs, read live by the core as the reviewer starts, so the brief carries every human
+       * review and comment on them for the reviewer to check was addressed (TECH-4990).
+       */
+      pullRequests: PullRequestFacts[];
+      focus?: string;
+    }
 );
 
 export interface RunnerPort {

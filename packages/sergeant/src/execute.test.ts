@@ -260,3 +260,18 @@ test("a merge in a turn with a start leaves no live run, and nothing runs after 
   const followupFirst = await turnOf([followup("a"), merge]);
   expect(followupFirst.outcomes.map((o) => o.status)).toEqual(["done", "done"]);
 });
+
+// TECH-4990: the reviewer's brief shows the humans' feedback on its PRs, read live as it starts, so a
+// change a human requested after the deciding turn's snapshot still reaches the reviewer.
+test("a reviewer starts with the live human feedback on its subject PRs, not the snapshot's", async () => {
+  const requested = {
+    id: "review:9", kind: "review" as const, author: "ada", state: "CHANGES_REQUESTED" as const, body: "Rename it.",
+    path: null, line: null, commitId: head, createdAt: "2026-10-02T06:01:00.000Z", updatedAt: "2026-10-02T06:01:00.000Z", url: `${pr.url}#pullrequestreview-9`,
+  };
+  const { p } = ports({ pr: { humanFeedback: [requested] } });
+  const specs: Parameters<Ports["runner"]["start"]>[0][] = [];
+  p.runner.start = async (spec) => void specs.push(spec);
+  const review: ProposedAction = { kind: "start_reviewer", subject: [{ repo: pr.repo, number: 7, headSha: head }] };
+  expect(await execute(review, { ...situation, runs: [] }, p)).toMatchObject({ status: "done" });
+  expect(specs).toMatchObject([{ role: "reviewer", pullRequests: [{ repo: pr.repo, number: 7, humanFeedback: [requested] }] }]);
+});
