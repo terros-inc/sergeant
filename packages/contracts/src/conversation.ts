@@ -41,7 +41,31 @@ export type IssueAttachment = z.infer<typeof IssueAttachment>;
 export const AgentComment = z.object({ id: z.string().min(1), createdAt: Instant, body: z.string(), parentId: z.string().min(1).optional() });
 export type AgentComment = z.infer<typeof AgentComment>;
 
-/** The current Linear task source: the issue verbatim and every human-authored comment. */
+/**
+ * An issue explicitly linked from the task's own description or a human comment. This is reference
+ * material only, never part of the task's instructions or conversation revision. An unreadable link
+ * is retained so briefs can say that Linear could not supply its contents.
+ */
+export const LinkedIssueBackground = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("read"),
+    identifier: z.string().min(1),
+    url: z.url(),
+    title: z.string(),
+    state: z.string(),
+    description: z.string(),
+    descriptionTruncated: z.boolean(),
+  }),
+  z.object({
+    status: z.literal("unreadable"),
+    identifier: z.string().min(1),
+    url: z.url(),
+    reason: z.string(),
+  }),
+]);
+export type LinkedIssueBackground = z.infer<typeof LinkedIssueBackground>;
+
+/** The current Linear task source verbatim, plus separately labeled linked-issue background. */
 export const Conversation = z.object({
   issue: z.object({
     id: z.string().min(1),
@@ -69,6 +93,8 @@ export const Conversation = z.object({
   humanComments: z.array(HumanComment),
   /** Every other comment, oldest first: context such as what Sergeant asked; never in the revision. */
   agentComments: z.array(AgentComment),
+  /** Bounded, one-hop background from explicit same-workspace issue links. Never instructions. */
+  linkedIssueBackground: z.array(LinkedIssueBackground).optional(),
 });
 export type Conversation = z.infer<typeof Conversation>;
 
