@@ -237,3 +237,35 @@ test("a merge GitHub refuses by repository policy resolves to refused", async ()
     refused: "Waiting on code owner review from terros-inc/owners.",
   });
 });
+
+// TECH-4991: only a 405 GitHub means as policy parks a PR for a human (M12). A temporary 405 must
+// reject so a later turn retries; a 405 on a head that did merge is that merge; a moved head (409)
+// is never a refusal.
+test.each([
+  ["the base moved mid-merge", 405, "Base branch was modified. Review and try the merge again."],
+  ["GitHub is still computing mergeability", 405, "Pull Request is not mergeable"],
+  ["the head moved", 409, "Head branch was modified. Review and try the merge again."],
+])("a merge that fails because %s rejects rather than resolving to refused", async (_, status, message) => {
+  const fetch = async (input: string | URL | Request) => {
+    const path = String(input);
+    if (path.endsWith("/pulls/7/reviews")) return json({ id: 1 });
+    if (path.endsWith("/pulls/7/merge")) return json({ message }, status);
+    if (path.endsWith("/pulls/7")) return json(pr);
+    throw new Error(`unexpected ${path}`);
+  };
+
+  await expect(adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).rejects.toThrow(`(${status}): ${message}`);
+});
+
+test("a 405 on a head that already merged resolves to that merge", async () => {
+  const merged = { ...pr, state: "closed", merged_at: "2026-10-03T01:00:00Z", merge_commit_sha: "c".repeat(40) };
+  const fetch = async (input: string | URL | Request) => {
+    const path = String(input);
+    if (path.endsWith("/pulls/7/reviews")) return json({ id: 1 });
+    if (path.endsWith("/pulls/7/merge")) return json({ message: "Pull Request is not mergeable" }, 405);
+    if (path.endsWith("/pulls/7")) return json(merged);
+    throw new Error(`unexpected ${path}`);
+  };
+
+  expect(await adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).toEqual({ mergedSha: "c".repeat(40) });
+});

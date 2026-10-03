@@ -281,13 +281,14 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         return { mergedSha: Sha.parse(result.sha) };
       } catch (error) {
         if (!(error instanceof GitHubHttpError) || error.status !== 405) throw error;
-        // 405 is repository policy (a required review Sergeant cannot give, such as a code owner's, or
-        // not mergeable) unless this exact head already merged, or the base moved mid-merge, which a
-        // retry can get past. A moved head is 409 and still rejects.
+        // 405 is repository policy (a required review Sergeant cannot give, such as a code owner's)
+        // unless this exact head already merged, or it is temporary: the base moved mid-merge, or
+        // GitHub had not finished computing mergeability (TECH-4991). Those reject, so a later turn
+        // retries rather than parking the PR for a human. A moved head is 409 and still rejects.
         try {
           return await alreadyMerged(repo, number, expectedHeadSha, error);
         } catch (e) {
-          if (e !== error || /base branch was modified/i.test(error.detail ?? "")) throw e;
+          if (e !== error || /base branch was modified|pull request is not mergeable/i.test(error.detail ?? "")) throw e;
           return { refused: error.detail ?? "405 Method Not Allowed" };
         }
       }

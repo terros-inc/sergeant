@@ -108,6 +108,9 @@ test.each([
   ["the review covered an earlier head", facts({ runs: [reviewer({ reviewed: [{ ...pr, headSha: moved }] })] }), "M6"],
   ["the reviewer requested changes", facts({ runs: [reviewer({ verdict: "changes_requested" })] }), "M6"],
   ["an approval still carries a blocking finding", facts({ runs: [reviewer({ findings: [{ id: "f1", severity: "blocking", description: "" }] })] }), "M6"],
+  // TECH-4991: GitHub still computing mergeability, or a conflict, is a wait (M7), never a policy refusal.
+  ["GitHub is still computing whether the PR can merge", facts({ pr: { mergeable: null } }), "M7"],
+  ["the PR conflicts with its base", facts({ pr: { mergeable: false } }), "M7"],
   // M9: the body must agree with the worker's closesIssue, and the closing PR merges last.
   ["the body lacks the closing reference the worker reported", facts({ pr: { body: "Part of UNF-1" } }), "M9"],
   ["a Part of PR's body carries a closing reference", facts({ runs: [reviewer(), worker(true, false)] }), "M9"],

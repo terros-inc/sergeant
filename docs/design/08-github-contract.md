@@ -104,7 +104,7 @@ live GitHub and Linear facts at execution time:
 | M4 | the PR's live head SHA equals `expectedHeadSha` |
 | M5 | the base branch has at least one required check, and every required check passed on `expectedHeadSha` |
 | M6 | a `ReviewDisposition` exists for this PR at `expectedHeadSha` and still passes D1–D6 against the evidence recorded by now (06 §6) |
-| M7 | GitHub reports the PR mergeable (`clean`, or `unstable` when only non-required checks failed) |
+| M7 | GitHub reports the PR mergeable (`clean`, or `unstable` when only non-required checks failed). Built: `mergeable` is `true`, not still being computed (`null`) or conflicting (TECH-4991); `mergeableState` is not read |
 | M8 | no `sergeant:hold` label on the issue or the PR, and no outstanding human "changes requested" review on the PR: no human whose latest review, at any head, is `CHANGES_REQUESTED` (a later approval by that human or a dismissal clears it; a later plain comment does not). Built: the review check (TECH-4987); the label is not |
 | M9 | if any other PR linked to the task is still open, this PR's body does not carry a closing reference to the issue |
 | M10 | re-read Linear and the PR: the current conversation revision (issue title and description, every human comment's id and `updatedAt`, and every human review and comment on the task's PRs: id, `updatedAt`, review state, and body hash) equals the `conversationRevision` the proposing turn saw. Otherwise refuse and wake the task, so a fresh turn decides with the new input in front of it (no locking; a comment arriving in the instant between this read and the merge is an accepted race) |
@@ -124,10 +124,13 @@ Execution: once M1–M11 and G1–G3 pass, the control-plane App submits an `APP
 `sha = expectedHeadSha` and the repository's `mergeMethod`. A failed approval stops the merge. A head
 that moved in between is refused by GitHub (M4 again). On a retry, "already merged at that SHA"
 counts as success. The merged SHA goes in the action result. A merge GitHub refuses by repository
-policy (405, or `merged: false`: a required review Sergeant cannot give, such as a code owner's, or not
-mergeable) is not retried while nothing changes (M12): Sergeant records it, posts one Linear comment
+policy (405, or `merged: false`: a required review Sergeant cannot give, such as a code owner's) is not
+retried while nothing changes (M12): Sergeant records it, posts one Linear comment
 that the PR is ready for a human to merge (its link and the reviewed head), and waits. A changed head,
-a new human review or comment, or a human edit on the issue lets a later turn try again. The Linear issue's Done state follows from
+a new human review or comment, or a human edit on the issue lets a later turn try again. A temporary
+405 is not policy and fails the action instead, so a later turn retries: "Base branch was modified", or
+"Pull Request is not mergeable" while GitHub is still computing mergeability (M7 normally refuses that
+first). The Linear issue's Done state follows from
 automation, not from Sergeant (07 §7).
 
 Where `mergePolicy` is `human`, Sergeant gets the PR ready (green, reviewed, disposition recorded),
