@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { driveCancel, recordCancel, taskDir } from "./cancel.ts";
+import { startService } from "./service.ts";
 import { fakes, head, issue, pr, repo, state } from "./stop-fixtures.ts";
 
 let dir = "";
@@ -23,7 +24,7 @@ async function stopWithFlakyStatus(failures: number) {
   await mkdir(task, { recursive: true });
   await writeFile(join(task, "state.json"), state(["run_w1"]));
   await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
-  return { deps, seen, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
+  return { deps, seen, live, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
 }
 
 async function ageStop(task: string) {
@@ -53,26 +54,31 @@ test("a stop whose run status stays unreadable after the cancel stays pending, s
   expect(await readdir(task)).not.toContain("cancel.json");
 });
 
-test("a stop stalled on unreadable status warns only after 15 minutes and remains pending", async () => {
-  const { seen, task, drive } = await stopWithFlakyStatus(6);
+test("an unreadable status past the grace finishes with one note and the issue restarts on Todo", async () => {
+  const { deps, seen, live, task, drive } = await stopWithFlakyStatus(99);
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }];
   expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
   expect(seen.comments).toEqual([]);
   await ageStop(task);
-  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }] });
+  expect(seen.closed).toEqual([{ number: 7, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
   expect(seen.comments).toEqual([{
-    key: expect.stringMatching(/^cancel-stalled:i1:/),
-    body: expect.stringMatching(/could not confirm.*after 2 attempts: `run_w1`.*worker-reported PR.*not restart.*restore the runner.*retrying/),
+    key: expect.stringMatching(/^cancel:i1:/),
+    body: expect.stringMatching(/run `run_w1` could not be read.*Closed \[o\/r#7\]/),
   }]);
-  expect(await readdir(task)).toContain("cancel.json");
-  // A later intake neither duplicates the warning nor gives up the TECH-5070 wait.
-  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
-  expect(seen.comments).toHaveLength(1);
-  expect(await readdir(task)).toContain("cancel.json");
-  // Once status is readable, the normal stop still finds and closes the worker-reported PR.
-  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
-  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
-  expect(seen.comments.map((comment) => comment.key)).toEqual([expect.stringMatching(/^cancel-stalled:i1:/), expect.stringMatching(/^cancel:i1:/)]);
   expect(await readdir(task)).not.toContain("cancel.json");
+
+  live.conversation = issue("unstarted", "Todo");
+  const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, log: () => {} }, deps);
+  try {
+    await expect.poll(() => seen.starts, { timeout: 5_000 }).toBe(1);
+  } finally {
+    await service.stop();
+  }
+  expect(seen.comments).toHaveLength(1);
+  const fresh = JSON.parse(await readFile(join(task, "state.json"), "utf8")) as { runIds: string[] };
+  expect(fresh.runIds).toHaveLength(1);
+  expect(fresh.runIds).not.toContain("run_w1");
 });
 
 test.each(["unreadable status and failed cancel", "readable running status and failed cancel"])("a stop with %s is surfaced", async (failure) => {
@@ -85,6 +91,7 @@ test.each(["unreadable status and failed cancel", "readable running status and f
 
 test("a warning failure is retried without failing the stop and reuses its idempotency key", async () => {
   const { deps, seen, task, drive } = await stopWithFlakyStatus(99);
+  deps.runner.cancel = async () => Promise.reject(new Error("Docker unavailable"));
   await ageStop(task);
   const post = deps.linear.postComment;
   deps.linear.postComment = async (comment) => {

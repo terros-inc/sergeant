@@ -17,9 +17,10 @@ import type { ServiceDeps } from "./service.ts";
 // on the issue, and the task's `state.json` is set aside. The intent is removed only once all of that
 // is done; until then the loop or `serve` drives it again, at every intake too, its startup included,
 // whatever the issue's delegation or state is by then. A run whose status cannot be read is unknown
-// and is canceled like a running one, never taken as stopped (04 §6), and the stop goes on only once
-// its status, with any PR its worker reported, reads after the cancel (TECH-5070). Nothing resumes a
-// stopped task: the issue delegated and in Todo again starts a fresh one, with a new budget.
+// and is canceled like a running one, never taken as stopped (04 §6). The stop waits through the
+// existing grace for its final report (TECH-5070), then finishes with a visible warning if the report
+// stays unreadable (TECH-5074). Nothing resumes a stopped task: the issue delegated and in Todo again
+// starts a fresh one, with a new budget.
 
 const CancelIntent = z.object({
   /** Why the task stopped, as the end of a sentence: "the issue was moved to Backlog". */
@@ -136,6 +137,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     await writeIntent(dir, intent);
   }
   const stopping: RunId[] = [];
+  const unreadable: RunId[] = [];
   const runs: RunRecord[] = [];
   for (const runId of intent.runIds) {
     let run = await deps.runner.status(runId).catch(() => undefined);
@@ -157,10 +159,13 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     if (run) runs.push(run);
     else {
       stopping.push(runId);
+      unreadable.push(runId);
       log(`${ref}: status of ${runId} unreadable after its cancel, retrying`);
     }
   }
-  if (stopping.length > 0 && !intent.unreadableStatusSurfaced) {
+  const unreadablePastGrace = Date.now() - Date.parse(intent.at) >= SURFACE_STALLED_STOP_AFTER_MS ? unreadable : [];
+  const stillStopping = stopping.filter((runId) => !unreadablePastGrace.includes(runId));
+  if (stillStopping.length > 0 && !intent.unreadableStatusSurfaced) {
     intent.unreadableStatusAttempts++;
     await writeIntent(dir, intent);
     if (Date.now() - Date.parse(intent.at) >= SURFACE_STALLED_STOP_AFTER_MS) {
@@ -169,7 +174,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
         await deps.linear.postComment({
           issueId: issue.id,
           key: `cancel-stalled:${issue.id}:${intent.requestId}`,
-          body: stalledStopComment(stopping, intent.unreadableStatusAttempts),
+          body: stalledStopComment(stillStopping, intent.unreadableStatusAttempts),
         });
         intent.unreadableStatusSurfaced = true;
         await writeIntent(dir, intent);
@@ -181,7 +186,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
       }
     }
   }
-  if (stopping.length > 0) return { stopping, closedPullRequests: intent.closed };
+  if (stillStopping.length > 0) return { stopping: stillStopping, closedPullRequests: intent.closed };
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open.
   const { issue } = await deps.linear.readConversation(ref);
   for (const pr of await openPullRequests(issue.linkedPullRequests, runs, enrolled, deps)) {
@@ -195,7 +200,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     await writeIntent(dir, intent);
     log(`${ref}: closed ${pr.url}`);
   }
-  await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: stopComment(intent) });
+  await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: stopComment(intent, unreadablePastGrace) });
   await rename(join(dir, "state.json"), join(dir, `state.stopped-${intent.at.replace(/[:.]/g, "-")}.json`)).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "ENOENT") throw e;
   });
@@ -219,9 +224,12 @@ async function openPullRequests(linked: PullRequestRef[], runs: RunRecord[], enr
   return prs.filter((p) => p.state === "open" && p.author === deps.workerLogin);
 }
 
-function stopComment(intent: CancelIntent): string {
+function stopComment(intent: CancelIntent, unreadable: RunId[]): string {
   const closed = intent.closed.length > 0 ? `Closed ${intent.closed.map((p) => `[${p.repo}#${p.number}](${p.url})`).join(", ")}.` : "No open PR to close.";
-  return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled. ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
+  const missing = unreadable.length > 0
+    ? ` The final report for ${unreadable.map((id) => `run \`${id}\``).join(", ")} could not be read; a human may need to close any PR Sergeant could not see.`
+    : "";
+  return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled.${missing} ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
 }
 
 function stalledStopComment(runIds: RunId[], attempts: number): string {
