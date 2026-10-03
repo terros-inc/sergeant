@@ -77,3 +77,29 @@ test("a runaway task still stops at its fresh window's end and asks once", async
   expect((await saved()).budget.since).toBe(answeredAt);
   expect(seen).toEqual(["q1", commentIdFor(budgetQuestionKey(issue.id, answeredAt))]);
 });
+
+// Budgets are time and money only: no count of turns ends a task. TECH-4989's loop ended silently at
+// its twelfth turn while it looked active in Linear.
+test("a task with many legitimate turns keeps going inside its time and money window", async () => {
+  const started: string[] = [];
+  let turns = 0;
+  const { result, posted } = await scenario({
+    state: { startedAt: ago(1), runIds: [] },
+    runner: {
+      // Each turn starts a worker that finishes at once: a fresh fact, so the next poll takes a turn.
+      start: async (spec) => void started.push(spec.runId),
+      status: async (id) => ({ ...worker("succeeded", 0.1), runId: id }),
+      cancel: async () => {},
+    },
+    reasoner: async () => (turns++, turnOf([start], 0.1)),
+    onPoll: async (_poll, live) => {
+      if (turns >= 30) await writeFile(join(dir, "STOP"), "");
+      return live;
+    },
+  });
+
+  expect(result.outcome).toBe("stopped");
+  expect(turns).toBe(30);
+  expect(started).toHaveLength(30);
+  expect(posted).toEqual([]);
+});

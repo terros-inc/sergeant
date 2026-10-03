@@ -15,8 +15,11 @@ export type LoopOptions = {
   /** The fraction of merged heads that skipped fresh review which get an audit review (06 §8). */
   auditSampleRate?: number;
   pollSeconds?: number;
-  /** Runaway guards: reasoning turns in total, and minutes with nothing changing and nothing running. */
-  maxTurns?: number;
+  /**
+   * Minutes with nothing changing and nothing running before the loop ends. No turn count ends a task
+   * (TECH-5059): a runaway is bounded by its budget window, and every effect is keyed or taken only
+   * when something changed since the last turn.
+   */
   idleMinutes?: number;
   /**
    * The task's budget window: hard wall time from the start, and best-effort spend (default 120
@@ -35,6 +38,6 @@ export type LoopOptions = {
 };
 
 export type LoopResult = {
-  outcome: "done" | "merged_not_done" | "stopped" | "turn_limit" | "idle";
+  outcome: "done" | "merged_not_done" | "stopped" | "idle";
   detail: string;
 };

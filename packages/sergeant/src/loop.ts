@@ -327,7 +327,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       await wait(pollMs);
       continue;
     }
-    if (state.turns >= (opts.maxTurns ?? 12)) return { outcome: "turn_limit", detail: `${state.turns} turns taken` };
     if (opts.wake) opts.wake.pending = false;
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);

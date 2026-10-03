@@ -120,8 +120,8 @@ repositories; the merge is one control-plane action: fresh exact-head PR, check,
 the Gate, and GitHub's SHA-guarded merge. A blocking review finding or a failed required check
 wakes a turn that may start a successor worker (one at a time, R1) on the same PR; its brief carries
 the PRs with their check states and every earlier run's report and findings. The fix is a new head,
-so the merge again needs a fresh approving review of it or the worker's waiver for it (M6); the
-loop's `maxTurns` bounds the iterations. This runner cannot resume a worker's session, so every
+so the merge again needs a fresh approving review of it or the worker's waiver for it (M6). No
+turn count bounds the iterations: the budget window does (TECH-5059). This runner cannot resume a worker's session, so every
 continuation is a successor. Re-running the same command resumes from `<dir>/state.json`.
 
 Reasoning may ask a human (`ask_human`): the V2 agent posts one question comment, keyed by the issue
@@ -243,7 +243,7 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   sweep) keeps feedback from before the rollout out. Per issue, at most 3 follow-ups are filed and 10
   pieces of feedback judged; past that, or after 3 failed attempts at one piece, Sergeant says so in a
   comment on the issue rather than dropping it silently.
-- A loop that ends (idle, the turn limit, a failed read) is admitted again on a later intake while
+- A loop that ends (idle, a failed read) is admitted again on a later intake while
   the issue is still delegated: an unchanged task takes no turn, a changed one does. A failed intake
   is logged and retried next interval.
 - SIGINT or SIGTERM stops intake and ends each loop at its next poll, never mid-turn; a second signal

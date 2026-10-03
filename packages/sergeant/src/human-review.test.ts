@@ -50,9 +50,10 @@ test("a human's requested changes on the PR wake a turn, block the merge, and re
   const seen: SituationReport[] = [];
   const started: RunSpec[] = [];
   const merged: unknown[] = [];
+  const stop = new AbortController();
 
   const result = await runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, maxTurns: 2, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {}, signal: stop.signal },
     {
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
@@ -65,6 +66,8 @@ test("a human's requested changes on the PR wake a turn, block the merge, and re
       },
       reasoner: {
         async turn(situation) {
+          // A third turn is past what this test asks: end the loop at its next poll.
+          if (seen.length === 2) return (stop.abort(), { output: { summary: "done", actions: [] }, model: "m", promptVersion: "p" });
           seen.push(situation);
           // After the first turn decided to wait, the captain requests changes; nothing else changes.
           if (seen.length === 1) livePr = { ...livePr, humanFeedback: captain };
@@ -79,7 +82,7 @@ test("a human's requested changes on the PR wake a turn, block the merge, and re
     },
   );
 
-  expect(result.outcome).toBe("turn_limit");
+  expect(result.outcome).toBe("stopped");
   expect(seen.map((s) => s.pullRequests[0]?.humanFeedback.map((f) => f.id))).toEqual([[], ["review_comment:4", "review:5"]]);
   expect(seen[1]?.conversationRevision).not.toBe(seen[0]?.conversationRevision);
   // Sergeant's own approving review of this head does not outrank the captain's request.
