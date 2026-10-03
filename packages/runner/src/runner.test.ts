@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import type { RunSpec } from "@terros/sergeant-contracts";
+import { issueRevision, type RunSpec } from "@terros/sergeant-contracts";
 import type { Exec, ExecOptions } from "./exec.ts";
 import { containerRunner, type ContainerRunnerOptions } from "./runner.ts";
 
@@ -98,7 +98,8 @@ test("cancel stays retryable until Docker confirms the container stopped", async
   expect((await runner.status("run_t1")).status).toBe("running");
 
   await runner.cancel("run_t1");
-  expect((await runner.status("run_t1")).status).toBe("canceled");
+  // Every record of the run names the issue text it started from, which M13 checks (TECH-5034).
+  expect(await runner.status("run_t1")).toMatchObject({ status: "canceled", issueRevision: issueRevision(spec.conversation.issue) });
 });
 
 // Unknown is not death (04 §6, captain). Reading a Docker outage as "gone" would fail a worker
