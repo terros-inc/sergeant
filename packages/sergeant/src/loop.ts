@@ -8,6 +8,7 @@ import {
   linearUploads,
   issueRevision,
   SituationReport,
+  type Conversation,
   type ProposedAction,
   type RunRecord,
 } from "@terros/sergeant-contracts";
@@ -92,6 +93,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // key every poll until Linear shows it or a human changes the conversation, never left to an idle
   // guard. Only in memory: a restart instead finds the turn's fingerprint uncommitted and takes a turn.
   let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
+  // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
+  const resolvedThreads = new Set<string>();
+  const resolveDue = (conversation: Conversation) => resolveAnswered(conversation, state.actedThrough, deps.linear, resolvedThreads, log);
 
   const recordReviews = (runs: RunRecord[]) =>
     recordReviewFacts(runs, state, { issueId: opts.issueId, auditFollowups: files.auditFollowups, reviews: files.reviews, log, save });
@@ -158,6 +162,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
 
     if (state.merged) {
+      await deps.linear.readConversation(opts.issueId).then(resolveDue, (e: Error) => log(`could not read the conversation: ${e.message}`));
       const stopped = await postOutcome(state.merged, opts, deps, log, save);
       if (stopped) return stopped;
       // The audit sample is drawn after the merge, so it cannot hold it up.
@@ -197,6 +202,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       stopping = active.reason;
       continue;
     }
+    await resolveDue(conversation);
     // TECH-5059: a human's answer to Sergeant's latest question, the budget question included, opens a
     // fresh window from the answer, with zero spend and the installation's budget now. Only an answer
     // newer than the window's start does, so it opens one window once, across restarts too.
@@ -346,7 +352,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     );
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
-    await resolveAnswered({ answered: turn.output.answered, outcomes }, situation, deps.linear, log);
     await postHandoffs(conversation.issue.id);
     if (retryMerge) {
       log("the merge did not happen for a reason the next poll may not show: another turn after the next poll");

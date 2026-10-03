@@ -79,6 +79,10 @@ export async function scenario(opts: {
   reasoner: Reasoner["turn"];
   onPoll: (poll: number, live: Conversation) => Promise<Conversation> | Conversation;
   loop?: Partial<LoopOptions>;
+  /** Runs before a thread is resolved; throw to simulate a crash that loses the resolve (TECH-5057). */
+  beforeResolve?: (id: string) => Promise<void> | void;
+  /** Runs before a comment is posted; throw to fail the post. */
+  beforePost?: (req: { key: string; parentId?: string }) => void;
 }) {
   dir ||= await mkdtemp(join(tmpdir(), "sergeant-budget-test-"));
   if (opts.state) await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", turns: 1, recentTurns: [], ...opts.state }));
@@ -97,13 +101,14 @@ export async function scenario(opts: {
         readConversation: async () => (live = await opts.onPoll(++polls, live)),
       moveIssueToStarted: async () => ({ moved: false as const }),
         async postComment({ key, body, parentId }) {
+          opts.beforePost?.({ key, ...(parentId && { parentId }) });
           posted.push(body);
           if (parentId) replies.push({ body, parentId });
           const id = commentIdFor(key);
           if (live.agentComments.some((c) => c.id === id)) return;
           live = { ...live, agentComments: [...live.agentComments, { id, createdAt: new Date().toISOString(), body, ...(parentId && { parentId }) }] };
         },
-        resolveThread: async (id) => (resolved.push(id), "resolved" as const),
+        resolveThread: async (id) => (await opts.beforeResolve?.(id), resolved.push(id), "resolved" as const),
         createFollowupIssue: async () => { throw new Error("unused"); },
       },
       github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
@@ -111,7 +116,7 @@ export async function scenario(opts: {
       reasoner: { turn: opts.reasoner },
     },
   );
-  return { result, posted, replies, resolved, merged };
+  return { result, posted, replies, resolved, merged, live };
 }
 
 export type Saved = { runIds: string[]; budget: { window: unknown; since?: string; priorRuns: string[] }; recentTurns: { outcomes: string[] }[] };

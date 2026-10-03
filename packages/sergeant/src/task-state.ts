@@ -29,6 +29,11 @@ const TaskState = z.object({
   lastFingerprint: z.string().optional(),
   /** The Linear conversation the last turn saw, so an edit made while waiting on a reply is noticed (TECH-5034). */
   seen: z.object({ revision: ConversationRevision, issue: z.string() }).optional(),
+  /**
+   * TECH-5057: the newest human comment (its Linear time) that a turn which asked nothing had read: the
+   * task has acted on every human reply up to it. Saved with that turn, so it survives a crash.
+   */
+  actedThrough: z.iso.datetime({ offset: true }).optional(),
   runIds: z.array(RunId),
   /**
    * Runs saved before the runner was asked to start them and not yet seen started: a crash, or a
@@ -92,6 +97,13 @@ export function applyTurn(
   state.lastFingerprint = turn.fingerprint;
   state.seen = { revision: conversationRevision(situation.conversation), issue: issueRevision(situation.conversation.issue) };
   state.recentTurns = [...state.recentTurns, { at, summary: turn.summary, outcomes: described }].slice(-8);
+  // A turn that proposed asking a human, whatever became of the ask, has not moved on (Q1: it does
+  // nothing else); any other turn has acted on every human comment it read, a zero-action turn included.
+  if (!outcomes.some((o) => o.action.kind === "ask_human")) {
+    const read = situation.conversation.humanComments.map((c) => c.createdAt);
+    const newest = [state.actedThrough, ...read].filter((t) => t !== undefined).sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+    if (newest) state.actedThrough = newest;
+  }
   const done = outcomes.flatMap((o) => (o.status === "done" ? [o] : []));
   for (const o of done) {
     const { started } = o;

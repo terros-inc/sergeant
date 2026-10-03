@@ -9,9 +9,7 @@ import {
   type HumanComment,
   type LinearPort,
   type ProposedAction,
-  type SituationReport,
 } from "@terros/sergeant-contracts";
-import type { ActionOutcome } from "./execute.ts";
 
 // UNF-727: Sergeant asks a human in Linear and does nothing more on the task until a human changes the
 // conversation. The wait is never stored. A question is posted under a key made of the issue and the
@@ -86,28 +84,44 @@ export function latestAnswer(conversation: Conversation): HumanComment | undefin
 }
 
 /**
- * TECH-5052: once Sergeant has acted on a human's answer, its question thread is resolved in Linear,
- * so an open thread only ever means "still needs a human". Acted on means a turn that named the
- * question it `answered` (the budget question included), asked nothing, and whose every action was
- * done. An unusable answer gets a follow-up in the same thread instead (`ask_human.followsUp`) and
- * stays open. The adapter resolves only a thread Sergeant started and leaves a resolved one alone.
- * Best-effort: a failure is logged and never retried, and it never stops the task.
+ * TECH-5057: resolve Sergeant's question threads in Linear so an open thread only ever means "still
+ * needs a human". The loop runs this on every pass, the merged task's included, and the rule is derived
+ * from facts, never from reasoning's say-so. A thread resolves when, for the latest question Sergeant
+ * asked in it (the budget question included):
+ *   - it is Sergeant's own question (a Linear comment of its that opens with the question heading);
+ *   - a human has commented after it, in its thread or on the issue (`humanComments` is only humans');
+ *   - the task has acted since that reply: a turn that proposed no ask_human had read it (`actedThrough`,
+ *     saved with that turn in `state.json`).
+ * An unusable answer gets a follow-up in the same thread (`ask_human.followsUp`); that turn asks, so it
+ * acts on nothing and the thread stays open until a turn moves on from a later reply. Every such thread
+ * is resolved, not only the latest question's, so a lost resolve is not stranded by a newer question.
+ * Nothing about the resolve itself is stored: a process lost after the turn was saved resolves the
+ * thread on the restarted loop's first pass, from the same facts, with no new turn or human comment
+ * needed. The adapter leaves a resolved thread alone, so a retry is harmless; `done` (this process's
+ * memory) only spares Linear a call per pass. A failure is logged and retried on the next pass.
  */
 export async function resolveAnswered(
-  turn: { answered?: string | undefined; outcomes: ActionOutcome[] },
-  situation: Pick<SituationReport, "conversation">,
+  conversation: Conversation,
+  actedThrough: string | undefined,
   linear: Pick<LinearPort, "resolveThread">,
+  done: Set<string>,
   log: (line: string) => void,
 ): Promise<void> {
-  const { conversation } = situation;
-  const { outcomes } = turn;
-  // A turn that asks does nothing else (Q1), so it acted on no answer: its question follows one up.
-  const applied = outcomes.every((o) => o.status === "done" && o.action.kind !== "ask_human");
-  const answered = applied ? ownQuestion(conversation, turn.answered) : undefined;
-  if (!answered || !linear.resolveThread) return;
-  const { id } = answered;
-  await linear.resolveThread(id).then(
-    (result) => log(`question ${id} answered and acted on: ${result.replaceAll("_", " ")}`),
-    (e: Error) => log(`could not resolve the thread of question ${id}: ${e.message}`),
-  );
+  if (!linear.resolveThread || actedThrough === undefined) return;
+  const at = (c: { createdAt: string }) => Date.parse(c.createdAt);
+  const latest = new Map<string, AgentComment>();
+  for (const c of conversation.agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING))) {
+    const thread = c.parentId ?? c.id;
+    const seen = latest.get(thread);
+    if (!seen || at(c) > at(seen)) latest.set(thread, c);
+  }
+  const acted = Date.parse(actedThrough);
+  for (const [thread, question] of latest) {
+    if (done.has(thread)) continue;
+    if (!conversation.humanComments.some((c) => at(c) > at(question) && at(c) <= acted)) continue;
+    await linear.resolveThread(thread).then(
+      (result) => (done.add(thread), log(`question ${question.id} answered and acted on: ${result.replaceAll("_", " ")}`)),
+      (e: Error) => log(`could not resolve the thread of question ${question.id}: ${e.message}`),
+    );
+  }
 }

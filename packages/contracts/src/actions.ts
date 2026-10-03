@@ -87,11 +87,6 @@ export type ProposedAction = z.infer<typeof ProposedAction>;
 export const TurnOutput = z.object({
   summary: z.string().min(1).max(2_000),
   actions: z.array(ProposedAction).max(5),
-  /**
-   * TECH-5052: the id of Sergeant's question whose human reply this turn acted on. Once every action
-   * of the turn is done, Sergeant resolves that question's thread in Linear.
-   */
-  answered: z.string().min(1).optional(),
   nextWakeSeconds: z.number().int().min(60).max(14_400).optional(),
 });
 export type TurnOutput = z.infer<typeof TurnOutput>;
