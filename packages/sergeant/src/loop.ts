@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { conversationRevision, linearUploads, issueRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { drawAudit, exists, finishReviews, observeCompletion, postOutcome } from "./after-merge.ts";
+import { markAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
 import { cancelPending, driveCancel } from "./cancel.ts";
@@ -308,7 +309,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       // TECH-5118: a human accepted the work as it is in reply to the budget question, so the task ends
       // with no fresh window and nothing more asked. Its question thread is resolved and `state.json` set
       // aside like a stop's, so intake resumes it no more; its PRs and the issue are left for a human.
+      // The marker keeps intake from starting it afresh while the issue stays in Todo (accepted.ts).
       await resolveDue(conversation);
+      await markAccepted(opts.dir, at);
       await rename(files.state, join(opts.dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
       return { outcome: "accepted", detail: "a human accepted the work as it is" };
     }

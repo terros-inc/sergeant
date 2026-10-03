@@ -79,6 +79,33 @@ test.each([
   expect((await saved()).budget.since).toBe(answeredAt);
 });
 
+test("a reply posted while the accepting turn reasoned denies the accept, and gets its fresh window", async () => {
+  const answeredAt = ago(2);
+  const steer = human("c2", ago(1), "Actually, just fix the failing lint check, then stop.");
+  const started: string[] = [];
+  const turns: number[] = [];
+  const { result, posted } = await scenario({
+    state: exhausted,
+    conversation: { agentComments: [budgetAsked], humanComments: [human("c1", answeredAt, "2")] },
+    runner: runner(started),
+    // The first turn read only "2" and accepts; the steer lands before its live check. The next turn reads it.
+    reasoner: async (situation) => (turns.push(situation.conversation.humanComments.length), turnOf(turns.length === 1 ? [accept] : [start])),
+    onPoll: async (_poll, live) => {
+      if (started.length > 0) await writeFile(join(dir, "STOP"), "");
+      return turns.length > 0 && live.humanComments.length === 1 ? { ...live, humanComments: [...live.humanComments, steer] } : live;
+    },
+  });
+
+  expect(result.outcome).toBe("stopped");
+  expect(turns).toEqual([1, 2]);
+  expect(started).toHaveLength(1);
+  expect(posted).toEqual([]);
+  const { budget, recentTurns } = await saved();
+  expect(budget.since).toBe(answeredAt);
+  expect(recentTurns.at(-2)?.outcomes).toEqual([expect.stringMatching(/^accept_as_is: denied by Q2 \(the conversation changed since/)]);
+  expect(await readdir(dir)).not.toContain("accepted.json");
+});
+
 test("accept_as_is after an answer to any other question is refused, and the task goes on", async () => {
   const answeredAt = ago(1);
   const question = { id: "q1", createdAt: ago(60), body: `${QUESTION_HEADING}\n\nShip it as it is, or add the migration?` };

@@ -140,7 +140,10 @@ window (TECH-5059): from the answer, with zero spend and the installation's curr
 extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
 K1–K4, and `sgt task grant` in 03 §7 and 11). A reply that accepts the work as it is ends the task instead (TECH-5118): reasoning
 proposes `accept_as_is`, allowed only after a human replied to the budget question, and Sergeant asks
-nothing more and leaves the PRs and the issue for a human to merge or close.
+nothing more and leaves the PRs and the issue for a human to merge or close. It is decided on the live
+conversation, so a reply posted while reasoning ran is read by the next turn instead. While the issue
+stays delegated and in Todo, intake does not start it afresh; a human moving it out of Todo and back
+(or `sgt task wake`) starts a fresh task, as after a stop. A comment alone does not.
 
 ## 7. Completion: PRs, automation, and Done
 
