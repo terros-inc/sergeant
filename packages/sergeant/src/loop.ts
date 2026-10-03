@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BudgetStatus,
@@ -22,7 +22,7 @@ import type { Reasoner } from "@terros/sergeant-reasoning";
 import { z } from "zod";
 import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
 import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
-import { cancelPending, driveCancel, recordStop } from "./cancel.ts";
+import { cancelPending, driveCancel, recordStop, stoppedFile } from "./cancel.ts";
 import { askHuman, checkLive, describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
@@ -65,6 +65,10 @@ const TaskState = z.object({
       /** Fixed when the task starts; a restart with other flags does not change it, only a grant extends it. */
       window: BudgetStatus.shape.window,
       grants: z.array(z.object({ commentId: z.string(), at: z.iso.datetime() })),
+      /** When the attempt restarted after a human stop (TECH-4999), which reset the window. */
+      restartedAt: z.iso.datetime().optional(),
+      /** Runs of the attempts before it, which its window does not count. */
+      priorRuns: z.array(RunId).default([]),
     }),
   merged: z
     .object({
@@ -152,8 +156,19 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     await writeFile(tmp, JSON.stringify(state, null, 2));
     await rename(tmp, files.state);
   };
+  // A human stopped the task since its last loop (cancel.ts), and it is eligible again: the clock
+  // resets (TECH-4999). The attempt gets a fresh window from now, zero spend, and the budget configured
+  // now; earlier grants and runs belong to the earlier window. A task never stopped keeps its window.
+  if (await exists(stoppedFile(opts.dir))) {
+    const now = new Date().toISOString();
+    state.startedAt = now;
+    state.turnCostUsd = 0;
+    state.budget = { window: { ...DEFAULT_BUDGET, ...opts.budget }, grants: [], restartedAt: now, priorRuns: [...state.runIds] };
+    log(`restarted after a human stop: a fresh budget window of ${JSON.stringify(state.budget.window)} from ${now}`);
+  }
   // The start time and the budget window are on disk before anything else happens.
   await save();
+  await rm(stoppedFile(opts.dir), { force: true });
   const requested = { ...state.budget.window, ...opts.budget };
   if (requested.wallMinutes !== state.budget.window.wallMinutes || requested.costUsd !== state.budget.window.costUsd) {
     log(`ignoring the budget options: this task keeps its window of ${JSON.stringify(state.budget.window)}; only a grant extends it`);
@@ -254,6 +269,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       return finishReviews(state.merged, result, { runIds: state.runIds, recordReviews, stop: files.stop, opts, deps, log });
     }
 
+    // A human stopped the task while this loop ran (an API cancel driven by `serve`'s intake, say): this
+    // attempt is over, and the next one starts with a fresh window.
+    if (await exists(stoppedFile(opts.dir))) return { outcome: "stopped", detail: "a human stopped the task" };
     const { runs, unknown } = await readRuns();
     await recordReviews(runs);
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
@@ -285,7 +303,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     // The budget question of the current window, if Linear has it: its id is derived from a key, so a
     // crash between posting it and saving anything loses nothing.
-    const questionId = commentIdFor(budgetQuestionKey(conversation.issue.id, state.budget.grants.length));
+    const questionId = commentIdFor(budgetQuestionKey(conversation.issue.id, state.budget.grants.length, state.budget.restartedAt));
     const budgetAsked = conversation.agentComments.find((c) => c.id === questionId);
     const budget = budgetOf(runs, unknown.length, budgetAsked && questionId);
     // UNF-728: an exhausted budget cancels running work through the runner, every poll until confirmed,
@@ -360,7 +378,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // happens and no runaway guard ends the wait (UNF-727); the reply wakes a turn, which may grant one
     // more window.
     if (!exhausted.allowed && !budgetAsked) {
-      const key = budgetQuestionKey(conversation.issue.id, state.budget.grants.length);
+      const key = budgetQuestionKey(conversation.issue.id, state.budget.grants.length, state.budget.restartedAt);
       const asked = await askHuman(budgetQuestion(situation, exhausted.reason), situation, deps, key);
       log(`budget exhausted (${exhausted.reason}): asking whether to continue: ${describeOutcome(asked)}`);
       await wait(pollMs);

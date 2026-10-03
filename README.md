@@ -155,8 +155,12 @@ happens. It is the installation config's `budget` (`{ "minutes": 45, "usd": 10 }
 each field unset defaulting to 120 minutes and $25; `canary`'s `--budget-minutes` and `--budget-usd`
 override the config's for its task. A restart keeps the stored window and logs that it ignores a
 different one, so changing the config's `budget` affects only tasks that start afterward; only a grant
-extends a task's window. Wall time is hard and runs from the task's start, including time spent
-waiting for a human. Spend is best-effort: the cost runs and reasoning turns report when they end (a turn's cost counts before its proposals run), so a running or
+extends a task's window. Any human stop resets the clock (TECH-4999): once a task undelegated, moved
+to Backlog, Canceled or Done, or canceled with `sgt task cancel` is eligible again (delegated again, or
+back in Todo), it starts a fresh window from that moment with zero spend and the config's current
+`budget`; a grant belongs to the window it was given in. Every finished cancel leaves `stopped.json` in
+the task's directory, which the next loop takes as that restart. Wall time is hard and runs from the
+window's start, including time spent waiting for a human. Spend is best-effort: the cost runs and reasoning turns report when they end (a turn's cost counts before its proposals run), so a running or
 canceled run's cost is unknown and the wall time is the backstop; there is no billing ledger. Once
 either is exhausted, no run, message, follow-up, or merge happens (Gate rule B1, checked before every
 effect and again right after its live reads), running runs are canceled until the runner confirms it,

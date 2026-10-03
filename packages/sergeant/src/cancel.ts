@@ -18,7 +18,9 @@ import type { ServiceDeps } from "./service.ts";
 // status cannot be read is unknown and is canceled like a running one, never taken as stopped (04 §6).
 // The loop records its own cancel when the issue is undelegated or moved to Backlog, Canceled, or Done
 // without Sergeant's merge; a stop by state also sets the task's `state.json` aside, so the issue
-// moved back to Todo is a fresh task.
+// moved back to Todo is a fresh task. Every finished cancel, whatever its cause, also leaves
+// `stopped.json` (TECH-4999): a human stop resets the task's budget clock, so its next loop, once the
+// issue is delegated again or back in Todo, opens a fresh window (loop.ts).
 
 const ClosedPr = z.object({ repo: RepoSlug, number: z.number().int().positive(), url: z.url() });
 type ClosedPr = z.infer<typeof ClosedPr>;
@@ -49,6 +51,8 @@ export class CancelConflict extends Error {}
 
 export const taskDir = (stateDir: string, ref: string) => join(stateDir, "tasks", ref);
 const intentFile = (dir: string) => join(dir, "cancel.json");
+/** Left by a finished cancel; the task's next loop takes it as a restart with a fresh budget window. */
+export const stoppedFile = (dir: string) => join(dir, "stopped.json");
 
 /** Every run the task recorded, its sampled audit included. */
 export const runIdsOf = (state: TaskState | undefined): RunId[] =>
@@ -168,6 +172,7 @@ export async function driveCancel(dir: string, ref: string, deps: CancelDeps, en
       if (e.code !== "ENOENT") throw e;
     });
   }
+  await writeFile(stoppedFile(dir), JSON.stringify({ at: intent.at, cause: intent.cause }));
   await rm(intentFile(dir), { force: true });
   return { undelegated, stopping };
 }

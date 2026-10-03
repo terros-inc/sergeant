@@ -5,6 +5,8 @@ import type { BudgetStatus, ProposedAction, PullRequestFacts, RunRecord, Situati
 // When either is exhausted, the loop cancels running work through the runner and asks the human,
 // through the ordinary question path (UNF-727), whether to continue. A reply reasoning reads as
 // "extend" becomes a `grant_budget` citing it: one more window. Anything else leaves the task stopped.
+// A human stop (undelegation, Backlog, Canceled or Done, `sgt task cancel`) resets the clock
+// (TECH-4999): the restarted attempt starts a fresh window, and only its own runs and turns count.
 
 export type BudgetWindow = BudgetStatus["window"];
 
@@ -13,8 +15,11 @@ export const DEFAULT_BUDGET: BudgetWindow = { wallMinutes: 120, costUsd: 25 };
 /**
  * The budget question's idempotency key: one per task and window (0 for the first, then one per
  * grant), so a restart finds the question already asked from Linear alone and never asks it twice.
+ * An attempt restarted after a human stop (TECH-4999) keys its windows by its start too, so its
+ * questions are its own, not the earlier attempt's.
  */
-export const budgetQuestionKey = (issueId: string, window: number) => `budget-question:${issueId}:${window}`;
+export const budgetQuestionKey = (issueId: string, window: number, restartedAt?: string) =>
+  `budget-question:${issueId}:${restartedAt === undefined ? "" : `${restartedAt}:`}${window}`;
 
 /** The task's budget now, from what `state.json` keeps (start, window, turn spend, grants) and the run records. */
 export function budgetStatus(input: {
@@ -24,18 +29,21 @@ export function budgetStatus(input: {
   grants: BudgetStatus["grants"];
   questionId?: string | undefined;
   runs: RunRecord[];
+  /** Runs of attempts before the latest human stop, which this window does not count. */
+  priorRuns?: string[] | undefined;
   /** Runs whose status could not be read this poll. */
   unknownRuns: number;
 }): BudgetStatus {
   const { window, grants } = input;
   const windowStart = grants.at(-1)?.at ?? input.startedAt;
-  const runCost = input.runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  const runs = input.runs.filter((r) => !input.priorRuns?.includes(r.runId));
+  const runCost = runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
   return {
     window,
     wallDeadline: new Date(Date.parse(windowStart) + window.wallMinutes * 60_000).toISOString(),
     spentUsd: round(runCost + input.turnCostUsd),
     costLimitUsd: window.costUsd * (grants.length + 1),
-    unknownCostRuns: input.runs.filter((r) => r.costUsd === undefined).length + input.unknownRuns,
+    unknownCostRuns: runs.filter((r) => r.costUsd === undefined).length + input.unknownRuns,
     grants,
     ...(input.questionId !== undefined && { questionId: input.questionId }),
   };
