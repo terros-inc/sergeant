@@ -37,8 +37,11 @@ export function apiClient(opts: ApiClientOptions): ApiClient {
     const url = `${opts.api}${path}`;
     if (opts.token) {
       const parsed = URL.parse(url);
-      if (!parsed || (parsed.protocol !== "https:" && !LOOPBACK.includes(parsed.hostname))) {
-        return failure("bad_request", `refusing to send your Linear login to ${parsed?.host ?? opts.api} without HTTPS`);
+      if (!parsed) {
+        return failure("bad_request", `invalid Sergeant API URL: ${opts.api}`);
+      }
+      if (parsed.protocol !== "https:" && !LOOPBACK.includes(parsed.hostname)) {
+        return failure("bad_request", `refusing to send your Linear login to ${parsed.host} without HTTPS`);
       }
     }
     const headers = { ...(body && { "Content-Type": "application/json" }), ...(opts.token && { Authorization: `Bearer ${opts.token}` }) };
