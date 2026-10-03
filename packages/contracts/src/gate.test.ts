@@ -226,7 +226,9 @@ test("asks a human to re-review only when their requested changes are all that b
   expect(ask({ pr: { humanFeedback: [{ ...requested, commitId: null }] } })).toEqual(["captain"]);
 
   // M8 plus any other rule: the merge waits on more than the human, so no one is asked.
-  expect(ask({ runs: [reviewer(), { ...worker(true), runId: "run_worker_2", status: "running", report: null }] })).toEqual([]); // M11
+  const activeRun: Over = { runs: [reviewer(), worker(true), { ...worker(true), runId: "run_worker_2", status: "running", report: null }] };
+  expect(checkMerge(merge, facts(activeRun))).toMatchObject({ allowed: false, rule: "M11" });
+  expect(ask(activeRun)).toEqual([]); // M8 plus M11
   expect(ask({ runs: [{ ...reviewer(), issueRevision: "issue-v0" }, worker(true)] })).toEqual([]); // M13
   expect(ask({ runs: [reviewer(), worker(true, true, ["https://docs.google.com/document/d/x"])] })).toEqual([]); // M14
   expect(ask({ pr: { checks: { sha: head, required: [{ name: "ci", state: "pending" }] } } })).toEqual([]); // M5
