@@ -13,6 +13,7 @@ const conversation: Conversation = {
     title: "T",
     description: "D",
     state: "Todo",
+    stateType: "unstarted",
     delegate: null,
     linkedPullRequests: [],
   },

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import {
   BudgetStatus,
   checkBudget,
-  checkDelegation,
   commentIdFor,
   conversationRevision,
   FiledFollowup,
@@ -23,7 +22,8 @@ import type { Reasoner } from "@terros/sergeant-reasoning";
 import { z } from "zod";
 import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
 import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
-import { askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
+import { driveCancel, recordStop } from "./cancel.ts";
+import { askHuman, checkLive, describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import { outcomeComment } from "./outcome.ts";
@@ -36,8 +36,8 @@ import { watchKey } from "./webhooks.ts";
 // Situation Report, take a reasoning turn when something changed, execute through the Gate, and
 // after the closing PR's merge post one outcome comment and watch Linear for the issue reaching Done;
 // a `Part of` PR's merge leaves the task working on the rest (UNF-734). It runs only while the issue
-// is delegated to Sergeant's V2 agent (UNF-724) and within its budget (UNF-728), and holds while a
-// question it asked is unanswered (UNF-727). Every finished review is recorded as telemetry, and a
+// is delegated to Sergeant's V2 agent (UNF-724), not in Backlog, Canceled, or Done (TECH-4989), and
+// within its budget (UNF-728), and holds while a question it asked is unanswered (UNF-727). Every finished review is recorded as telemetry, and a
 // merged head that skipped fresh review may be sampled for a nonblocking audit review (UNF-730). A
 // deliberately temporary local store (`state.json`) lets a restarted loop resume; Linear, GitHub, and
 // the runner's own run records stay the authority for everything else.
@@ -207,6 +207,22 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const budgetOf = (runs: RunRecord[], unknownRuns: number, questionId?: string) =>
     budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, ...(questionId && { questionId }), runs, unknownRuns });
 
+  // The task's durable cancel (cancel.ts), recorded here and driven under the task's lock every poll
+  // until the runner confirms each run stopped, its open PRs are closed, and the issue is told. A stop
+  // by state sets `state.json` aside, so nothing here saves it again.
+  const stop = async (cause: Parameters<typeof recordStop>[1], reason: string): Promise<LoopResult | undefined> => {
+    await recordStop(opts.dir, cause);
+    const exclusive = deps.exclusive ?? ((step) => step());
+    const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
+    const progress = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
+    if (progress?.stopping.length === 0) {
+      if (cause.cause !== "state") await recordReviews((await readRuns()).runs);
+      return { outcome: "stopped", detail: reason };
+    }
+    log(`stopping (${reason}): retrying cancellation`);
+    return undefined;
+  };
+
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };
     if (opts.signal?.aborted) return { outcome: "stopped", detail: "the service is stopping" };
@@ -241,17 +257,21 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       opts.wake.watched = [conversation.issue.id, ...keys];
     };
     watch(conversation.issue.linkedPullRequests);
-    // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer,
-    // is not Sergeant's to work on. Undelegation is the human's cancel: its runs are canceled so they
-    // publish nothing more, and the loop stops only once the runner confirms each one stopped. The
-    // executor re-checks live before each start and merge (A1).
-    const delegation = checkDelegation(conversation.issue, deps.agentUserId);
-    if (!delegation.allowed) {
-      if ((await cancelRuns(live, deps, log)) === 0) {
-        await recordReviews((await readRuns()).runs);
-        return { outcome: "stopped", detail: delegation.reason };
-      }
-      log(`stopping (${delegation.reason}): retrying cancellation`);
+    // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer
+    // (A1), or that a human moved to Backlog, Canceled, or Done (A2), is not Sergeant's to work on. Each
+    // is the human's cancel: its runs are canceled so they publish nothing more, its open PRs are
+    // closed, and the loop stops only once the runner confirms each run stopped. Done after the
+    // worker's closing PR merged is the task's normal end instead, taken below. The executor re-checks
+    // both live before each effect.
+    const active = checkLive(conversation.issue, deps.agentUserId);
+    const finished =
+      !active.allowed &&
+      active.rule === "A2" &&
+      conversation.issue.stateType === "completed" &&
+      landedOf(await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps), runs, deps.workerLogin) !== undefined;
+    if (!active.allowed && !finished) {
+      const stopped = await stop(active.rule === "A1" ? { cause: "undelegated" } : { cause: "state", state: conversation.issue.state }, active.reason);
+      if (stopped) return stopped;
       await wait(pollMs);
       continue;
     }
@@ -299,7 +319,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
     // own PR reported closing: a human may link one merged elsewhere, and a merged `Part of` PR is only
     // a fact for the next turn.
-    const landed = pullRequests.find((p) => p.state === "merged" && p.author === deps.workerLogin && reportedClosing(runs, p) === true);
+    const landed = landedOf(pullRequests, runs, deps.workerLogin);
     if (landed?.mergedSha) {
       const outcome = outcomeComment(landed, landed.mergedSha, runs, state.followups);
       state.merged = {
@@ -416,6 +436,10 @@ async function cancelRuns(runIds: RunId[], deps: Ports, log: (line: string) => v
   }
   return unconfirmed;
 }
+
+/** The worker's own PR it reported closing the issue, merged. */
+const landedOf = (pullRequests: PullRequestFacts[], runs: RunRecord[], workerLogin: string) =>
+  pullRequests.find((p) => p.state === "merged" && p.author === workerLogin && reportedClosing(runs, p) === true);
 
 /**
  * Every PR in an enrolled repository that Linear links to the issue or a worker reported, re-read

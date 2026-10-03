@@ -61,7 +61,7 @@ const merge: MergePr = { kind: "merge_pr", repo, number: 7, expectedHeadSha: hea
 const start: ProposedAction = { kind: "start_worker", objective: "finish", repositories: [repo] };
 const human = (id: string, at: string, body: string): HumanComment => ({ id, author: { id: "u1", name: "Human" }, createdAt: at, updatedAt: at, body });
 
-const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] };
+const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] };
 const turnOf = (actions: ProposedAction[], costUsd?: number) => ({ output: { summary: "s", actions }, model: "m", promptVersion: "p", ...(costUsd !== undefined && { costUsd }) });
 
 let dir = "";
@@ -105,7 +105,7 @@ async function scenario(opts: {
         },
         createFollowupIssue: async () => { throw new Error("unused"); },
       },
-      github: { readPullRequest: async () => pr, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
+      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
       runner: opts.runner,
       reasoner: { turn: opts.reasoner },
     },

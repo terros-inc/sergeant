@@ -25,7 +25,7 @@ afterEach(async () => {
 
 function fakes(runs: RunRecord[] = []) {
   const conversation: Conversation = {
-    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Fix the login", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [] },
+    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Fix the login", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
     humanComments: [],
     agentComments: [],
   };
@@ -35,7 +35,7 @@ function fakes(runs: RunRecord[] = []) {
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
-    delegatedIssues: async () => (conversation.issue.delegate ? ["UNF-1"] : []),
+    delegatedIssues: async () => (conversation.issue.delegate ? [{ identifier: "UNF-1", stateType: conversation.issue.stateType }] : []),
     undelegate: async () => {
       conversation.issue.delegate = null;
     },
@@ -45,7 +45,7 @@ function fakes(runs: RunRecord[] = []) {
       postComment: async ({ key, body }) => void comments.push({ key, body }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: {
       start: async () => {},
       status: async (runId) => runs.find((r) => r.runId === runId) ?? Promise.reject(new Error(`no ${runId}`)),
@@ -169,7 +169,9 @@ test.each([
   await vi.waitFor(async () => expect(await exists(join(task, "cancel.json"))).toBe(false), { timeout: 5_000 });
   expect(f.canceled.sort()).toEqual(["run_lost", "run_w1"]);
   expect(f.conversation.issue.delegate).toBeNull();
-  expect(f.comments.map((c) => c.key)).toEqual(delegated ? ["cancel:i-UNF-1:req-1"] : []);
+  // Said once the runs are stopped, under the cancel's key: a cancel recorded before the restart
+  // that had already said it posts nothing new.
+  expect(f.comments.map((c) => c.key)).toEqual(["cancel:i-UNF-1:req-1"]);
   expect(f.turns()).toBe(0);
 });
 

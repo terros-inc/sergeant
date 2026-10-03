@@ -23,6 +23,19 @@ export function checkDelegation(issue: Conversation["issue"], agentUserId: strin
   return deny("A1", `${issue.identifier} is ${now}, not to Sergeant's agent`);
 }
 
+/** Linear state types that stop a task (TECH-4989), unless Sergeant's own closing merge led there. */
+export const STOP_STATE_TYPES: readonly string[] = ["backlog", "canceled", "completed"];
+
+/**
+ * A2, re-checked against the same live read as A1 before every effect: an issue a human moved to
+ * Backlog, Canceled, or Done is not Sergeant's to work on, as if it were undelegated. The steps after
+ * Sergeant's closing merge (the outcome comment, the audit draw) check only A1: Done is where it leads.
+ */
+export function checkIssueState(issue: Conversation["issue"]): GateVerdict {
+  if (!STOP_STATE_TYPES.includes(issue.stateType)) return allow;
+  return deny("A2", `${issue.identifier} is in ${issue.state} (${issue.stateType})`);
+}
+
 /** Who says which PRs are this task's: one live Linear read and Sergeant's worker App login. */
 export type Ownership = { linkedPullRequests: PullRequestRef[]; workerLogin: string };
 

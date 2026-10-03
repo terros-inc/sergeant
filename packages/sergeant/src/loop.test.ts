@@ -76,7 +76,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: ["run_worker", "run_review"], recentTurns: [] }));
 
   let live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -84,6 +84,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
   const merged: unknown[] = [];
   const comments: { body: string; key: string }[] = [];
   const filed: string[] = [];
+  const closed: { number: number; comment: string }[] = [];
 
   const run = () => runLoop(
     { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {} },
@@ -98,9 +99,10 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
       },
       github: {
         readPullRequest: async () => pr,
+        closePullRequest: async ({ number, comment }) => void closed.push({ number, comment }),
         mergePullRequest: async (req) => {
           merged.push(req);
-          live = { ...live, issue: { ...live.issue, state: "Done" } };
+          live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
           return { mergedSha: "c".repeat(40) };
         },
       },
@@ -114,7 +116,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
       },
     },
   );
-  return { result: await run(), rerun: run, seen, merged, comments, filed };
+  return { result: await run(), rerun: run, seen, merged, comments, filed, closed };
 }
 
 test("a human comment landing before the merge denies it and wakes a turn that sees it", async () => {
@@ -140,13 +142,15 @@ test("a human comment landing before the merge denies it and wakes a turn that s
   expect(filed).toHaveLength(1);
 });
 
-test("a reassignment landing before the merge denies it and stops the loop without posting", async () => {
+test("a reassignment landing before the merge denies it and stops the loop, closing the task's PR", async () => {
   // A human hands the issue to V1's agent while the turn is deciding to merge.
-  const { result, seen, merged, comments, filed } = await scenario((live) => ({ ...live, issue: { ...live.issue, delegate: { id: "agent-v1", name: "Sergeant V1" } } }));
+  const { result, seen, merged, comments, filed, closed } = await scenario((live) => ({ ...live, issue: { ...live.issue, delegate: { id: "agent-v1", name: "Sergeant V1" } } }));
 
   expect(seen).toHaveLength(1);
   expect([...merged, ...filed]).toEqual([]);
-  expect(comments).toEqual([]);
+  // Undelegation is the human's cancel (TECH-4989): the open PR is closed, and the stop said once.
+  expect(closed).toEqual([{ number: 7, comment: "Closed: the Linear issue is no longer delegated to Sergeant." }]);
+  expect(comments).toEqual([expect.objectContaining({ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`Closed [${repo}#7](${pr.url})`) })]);
   expect(result).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("Sergeant V1") });
 });
 
@@ -157,7 +161,7 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_worker", "run_review"], recentTurns: [] }));
   const mergedSha = "c".repeat(40);
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Done", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Done", stateType: "completed", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -171,7 +175,7 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
       linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
       github: {
         readPullRequest: async () => ({ ...pr, state: "merged", mergedSha }),
-        mergePullRequest: async () => { throw new Error("already merged"); },
+        closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("already merged"); },
       },
       runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: {
@@ -199,7 +203,7 @@ test("a PR Linear links with no worker report is still polled, and its checks ch
   // is linked too but merged by someone else, so it is not taken for this task's merge.
   dir = await mkdtemp(join(tmpdir(), "sergeant-loop-test-"));
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }, { repo: "other/repo", number: 1 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }, { repo: "other/repo", number: 1 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -216,7 +220,7 @@ test("a PR Linear links with no worker report is still polled, and its checks ch
       linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
       github: {
         readPullRequest: async (r, n) => (read.push(`${r}#${n}`), n === 7 ? { ...pr, checks } : other),
-        mergePullRequest: async () => { throw new Error("unused"); },
+        closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); },
       },
       runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
       reasoner: {
@@ -251,7 +255,7 @@ test.each([
     [8, { ...pr, number: 8, url: `https://github.com/${repo}/pull/8`, body: "Fixes UNF-1" }],
   ]);
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -268,7 +272,7 @@ test.each([
       linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
       github: {
         readPullRequest: async (_repo, number) => prs.get(number)!,
-        mergePullRequest: async ({ number }) => {
+        closePullRequest: async () => {}, mergePullRequest: async ({ number }) => {
           merges.push(number);
           const mergedSha = String(number).repeat(40);
           prs.set(number, { ...prs.get(number)!, state: "merged", mergedSha });

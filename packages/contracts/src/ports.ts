@@ -43,6 +43,8 @@ export interface GitHubPort {
    * to `refused` with GitHub's message; any other failure rejects.
    */
   mergePullRequest(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<{ mergedSha: Sha } | { refused: string }>;
+  /** Comments `comment` on an open PR, then closes it: a canceled task's PR (TECH-4989). */
+  closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
 }
 
 /**

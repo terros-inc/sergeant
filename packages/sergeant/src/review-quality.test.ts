@@ -61,6 +61,9 @@ const reviewer = (runId: string, headSha: string, verdict: "approve" | "changes_
   },
 });
 
+const inProgress = { state: "In Progress", stateType: "started" };
+const done = { state: "Done", stateType: "completed" };
+
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
@@ -86,7 +89,7 @@ async function scenario(opts: {
     JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: opts.runs.map((r) => r.runId), recentTurns: [] }),
   );
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Done", delegate: opts.delegated === false ? null : agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", ...(opts.mergedOnGitHub ? done : inProgress), delegate: opts.delegated === false ? null : agent, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -102,15 +105,17 @@ async function scenario(opts: {
         linear: {
           readConversation: async () => live,
       moveIssueToStarted: async () => ({ moved: false as const }),
-          postComment: async () => void events.push("outcome comment"),
+          postComment: async ({ key }) => void events.push(key.startsWith("cancel:") ? "stop comment" : "outcome comment"),
           createFollowupIssue: async () => {
             throw new Error("unused");
           },
         },
         github: {
           readPullRequest: async () => (opts.mergedOnGitHub ? { ...pr(opts.head), state: "merged", mergedSha } : pr(opts.head)),
+          closePullRequest: async ({ number }) => void events.push(`close #${number}`),
           mergePullRequest: async () => {
             events.push("merge");
+            live.issue = { ...live.issue, ...done };
             return { mergedSha };
           },
         },
@@ -231,7 +236,8 @@ test("a finished review is recorded even when the task never merges", async () =
   });
 
   expect(result.outcome).toBe("stopped");
-  expect(events).toEqual([]);
+  // Undelegation is the human's cancel: the open PR is closed and the stop said once (TECH-4989).
+  expect(events).toEqual(["close #7", "stop comment"]);
   expect(await latest()).toEqual([
     expect.objectContaining({ runId: "run_r1", trigger: "required", merged: null, mustFix: [expect.objectContaining({ id: "f1" })] }),
   ]);

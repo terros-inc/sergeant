@@ -34,6 +34,11 @@ export const Conversation = z.object({
     title: z.string(),
     description: z.string(),
     state: z.string(),
+    /**
+     * The state's Linear type: `triage`, `backlog`, `unstarted` (Todo), `started`, `completed`, or
+     * `canceled`. What intake and the stop rule (A2) read; `state` is only its name.
+     */
+    stateType: z.string(),
     /** The current Linear delegate. `null` means nobody is delegated. */
     delegate: z.object({ id: z.string().min(1), name: z.string() }).nullable(),
     /**

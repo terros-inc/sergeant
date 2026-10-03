@@ -95,10 +95,14 @@ pnpm --filter @terros/sergeant live-check --config <file> --repo owner/name [--i
 The canary loop reads and writes live Linear and GitHub, launches real model sessions, and costs
 money. It works on the issue only while the issue is delegated to `agentUserId`: before anything
 starts, on every poll, and again from a live read before each start, merge, and the outcome comment
-(Gate rule A1). An undelegated or reassigned issue stops the loop, cancels its running runs, and
-gets no merge and no comment. Undelegation is the human's cancel: the loop keeps retrying each
-cancellation, and treats a run whose status it cannot read as still running, until the runner confirms
-every run stopped. After the merge, the V2 agent posts one outcome comment (PR, reviewed
+(Gate rule A1), and only while it is not in Backlog, Canceled, or Done (A2, TECH-4989; Done after
+Sergeant's own closing merge is the normal end). An undelegated or reassigned issue, or one a human
+moves to Backlog, Canceled, or Done, stops the loop and gets no merge. Either is the human's cancel,
+recorded in `<dir>/cancel.json` first: the loop keeps retrying each cancellation, and treats a run whose
+status it cannot read as still running, until the runner confirms every run stopped; then it closes
+the task's open PRs (only those the worker App opened) with a short comment, and posts one comment on
+the issue saying it stopped and which PRs it closed. A stop by state also sets `state.json` aside, so
+the issue moved back to Todo is a fresh task. After the merge, the V2 agent posts one outcome comment (PR, reviewed
 head, observed required checks, merge result, known gaps), keyed by the issue and the merge so a
 rerun never posts it twice; Linear's GitHub integration moves the issue to Done. Workers push their branches and open PRs with a worker-App token scoped to their run's
 repositories; the merge is one control-plane action: fresh exact-head PR, check, and Linear reads,
@@ -177,10 +181,13 @@ pnpm --filter @terros/sergeant canary --config <file> --issue UNF-123 --repo own
 V2 agent, in every repository the installation config enrolls, with nobody starting an issue by hand.
 It is a thin shell over the canary's per-task loop, not a workflow engine:
 
-- **Intake** lists open (not completed or canceled) issues delegated to `agentUserId` every
-  `--intake-seconds` (120) and runs each one's loop, at most `--max-tasks` (2) at a time; the issue
-  whose loop ended longest ago gets a free slot first. A task waiting for a human or a run holds its
-  slot.
+- **Intake** lists the issues delegated to `agentUserId` (open ones, and any completed or canceled in
+  the last week) every `--intake-seconds` (120) and runs each one's loop, at most `--max-tasks` (2) at
+  a time; the issue whose loop ended longest ago gets a free slot first. A task waiting for a human or
+  a run holds its slot. A task starts only from Todo (TECH-4989): an issue in Triage or Backlog waits
+  until a human moves it there, and a started issue runs only if its task is already under way. A
+  task whose issue was moved to Backlog, Canceled, or Done before Sergeant's merge is run outside the
+  limit, only so its loop stops it.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
   Linear links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when they changed, so
   a missed webhook costs only latency. Its state is `<state dir>/tasks/<issue>/`; runs live under
@@ -207,10 +214,10 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
 - The same port answers the client API under `/v1` (UNF-713, the slice of design 11 §2 `sgt` uses):
   task and run reads, `POST /v1/tasks/:ref/wake`, `/v1/tasks/:ref/cancel`, and `/v1/runs/:id/cancel`.
   A wake ends the task loop's wait and owes it one turn, behind every hold the loop keeps. A task
-  cancel is recorded in the task's directory first, then removes the V2 agent's delegation, says why on
-  the issue, and cancels every run of the task not confirmed stopped; it answers with any run the runner
-  has not yet confirmed, and `serve` keeps driving the recorded cancel at each intake, across a restart,
-  until it has. Delegating again resumes the task. A run cancel is the
+  cancel is recorded in the task's directory first, then removes the V2 agent's delegation, cancels
+  every run of the task not confirmed stopped, and once they are, closes the task's open PRs and says
+  why on the issue; it answers with any run the runner has not yet confirmed, and `serve` keeps driving
+  the recorded cancel at each intake, across a restart, until it has. Delegating again resumes the task. A run cancel is the
   runner's confirmed cancel, noted on the issue so the next turn does not just restart it. Every
   `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
   from `sgt login`, which `serve` reads back from Linear on every call and admits only for an active

@@ -17,7 +17,7 @@ const issuePage = z.object({
   url: z.url(),
   title: z.string(),
   description: z.string().nullable(),
-  state: z.object({ name: z.string() }),
+  state: z.object({ name: z.string(), type: z.string() }),
   delegate: actor.nullable(),
   attachments: z.object({ nodes: z.array(z.object({ url: z.string(), sourceType: z.string().nullable() })) }),
   comments: z.object({
@@ -34,7 +34,7 @@ const issueQuery = `
   query SergeantIssue($id: String!, $after: String) {
     issue(id: $id) {
       id identifier url title description
-      state { name }
+      state { name type }
       delegate { id name }
       attachments(first: 100) { nodes { url sourceType } }
       comments(first: 50, after: $after) {
@@ -62,17 +62,24 @@ const clearDelegate = `
     issueUpdate(id: $id, input: { delegateId: null }) { success }
   }
 `;
-const delegatedQuery = `
+// Open issues, and those completed or canceled since `since`: a task whose issue a human moved to Done
+// or Canceled while no loop ran is still found, and stopped (TECH-4989).
+const delegatedQuery = (since: string) => `
   query SergeantDelegated($agent: ID!, $after: String) {
-    issues(first: 100, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { nin: ["completed", "canceled"] } } }) {
-      nodes { identifier }
+    issues(first: 100, after: $after, filter: {
+      delegate: { id: { eq: $agent } }
+      or: [{ state: { type: { nin: ["completed", "canceled"] } } }, { completedAt: { gt: ${JSON.stringify(since)} } }, { canceledAt: { gt: ${JSON.stringify(since)} } }]
+    }) {
+      nodes { identifier state { type } }
       pageInfo { hasNextPage endCursor }
     }
   }
 `;
+/** How far back `delegatedIssues` finds a completed or canceled issue. */
+const RECENTLY_CLOSED_MS = 7 * 24 * 60 * 60_000;
 const delegatedPage = z.object({
   issues: z.object({
-    nodes: z.array(z.object({ identifier: z.string().min(1) })),
+    nodes: z.array(z.object({ identifier: z.string().min(1), state: z.object({ type: z.string() }) })),
     pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
   }),
 });
@@ -130,6 +137,8 @@ function linkedPullRequests(attachments: { url: string; sourceType: string | nul
   });
 }
 
+export type DelegatedIssue = { identifier: string; stateType: string };
+
 export type LinearAdapterOptions = {
   apiKey: string;
   /** User ids that act for Sergeant but might not have Linear's `botActor` marker. */
@@ -142,8 +151,11 @@ export type LinearAdapterOptions = {
 export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   /** The token's own user and the Linear workspace (organization) it is in. */
   viewer(): Promise<{ id: string; name: string; organizationId: string }>;
-  /** Identifiers of the open issues (not completed or canceled) delegated to `agentUserId`. */
-  delegatedIssues(agentUserId: string): Promise<string[]>;
+  /**
+   * The issues delegated to `agentUserId` with their state types: every open one, and those completed or
+   * canceled in the last week.
+   */
+  delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>;
   /** Removes the issue's delegate: a human's cancel (`sgt task cancel`). Idempotent. */
   undelegate(issueId: string): Promise<void>;
 } {
@@ -219,6 +231,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
           title: first.title,
           description: first.description ?? "",
           state: first.state.name,
+          stateType: first.state.type,
           delegate: first.delegate,
           linkedPullRequests: linkedPullRequests(first.attachments.nodes),
         },
@@ -303,14 +316,15 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     },
 
     async delegatedIssues(agentUserId) {
-      const identifiers: string[] = [];
+      const delegated: DelegatedIssue[] = [];
+      const query = delegatedQuery(new Date(Date.now() - RECENTLY_CLOSED_MS).toISOString());
       let after: string | null = null;
       do {
-        const { issues }: z.infer<typeof delegatedPage> = await request(delegatedQuery, { agent: agentUserId, after }, delegatedPage);
-        identifiers.push(...issues.nodes.map((n) => n.identifier));
+        const { issues }: z.infer<typeof delegatedPage> = await request(query, { agent: agentUserId, after }, delegatedPage);
+        delegated.push(...issues.nodes.map((n) => ({ identifier: n.identifier, stateType: n.state.type })));
         after = issues.pageInfo.hasNextPage ? issues.pageInfo.endCursor : null;
       } while (after);
-      return identifiers;
+      return delegated;
     },
 
     async undelegate(issueId) {

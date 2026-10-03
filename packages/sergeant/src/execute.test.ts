@@ -25,6 +25,7 @@ const conversation: Conversation = {
     title: "T",
     description: "D",
     state: "In Progress",
+    stateType: "started",
     delegate: { id: "agent-v2", name: "Sergeant" },
     linkedPullRequests: [{ repo: "trevorallred/canary", number: 7 }],
   },
@@ -109,7 +110,7 @@ function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversati
     workerLogin: "sergeant-worker[bot]",
     github: {
       readPullRequest: async () => ({ ...pr, ...live.pr }),
-      mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),
+      closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),
     },
     runner: {
       start: async (spec) => void started.push(spec.runId),

@@ -14,6 +14,7 @@ const base: Conversation = {
     title: "T",
     description: "D",
     state: "Todo",
+    stateType: "unstarted",
     delegate: null,
     linkedPullRequests: [],
   },
@@ -24,7 +25,7 @@ const base: Conversation = {
 test("changes when humans change what was said, and only then", () => {
   const rev = conversationRevision(base);
   expect(conversationRevision({ ...base, humanComments: [...base.humanComments].reverse() })).toBe(rev);
-  expect(conversationRevision({ ...base, issue: { ...base.issue, state: "In Progress" } })).toBe(rev);
+  expect(conversationRevision({ ...base, issue: { ...base.issue, state: "In Progress", stateType: "started" } })).toBe(rev);
   // Sergeant's own question must not count as the human reply that ends its wait (UNF-727).
   expect(conversationRevision({ ...base, agentComments: [{ id: "q1", createdAt: at, body: "**Question for you**" }] })).toBe(rev);
 

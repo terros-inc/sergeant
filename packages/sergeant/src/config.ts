@@ -117,7 +117,7 @@ export function secretResolver(config: InstallationConfig) {
 }
 
 export type Installation = {
-  linear: LinearPort & { delegatedIssues(agentUserId: string): Promise<string[]>; undelegate(issueId: string): Promise<void> };
+  linear: LinearPort & { delegatedIssues(agentUserId: string): Promise<{ identifier: string; stateType: string }[]>; undelegate(issueId: string): Promise<void> };
   /** The V2 agent's Linear user, verified against the token. */
   agentUserId: string;
   /** The Linear workspace the agent is in: the only one whose users may call the API. */

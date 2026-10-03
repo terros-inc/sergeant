@@ -73,7 +73,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   await writeFile(stateFile, beforeAsking);
 
   let live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -107,9 +107,9 @@ test("a question is posted once, holds every effect until a human replies, and s
       },
       github: {
         readPullRequest: async () => pr,
-        mergePullRequest: async (req) => {
+        closePullRequest: async () => {}, mergePullRequest: async (req) => {
           merged.push(req);
-          live = { ...live, issue: { ...live.issue, state: "Done" } };
+          live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
           return { mergedSha: "c".repeat(40) };
         },
       },
@@ -149,7 +149,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   expect(posted.filter((p) => p.key.startsWith("question:"))).toHaveLength(1);
 });
 
-const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] };
+const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] };
 const start: ProposedAction = { kind: "start_worker", objective: "o", repositories: [repo] };
 const followup: ProposedAction = { kind: "create_followup", key: "k", title: "T", description: "D", relation: "related" };
 
@@ -178,7 +178,7 @@ test("a turn that asks does nothing else, whatever order reasoning proposed", as
         postComment: async () => void effects.push("ask"),
         createFollowupIssue: async () => (effects.push("followup"), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
       },
-      github: { readPullRequest: async () => pr, mergePullRequest: async () => (effects.push("merge"), { mergedSha: head }) },
+      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async () => (effects.push("merge"), { mergedSha: head }) },
       runner: { start: async () => void effects.push("start"), status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: { turn: async () => ({ output: { summary: "s", actions }, model: "m", promptVersion: "p" }) },
     });
@@ -215,7 +215,7 @@ test("a question whose post failed or went unconfirmed is posted again until Lin
         },
         createFollowupIssue: async () => { throw new Error("unused"); },
       },
-      github: { readPullRequest: async () => pr, mergePullRequest: async (req) => (merged.push(req), { mergedSha: head }) },
+      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: head }) },
       runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: { turn: async () => (turns++, { output: { summary: "s", actions: [ask, merge] }, model: "m", promptVersion: "p" }) },
     },

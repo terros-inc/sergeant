@@ -2,20 +2,23 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { RepoSlug } from "@terros/sergeant-contracts";
+import { STOP_STATE_TYPES, type RepoSlug } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost, type Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
-import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
+import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
-import { runLoop, type LoopResult } from "./loop.ts";
+import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
 import { Wake } from "./wake.ts";
 import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
-// engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
-// existing loop (loop.ts), at most `maxTasks` at a time. Each task loop already re-reads its runs,
+// engine. Intake polls Linear for issues delegated to the V2 agent (UNF-724) and runs each one's
+// existing loop (loop.ts), at most `maxTasks` at a time. A task starts only from Todo (TECH-4989): an
+// issue in Triage or Backlog waits until a human moves it there, and only a task already under way
+// is run in a started state. A task whose issue a human moved to Backlog, Canceled, or Done is run,
+// outside the limit, only so its loop stops it. Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
 // when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) only ends a loop's wait
 // or runs an intake sooner. Nothing is kept but each task's own `state.json` and a
@@ -53,8 +56,8 @@ export type ServiceOptions = {
 
 export type ServiceDeps = Ports & {
   reasoner: Reasoner;
-  /** Open issues delegated to the V2 agent, by identifier. */
-  delegatedIssues: () => Promise<string[]>;
+  /** Issues delegated to the V2 agent, by identifier with their Linear state types: every open one, and any recently closed. */
+  delegatedIssues: () => Promise<{ identifier: string; stateType: string }[]>;
   /** Removes the issue's delegation to the V2 agent: a human's cancel through the API. */
   undelegate?: (issueId: string) => Promise<void>;
 };
@@ -77,7 +80,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   // unchanged ending (an idle task readmitted every intake, say) is not logged again.
   const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string }>();
   let lastIntake: { at: string; error?: string } | undefined;
-  // The open issues delegated to the V2 agent at the last intake, and each task's wake (API).
+  // The delegated issues whose task the last intake would run, and each task's wake (API).
   let delegated: string[] = [];
   const wakes = new Map<string, Wake>();
   const wakeOf = (issueId: string) => {
@@ -143,14 +146,32 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     void next.finally(() => active.has(ref) && wakeOf(ref).interrupt()).catch(() => {});
     return next;
   };
-  const drive = (ref: string) => driveCancel(opts.stateDir, ref, deps, log);
+  const drive = (ref: string) => driveCancel(taskDir(opts.stateDir, ref), ref, deps, opts.enrolledRepositories, log);
+
+  /**
+   * Whether intake runs the issue's task: `start` from Todo, `run` a task already under way, `stop` one
+   * whose issue was moved to Backlog, Canceled, or Done before Sergeant's merge, or not at all: in
+   * Triage or Backlog with no task, started by a human with no task, or with a cancel still driving.
+   */
+  const intent = async ({ identifier, stateType }: { identifier: string; stateType: string }) => {
+    const dir = taskDir(opts.stateDir, identifier);
+    if (await cancelPending(dir)) return undefined;
+    if (stateType === "unstarted") return "start";
+    const task = await readTaskState(join(dir, "state.json")).catch(() => undefined);
+    if (!task) return undefined;
+    if (!STOP_STATE_TYPES.includes(stateType)) return "run";
+    return task.merged ? undefined : "stop";
+  };
 
   const intake = async () => {
     for (const ref of await pendingCancels(opts.stateDir)) {
       await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
     }
-    delegated = [...new Set(await deps.delegatedIssues())];
+    const issues = await Promise.all((await deps.delegatedIssues()).map(async (issue) => ({ id: issue.identifier, intent: await intent(issue) })));
+    delegated = [...new Set(issues.flatMap((i) => (i.intent ? [i.id] : [])))];
     if (abort.signal.aborted) return;
+    // A task to stop takes no turn, so it does not wait for a slot.
+    for (const issue of issues) if (issue.intent === "stop") admit(issue.id);
     const waiting = delegated.filter((id) => !active.has(id));
     // A woken task first, then the one that waited longest.
     const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
