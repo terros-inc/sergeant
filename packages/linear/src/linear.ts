@@ -1,162 +1,34 @@
 import { commentIdFor, Conversation, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import {
+  actor,
+  clearDelegate,
+  commentById,
+  createComment,
+  createIssue,
+  createRelation,
+  DelegatedIssue,
+  delegatedPage,
+  delegatedQuery,
+  delegationHistory,
+  delegationHistoryShape,
+  followupOrigin,
+  followupOriginShape,
+  issueById,
+  issuePage,
+  issueQuery,
+  issueRef,
+  issueWorkflow,
+  issueWorkflowShape,
+  moveState,
+  relationById,
+  response,
+  unstartedTypes,
+  viewerQuery,
+} from "./queries.ts";
 
-const actor = z.object({ id: z.string().min(1), name: z.string() });
-const comment = z.object({
-  id: z.string().min(1),
-  body: z.string(),
-  createdAt: z.iso.datetime({ offset: true }),
-  updatedAt: z.iso.datetime({ offset: true }),
-  user: actor.nullable(),
-  externalUser: actor.nullable(),
-  botActor: z.object({ id: z.string().nullable(), type: z.string(), name: z.string().nullable() }).nullable(),
-});
-const issuePage = z.object({
-  id: z.string().min(1),
-  identifier: z.string().min(1),
-  url: z.url(),
-  title: z.string(),
-  description: z.string().nullable(),
-  state: z.object({ name: z.string() }),
-  delegate: actor.nullable(),
-  attachments: z.object({ nodes: z.array(z.object({ url: z.string(), sourceType: z.string().nullable() })) }),
-  comments: z.object({
-    nodes: z.array(comment),
-    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
-  }),
-});
-const response = z.object({
-  data: z.unknown().optional(),
-  errors: z.array(z.object({ message: z.string() })).optional(),
-});
-
-const issueQuery = `
-  query SergeantIssue($id: String!, $after: String) {
-    issue(id: $id) {
-      id identifier url title description
-      state { name }
-      delegate { id name }
-      attachments(first: 100) { nodes { url sourceType } }
-      comments(first: 50, after: $after) {
-        nodes {
-          id body createdAt updatedAt
-          user { id name }
-          externalUser { id name }
-          botActor { id type name }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-`;
-
-const createComment = `
-  mutation SergeantComment($input: CommentCreateInput!) {
-    commentCreate(input: $input) { success }
-  }
-`;
-const commentById = `query SergeantCommentById($id: String!) { comment(id: $id) { id } }`;
-const viewerQuery = `query SergeantViewer { viewer { id name organization { id } } }`;
-const clearDelegate = `
-  mutation SergeantUndelegate($id: String!) {
-    issueUpdate(id: $id, input: { delegateId: null }) { success }
-  }
-`;
-const delegatedQuery = `
-  query SergeantDelegated($agent: ID!, $after: String) {
-    issues(first: 100, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { nin: ["completed", "canceled"] } } }) {
-      nodes { identifier priority createdAt state { name type } }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-`;
-/** An open issue delegated to the agent, with what its admission order needs (TECH-5008). */
-export const DelegatedIssue = z.object({
-  identifier: z.string().min(1),
-  /** Linear's priority: 1 Urgent, 2 High, 3 Medium, 4 Low, 0 none. */
-  priority: z.number(),
-  createdAt: z.iso.datetime({ offset: true }),
-  state: z.object({ name: z.string(), type: z.string() }),
-});
-export type DelegatedIssue = z.infer<typeof DelegatedIssue>;
-const delegatedPage = z.object({
-  issues: z.object({
-    nodes: z.array(DelegatedIssue),
-    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
-  }),
-});
-const workflowState = z.object({ id: z.string().min(1), name: z.string(), type: z.string(), position: z.number() });
-const followupOrigin = `
-  query SergeantFollowupOrigin($id: String!) {
-    issue(id: $id) {
-      id
-      assignee { id }
-      delegate { id }
-      team { id states(first: 100) { nodes { id name type position } } }
-      project { id }
-    }
-  }
-`;
-const followupOriginShape = z.object({
-  issue: z.object({
-    id: z.string(),
-    assignee: z.object({ id: z.string() }).nullable(),
-    delegate: z.object({ id: z.string() }).nullable(),
-    team: z.object({ id: z.string(), states: z.object({ nodes: z.array(workflowState) }) }),
-    project: z.object({ id: z.string() }).nullable(),
-  }),
-});
-// The first 100 history entries in Linear's default order, which is not verified to be newest first:
-// on a long-lived issue the delegation may be past this page, and the follow-up is then unassigned.
-const delegationHistory = `
-  query SergeantDelegationHistory($id: String!) {
-    issue(id: $id) { history(first: 100) { nodes { createdAt actor { id } toDelegate { id } } } }
-  }
-`;
-const delegationHistoryShape = z.object({
-  issue: z.object({
-    history: z.object({
-      nodes: z.array(z.object({ createdAt: z.string(), actor: z.object({ id: z.string() }).nullable(), toDelegate: z.object({ id: z.string() }).nullable() })),
-    }),
-  }),
-});
-const createIssue = `
-  mutation SergeantFollowup($input: IssueCreateInput!) {
-    issueCreate(input: $input) { success issue { identifier url } }
-  }
-`;
-const issueById = `query SergeantIssueById($id: String!) { issue(id: $id) { identifier url } }`;
-const issueWorkflow = `
-  query SergeantIssueWorkflow($id: String!) {
-    issue(id: $id) {
-      state { name type }
-      team { states(first: 100) { nodes { id name type position } } }
-    }
-  }
-`;
-const moveState = `
-  mutation SergeantMoveState($id: String!, $stateId: String!) {
-    issueUpdate(id: $id, input: { stateId: $stateId }) { success }
-  }
-`;
-const issueWorkflowShape = z.object({
-  issue: z
-    .object({
-      state: z.object({ name: z.string(), type: z.string() }),
-      team: z.object({ states: z.object({ nodes: z.array(workflowState) }) }),
-    })
-    .nullable(),
-});
-
-/** State types that a delegated issue may still be sitting in before its first worker starts. */
-const unstartedTypes = new Set(["triage", "backlog", "unstarted"]);
-const createRelation = `
-  mutation SergeantRelation($input: IssueRelationCreateInput!) {
-    issueRelationCreate(input: $input) { success }
-  }
-`;
-const relationById = `query SergeantRelationById($id: String!) { issueRelation(id: $id) { id } }`;
-const issueRef = z.object({ identifier: z.string().min(1), url: z.url() });
+export { DelegatedIssue } from "./queries.ts";
+export { linearUser, type LinearUser } from "./linear-user.ts";
 
 const pullRequestUrl = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
 
@@ -387,43 +259,4 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       if (!issueUpdate.success) throw new Error("Linear issueUpdate did not succeed");
     },
   };
-}
-
-const callerQuery = `
-  query SergeantCaller {
-    viewer { id name email active organization { id } teams(first: 250) { nodes { key } } }
-  }
-`;
-const callerData = z.object({
-  viewer: z.object({
-    id: z.string().min(1),
-    name: z.string(),
-    email: z.string(),
-    active: z.boolean(),
-    organization: z.object({ id: z.string().min(1) }),
-    teams: z.object({ nodes: z.array(z.object({ key: z.string() })) }),
-  }),
-});
-
-export type LinearUser = { id: string; name: string; email: string; active: boolean; organizationId: string; teamKeys: string[] };
-
-/**
- * The Linear user a human's own OAuth access token (`sgt login`) acts as, read with that token;
- * `undefined` when Linear does not accept the token. Throws when Linear cannot answer.
- */
-export async function linearUser(accessToken: string, options: { apiUrl?: string; fetch?: typeof globalThis.fetch } = {}): Promise<LinearUser | undefined> {
-  const res = await (options.fetch ?? globalThis.fetch)(options.apiUrl ?? "https://api.linear.app/graphql", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ query: callerQuery }),
-  });
-  if (res.status === 401) return undefined;
-  const body = z
-    .object({ data: z.unknown().optional(), errors: z.array(z.object({ message: z.string(), extensions: z.object({ code: z.string().optional() }).optional() })).optional() })
-    .safeParse(await res.json().catch(() => undefined));
-  // Linear answers an unknown, expired, or revoked token with an authentication error.
-  if (body.success && body.data.errors?.some((e) => e.extensions?.code === "AUTHENTICATION_ERROR")) return undefined;
-  if (!res.ok || !body.success || body.data.errors?.length) throw new Error(`Linear API request failed (${res.status})`);
-  const { viewer } = callerData.parse(body.data.data);
-  return { id: viewer.id, name: viewer.name, email: viewer.email, active: viewer.active, organizationId: viewer.organization.id, teamKeys: viewer.teams.nodes.map((t) => t.key) };
 }

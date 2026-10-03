@@ -1,0 +1,158 @@
+import { z } from "zod";
+
+export const actor = z.object({ id: z.string().min(1), name: z.string() });
+const comment = z.object({
+  id: z.string().min(1),
+  body: z.string(),
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+  user: actor.nullable(),
+  externalUser: actor.nullable(),
+  botActor: z.object({ id: z.string().nullable(), type: z.string(), name: z.string().nullable() }).nullable(),
+});
+export const issuePage = z.object({
+  id: z.string().min(1),
+  identifier: z.string().min(1),
+  url: z.url(),
+  title: z.string(),
+  description: z.string().nullable(),
+  state: z.object({ name: z.string() }),
+  delegate: actor.nullable(),
+  attachments: z.object({ nodes: z.array(z.object({ url: z.string(), sourceType: z.string().nullable() })) }),
+  comments: z.object({
+    nodes: z.array(comment),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  }),
+});
+export const response = z.object({
+  data: z.unknown().optional(),
+  errors: z.array(z.object({ message: z.string() })).optional(),
+});
+
+export const issueQuery = `
+  query SergeantIssue($id: String!, $after: String) {
+    issue(id: $id) {
+      id identifier url title description
+      state { name }
+      delegate { id name }
+      attachments(first: 100) { nodes { url sourceType } }
+      comments(first: 50, after: $after) {
+        nodes {
+          id body createdAt updatedAt
+          user { id name }
+          externalUser { id name }
+          botActor { id type name }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;
+
+export const createComment = `
+  mutation SergeantComment($input: CommentCreateInput!) {
+    commentCreate(input: $input) { success }
+  }
+`;
+export const commentById = `query SergeantCommentById($id: String!) { comment(id: $id) { id } }`;
+export const viewerQuery = `query SergeantViewer { viewer { id name organization { id } } }`;
+export const clearDelegate = `
+  mutation SergeantUndelegate($id: String!) {
+    issueUpdate(id: $id, input: { delegateId: null }) { success }
+  }
+`;
+export const delegatedQuery = `
+  query SergeantDelegated($agent: ID!, $after: String) {
+    issues(first: 100, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { nin: ["completed", "canceled"] } } }) {
+      nodes { identifier priority createdAt state { name type } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+/** An open issue delegated to the agent, with what its admission order needs (TECH-5008). */
+export const DelegatedIssue = z.object({
+  identifier: z.string().min(1),
+  /** Linear's priority: 1 Urgent, 2 High, 3 Medium, 4 Low, 0 none. */
+  priority: z.number(),
+  createdAt: z.iso.datetime({ offset: true }),
+  state: z.object({ name: z.string(), type: z.string() }),
+});
+export type DelegatedIssue = z.infer<typeof DelegatedIssue>;
+export const delegatedPage = z.object({
+  issues: z.object({
+    nodes: z.array(DelegatedIssue),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  }),
+});
+const workflowState = z.object({ id: z.string().min(1), name: z.string(), type: z.string(), position: z.number() });
+export const followupOrigin = `
+  query SergeantFollowupOrigin($id: String!) {
+    issue(id: $id) {
+      id
+      assignee { id }
+      delegate { id }
+      team { id states(first: 100) { nodes { id name type position } } }
+      project { id }
+    }
+  }
+`;
+export const followupOriginShape = z.object({
+  issue: z.object({
+    id: z.string(),
+    assignee: z.object({ id: z.string() }).nullable(),
+    delegate: z.object({ id: z.string() }).nullable(),
+    team: z.object({ id: z.string(), states: z.object({ nodes: z.array(workflowState) }) }),
+    project: z.object({ id: z.string() }).nullable(),
+  }),
+});
+// The first 100 history entries in Linear's default order, which is not verified to be newest first:
+// on a long-lived issue the delegation may be past this page, and the follow-up is then unassigned.
+export const delegationHistory = `
+  query SergeantDelegationHistory($id: String!) {
+    issue(id: $id) { history(first: 100) { nodes { createdAt actor { id } toDelegate { id } } } }
+  }
+`;
+export const delegationHistoryShape = z.object({
+  issue: z.object({
+    history: z.object({
+      nodes: z.array(z.object({ createdAt: z.string(), actor: z.object({ id: z.string() }).nullable(), toDelegate: z.object({ id: z.string() }).nullable() })),
+    }),
+  }),
+});
+export const createIssue = `
+  mutation SergeantFollowup($input: IssueCreateInput!) {
+    issueCreate(input: $input) { success issue { identifier url } }
+  }
+`;
+export const issueById = `query SergeantIssueById($id: String!) { issue(id: $id) { identifier url } }`;
+export const issueWorkflow = `
+  query SergeantIssueWorkflow($id: String!) {
+    issue(id: $id) {
+      state { name type }
+      team { states(first: 100) { nodes { id name type position } } }
+    }
+  }
+`;
+export const moveState = `
+  mutation SergeantMoveState($id: String!, $stateId: String!) {
+    issueUpdate(id: $id, input: { stateId: $stateId }) { success }
+  }
+`;
+export const issueWorkflowShape = z.object({
+  issue: z
+    .object({
+      state: z.object({ name: z.string(), type: z.string() }),
+      team: z.object({ states: z.object({ nodes: z.array(workflowState) }) }),
+    })
+    .nullable(),
+});
+
+/** State types that a delegated issue may still be sitting in before its first worker starts. */
+export const unstartedTypes = new Set(["triage", "backlog", "unstarted"]);
+export const createRelation = `
+  mutation SergeantRelation($input: IssueRelationCreateInput!) {
+    issueRelationCreate(input: $input) { success }
+  }
+`;
+export const relationById = `query SergeantRelationById($id: String!) { issueRelation(id: $id) { id } }`;
+export const issueRef = z.object({ identifier: z.string().min(1), url: z.url() });

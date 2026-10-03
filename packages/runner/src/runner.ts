@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   parseReport,
@@ -12,6 +12,7 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
+import { AGENT_SCRIPT, AgentOutput, agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL, type Exec } from "./exec.ts";
 
 export type Role = RunSpec["role"];
@@ -63,22 +64,6 @@ const RunMeta = z.object({
   startedAt: z.string(),
 });
 type RunMeta = z.infer<typeof RunMeta>;
-
-/** The `claude -p` result line; everything else in it is ignored. */
-const AgentOutput = z.object({
-  is_error: z.boolean(),
-  subtype: z.string().optional(),
-  session_id: z.string().optional(),
-  total_cost_usd: z.number().optional(),
-  modelUsage: z.record(z.string(), z.unknown()).optional(),
-});
-
-// Runs inside the container.
-const AGENT_SCRIPT = `
-wall="$1"; model="$2"; budget="$3"
-exec timeout "$wall" claude -p "Read /workspace/sergeant-brief.md and do what it says. Your last step is writing /workspace/sergeant-report.md." \\
-  --output-format json --model "$model" --max-budget-usd "$budget" --permission-mode bypassPermissions
-`;
 
 /**
  * The local runner (04 §10 `claude-code-local`, laptop shape): every worker and reviewer is a new
@@ -303,25 +288,3 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     },
   };
 }
-
-/** Docker's definite answer that a container does not exist; any other failure is unknown. */
-const isGone = (r: { code: number; stderr: string }) => r.code !== 0 && /no such (container|object)/i.test(r.stderr);
-
-/**
- * The path of a regular file the agent wrote, refusing symlinks anywhere below the workspace: a
- * link planted in the container would otherwise make this host process read a host file.
- */
-async function agentFile(workspace: string, ...parts: string[]): Promise<string | undefined> {
-  let path = workspace;
-  for (const [i, part] of parts.entries()) {
-    path = join(path, part);
-    const st = await lstat(path).catch(() => undefined);
-    if (!st || st.isSymbolicLink() || (i < parts.length - 1 ? !st.isDirectory() : !st.isFile())) return undefined;
-  }
-  return path;
-}
-
-const gitIdentityEnv = ({ name, email }: { name: string; email: string }) =>
-  [`GIT_AUTHOR_NAME=${name}`, `GIT_AUTHOR_EMAIL=${email}`, `GIT_COMMITTER_NAME=${name}`, `GIT_COMMITTER_EMAIL=${email}`].flatMap(
-    (v) => ["--env", v],
-  );
