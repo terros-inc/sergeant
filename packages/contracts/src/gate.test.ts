@@ -196,36 +196,28 @@ test("refuses to merge past an input a run could not read until a question names
   expect(checkMerge(merge, facts({ runs: [reviewer(), unread], agentComments: [quoted] }))).toMatchObject({ allowed: false, rule: "M14" });
 });
 
-// TECH-4992: after a successor addressed a human's requested changes, the task sat blocked by M8 with
-// nobody told. Sergeant asks that human to re-review only once M8 is all that is left: never while
-// checks are red or pending, the head lacks review standing, or the request was already lifted.
+// TECH-4992, TECH-5051: Sergeant told a human "merging waits on your review" while the Gate went on to
+// refuse on M13. It asks only when the real merge gate, M8 aside, would merge the head.
 test("asks a human to re-review only when their requested changes are all that blocks the head", () => {
-  const review = (author: string, state: HumanPullRequestFeedback["state"], commitId: string, hour: number): HumanPullRequestFeedback => {
+  const review = (state: HumanPullRequestFeedback["state"], commitId: string | null, hour: number): HumanPullRequestFeedback => {
     const at = `2026-10-03T0${hour}:00:00.000Z`;
-    return { id: `review:${hour}`, kind: "review", author, state, body: "", path: null, line: null, commitId, createdAt: at, updatedAt: at, url: `https://github.com/x/y/pull/7#r${hour}` };
+    return { id: `review:${hour}`, kind: "review", author: "captain", state, body: "", path: null, line: null, commitId, createdAt: at, updatedAt: at, url: `https://github.com/x/y/pull/7#r${hour}` };
   };
-  const requested = review("captain", "CHANGES_REQUESTED", moved, 1);
-  const ask = (over: Partial<MergeFacts["pr"]> = {}, runs = [reviewer(), worker(true)]) =>
-    rereviewRequests({ ...facts().pr, humanFeedback: [requested], ...over }, runs);
+  const requested = review("CHANGES_REQUESTED", moved, 1);
+  const ask = (over: Over = {}) => rereviewRequests(facts({ ...over, pr: { humanFeedback: [requested], ...over.pr } }));
 
+  expect(checkMerge(merge, facts({ pr: { humanFeedback: [requested] } }))).toMatchObject({ allowed: false, rule: "M8" });
   expect(ask()).toEqual(["captain"]);
-  expect(ask({}, [worker(false)])).toEqual(["captain"]);
-  expect(ask({ checks: { sha: head, required: [{ name: "ci", state: "pending" }] } })).toEqual([]);
-  expect(ask({ checks: { sha: head, required: [{ name: "ci", state: "failed" }] } })).toEqual([]);
-  expect(ask({ checks: { sha: moved, required: [{ name: "ci", state: "passed" }] } })).toEqual([]);
-  expect(ask({}, [reviewer({ reviewed: [{ ...pr, headSha: moved }] }), worker(true)])).toEqual([]);
-  expect(ask({}, [reviewer({ verdict: "changes_requested" }), worker(true)])).toEqual([]);
-  expect(ask({}, [worker(true)])).toEqual([]);
-  expect(ask({ humanFeedback: [requested, review("captain", "APPROVED", head, 2)] })).toEqual([]);
-  expect(ask({ humanFeedback: [{ ...requested, state: "DISMISSED" }] })).toEqual([]);
-  // Requested on this very head: nothing has addressed it yet.
-  expect(ask({ humanFeedback: [review("captain", "CHANGES_REQUESTED", head, 1)] })).toEqual([]);
-  expect(ask({ state: "merged" })).toEqual([]);
-  expect(ask({ draft: true })).toEqual([]);
-  expect(ask({ checks: { sha: head, required: [] } })).toEqual([]);
-  // A conflicting PR, or one GitHub is still computing, would be refused by M7 after the approval.
-  expect(ask({ mergeable: false })).toEqual([]);
-  expect(ask({ mergeable: null })).toEqual([]);
+  expect(ask({ runs: [worker(false)] })).toEqual(["captain"]);
   // A review whose commit GitHub no longer reports was not left on this head.
-  expect(ask({ humanFeedback: [{ ...requested, commitId: null }] })).toEqual(["captain"]);
+  expect(ask({ pr: { humanFeedback: [{ ...requested, commitId: null }] } })).toEqual(["captain"]);
+
+  // M8 plus any other rule: the merge waits on more than the human, so no one is asked.
+  expect(ask({ runs: [reviewer(), { ...worker(true), runId: "run_worker_2", status: "running", report: null }] })).toEqual([]); // M11
+  expect(ask({ runs: [{ ...reviewer(), issueRevision: "issue-v0" }, worker(true)] })).toEqual([]); // M13
+  expect(ask({ runs: [reviewer(), worker(true, true, ["https://docs.google.com/document/d/x"])] })).toEqual([]); // M14
+  expect(ask({ pr: { checks: { sha: head, required: [{ name: "ci", state: "pending" }] } } })).toEqual([]); // M5
+  // Not blocked by M8 at all: approved since, or requested on this very head, so nothing has addressed it yet.
+  expect(ask({ pr: { humanFeedback: [requested, review("APPROVED", head, 2)] } })).toEqual([]);
+  expect(ask({ pr: { humanFeedback: [review("CHANGES_REQUESTED", head, 1)] } })).toEqual([]);
 });

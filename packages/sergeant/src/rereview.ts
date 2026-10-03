@@ -1,8 +1,8 @@
-import { commentIdFor, rereviewRequests, type Conversation, type LinearPort, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { commentIdFor, issueRevision, rereviewRequests, type LinearPort, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
 
 // TECH-4992: a human's requested changes block the merge (M8) until that human approves or someone
-// dismisses the review. Once a successor's head has addressed them, is reviewed, mergeable, and green,
-// nothing else is left for Sergeant to do, so it asks the human once, on the issue, to re-review or dismiss.
+// dismisses the review. Once a successor's head has addressed them and the merge gate would pass it but
+// for M8, nothing else is left for Sergeant to do, so it asks the human once, on the issue, to re-review or dismiss.
 
 /** Once per PR head: the comment's id is derived from this key, so Linear shows whether it was posted. */
 export const rereviewKey = (issueId: string, pr: PullRequestFacts) => `rereview:${issueId}:${pr.repo}#${pr.number}:${pr.headSha}`;
@@ -23,18 +23,20 @@ export function rereviewComment(pr: PullRequestFacts, reviewers: string[]): stri
  * the record: a failed post is tried again next poll, and the key posts nothing new however often.
  */
 export async function postRereviewRequests(
-  conversation: Conversation,
-  pullRequests: PullRequestFacts[],
-  runs: RunRecord[],
+  situation: SituationReport,
+  workerLogin: string,
   linear: Pick<LinearPort, "postComment">,
   log: (line: string) => void,
 ): Promise<void> {
-  const issueId = conversation.issue.id;
-  for (const pr of pullRequests) {
-    const reviewers = rereviewRequests(pr, runs);
-    const key = rereviewKey(issueId, pr);
-    if (reviewers.length === 0 || conversation.agentComments.some((c) => c.id === commentIdFor(key))) continue;
-    await linear.postComment({ issueId, body: rereviewComment(pr, reviewers), key }).then(
+  const { issue, agentComments } = situation.conversation;
+  // The merge gate's facts as of this poll, for a merge proposed from this very situation.
+  const facts = { ...situation, agentComments, workerLogin, linkedPullRequests: issue.linkedPullRequests, issueIdentifier: issue.identifier };
+  const live = { liveConversationRevision: situation.conversationRevision, liveIssueRevision: issueRevision(issue) };
+  for (const pr of situation.pullRequests) {
+    const reviewers = rereviewRequests({ ...facts, ...live, pr });
+    const key = rereviewKey(issue.id, pr);
+    if (reviewers.length === 0 || agentComments.some((c) => c.id === commentIdFor(key))) continue;
+    await linear.postComment({ issueId: issue.id, body: rereviewComment(pr, reviewers), key }).then(
       () => log(`${pr.repo}#${pr.number}: asked ${reviewers.join(", ")} to re-review or dismiss`),
       (e: Error) => log(`${pr.repo}#${pr.number}: re-review request not posted: ${e.message}`),
     );
