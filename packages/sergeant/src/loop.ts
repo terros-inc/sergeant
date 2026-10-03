@@ -161,7 +161,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       // The audit sample is drawn after the merge, so it cannot hold it up.
       await drawAudit(state.merged, state.runIds, opts, deps, log, save, budgetOf);
       const result = await observeCompletion(state.merged, opts, deps, log);
-      return finishReviews(state.merged, result, { runIds: state.runIds, recordReviews, stop: files.stop, opts, deps, log });
+      const finished = await finishReviews(state.merged, result, { runIds: state.runIds, recordReviews, stop: files.stop, opts, deps, log });
+      // Seen through: the issue is Done and every review finished, so intake resumes it no more.
+      if (finished.outcome === "done" && !opts.signal?.aborted && !(await exists(files.stop))) {
+        state.merged.completedAt = new Date().toISOString();
+        await save();
+      }
+      return finished;
     }
 
     const { runs, unknown } = await readRuns();
@@ -291,6 +297,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const fingerprint = fingerprintOf(situation);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
+      // Running work holds a slot: a task resumed with its runs going asks for one.
+      if (running.length > 0) opts.slot?.work();
       // Waiting on a human merge or requested changes is a human wait like a question: no idle end.
       const human = running.length === 0 ? humanWait(situation) : undefined;
       if (human) opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));

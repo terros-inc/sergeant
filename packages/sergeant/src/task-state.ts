@@ -60,6 +60,8 @@ const TaskState = z.object({
       auditDrawnAt: z.iso.datetime().optional(),
       /** The sampled audit review of the merged head. */
       audit: z.object({ runId: RunId }).optional(),
+      /** When the loop saw the task through (Linear Done, reviews finished): intake no longer resumes it. */
+      completedAt: z.iso.datetime().optional(),
     })
     .optional(),
   /**

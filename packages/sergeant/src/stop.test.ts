@@ -325,7 +325,7 @@ test.each([
 test.each([
   ["undelegated", (c: Conversation) => void (c.issue.delegate = null), "the Linear issue is no longer delegated to Sergeant"],
   ["moved to Backlog", (c: Conversation) => Object.assign(c.issue, { state: "Backlog", stateType: "backlog" }), "the Linear issue was canceled or moved to Backlog"],
-])("intake stops a local task %s while no loop runs it, the same way", async (_, change, reason) => {
+])("a local task %s with no loop resumes at intake, though Linear no longer lists it as new work, and stops the same way", async (_, change, reason) => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
   const task = taskDir(dir, "UNF-1");
   await mkdir(task, { recursive: true });
@@ -349,11 +349,16 @@ test.each([
   expect(await readdir(task)).not.toContain("state.json");
 });
 
-test("Done after Sergeant's closing merge is the task's normal end: no stop, no stop comment", async () => {
+// The closing PR merged after the task's loop ended (or before it saved the merge): the issue is Done
+// and Linear lists it no more, but the resumed loop sees the merge and completes, and stops nothing.
+test("an idle local task whose closing PR merged completes when resumed in Done: no stop, no stop comment, and no resume after", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
-  await writeFile(join(dir, "state.json"), state(["run_w1"]));
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), state(["run_w1"]));
   const live = { conversation: issue("completed", "Done") };
   const { deps, seen } = fakes(live);
+  deps.delegatedIssues = async () => [];
   const merged = { ...pr(7), state: "merged" as const, mergedSha: head };
   deps.github.readPullRequest = async () => merged;
   const done: RunRecord = {
@@ -361,15 +366,21 @@ test("Done after Sergeant's closing merge is the task's normal end: no stop, no 
     report: { reportVersion: "s2-worker-report/1", outcome: "completed", summary: "", pullRequests: [{ repo, number: 7, headSha: head, url: merged.url, closesIssue: true, review: { required: false, reason: "" } }], knownGaps: [], followups: [] },
   };
   deps.runner.status = async () => done;
-  const abort = new AbortController();
-  const loop = runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, signal: abort.signal, log: () => {} }, deps);
-  await sleep(200);
-  abort.abort();
-  await loop;
+  let reads = 0;
+  const read = deps.linear.readConversation;
+  deps.linear.readConversation = async (ref) => (reads++, read(ref));
+  const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, maxTasks: 0, auditSampleRate: 0, log: () => {} }, deps);
+  try {
+    await vi.waitFor(async () => expect(JSON.parse(await readFile(join(task, "state.json"), "utf8"))).toMatchObject({ merged: { completedAt: expect.any(String) } }), { timeout: 5_000 });
+    const after = reads;
+    await sleep(100);
+    expect(reads).toBe(after);
+  } finally {
+    await service.stop();
+  }
   expect(seen.closed).toEqual([]);
   expect(seen.canceled).toEqual([]);
-  expect(seen.comments.filter((c) => c.key.startsWith("cancel:"))).toEqual([]);
-  expect(await readdir(dir)).toContain("state.json");
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^outcome:i1:/), body: expect.any(String) }]);
 });
 
 test("a local task whose Linear read fails holds up neither the other tasks nor new Todo work", async () => {

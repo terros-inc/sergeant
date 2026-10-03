@@ -202,12 +202,14 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   the grace, it continues at once; past it, its slot goes to the next task, and its loop keeps polling
   without a slot. Once the human answers, it queues for a slot in the same order as new work. Like a
   question, a wait on a human merge or on requested changes no longer ends on the idle guard.
-  `GET /status` lists the released tasks under `released`. A task starts only from Todo (TECH-4989):
-  an issue in Triage or Backlog waits until a human moves it there, and a started issue runs only if
-  its task is already under way. Starting it moves the issue from Todo to In Progress, the only state
-  Sergeant moves an issue to. Every intake also reconciles each local task directory with no loop
-  against Linear and stops a task whose issue is undelegated or in Backlog, Canceled, or Done; a stop
-  never needs a task slot.
+  `GET /status` lists the released tasks under `released`. Linear's list only discovers new work, and
+  a task starts only from Todo (TECH-4989): an issue in Triage or Backlog waits until a human moves it
+  there. Starting it moves the issue from Todo to In Progress, the only state Sergeant moves an issue
+  to. Every intake also resumes each local task (`state.json`) with no loop, whether or not Linear
+  lists it, into a free slot in the same order, or with no slot until it has work to do. Its loop's
+  own live checks then continue it, stop it (undelegated, or in Backlog, Canceled, or Done without its
+  closing PR merged), or see it through after the merge; a stop never needs a task slot, and a task
+  seen through is not resumed again.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
   Linear links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when they changed, so
   a missed webhook costs only latency. Its state is `<state dir>/tasks/<issue>/`; runs live under

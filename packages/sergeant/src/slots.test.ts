@@ -175,6 +175,6 @@ test("a task waiting past the grace frees its slot, and once answered is readmit
   expect(f.turns).toHaveLength(3);
   await f.finish("REVIEW");
   await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER", "REVIEW", "ASKS"]), { timeout: 5_000 });
-  expect(logs).toContainEqual("ASKS: the human answered; admitted to a task slot again");
+  expect(logs).toContainEqual("ASKS: has work again; admitted to a task slot");
   await f.finish("ASKS");
 });
