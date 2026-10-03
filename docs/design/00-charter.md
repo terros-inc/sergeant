@@ -131,6 +131,8 @@ autonomous development engineer, not a hostile sandbox escapee. Runs share one d
 anything granted to any run (enrolled repositories, dev/stage systems) is within the accepted blast
 radius. The hard boundary is production, IAM/org/billing, Sergeant's control plane, and personal
 credentials; no run ever holds them, and that is enforced by the credentials given, not by prompts.
+The one accepted exception is the model credential a run works on, which may be a teammate's registered
+subscription (09 §3a).
 (S1: UNF-650, a worker minted the control plane's GitHub App token because it inherited the daemon's
 environment.)
 
@@ -233,7 +235,8 @@ engineering tools. Reviewers are given read-only GitHub tokens, but runs are not
 other, so anything granted to any run is within the accepted blast radius. Sergeant's deterministic core
 runs in a separate **control-plane zone** that holds the Linear agent credential, the control-plane
 GitHub App, installation configuration, and merge authority. Neither zone holds production,
-IAM/org/billing administration, or anyone's personal credentials: that is the hard boundary. Sergeant's
+IAM/org/billing administration, or anyone's personal credentials (apart from the model subscription a
+run works on, 09 §3a): that is the hard boundary. Sergeant's
 reasoning reads untrusted text (issues, comments, reports, code), so everything it can cause is bounded
 by the Gate. Details and the literal blast radius are in `09-security.md`.
 

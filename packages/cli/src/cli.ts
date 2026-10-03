@@ -163,7 +163,7 @@ const commands: Record<string, Command> = {
       if (!credential) throw new Usage("account register reads your credential from stdin, for example `sgt account register codex-local < ~/.codex/auth.json`");
       const res = await call(ctx, "POST", `/v1/accounts/${path(adapter)}/register`, RegisterAccountResponse, { credential });
       const left = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
-      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${res.account.id} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it after the owner's accounts.`);
+      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${res.account.id} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it after the owner's accounts.\n\n${res.notice}`);
     },
   },
   "account remove": {

@@ -271,5 +271,6 @@ final report does not acknowledge is shown to Sergeant as unacknowledged.
 ## 8. What a worker never receives
 
 The control plane's credentials; Linear access; other tasks' briefs; Sergeant's reasoning session;
-production credentials; any human's personal credentials. What a worker needs from Linear arrives
+production credentials; any human's personal credentials, except the model subscription a person
+registered when the run works on it (09 §3a). What a worker needs from Linear arrives
 verbatim in the brief, or in a message.
