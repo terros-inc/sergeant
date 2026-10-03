@@ -130,7 +130,9 @@ that the PR is ready for a human to merge (its link and the reviewed head), and 
 a new human review or comment, or a human edit on the issue lets a later turn try again. A temporary
 405 is not policy and fails the action instead, so a later turn retries: "Base branch was modified", or
 "Pull Request is not mergeable" while GitHub is still computing mergeability (M7 normally refuses that
-first). The Linear issue's Done state follows from
+first). Because such a failure, or an M7 refusal of a PR the poll saw mergeable, can leave the next poll
+looking unchanged, the loop does not commit that turn's fingerprint: it takes another turn after the
+next poll, also after a restart. The Linear issue's Done state follows from
 automation, not from Sergeant (07 §7).
 
 Where `mergePolicy` is `human`, Sergeant gets the PR ready (green, reviewed, disposition recorded),

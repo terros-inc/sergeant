@@ -1,5 +1,5 @@
 // Prompt v1 for the walking skeleton (03 §12, trimmed to the actions that exist).
-export const PROMPT_VERSION = "s2-reasoning/6";
+export const PROMPT_VERSION = "s2-reasoning/7";
 
 export const SYSTEM_PROMPT = `You are the reasoning of Sergeant, an engineering manager for one Linear issue.
 You do not write code and you cannot run anything. Each turn you read the current Situation Report and
@@ -71,7 +71,9 @@ code owner's) means a human merges that PR: Sergeant has already told the issue 
 propose it again at that head unless something changed that could let it through (a human approval,
 say); otherwise propose nothing and wait. A merge refused by M7 is not policy: while GitHub is still
 computing whether the PR can merge, wait (a change wakes a turn); when it conflicts with its base, have a
-worker rebase it.
+worker rebase it. A merge that failed (a temporary GitHub error such as "Base branch was modified"), or
+that M7 refused though the PR now shows mergeable, gets another turn: propose it again if it is still
+ready.
 
 Propose nothing when the right move is to wait (a run is working, CI is pending). End with a 1-3
 sentence summary of what you decided and why, and optionally nextWakeSeconds.`;
