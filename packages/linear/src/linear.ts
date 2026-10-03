@@ -54,6 +54,8 @@ export type LinearAdapterOptions = {
   sergeantUserIds: readonly string[];
   apiUrl?: string;
   fetch?: typeof globalThis.fetch;
+  /** Where the adapter's warnings go; defaults to the console, timestamped like the service's log. */
+  log?: (line: string) => void;
 };
 
 /** The minimal live Linear surface for the walking skeleton, as the token's own identity. */
@@ -78,6 +80,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   const fetchFn = options.fetch ?? globalThis.fetch;
   const apiUrl = options.apiUrl ?? "https://api.linear.app/graphql";
   const sergeantUsers = new Set(options.sergeantUserIds);
+  const log = options.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
 
   const request = async <T>(query: string, variables: Record<string, unknown>, data: z.ZodType<T>): Promise<T> => {
     const res = await fetchFn(apiUrl, {
@@ -115,18 +118,22 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
 
   /**
    * The human who most recently delegated the issue to `delegateId`, when Linear's history shows one.
-   * Best-effort: a failed or mismatched history query only leaves the follow-up unassigned.
+   * Best-effort: a failed or mismatched history query only leaves the follow-up unassigned, with a
+   * warning, since the query's fields and ordering are unproven against live Linear (TECH-5004).
    */
   const delegator = async (issueId: string, delegateId: string | undefined) => {
     if (!delegateId) return undefined;
-    const history = await request(delegationHistory, { id: issueId }, delegationHistoryShape).catch(() => undefined);
+    const history = await request(delegationHistory, { id: issueId }, delegationHistoryShape).catch((e: Error) => {
+      log(`warning: delegation history of ${issueId} unreadable, follow-up left unassigned: ${e.message}`);
+      return undefined;
+    });
     if (!history) return undefined;
-    const { issue } = history;
-    const delegation = issue.history.nodes
-      .filter((h) => h.toDelegate?.id === delegateId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const { nodes } = history.issue.history;
+    const delegation = nodes.filter((h) => h.toDelegate?.id === delegateId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     const actorId = delegation?.actor?.id;
-    return actorId && !sergeantUsers.has(actorId) ? actorId : undefined;
+    if (actorId && !sergeantUsers.has(actorId)) return actorId;
+    log(`warning: no human delegator of ${issueId} in its first ${nodes.length} history entries, follow-up left unassigned`);
+    return undefined;
   };
 
   return {
