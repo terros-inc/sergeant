@@ -84,7 +84,17 @@ const CodexEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn.failed"), error: z.object({ message: z.string() }) }),
 ]);
 
-const CODEX_AUTH_FAILURE = /(?:\b401\b|unauthori[sz]ed|authentication failed|invalid[_ -]?grant|refresh token.{0,80}(?:expired|invalid|revoked)|(?:expired|invalid|revoked).{0,80}refresh token)/i;
+// Verbatim user-facing refresh failures in the pinned Codex 0.160.0 binary. These can be emitted
+// before the JSON event stream starts, so stderr is checked only for these specific messages.
+const CODEX_REFRESH_FAILURES = [
+  "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.",
+  "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+  "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
+  "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
+  "Your access token could not be refreshed. Please log out and sign in again.",
+] as const;
+const CODEX_STRUCTURED_AUTH_FAILURE = /(?:\b401\b|unauthori[sz]ed|authentication failed|invalid[_ -]?grant)/i;
+const isCodexRefreshFailure = (text: string) => CODEX_REFRESH_FAILURES.some((message) => text.includes(message));
 const CODEX_AUTH_DETAIL = "Codex authentication failed; replace the installation's Codex credential or switch to an OpenAI API key";
 
 /**
@@ -140,7 +150,9 @@ exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-g
     }
     // Structured turn failures are authoritative. Login failures happen before JSON starts and are
     // written to stderr. Never scan successful item text, which could merely discuss a 401.
-    const authenticationFailed = (failure !== undefined && CODEX_AUTH_FAILURE.test(failure)) || (tokens === undefined && CODEX_AUTH_FAILURE.test(stderr));
+    const authenticationFailed =
+      (failure !== undefined && (isCodexRefreshFailure(failure) || CODEX_STRUCTURED_AUTH_FAILURE.test(failure))) ||
+      (tokens === undefined && isCodexRefreshFailure(stderr));
     return {
       ok: tokens !== undefined && failure === undefined,
       // OpenAI's errors quote part of an API key; a run record never holds any of it.

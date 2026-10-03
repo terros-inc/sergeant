@@ -73,8 +73,10 @@ Terros now has its own Codex Team account, and nothing personal is ever used.
 
   Codex refreshes a ChatGPT login's tokens as they age and writes them to `auth.json`; in a run that
   is the container's own copy, discarded at the end, so the secret keeps the tokens it was given.
-  Sergeant detects 401s and expired, invalid, or revoked refresh-token failures, records the run's
-  distinct `failureReason` as `authentication`, and posts an idempotent alert on the Linear issue.
+  Sergeant detects structured Codex authentication failures and Codex's specific refresh failures:
+  expired, revoked, or already-used refresh tokens; a login changed to another account; and a generic
+  failure to refresh the access token. It records the run's distinct `failureReason` as
+  `authentication` and posts an idempotent alert on the Linear issue during an active pre-merge poll.
   The alert tells an operator to sign in again and replace the configured Secrets Manager secret, or
   switch to an OpenAI API key. It never includes provider error text or token values. An API key does
   not age this way, but bills that API project per token instead of the Team plan.

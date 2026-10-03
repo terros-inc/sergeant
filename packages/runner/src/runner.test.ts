@@ -9,14 +9,14 @@ import { containerRunner, type ContainerRunnerOptions } from "./runner.ts";
 // A fake host: records every command and plays Docker from `docker`. No real process is launched.
 function fakeHost() {
   const calls: { cmd: string; args: string[]; opts: ExecOptions }[] = [];
-  const docker = { reachable: true, running: true, logs: "", logErrors: "" };
+  const docker = { reachable: true, running: true, exitCode: 0, logs: "", logErrors: "" };
   const exec: Exec = async (cmd, args, opts = {}) => {
     calls.push({ cmd, args, opts });
     if (cmd !== "docker" || args[0] === "run" || args[0] === "rm") return { code: 0, stdout: "", stderr: "" };
     if (args[0] === "logs") return { code: 0, stdout: docker.logs, stderr: docker.logErrors };
     if (!docker.reachable) return { code: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" };
     if (args[0] === "stop") docker.running = false;
-    const status = args.includes("{{.State.Running}}") ? String(docker.running) : `${docker.running ? "running" : "exited"} 0`;
+    const status = args.includes("{{.State.Running}}") ? String(docker.running) : `${docker.running ? "running" : "exited"} ${docker.exitCode}`;
     return { code: 0, stdout: `${status}\n`, stderr: "" };
   };
   return { calls, docker, exec };
@@ -196,11 +196,12 @@ const REPORT = `Done.
 \`\`\`
 `;
 
-async function ended(extra: Record<string, unknown>, logs: string, report = REPORT) {
+async function ended(extra: Record<string, unknown>, logs: string, report = REPORT, logErrors = "") {
   const { runner, host, rootDir } = await started(extra);
   if (report) await writeFile(join(rootDir, "run_t1", "workspace", "sergeant-report.md"), report);
   host.docker.running = false;
   host.docker.logs = logs;
+  host.docker.logErrors = logErrors;
   return runner.status("run_t1");
 }
 
@@ -220,25 +221,54 @@ test("a Codex run records its summed tokens and no cost; a Claude run its report
   expect(codex.costUsd).toBeUndefined();
   expect(codex.report).not.toBeNull();
 
-  const failed = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, '{"type":"turn.failed","error":{"message":"401: Incorrect API key provided: sk-proj***abcd."}}', "");
-  expect(failed).toMatchObject({
-    status: "failed",
-    issueRevision: issueRevision(spec.conversation.issue),
-    failureReason: "authentication",
-    reportError: expect.stringContaining("Codex authentication failed"),
-  });
-  expect(JSON.stringify(failed)).not.toContain("abcd");
-
-  const login = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
-  login.host.docker.running = false;
-  login.host.docker.logErrors = "OAuth refresh token was revoked: secret-token-value";
-  const loginFailed = await login.runner.status("run_t1");
-  expect(loginFailed).toMatchObject({ status: "failed", failureReason: "authentication", reportError: expect.stringContaining("replace the installation's Codex credential") });
-  expect(JSON.stringify(loginFailed)).not.toContain("secret-token-value");
-
   const claude = await ended({}, '{"is_error":false,"session_id":"s","total_cost_usd":1.25,"modelUsage":{"claude-sonnet-5-5":{}}}');
   expect(claude).toMatchObject({ status: "succeeded", provider: "anthropic/claude-code", model: "claude-sonnet-5-5", costUsd: 1.25 });
   expect(claude.tokens).toBeUndefined();
+});
+
+// These are Codex 0.160.0's own messages. In particular, reuse is how a disposable container's
+// stored ChatGPT credential fails after another run rotated the refresh token (TECH-5020).
+test.each([
+  "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+  "Your access token could not be refreshed. Please log out and sign in again.",
+  "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
+])("a Codex refresh failure is recorded as authentication: %s", async (message) => {
+  const run = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
+  run.host.docker.running = false;
+  run.host.docker.logErrors = `Error refreshing token: ${message}`;
+
+  expect(await run.runner.status("run_t1")).toMatchObject({
+    status: "failed",
+    failureReason: "authentication",
+    reportError: expect.stringContaining("replace the installation's Codex credential"),
+  });
+});
+
+test("non-auth Codex failures and unrelated stderr do not report authentication", async () => {
+  const turn = await ended(
+    { adapters: { worker: "codex-local" }, codexCredential: CODEX },
+    '{"type":"turn.failed","error":{"message":"The model hit its usage limit."}}',
+    "",
+  );
+  expect(turn).toMatchObject({ status: "failed", reportError: expect.stringContaining("The model hit its usage limit.") });
+  expect(turn.failureReason).toBeUndefined();
+
+  const timeout = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
+  timeout.host.docker.running = false;
+  timeout.host.docker.exitCode = 124;
+  timeout.host.docker.logErrors = "health probe returned 401 Unauthorized";
+  const timedOut = await timeout.runner.status("run_t1");
+  expect(timedOut).toMatchObject({ status: "failed", reportError: expect.stringContaining("wall-time limit reached") });
+  expect(timedOut.failureReason).toBeUndefined();
+
+  const success = await ended(
+    { adapters: { worker: "codex-local" }, codexCredential: CODEX },
+    '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}',
+    REPORT,
+    "an unrelated request returned 401 Unauthorized",
+  );
+  expect(success.status).toBe("succeeded");
+  expect(success.failureReason).toBeUndefined();
 });
 
 // TECH-5070: a stop cancels a run whose status it could not read, then reads it again for the PRs its
