@@ -29,6 +29,7 @@ import { takeTurn } from "./index.ts";
 import { outcomeComment } from "./outcome.ts";
 import { openQuestion } from "./question.ts";
 import { type ReviewFacts, reviewFacts } from "./review-quality.ts";
+import { humanWait, type Slot } from "./slots.ts";
 import { pause, type Wake } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
 
@@ -121,6 +122,8 @@ export type LoopOptions = {
   signal?: AbortSignal;
   /** A human asking for a turn now (`sgt task wake`). */
   wake?: Wake;
+  /** The task's slot (TECH-5008): told when the task waits on a human, and asked before each turn. */
+  slot?: Slot;
 };
 
 export type LoopResult = {
@@ -279,6 +282,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const question = openQuestion(conversation);
     if (question) {
       unposted = undefined;
+      if (live.length === 0) opts.slot?.waiting(Date.parse(question.createdAt));
       log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);
       await wait(pollMs);
       continue;
@@ -339,6 +343,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {
+      opts.slot?.waiting(Date.parse(budgetAsked.createdAt));
       log(`waiting: the budget question posted at ${budgetAsked.createdAt} has no human reply yet`);
       await wait(pollMs);
       continue;
@@ -347,11 +352,20 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const fingerprint = fingerprintOf(situation);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
+      // Waiting on a human merge or requested changes is a human wait like a question: no idle end.
+      const human = running.length === 0 ? humanWait(situation) : undefined;
+      if (human) opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
-      if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
+      if (running.length === 0 && !human && quietMinutes > (opts.idleMinutes ?? 60)) {
         return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMinutes)} minutes` };
       }
-      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : "waiting: nothing changed since the last turn");
+      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : human ? `waiting on ${human}` : "waiting: nothing changed since the last turn");
+      await wait(pollMs);
+      continue;
+    }
+    // A task whose slot was released while it waited on a human queues for one before its turn.
+    if (opts.slot && !opts.slot.work()) {
+      log("queued: waiting for a free task slot");
       await wait(pollMs);
       continue;
     }

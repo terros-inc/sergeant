@@ -8,6 +8,9 @@ import type { LinearUser } from "@terros/sergeant-linear";
 import { linearCallers } from "./auth.ts";
 import { startService, type Service, type ServiceDeps, type ServiceOptions } from "./service.ts";
 
+/** An open Todo issue with no priority, as intake lists it. */
+const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" } });
+
 // The client API's actions must reach the task through the loop's own paths: a wake ends the loop's
 // wait and owes it a turn, a cancel undelegates and cancels the runs until the runner confirms them,
 // and a run cancel is the runner's. Only a Linear user the installation admits may use any of it, or,
@@ -35,7 +38,7 @@ function fakes(runs: RunRecord[] = []) {
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
-    delegatedIssues: async () => (conversation.issue.delegate ? ["UNF-1"] : []),
+    delegatedIssues: async () => (conversation.issue.delegate ? [todo("UNF-1")] : []),
     undelegate: async () => {
       conversation.issue.delegate = null;
     },

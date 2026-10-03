@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { RepoSlug, type GitHubPort, type LinearPort, type RunGitHubTokens } from "@terros/sergeant-contracts";
 import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
-import { createLinearPort } from "@terros/sergeant-linear";
+import { createLinearPort, type DelegatedIssue } from "@terros/sergeant-linear";
 import { z } from "zod";
 import type { BudgetWindow } from "./budget.ts";
 
@@ -88,6 +88,10 @@ export const InstallationConfig = z.strictObject({
     .default({ auditSampleRate: 0.2 }),
   /** The budget window a task gets when it starts (TECH-4964); each one unset keeps its default (120 minutes, $25). */
   budget: z.strictObject({ minutes: z.number().positive().optional(), usd: z.number().positive().optional() }).optional(),
+  /** Task slots `serve` fills at once (TECH-5008, superseding TECH-4988); `serve --max-tasks` wins, and without either it is 2. */
+  maxTasks: z.number().int().positive().optional(),
+  /** Minutes a task waiting on a human keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */
+  waitingGraceMinutes: z.number().nonnegative().optional(),
 });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;
 
@@ -117,7 +121,7 @@ export function secretResolver(config: InstallationConfig) {
 }
 
 export type Installation = {
-  linear: LinearPort & { delegatedIssues(agentUserId: string): Promise<string[]>; undelegate(issueId: string): Promise<void> };
+  linear: LinearPort & { delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>; undelegate(issueId: string): Promise<void> };
   /** The V2 agent's Linear user, verified against the token. */
   agentUserId: string;
   /** The Linear workspace the agent is in: the only one whose users may call the API. */

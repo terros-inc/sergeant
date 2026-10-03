@@ -3,11 +3,12 @@
 // and writes live Linear and GitHub, launches real model sessions, and costs money. From
 // packages/sergeant, after building the runner image (`docker build -t sergeant-runner:local ../runner/container`):
 //
-//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2] [--trust-loopback]
+//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2] [--waiting-grace-minutes 15] [--trust-loopback]
 //
 // Every repository in the installation config is enrolled. Credentials come from the config's secret
-// references exactly as for the canary (canary.ts). SIGINT or SIGTERM stops intake and lets each task
-// loop end at its next poll; a second signal exits at once. `GET /health` reports only
+// references exactly as for the canary (canary.ts). `--max-tasks` and `--waiting-grace-minutes`, when
+// given, win over the config's `maxTasks` and `waitingGraceMinutes` (TECH-5008). SIGINT or SIGTERM
+// stops intake and lets each task loop end at its next poll; a second signal exits at once. `GET /health` reports only
 // whether it is healthy; `GET /status` adds its tasks and latest intake, for loopback only. With the
 // config's webhook secrets, `POST /webhooks/linear` and `/webhooks/github` wake tasks early. The client
 // API admits the Linear users the config's `humans` names (auth.ts); `--trust-loopback` also admits an
@@ -28,7 +29,8 @@ const { values } = parseArgs({
     "state-dir": { type: "string" },
     port: { type: "string", default: "8080" },
     host: { type: "string", default: "127.0.0.1" },
-    "max-tasks": { type: "string", default: "2" },
+    "max-tasks": { type: "string" },
+    "waiting-grace-minutes": { type: "string" },
     "intake-seconds": { type: "string", default: "120" },
     "poll-seconds": { type: "string", default: "60" },
     "reasoning-model": { type: "string", default: "opus" },
@@ -47,13 +49,19 @@ const installation = await connect(config, repositories);
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;
 
+// An explicit flag wins, then the config, then the service's default (2 slots, 15 minutes).
+const maxTasks = values["max-tasks"] !== undefined ? count(values["max-tasks"], "--max-tasks", 1) : config.maxTasks;
+const waitingGraceMinutes =
+  values["waiting-grace-minutes"] !== undefined ? count(values["waiting-grace-minutes"], "--waiting-grace-minutes", 0) : config.waitingGraceMinutes;
+
 const service = await startService(
   {
     enrolledRepositories: repositories,
     stateDir,
     port: count(values.port, "--port", 0),
     host: values.host,
-    maxTasks: count(values["max-tasks"], "--max-tasks", 1),
+    ...(maxTasks !== undefined && { maxTasks }),
+    ...(waitingGraceMinutes !== undefined && { waitingGraceMinutes }),
     intakeSeconds: count(values["intake-seconds"], "--intake-seconds", 1),
     pollSeconds: count(values["poll-seconds"], "--poll-seconds", 1),
     budget: taskBudget(config),

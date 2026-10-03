@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { RepoSlug } from "@terros/sergeant-contracts";
+import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost, type Caller } from "./auth.ts";
@@ -10,12 +11,13 @@ import type { BudgetWindow } from "./budget.ts";
 import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import { runLoop, type LoopResult } from "./loop.ts";
+import { admissionOrder, Slot } from "./slots.ts";
 import { Wake } from "./wake.ts";
 import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
-// existing loop (loop.ts), at most `maxTasks` at a time. Each task loop already re-reads its runs,
+// existing loop (loop.ts), at most `maxTasks` holding a slot at a time (slots.ts). Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
 // when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) only ends a loop's wait
 // or runs an intake sooner. Nothing is kept but each task's own `state.json` and a
@@ -28,8 +30,10 @@ export type ServiceOptions = {
   enrolledRepositories: RepoSlug[];
   /** Holds `tasks/<issue identifier>/`, one task loop's directory each. */
   stateDir: string;
-  /** Task loops running at once; further delegated issues wait for a free slot. */
+  /** Task slots: tasks running or waiting on a human within the grace; further delegated issues wait for a free one. */
   maxTasks?: number;
+  /** How long a task waiting on a human keeps its slot before the next task in order gets it. */
+  waitingGraceMinutes?: number;
   intakeSeconds?: number;
   /** Each task loop's poll interval, and how long it stays with nothing changing and nothing running. */
   pollSeconds?: number;
@@ -53,8 +57,8 @@ export type ServiceOptions = {
 
 export type ServiceDeps = Ports & {
   reasoner: Reasoner;
-  /** Open issues delegated to the V2 agent, by identifier. */
-  delegatedIssues: () => Promise<string[]>;
+  /** Open issues delegated to the V2 agent, with their status, priority, and creation time. */
+  delegatedIssues: () => Promise<DelegatedIssue[]>;
   /** Removes the issue's delegation to the V2 agent: a human's cancel through the API. */
   undelegate?: (issueId: string) => Promise<void>;
 };
@@ -71,13 +75,18 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const log = opts.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
   const release = await lockStateDir(opts.stateDir);
   const maxTasks = opts.maxTasks ?? 2;
+  const graceMs = (opts.waitingGraceMinutes ?? 15) * 60_000;
   const abort = new AbortController();
   const active = new Map<string, Promise<void>>();
-  // When and how each task loop last ended: a slot goes to the issue that waited longest, and an
-  // unchanged ending (an idle task readmitted every intake, say) is not logged again.
+  // Each running loop's slot: released while it waits on a human past the grace (slots.ts).
+  const slots = new Map<string, Slot>();
+  // When and how each task loop last ended: an unchanged ending (an idle task readmitted every intake,
+  // say) is not logged again, and a loop that ended since the latest intake waits for the next.
   const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string }>();
   let lastIntake: { at: string; error?: string } | undefined;
-  // The open issues delegated to the V2 agent at the last intake, and each task's wake (API).
+  let intakeStartedAt = 0;
+  // The open issues delegated to the V2 agent at the last intake, in admission order, and each task's wake (API).
+  let ordered: DelegatedIssue[] = [];
   let delegated: string[] = [];
   const wakes = new Map<string, Wake>();
   const wakeOf = (issueId: string) => {
@@ -90,6 +99,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
 
   const admit = (issueId: string) => {
     if (active.has(issueId)) return;
+    const slot = new Slot(() => schedule());
     let outcome: LoopResult["outcome"] | "failed" = "failed";
     let detail = "";
     const loop = runLoop(
@@ -103,6 +113,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         log: (line) => log(`${issueId}: ${line}`),
         signal: abort.signal,
         wake: wakeOf(issueId),
+        slot,
       },
       { ...deps, exclusive: (step) => locked(issueId, step) },
     )
@@ -116,9 +127,45 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       )
       .finally(() => {
         if (active.get(issueId) === loop) active.delete(issueId);
+        if (slots.get(issueId) === slot) slots.delete(issueId);
         ended.set(issueId, { at: Date.now(), outcome, detail });
+        schedule();
       });
     active.set(issueId, loop);
+    slots.set(issueId, slot);
+  };
+
+  // TECH-5008: releases each slot held past the grace by a task waiting on a human, then gives every
+  // free slot to the highest-ordered task that wants one: a released task whose human answered, or a
+  // delegated issue with no loop. A woken task (`sgt task wake`) goes first. A loop that ended since
+  // the latest intake waits for the next one, so an idle task is not readmitted at once, over and over.
+  const schedule = () => {
+    if (abort.signal.aborted) return;
+    for (const [issueId, slot] of slots) {
+      if (slot.released || slot.waitingSince === undefined || Date.now() - slot.waitingSince < graceMs) continue;
+      slot.released = true;
+      slot.waitingSince = undefined;
+      log(`${issueId}: waiting on a human past the grace; its task slot is free until the human answers`);
+    }
+    let free = maxTasks - [...slots.values()].filter((s) => !s.released).length;
+    if (free <= 0) return;
+    const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
+    const queued = ordered
+      .map((issue) => issue.identifier)
+      .filter((id) => (active.has(id) ? slots.get(id)?.wanted : (ended.get(id)?.at ?? 0) < intakeStartedAt))
+      .sort((a, b) => woken(a) - woken(b));
+    for (const issueId of queued) {
+      if (free-- <= 0) break;
+      const slot = slots.get(issueId);
+      if (!slot) {
+        admit(issueId);
+        continue;
+      }
+      slot.released = false;
+      slot.wanted = false;
+      log(`${issueId}: the human answered; admitted to a task slot again`);
+      wakeOf(issueId).interrupt();
+    }
   };
 
   // A task cancel recorded through the API and not yet confirmed (cancel.ts): driven at once, again
@@ -149,13 +196,12 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     for (const ref of await pendingCancels(opts.stateDir)) {
       await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
     }
-    delegated = [...new Set(await deps.delegatedIssues())];
-    if (abort.signal.aborted) return;
-    const waiting = delegated.filter((id) => !active.has(id));
-    // A woken task first, then the one that waited longest.
-    const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
-    waiting.sort((a, b) => woken(a) - woken(b) || (ended.get(a)?.at ?? 0) - (ended.get(b)?.at ?? 0));
-    for (const issueId of waiting.slice(0, Math.max(0, maxTasks - active.size))) admit(issueId);
+    const startedAt = Date.now();
+    const issues = new Map((await deps.delegatedIssues()).map((issue) => [issue.identifier, issue]));
+    ordered = [...issues.values()].sort(admissionOrder);
+    delegated = ordered.map((issue) => issue.identifier);
+    intakeStartedAt = startedAt;
+    schedule();
   };
 
   const intakeLoop = (async () => {
@@ -235,7 +281,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
           const ok = !abort.signal.aborted && !lastIntake?.error;
           if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
             res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
-            const detail = req.url === "/status" && { stopping: abort.signal.aborted, tasks: [...active.keys()], lastIntake };
+            const released = [...slots].filter(([, s]) => s.released).map(([id]) => id);
+            const detail = req.url === "/status" && { stopping: abort.signal.aborted, tasks: [...active.keys()], released, lastIntake };
             res.end(JSON.stringify({ ok, ...detail }));
           } else if (webhookPaths.has(new URL(req.url ?? "/", "http://localhost").pathname)) {
             webhooks(req, res);

@@ -65,14 +65,23 @@ const clearDelegate = `
 const delegatedQuery = `
   query SergeantDelegated($agent: ID!, $after: String) {
     issues(first: 100, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { nin: ["completed", "canceled"] } } }) {
-      nodes { identifier }
+      nodes { identifier priority createdAt state { name type } }
       pageInfo { hasNextPage endCursor }
     }
   }
 `;
+/** An open issue delegated to the agent, with what its admission order needs (TECH-5008). */
+export const DelegatedIssue = z.object({
+  identifier: z.string().min(1),
+  /** Linear's priority: 1 Urgent, 2 High, 3 Medium, 4 Low, 0 none. */
+  priority: z.number(),
+  createdAt: z.iso.datetime({ offset: true }),
+  state: z.object({ name: z.string(), type: z.string() }),
+});
+export type DelegatedIssue = z.infer<typeof DelegatedIssue>;
 const delegatedPage = z.object({
   issues: z.object({
-    nodes: z.array(z.object({ identifier: z.string().min(1) })),
+    nodes: z.array(DelegatedIssue),
     pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
   }),
 });
@@ -175,8 +184,8 @@ export type LinearAdapterOptions = {
 export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   /** The token's own user and the Linear workspace (organization) it is in. */
   viewer(): Promise<{ id: string; name: string; organizationId: string }>;
-  /** Identifiers of the open issues (not completed or canceled) delegated to `agentUserId`. */
-  delegatedIssues(agentUserId: string): Promise<string[]>;
+  /** The open issues (not completed or canceled) delegated to `agentUserId`. */
+  delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>;
   /** Removes the issue's delegate: a human's cancel (`sgt task cancel`). Idempotent. */
   undelegate(issueId: string): Promise<void>;
 } {
@@ -363,14 +372,14 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     },
 
     async delegatedIssues(agentUserId) {
-      const identifiers: string[] = [];
+      const delegated: DelegatedIssue[] = [];
       let after: string | null = null;
       do {
         const { issues }: z.infer<typeof delegatedPage> = await request(delegatedQuery, { agent: agentUserId, after }, delegatedPage);
-        identifiers.push(...issues.nodes.map((n) => n.identifier));
+        delegated.push(...issues.nodes);
         after = issues.pageInfo.hasNextPage ? issues.pageInfo.endCursor : null;
       } while (after);
-      return identifiers;
+      return delegated;
     },
 
     async undelegate(issueId) {

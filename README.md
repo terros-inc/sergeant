@@ -67,6 +67,9 @@ input. Optional `review.auditSampleRate` (0 to 1, default 0.2) is the fraction o
 skipped fresh review which get an audit review. Optional `budget` is the budget window a task gets
 when it starts, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
 numbers, each optional; unset, 120 minutes and $25; see the task budget under Commands). Optional
+`maxTasks` (a positive integer, default 2) is how many task slots `serve` fills, and optional
+`waitingGraceMinutes` (default 15) how long a task waiting on a human keeps its slot; `serve
+--max-tasks` and `--waiting-grace-minutes` win over them (see Intake under Commands). Optional
 `linear.webhookSecret` and `github.webhookSecret` are the signing secrets of the Linear app's and the control-plane App's
 webhooks; `serve` has each webhook endpoint only when its secret is set. Optional `humans` says who
 may use `sgt` and the client API, each with their own Linear login (see [The `sgt` CLI](#the-sgt-cli)):
@@ -178,9 +181,16 @@ V2 agent, in every repository the installation config enrolls, with nobody start
 It is a thin shell over the canary's per-task loop, not a workflow engine:
 
 - **Intake** lists open (not completed or canceled) issues delegated to `agentUserId` every
-  `--intake-seconds` (120) and runs each one's loop, at most `--max-tasks` (2) at a time; the issue
-  whose loop ended longest ago gets a free slot first. A task waiting for a human or a run holds its
-  slot.
+  `--intake-seconds` (120) and runs each one's loop in one of `maxTasks` (2) task slots (TECH-5008).
+  A free slot goes to the highest-ordered task that wants one: by Linear status, In Review, then In
+  Progress, then Todo; then by priority, Urgent to none; then newest first. Finishing work beats
+  starting it. A task asked to wake (`sgt task wake`) goes first. A task holds its slot while it runs
+  a worker, a reviewer, or a reasoning turn, and while it waits on a human (a question, a budget
+  reply, a human merge, or changes requested) for up to `waitingGraceMinutes` (15). Answered within
+  the grace, it continues at once; past it, its slot goes to the next task, and its loop keeps polling
+  without a slot. Once the human answers, it queues for a slot in the same order as new work. Like a
+  question, a wait on a human merge or on requested changes no longer ends on the idle guard.
+  `GET /status` lists the released tasks under `released`.
 - **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs
   Linear links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when they changed, so
   a missed webhook costs only latency. Its state is `<state dir>/tasks/<issue>/`; runs live under
@@ -223,7 +233,7 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   `Host`. Posts must be JSON, so a cross-site form cannot post.
 
 ```sh
-pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2] [--trust-loopback]
+pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2] [--waiting-grace-minutes 15] [--trust-loopback]
 ```
 
 To run `serve` on one AWS host behind an HTTPS endpoint, see [`deploy/`](deploy/README.md): Terraform,

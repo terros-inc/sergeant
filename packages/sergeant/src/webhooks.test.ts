@@ -14,6 +14,8 @@ import { linearNudge } from "./webhooks.ts";
 // once per gap, and no event forces a turn on its own.
 
 const agent = { id: "agent-v2", name: "Sergeant" };
+/** An open Todo issue with no priority, as intake lists it. */
+const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" } });
 const secrets = { linear: "linear-secret", github: "github-secret" };
 const head = "a".repeat(40);
 const pr: PullRequestFacts = {
@@ -62,7 +64,7 @@ async function start() {
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
-    delegatedIssues: async () => (counts.intakes++, [...delegated]),
+    delegatedIssues: async () => (counts.intakes++, [...delegated].map(todo)),
     linear: {
       readConversation: async (id) => {
         counts.reads.set(id, (counts.reads.get(id) ?? 0) + 1);

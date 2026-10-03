@@ -50,7 +50,7 @@ variable "initial_ref" {
 }
 
 variable "instance_type" {
-  description = "Graviton. Sized for `serve --max-tasks 2`: two tasks' Docker workers and reviewers plus the control plane."
+  description = "Graviton. Sized for 2 task slots (`maxTasks`): two tasks' Docker workers and reviewers plus the control plane."
   type        = string
   default     = "m7g.xlarge"
 }

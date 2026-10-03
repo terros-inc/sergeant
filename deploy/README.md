@@ -41,7 +41,8 @@ How it fits together:
 - **The config lives in AWS.** Every install reads the SSM parameter (default
   `/sergeant/v2/installation-config`) and replaces `/etc/sergeant/installation.json` only if it parses
   as an `InstallationConfig`; a config that does not parse stops the update before `serve` restarts.
-  Enrolling a repository, or changing the per-task budget, is: edit the parameter, then update.
+  Enrolling a repository, changing the per-task budget, or changing the task slots (`maxTasks`,
+  `waitingGraceMinutes`), is: edit the parameter, then update.
 - **Logs** go to `/var/log/sergeant/serve.log` on the host and to CloudWatch Logs group `/sergeant/v2`
   (streams `<instance id>/serve` and `<instance id>/first-boot`).
 
@@ -203,6 +204,32 @@ aws ssm put-parameter --name /sergeant/v2/installation-config --type String --ov
 
 Only tasks that start after the update get the new window. A task already running keeps the one it
 started with (the log says `ignoring the budget options`); only a human's "extend" reply enlarges it.
+
+### Change the task slots
+
+The installation config's `maxTasks` (default 2) is how many task slots `serve` fills, and
+`waitingGraceMinutes` (default 15) how long a task waiting on a human keeps its slot before the next
+task in order gets it (root `README.md`, Intake under Commands). Add or change them in your
+`installation.json`, for example `"maxTasks": 4`, put the parameter, then run an Update (above):
+
+```sh
+aws ssm put-parameter --name /sergeant/v2/installation-config --type String --overwrite \
+  --value file://installation.json
+```
+
+The unit file no longer passes `--max-tasks`, so the config is the single source; an explicit flag
+would still win over it. Terros's hosts run 4 tasks through a stopgap systemd drop-in that overrides
+`ExecStart` with `--max-tasks 4`. Once the config says `"maxTasks": 4` and an install with this change
+has run, find the drop-in with `systemctl cat sergeant` (the file under
+`/etc/systemd/system/sergeant.service.d/` that sets `ExecStart`), delete it, and reload, so the config
+and the unit file's own `ExecStart` apply:
+
+```sh
+systemctl cat sergeant                                   # shows the drop-in's path
+sudo rm /etc/systemd/system/sergeant.service.d/<drop-in>.conf
+sudo systemctl daemon-reload && sudo systemctl restart sergeant
+systemctl cat sergeant | grep ExecStart                  # no --max-tasks
+```
 
 ### Live check on the host
 
