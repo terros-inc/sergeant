@@ -139,7 +139,8 @@ A human's answer to any of Sergeant's questions, this one included, gives the ta
 window (TECH-5059): from the answer, with zero spend and the installation's current budget. An
 extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
 K1–K4, and `sgt task grant` in 03 §7 and 11). A reply that accepts the work as it is ends the task instead (TECH-5118): reasoning
-proposes `accept_as_is`, allowed only after a human replied to the budget question, and Sergeant asks
+proposes `accept_as_is`, allowed only after a human replied to the budget question in the current budget window
+(TECH-5137: a reply from before a re-trigger never ends the fresh task), and Sergeant asks
 nothing more and leaves the PRs and the issue for a human to merge or close, saying so in one comment
 keyed by the accepting reply (TECH-5120). It is decided on the live
 conversation, so a reply posted while reasoning ran is read by the next turn instead. While the issue

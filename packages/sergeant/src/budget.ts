@@ -43,10 +43,17 @@ export const budgetQuestionKey = (issueId: string, since: string | undefined) =>
  * clarifying question in that question's thread). Read from the conversation alone, so it survives a
  * restart: a window opens at the task's start or at a human comment's time, so every budget question's
  * id is one of the keys of those times.
+ *
+ * TECH-5137: only a reply given in the current window counts. A reply to one of this task's questions
+ * opens a window from itself (poll-checks.ts), so it is never older than `windowStart`; a reply from
+ * before a re-trigger predates this task's start, and so its first window. Without this, a re-triggered
+ * task whose latest answer was still the earlier task's could end on it, and its acknowledgment, keyed
+ * by that reply (accepted.ts), matched the earlier one, so Linear posted nothing.
  */
-export function answeredBudgetQuestion(conversation: Conversation): boolean {
+export function answeredBudgetQuestion(conversation: Conversation, windowStart: string): boolean {
   const asked = latestQuestion(conversation);
-  if (!asked || !latestAnswer(conversation)) return false;
+  const reply = latestAnswer(conversation);
+  if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(windowStart)) return false;
   const { issue, humanComments } = conversation;
   const windows = [undefined, ...humanComments.map((c) => c.createdAt)];
   const thread = asked.parentId ?? asked.id;
