@@ -312,7 +312,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     cancelTask: (ref, req, by) =>
       serialized(ref, async () => {
         const undelegated = await recordCancel(opts.stateDir, ref, { ...req, by }, deps);
-        return { undelegated, stopping: await drive(ref) };
+        return { undelegated, ...(await drive(ref)) };
       }),
     ...(opts.humans && { callerOf: opts.humans.callerOf, linearClientId: opts.humans.linearClientId }),
     trustLoopback: opts.trustLoopback ?? false,

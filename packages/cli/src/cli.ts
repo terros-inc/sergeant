@@ -98,9 +98,13 @@ const commands: Record<string, Command> = {
       const res = await call(ctx, "POST", `/v1/tasks/${path(ref)}/cancel`, CancelTaskResponse, { reason: ctx.flags.reason, requestId: randomUUID() });
       print(ctx, res, () => {
         const delegation = res.undelegated ? "Sergeant's delegation is removed" : "Sergeant was already not delegated";
-        return res.stopping.length === 0
-          ? `${res.ref} canceled: ${delegation} and no run of it is running`
-          : `${res.ref} canceling: ${delegation}; not yet confirmed stopped, Sergeant keeps canceling: ${res.stopping.join(", ")} (sgt run list --task ${res.ref})`;
+        if (res.stopping.length > 0) {
+          return `${res.ref} canceling: ${delegation}; not yet confirmed stopped, Sergeant keeps canceling: ${res.stopping.join(", ")} (sgt run list --task ${res.ref}). Its open PRs are closed once they stop.`;
+        }
+        // An older Sergeant does not report the PRs it closed: say nothing rather than guess.
+        const prs = res.closedPullRequests;
+        const closed = prs === undefined ? [] : prs.length === 0 ? ["no open worker PR to close"] : prs.map((p) => `closed ${p.repo}#${p.number}  ${p.url}`);
+        return [`${res.ref} canceled: ${delegation} and no run of it is running`, ...closed].join("\n");
       });
     },
   },
