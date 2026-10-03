@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -102,4 +102,35 @@ test("a run uses one account's credential, records it, and a quota failure moves
   await runner.start({ ...worker, runId: "run_w2" });
   expect(await runner.status("run_w2")).toMatchObject({ account: { id: ada.id, group: "registered", holder: "Ada Example <ada@example.com>" } });
   expect(env).toEqual(["sk-ant-oat01-installation", "sk-ant-oat01-ada"]);
+});
+
+test("a terminal record keeps the provider choice and account recorded at launch", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "sergeant-recorded-choice-test-"));
+  const runDir = join(rootDir, "run_done");
+  await mkdir(runDir);
+  const providerChoice = {
+    adapter: "codex-local",
+    reason: "more weekly quota",
+    readings: [{ adapter: "codex-local", account: "installation-codex", readAt: "2026-10-03T12:00:00.000Z", weekly: { remainingPercent: 80 }, fiveHour: { remainingPercent: 90 } }],
+  };
+  const account = { id: "installation-codex", group: "owner", holder: "the installation" } as const;
+  await writeFile(join(runDir, "run.json"), JSON.stringify({
+    runId: "run_done", role: "worker", adapter: "codex-local", model: "gpt-5", repositories: ["o/r"],
+    container: "sergeant-run_done", startedAt: "2026-10-03T12:00:00.000Z", providerChoice, account,
+    accountReason: "owner's account installation-codex",
+  }));
+  // A terminal record may have been written by a process that did not yet copy the launch metadata.
+  await writeFile(join(runDir, "record.json"), JSON.stringify({
+    runId: "run_done", role: "worker", status: "succeeded", provider: "openai/codex", model: "gpt-5", report: null,
+  }));
+  const runner = containerRunner({
+    rootDir,
+    models: { worker: { "claude-code-local": "opus", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
+    claudeOAuthToken: "sk-ant-oat01-test",
+    codexCredential: '{"tokens":{"access_token":"t"}}',
+    gitIdentity: { name: "Ada Example", email: "ada@example.com" },
+    githubTokens: async () => "ghs_test",
+  });
+
+  expect(await runner.status("run_done")).toMatchObject({ providerChoice, account, accountReason: "owner's account installation-codex" });
 });
