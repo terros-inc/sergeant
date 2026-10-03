@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import {
-  ApiError,
+  type ApiError,
+  type ApiResult,
+  apiClient,
   CancelRunResponse,
   CancelTaskResponse,
   LoginConfig,
+  type Method,
   RunDetail,
   RunList,
   sergeantVersion,
@@ -229,43 +232,29 @@ export async function main(argv: string[], io: Io): Promise<number> {
 }
 
 /** One API call; a refusal, an unreachable API, or a response outside the contract ends the command. */
-async function request(ctx: Context, method: "GET" | "POST", path: string, body?: object): Promise<string> {
-  const fetchFn = ctx.io.fetch ?? globalThis.fetch;
-  const url = new URL(`${ctx.api}${path}`);
-  if (ctx.token && url.protocol !== "https:" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
-    fail(ctx, "bad_request", `refusing to send your Linear login to ${url.host} without HTTPS`);
-  }
-  const headers = { ...(body && { "Content-Type": "application/json" }), ...(ctx.token && { Authorization: `Bearer ${ctx.token}` }) };
-  const res = await fetchFn(url, { method, headers, ...(body && { body: JSON.stringify(body) }) }).catch((e: Error) =>
-    fail(ctx, "unavailable", `cannot reach the Sergeant API at ${ctx.api} (${(e.cause as Error | undefined)?.message ?? e.message}). Is serve running there? For the hosted instance, open the SSM port-forward first (README.md).`),
-  );
-  const text = await res.text();
-  if (res.ok) return text;
-  const refused = ApiError.safeParse(safeJson(text));
-  if (refused.success) return fail(ctx, refused.data.error.code, refused.data.error.message);
-  return fail(ctx, "unavailable", `${method} ${path} answered ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+async function request(ctx: Context, method: Method, path: string, body?: object): Promise<string> {
+  return settle(ctx, await client(ctx).request(method, path, body));
 }
 
-async function call<T>(ctx: Context, method: "GET" | "POST", path: string, schema: z.ZodType<T>, body?: object): Promise<T> {
-  const text = await request(ctx, method, path, body);
-  const parsed = schema.safeParse(safeJson(text));
-  if (!parsed.success) return fail(ctx, "unavailable", `${method} ${path} answered outside the API contract: ${parsed.error.issues[0]?.message ?? text.slice(0, 200)}`);
-  return parsed.data;
+async function call<T>(ctx: Context, method: Method, path: string, schema: z.ZodType<T>, body?: object): Promise<T> {
+  return settle(ctx, await client(ctx).call(method, path, schema, body));
 }
+
+const client = (ctx: Context) =>
+  apiClient({
+    api: ctx.api,
+    fetch: ctx.io.fetch,
+    token: ctx.token,
+    unreachableHint: ". Is serve running there? For the hosted instance, open the SSM port-forward first (README.md).",
+  });
+
+const settle = <T>(ctx: Context, res: ApiResult<T>): T => (res.ok ? res.value : fail(ctx, res.error.code, res.error.message));
 
 function fail(ctx: Context, code: ApiError["error"]["code"], message: string): never {
   if (ctx.json) ctx.io.out(`${JSON.stringify({ error: { code, message } } satisfies ApiError)}\n`);
   else ctx.io.err(`sgt: ${code}: ${message}\n`);
   throw new Failure(message);
 }
-
-const safeJson = (text: string): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-};
 
 const path = (segment: string | undefined) => encodeURIComponent(segment ?? "");
 

@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { ApiError, RunDetail, RunId, RunList, sergeantVersion, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
+import { type ApiError, type ApiFailure, apiClient, RunDetail, RunId, RunList, safeJson, sergeantVersion, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 // `sgt-mcp` (TECH-4940): Sergeant for MCP clients such as ChatGPT and Firstmate, the read-only half
@@ -21,28 +21,13 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
   const server = new McpServer({ name: "sergeant", version: sergeantVersion().version });
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
-  /** One GET; a refusal, an unreachable API, or an answer outside the contract is a tool error. */
-  async function get(path: string): Promise<{ ok: true; status: number; text: string } | { ok: false; result: Result }> {
-    let res: Response;
-    try {
-      res = await fetchFn(`${api}${path}`);
-    } catch (e) {
-      const cause = ((e as Error).cause as Error | undefined)?.message ?? (e as Error).message;
-      return { ok: false, result: error("unavailable", `cannot reach the Sergeant API at ${api} (${cause}); is serve running on this host?`) };
-    }
-    const text = await res.text();
-    if (res.ok) return { ok: true, status: res.status, text };
-    const refused = ApiError.safeParse(safeJson(text));
-    if (refused.success) return { ok: false, result: error(refused.data.error.code, refused.data.error.message) };
-    return { ok: false, result: error("unavailable", `GET ${path} answered ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`) };
-  }
+  const client = apiClient({ api, fetch: fetchFn, unreachableHint: "; is serve running on this host?" });
 
+  /** One GET, its answer validated against `schema`; a refusal, an unreachable API, or an answer outside the contract is a tool error. */
   async function read<T extends Record<string, unknown>>(path: string, schema: z.ZodType<T>): Promise<Result> {
-    const res = await get(path);
-    if (!res.ok) return res.result;
-    const parsed = schema.safeParse(safeJson(res.text));
-    if (!parsed.success) return error("unavailable", `GET ${path} answered outside the API contract: ${parsed.error.issues[0]?.message ?? res.text.slice(0, 200)}`);
-    return { content: [{ type: "text", text: JSON.stringify(parsed.data) }], structuredContent: parsed.data };
+    const res = await client.call("GET", path, schema);
+    if (!res.ok) return error(res.error);
+    return { content: [{ type: "text", text: JSON.stringify(res.value) }], structuredContent: res.value };
   }
 
   server.registerTool(
@@ -99,8 +84,8 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
       annotations: readOnly,
     },
     async ({ run }) => {
-      const res = await get(`/v1/runs/${encodeURIComponent(run)}/report`);
-      return res.ok ? { content: [{ type: "text", text: res.text }] } : res.result;
+      const res = await client.request("GET", `/v1/runs/${encodeURIComponent(run)}/report`);
+      return res.ok ? { content: [{ type: "text", text: res.value }] } : error(res.error);
     },
   );
 
@@ -117,10 +102,10 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
       try {
         res = await fetchFn(`${api}/health`);
       } catch (e) {
-        return error("unavailable", `cannot reach Sergeant at ${api} (${((e as Error).cause as Error | undefined)?.message ?? (e as Error).message})`);
+        return error({ code: "unavailable", message: `cannot reach Sergeant at ${api} (${((e as Error).cause as Error | undefined)?.message ?? (e as Error).message})` });
       }
       const parsed = Health.safeParse(safeJson(await res.text()));
-      if (!parsed.success) return error("unavailable", `GET /health answered ${res.status} outside its contract`);
+      if (!parsed.success) return error({ code: "unavailable", message: `GET /health answered ${res.status} outside its contract` });
       const health = { ok: parsed.data.ok, api };
       return { content: [{ type: "text", text: JSON.stringify(health) }], structuredContent: health };
     },
@@ -129,14 +114,6 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
   return server;
 }
 
-function error(code: ApiError["error"]["code"], message: string): Result {
-  return { content: [{ type: "text", text: JSON.stringify({ error: { code, message } } satisfies ApiError) }], isError: true };
+function error(failure: ApiFailure): Result {
+  return { content: [{ type: "text", text: JSON.stringify({ error: failure } satisfies ApiError) }], isError: true };
 }
-
-const safeJson = (text: string): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-};
