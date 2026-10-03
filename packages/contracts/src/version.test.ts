@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -43,5 +43,33 @@ test("without a version tag it falls back to 0.0.0+<sha> and says so", () => {
   expect(sergeantVersion(r.dir)).toEqual({ version: `0.0.0+${r.sha()}`, fallback: "no vMAJOR.MINOR.PATCH tag" });
   const bare = mkdtempSync(join(tmpdir(), "sgt-nogit-"));
   dirs.push(bare);
-  expect(sergeantVersion(bare)).toEqual({ version: "0.0.0+unknown", fallback: "no git checkout" });
+  expect(sergeantVersion(bare)).toEqual({ version: "0.0.0+unknown", fallback: expect.stringMatching(/^git cannot read the checkout: fatal: not a git repository/) });
+});
+
+test("prerelease and extra-dotted tags are skipped for the nearest real vX.Y.Z", () => {
+  const r = repo(1);
+  r.git("tag", "v2.0.0");
+  r.git("commit", "-q", "--allow-empty", "-m", "a");
+  r.git("tag", "v2.1.0-rc.1");
+  r.git("commit", "-q", "--allow-empty", "-m", "b");
+  r.git("tag", "v2.1.0.1");
+  expect(sergeantVersion(r.dir)).toEqual({ version: `2.0.2+${r.sha()}` });
+});
+
+test("a checkout owned by another user is trusted, and a refusal is reported as one", () => {
+  // serve runs as the sergeant user against the root-owned host checkout; git calls that dubious ownership.
+  const r = repo(1);
+  r.git("tag", "v2.0.0");
+  process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = "1";
+  try {
+    expect(sergeantVersion(r.dir)).toEqual({ version: `2.0.0+${r.sha()}` });
+    // Only the given root is trusted, so a subdirectory of it is still refused, and says so.
+    mkdirSync(join(r.dir, "sub"));
+    expect(sergeantVersion(join(r.dir, "sub"))).toEqual({
+      version: "0.0.0+unknown",
+      fallback: expect.stringMatching(/^git cannot read the checkout: fatal: detected dubious ownership/),
+    });
+  } finally {
+    delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
+  }
 });
