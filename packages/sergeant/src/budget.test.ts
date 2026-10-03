@@ -187,3 +187,28 @@ test.each([
   expect((await saved()).budget.since).toBe(answeredAt);
   expect(started).toHaveLength(actions.length);
 });
+
+test("a recorded run whose status cannot be read holds every turn until the runner answers", async () => {
+  let readable = false;
+  let turns = 0;
+  let turnsWhileUnknown = -1;
+  await scenario({
+    state: { startedAt: new Date().toISOString(), runIds: ["run_w"] },
+    runner: {
+      start: async () => {},
+      status: async () => {
+        if (!readable) throw new Error("runner unreachable");
+        return worker("succeeded", 0);
+      },
+      cancel: async () => {},
+    },
+    reasoner: async () => (turns++, turnOf([])),
+    onPoll: async (poll, live) => {
+      if (poll === 4) [turnsWhileUnknown, readable] = [turns, true];
+      return stopAfter(8)(poll, live);
+    },
+  });
+
+  expect(turnsWhileUnknown).toBe(0);
+  expect(turns).toBe(1);
+});
