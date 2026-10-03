@@ -214,7 +214,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
         const issue = await ports.linear.createFollowupIssue({
           originIssueId: conversation.issue.id,
           title: action.title,
-          description: `${action.description}\n\n---\nFollow-up from [${identifier}](${url}), filed by Sergeant. Not delegated: triage it like any other issue.`,
+          description: `${action.description}\n\n---\nFollow-up from [${identifier}](${url}), filed by Sergeant. Not delegated: move it to Todo and delegate it when it should start.`,
           relation: action.relation,
           // Per task and reasoning's key, never per turn or run: a re-proposal, a retry, or a
           // restarted loop files nothing new, even when state.json never recorded the first one.

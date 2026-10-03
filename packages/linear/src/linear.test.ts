@@ -106,18 +106,22 @@ test("postComment uses one id per key and treats Linear's duplicate refusal as a
   await expect(failing.postComment({ issueId: "UNF-1", body: "x", key: "k" })).rejects.toThrow(/forbidden/);
 });
 
+const workflow = [
+  { id: "s-triage", name: "Triage", type: "triage", position: 0 },
+  // Two backlog-type states: the lower position wins, regardless of input order.
+  { id: "s-icebox", name: "Icebox", type: "backlog", position: 2 },
+  { id: "s-backlog", name: "Backlog", type: "backlog", position: 1 },
+  { id: "s-todo", name: "Todo", type: "unstarted", position: 3 },
+  // Two started states: the lower position wins, regardless of input order.
+  { id: "s-review", name: "In Review", type: "started", position: 5 },
+  { id: "s-progress", name: "In Progress", type: "started", position: 4 },
+  { id: "s-done", name: "Done", type: "completed", position: 6 },
+];
+
 // TECH-4947: the first worker starting must make the issue visibly In Progress, moving it to the
 // team's first `started` state only from an unstarted-like state, by position, and never backward.
 test("moveIssueToStarted moves an unstarted issue to the first started state and is a no-op otherwise", async () => {
-  const states = [
-    { id: "s-triage", name: "Triage", type: "triage", position: 0 },
-    { id: "s-backlog", name: "Backlog", type: "backlog", position: 1 },
-    { id: "s-todo", name: "Todo", type: "unstarted", position: 2 },
-    // Two started states: the lower position wins, regardless of input order.
-    { id: "s-review", name: "In Review", type: "started", position: 4 },
-    { id: "s-progress", name: "In Progress", type: "started", position: 3 },
-    { id: "s-done", name: "Done", type: "completed", position: 5 },
-  ];
+  const states = workflow;
   const updates: { id: string; stateId: string }[] = [];
   const portFor = (current: { name: string; type: string }) =>
     createLinearPort({
@@ -171,7 +175,7 @@ test("createFollowupIssue files one issue per key in the origin's team and proje
     const { query, variables } = JSON.parse(String(init?.body)) as Req;
     const input = variables.input;
     if (query.includes("SergeantFollowupOrigin")) {
-      return Response.json({ data: { issue: { id: "origin-1", team: { id: "team-1" }, project: { id: "project-1" } } } });
+      return Response.json({ data: { issue: { id: "origin-1", assignee: { id: "owner" }, delegate: null, team: { id: "team-1", states: { nodes: workflow } }, project: { id: "project-1" } } } });
     }
     if (input && query.includes("issueCreate")) {
       if (issues.has(input.id)) return Response.json({ errors: [{ message: "duplicate id" }] });
@@ -199,7 +203,65 @@ test("createFollowupIssue files one issue per key in the origin's team and proje
 
   expect(issues.size).toBe(1);
   const [issueId, issue] = [...issues][0] ?? [];
-  expect(issue).toEqual({ id: issueId, teamId: "team-1", projectId: "project-1", title: "Add jitter", description: "Review f1." });
+  expect(issue).toEqual({ id: issueId, teamId: "team-1", projectId: "project-1", stateId: "s-backlog", assigneeId: "owner", title: "Add jitter", description: "Review f1." });
   // blocked_by: the origin blocks the follow-up.
   expect([...relations.values()]).toMatchObject([{ issueId: "origin-1", relatedIssueId: issueId, type: "blocks" }]);
+});
+
+// TECH-4998: a follow-up filed in Triage was auto-assigned to whoever was on the PagerDuty rotation.
+// It must land in Backlog with the origin's owner: its assignee, else the human who delegated it to
+// Sergeant, else nobody — never Sergeant itself.
+test("createFollowupIssue files in Backlog, assigned to the origin's owner, and falls back to unassigned", async () => {
+  type Origin = { assignee: { id: string } | null; delegate: { id: string } | null };
+  const fileFor = async (origin: Origin, history: unknown[] | Response = []) => {
+    const created: Record<string, unknown>[] = [];
+    const linear = createLinearPort({
+      apiKey: "test",
+      sergeantUserIds: ["sergeant-user"],
+      fetch: async (_i, init) => {
+        const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { input?: Record<string, unknown> } };
+        if (query.includes("SergeantFollowupOrigin")) {
+          return Response.json({ data: { issue: { id: "origin-1", ...origin, team: { id: "team-1", states: { nodes: workflow } }, project: null } } });
+        }
+        if (query.includes("SergeantDelegationHistory")) {
+          return history instanceof Response ? history : Response.json({ data: { issue: { history: { nodes: history } } } });
+        }
+        if (query.includes("issueCreate")) {
+          created.push(variables.input ?? {});
+          return Response.json({ data: { issueCreate: { success: true, issue: { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" } } } });
+        }
+        return Response.json({ data: { issueRelationCreate: { success: true } } });
+      },
+    });
+    await linear.createFollowupIssue({ originIssueId: "UNF-1", title: "t", description: "d", relation: "related", key: "followup:t1:k" });
+    return created[0];
+  };
+  const sergeant = { id: "sergeant-user" };
+  const delegatedBy = (actor: { id: string } | null, minute: number) => ({ createdAt: at(minute), actor, toDelegate: sergeant });
+
+  // Assigned to X: Backlog, assigned to X, even when someone else delegated it.
+  expect(await fileFor({ assignee: { id: "x" }, delegate: sergeant }, [delegatedBy({ id: "d" }, 1)])).toMatchObject({ stateId: "s-backlog", assigneeId: "x" });
+  // No assignee: the human whose delegation to Sergeant is the latest.
+  const history = [delegatedBy({ id: "earlier" }, 1), delegatedBy({ id: "d" }, 3), { createdAt: at(4), actor: { id: "other" }, toDelegate: null }];
+  expect(await fileFor({ assignee: null, delegate: sergeant }, history)).toMatchObject({ stateId: "s-backlog", assigneeId: "d" });
+  // No assignee and no human delegator (none in history, an automation, or Sergeant itself): unassigned, still Backlog.
+  for (const h of [[], [delegatedBy(null, 1)], [delegatedBy(sergeant, 1)]]) {
+    const filed = await fileFor({ assignee: null, delegate: sergeant }, h);
+    expect(filed).toMatchObject({ stateId: "s-backlog" });
+    expect(filed).not.toHaveProperty("assigneeId");
+  }
+  expect(await fileFor({ assignee: null, delegate: null })).not.toHaveProperty("assigneeId");
+  // Assigned to Sergeant itself: falls through to the human delegator.
+  expect(await fileFor({ assignee: sergeant, delegate: sergeant }, history)).toMatchObject({ stateId: "s-backlog", assigneeId: "d" });
+  // The history lookup is best-effort: an error or a schema mismatch still files the follow-up, unassigned in Backlog.
+  const brokenHistory = [
+    Response.json({ errors: [{ message: "Cannot query field 'toDelegate' on type 'IssueHistory'." }] }),
+    new Response("unavailable", { status: 503 }),
+    Response.json({ data: { issue: { history: null } } }),
+  ];
+  for (const h of brokenHistory) {
+    const filed = await fileFor({ assignee: null, delegate: sergeant }, h);
+    expect(filed).toMatchObject({ stateId: "s-backlog" });
+    expect(filed).not.toHaveProperty("assigneeId");
+  }
 });
