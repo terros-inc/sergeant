@@ -217,8 +217,8 @@ work is a separate outcome, or when out-of-scope work was discovered that someon
 - Description: why it exists, what was learned, a link back. Written to stand alone.
 - Delegated to Sergeant only when `followups.autoDelegate` is on; otherwise a human starts it.
 - In the team's first `backlog` state, never Triage (whose rotation would auto-assign it to whoever is
-  on call). Assigned to the origin's assignee, else to the human who delegated the origin to Sergeant
-  when Linear's history shows it, else unassigned.
+  on call). Assigned to the origin's assignee unless that is Sergeant, else to the human who delegated
+  the origin to Sergeant when Linear's history shows it, else unassigned.
 - Limits: `maxPerTask` and `maxDepth` (F1–F3); deduplicated by Sergeant's semantic key (02 §6).
 
 Multi-repository work does not need follow-ups: one worker handles all repositories in the task's set

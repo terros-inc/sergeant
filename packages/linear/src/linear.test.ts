@@ -212,7 +212,8 @@ test("createFollowupIssue files one issue per key in the origin's team and proje
 // It must land in Backlog with the origin's owner: its assignee, else the human who delegated it to
 // Sergeant, else nobody — never Sergeant itself.
 test("createFollowupIssue files in Backlog, assigned to the origin's owner, and falls back to unassigned", async () => {
-  const fileFor = async (origin: { assignee: { id: string } | null; delegate: { id: string } | null }, history: unknown[] = []) => {
+  type Origin = { assignee: { id: string } | null; delegate: { id: string } | null };
+  const fileFor = async (origin: Origin, history: unknown[] | Response = []) => {
     const created: Record<string, unknown>[] = [];
     const linear = createLinearPort({
       apiKey: "test",
@@ -222,7 +223,9 @@ test("createFollowupIssue files in Backlog, assigned to the origin's owner, and 
         if (query.includes("SergeantFollowupOrigin")) {
           return Response.json({ data: { issue: { id: "origin-1", ...origin, team: { id: "team-1", states: { nodes: workflow } }, project: null } } });
         }
-        if (query.includes("SergeantDelegationHistory")) return Response.json({ data: { issue: { history: { nodes: history } } } });
+        if (query.includes("SergeantDelegationHistory")) {
+          return history instanceof Response ? history : Response.json({ data: { issue: { history: { nodes: history } } } });
+        }
         if (query.includes("issueCreate")) {
           created.push(variables.input ?? {});
           return Response.json({ data: { issueCreate: { success: true, issue: { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" } } } });
@@ -248,4 +251,17 @@ test("createFollowupIssue files in Backlog, assigned to the origin's owner, and 
     expect(filed).not.toHaveProperty("assigneeId");
   }
   expect(await fileFor({ assignee: null, delegate: null })).not.toHaveProperty("assigneeId");
+  // Assigned to Sergeant itself: falls through to the human delegator.
+  expect(await fileFor({ assignee: sergeant, delegate: sergeant }, history)).toMatchObject({ stateId: "s-backlog", assigneeId: "d" });
+  // The history lookup is best-effort: an error or a schema mismatch still files the follow-up, unassigned in Backlog.
+  const brokenHistory = [
+    Response.json({ errors: [{ message: "Cannot query field 'toDelegate' on type 'IssueHistory'." }] }),
+    new Response("unavailable", { status: 503 }),
+    Response.json({ data: { issue: { history: null } } }),
+  ];
+  for (const h of brokenHistory) {
+    const filed = await fileFor({ assignee: null, delegate: sergeant }, h);
+    expect(filed).toMatchObject({ stateId: "s-backlog" });
+    expect(filed).not.toHaveProperty("assigneeId");
+  }
 });

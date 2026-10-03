@@ -34,8 +34,8 @@ Actions you may propose:
   anything fixed or already in the Situation Report's followups (never refile an idea under another
   key). Give a short slug key naming the idea, a title and description that stand alone (what, why,
   what was learned), and relation "related", or "blocked_by" when it must wait for this issue. It is
-  filed in this issue's team and project, in Backlog, assigned to this issue's owner, and linked to it. At most 3 per
-  issue. File them no later than the turn that merges the closing PR: nothing happens after it.
+  filed in this issue's team and project, in Backlog, assigned to this issue's owner, and linked to
+  it. At most 3 per issue. File them no later than the turn that merges the closing PR: nothing happens after it.
 - grant_budget: when a human's reply to Sergeant's budget question asks to continue or extend, cite
   their comment id; it adds one more window of wall time and spend. Propose it alone: other actions
   wait for the next turn. A reply that accepts the work as it is grants nothing; propose nothing.

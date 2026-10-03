@@ -97,7 +97,8 @@ const followupOriginShape = z.object({
     project: z.object({ id: z.string() }).nullable(),
   }),
 });
-// The most recent history entries; the delegation that put the issue in Sergeant's hands is among them.
+// The first 100 history entries in Linear's default order, which is not verified to be newest first:
+// on a long-lived issue the delegation may be past this page, and the follow-up is then unassigned.
 const delegationHistory = `
   query SergeantDelegationHistory($id: String!) {
     issue(id: $id) { history(first: 100) { nodes { createdAt actor { id } toDelegate { id } } } }
@@ -218,10 +219,15 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     return issue;
   };
 
-  /** The human who most recently delegated the issue to `delegateId`, when Linear's history shows one. */
+  /**
+   * The human who most recently delegated the issue to `delegateId`, when Linear's history shows one.
+   * Best-effort: a failed or mismatched history query only leaves the follow-up unassigned.
+   */
   const delegator = async (issueId: string, delegateId: string | undefined) => {
     if (!delegateId) return undefined;
-    const { issue } = await request(delegationHistory, { id: issueId }, delegationHistoryShape);
+    const history = await request(delegationHistory, { id: issueId }, delegationHistoryShape).catch(() => undefined);
+    if (!history) return undefined;
+    const { issue } = history;
     const delegation = issue.history.nodes
       .filter((h) => h.toDelegate?.id === delegateId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
@@ -292,7 +298,9 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       // and a Backlog issue never auto-starts; a human moves it to Todo and delegates it.
       const backlog = origin.team.states.nodes.filter((s) => s.type === "backlog").sort((a, b) => a.position - b.position)[0];
       if (!backlog) throw new Error("Linear team has no backlog state for a follow-up");
-      const assigneeId = origin.assignee?.id ?? (await delegator(origin.id, origin.delegate?.id));
+      // Never Sergeant itself: an origin assigned to a Sergeant user falls through to its delegator.
+      const owner = origin.assignee && !sergeantUsers.has(origin.assignee.id) ? origin.assignee.id : undefined;
+      const assigneeId = owner ?? (await delegator(origin.id, origin.delegate?.id));
       // No delegate: a human decides when Sergeant takes it.
       const id = commentIdFor(key);
       const issue = await createOnce(
