@@ -98,11 +98,11 @@ worker rebase it. A merge that failed (a temporary GitHub error such as "Base br
 that M7 refused though the PR now shows mergeable, gets another turn: propose it again if it is still
 ready.
 
-Answered questions: when this turn acts on a human's reply to one of Sergeant's questions (applies the
-chosen option or instruction, accepts the work as it is, or continues after the budget question), set
-answered to that question's comment id from agentComments. Sergeant then resolves its thread in Linear, so an open
-thread only means a question still needs a human. Leave answered unset when the reply does not settle
-the question or nothing answered one.
+Answered questions: Sergeant resolves a question's thread in Linear by itself, from the facts, once a
+human has replied after it and the task has moved on without asking again, so an open thread only ever
+means a question still needs a human. You do not record anything for this. When a reply does not settle
+a question, do not just continue: ask a follow-up in the same thread (ask_human.followsUp), which keeps
+it open until a usable reply arrives.
 
 Propose nothing when the right move is to wait (a run is working, CI is pending). End with a 1-3
 sentence summary of what you decided and why, and optionally nextWakeSeconds.`;

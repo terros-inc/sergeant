@@ -79,6 +79,8 @@ export async function scenario(opts: {
   reasoner: Reasoner["turn"];
   onPoll: (poll: number, live: Conversation) => Promise<Conversation> | Conversation;
   loop?: Partial<LoopOptions>;
+  /** Runs before a thread is resolved; throw to simulate a crash that loses the resolve (TECH-5057). */
+  beforeResolve?: (id: string) => Promise<void> | void;
 }) {
   dir ||= await mkdtemp(join(tmpdir(), "sergeant-budget-test-"));
   if (opts.state) await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", turns: 1, recentTurns: [], ...opts.state }));
@@ -103,7 +105,7 @@ export async function scenario(opts: {
           if (live.agentComments.some((c) => c.id === id)) return;
           live = { ...live, agentComments: [...live.agentComments, { id, createdAt: new Date().toISOString(), body, ...(parentId && { parentId }) }] };
         },
-        resolveThread: async (id) => (resolved.push(id), "resolved" as const),
+        resolveThread: async (id) => (await opts.beforeResolve?.(id), resolved.push(id), "resolved" as const),
         createFollowupIssue: async () => { throw new Error("unused"); },
       },
       github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },

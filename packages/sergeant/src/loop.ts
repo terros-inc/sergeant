@@ -346,7 +346,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     );
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
-    await resolveAnswered({ answered: turn.output.answered, outcomes }, situation, deps.linear, log);
+    // A turn that asks the human (Q1: it then does nothing else) has not moved on; any other turn has,
+    // a zero-action turn that continues after an answer included. That is "acted since the reply".
+    const acted = !outcomes.some((o) => o.status === "done" && o.action.kind === "ask_human");
+    await resolveAnswered(acted, situation, deps.linear, log);
     await postHandoffs(conversation.issue.id);
     if (retryMerge) {
       log("the merge did not happen for a reason the next poll may not show: another turn after the next poll");
