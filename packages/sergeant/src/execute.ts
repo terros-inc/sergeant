@@ -210,7 +210,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
       case "accept_as_is": {
         // No effect: the loop ends the task (TECH-5118). Only a human's reply to the budget question
         // can accept the work as it is; an answer to any other question leaves the task going.
-        if (!answeredBudgetQuestion(conversation, situation.budget.windowStart)) {
+        if (!answeredBudgetQuestion(conversation, situation.budget)) {
           return denied({ rule: "Q2", reason: "no human has replied to Sergeant's budget question in this budget window" });
         }
         // Ending is terminal, so it is decided on the live conversation, not the turn's: an "extend" or

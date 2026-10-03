@@ -48,7 +48,7 @@ afterAll(async () => {
 const detail = {
   task: { ref: "UNF-12", status: "active", startedAt: "2026-10-02T10:00:00.000Z", turns: 2, lastTurnAt: "2026-10-02T10:30:00.000Z", runs: 1 },
   issue: { title: "Fix the login", state: "In Progress", url: "https://linear.app/x/issue/UNF-12", delegatedToSergeant: true, delegate: "Sergeant" },
-  budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2026-10-02T12:00:00.000Z", spentUsd: 3.5, costLimitUsd: 25, unknownCostRuns: 1, windowStart: "2026-10-02T10:00:00.000Z" },
+  budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2026-10-02T12:00:00.000Z", spentUsd: 3.5, costLimitUsd: 25, unknownCostRuns: 1, taskStart: "2026-10-02T10:00:00.000Z", windowStart: "2026-10-02T10:00:00.000Z" },
   runs: [{ runId: "run_w1", task: "UNF-12", role: "worker", status: "running", model: "opus" }],
   recentTurns: [{ at: "2026-10-02T10:30:00.000Z", summary: "Started a worker on the login fix", outcomes: ["start_worker: done"] }],
   followups: [],

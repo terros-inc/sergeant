@@ -17,13 +17,13 @@ afterEach(cleanup);
 const acknowledged = `Sergeant has stopped: the work was accepted as it is. [${pr.repo}#${pr.number}](${pr.url}) and this issue are yours to merge or close.`;
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const accept: ProposedAction = { kind: "accept_as_is" };
+// A task whose first window ran out: two hours of wall time from four hours ago, and $30 spent.
+const exhausted = { startedAt: ago(240), runIds: ["run_w"], turnCostUsd: 0 };
 const budgetAsked: AgentComment = {
-  id: commentIdFor(budgetQuestionKey("i1", undefined)),
+  id: commentIdFor(budgetQuestionKey("i1", exhausted.startedAt)),
   createdAt: ago(60),
   body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted (wall time exhausted). Continue?`,
 };
-// A task whose first window ran out: two hours of wall time from four hours ago, and $30 spent.
-const exhausted = { startedAt: ago(240), runIds: ["run_w"], turnCostUsd: 0 };
 const runner = (started: string[]) => ({
   start: async (spec: { runId: string }) => void started.push(spec.runId),
   status: async (id: string) => (id === "run_w" ? worker("succeeded", 30) : { ...worker("running"), runId: id }),
@@ -192,7 +192,7 @@ test("a failed resolve of the accepted budget question keeps the task until a re
 // reply's key, which Linear already had, so the second ending was silent.
 const oldReply = human("c-old", ago(590), "2");
 const earlier: AgentComment[] = [
-  { ...budgetAsked, createdAt: ago(600) },
+  { ...budgetAsked, id: commentIdFor(budgetQuestionKey("i1", ago(720))), createdAt: ago(600) },
   { id: commentIdFor(acceptedKey("i1", oldReply.id)), createdAt: ago(589), body: acknowledged },
 ];
 

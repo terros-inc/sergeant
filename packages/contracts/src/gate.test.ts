@@ -100,7 +100,7 @@ const facts = (over: Over = {}): MergePreflightFacts => ({
   },
   agentUserId: "agent-v2",
   budget: {
-    window: { wallMinutes: 120, costUsd: 25 }, windowStart: "2026-10-03T02:00:00.000Z", wallDeadline: "2026-10-03T04:00:00.000Z",
+    window: { wallMinutes: 120, costUsd: 25 }, taskStart: "2026-10-03T02:00:00.000Z", windowStart: "2026-10-03T02:00:00.000Z", wallDeadline: "2026-10-03T04:00:00.000Z",
     spentUsd: 1, costLimitUsd: 25, unknownCostRuns: 0, ...over.budget,
   },
   now,

@@ -12,6 +12,8 @@ const Instant = z.iso.datetime({ offset: true });
 export const BudgetStatus = z.object({
   /** The configured allowance of one window. */
   window: z.object({ wallMinutes: z.number().positive(), costUsd: z.number().positive() }),
+  /** When the task started: a re-triggered task starts anew, and its first window's budget question is its own (TECH-5145). */
+  taskStart: Instant,
   /** When the window opened: the task's start, or the latest human answer to one of Sergeant's questions. */
   windowStart: Instant,
   /** One window after `windowStart`. */
