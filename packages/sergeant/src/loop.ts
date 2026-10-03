@@ -1,37 +1,34 @@
-import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  BudgetStatus,
   checkBudget,
   checkDelegation,
   commentIdFor,
   conversationRevision,
-  FiledFollowup,
-  RefusedMerge,
-  RepoSlug,
   reportedClosing,
-  RunId,
-  Sha,
   SituationReport,
   type ProposedAction,
-  type PullRequestFacts,
-  type PullRequestRef,
   type RunRecord,
 } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
-import { z } from "zod";
-import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
-import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
-import { type ActionOutcome, askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
+import { drawAudit, exists, finishReviews, observeCompletion, postOutcome } from "./after-merge.ts";
+import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
+import { askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
+import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
+import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
 import { openQuestion } from "./question.ts";
-import { type ReviewFacts, reviewFacts } from "./review-quality.ts";
-import { humanWait, type Slot } from "./slots.ts";
-import { pause, type Wake } from "./wake.ts";
+import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
+import { humanWait } from "./slots.ts";
+import { applyTurn, loadState } from "./task-state.ts";
+import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
+
+export type { LoopOptions, LoopResult } from "./loop-options.ts";
+export { readTaskState, type TaskState } from "./task-state.ts";
 
 // The walking skeleton's loop for one explicitly selected issue (UNF-706): poll, build a fresh
 // Situation Report, take a reasoning turn when something changed, execute through the Gate, and
@@ -42,94 +39,6 @@ import { watchKey } from "./webhooks.ts";
 // merged head that skipped fresh review may be sampled for a nonblocking audit review (UNF-730). A
 // deliberately temporary local store (`state.json`) lets a restarted loop resume; Linear, GitHub, and
 // the runner's own run records stay the authority for everything else.
-
-const TaskState = z.object({
-  issueId: z.string(),
-  startedAt: z.iso.datetime(),
-  turns: z.number().int(),
-  lastTurnAt: z.iso.datetime().optional(),
-  /** What the last turn saw; an unchanged situation gets no new turn. */
-  lastFingerprint: z.string().optional(),
-  runIds: z.array(RunId),
-  /**
-   * Runs saved before the runner was asked to start them and not yet seen started: a crash, or a
-   * start that failed, in between. Each is confirmed with the runner, or canceled, before anything else.
-   */
-  unconfirmedStarts: z.array(RunId).default([]),
-  /** Follow-up issues filed for this task, shown to every later turn and listed in the outcome. */
-  followups: z.array(FiledFollowup).default([]),
-  recentTurns: z.array(z.object({ at: z.iso.datetime(), summary: z.string(), outcomes: z.array(z.string()) })),
-  /** Reported cost of every reasoning turn; runs report their own. */
-  turnCostUsd: z.number().default(0),
-  budget: z
-    .object({
-      /** Fixed when the task starts; a restart with other flags does not change it, only a grant extends it. */
-      window: BudgetStatus.shape.window,
-      grants: z.array(z.object({ commentId: z.string(), at: z.iso.datetime() })),
-    }),
-  merged: z
-    .object({
-      repo: RepoSlug,
-      number: z.number().int(),
-      headSha: Sha,
-      mergedSha: Sha,
-      at: z.iso.datetime(),
-      /** The outcome comment, built from the facts the merge was allowed on; posted once. */
-      outcome: z.string().optional(),
-      outcomePostedAt: z.iso.datetime().optional(),
-      /** When the audit sample was drawn for the merged head; done once. */
-      auditDrawnAt: z.iso.datetime().optional(),
-      /** The sampled audit review of the merged head. */
-      audit: z.object({ runId: RunId }).optional(),
-    })
-    .optional(),
-  /**
-   * Merges GitHub refused by repository policy, one per PR (the latest head), with when the
-   * ready-for-human-merge comment was confirmed posted (TECH-4987). Lost, a merge is tried once more
-   * and refused again, and the comment's key posts nothing new.
-   */
-  refusedMerges: z.array(RefusedMerge.extend({ commentPostedAt: z.iso.datetime().optional() })).default([]),
-  /** Per finished review: the later-known facts its last `reviews.jsonl` line carried. */
-  reviewsRecorded: z.record(z.string(), z.string()).default({}),
-});
-export type TaskState = z.infer<typeof TaskState>;
-type State = TaskState;
-
-export type LoopOptions = {
-  issueId: string;
-  enrolledRepositories: RepoSlug[];
-  /**
-   * Holds `state.json`, `turns.jsonl` (every turn's report, output, and outcomes), `reviews.jsonl`
-   * (`ReviewFacts` for every finished review; the last line per run id holds),
-   * `audit-followups.jsonl` (audit must-fix findings on merged code), and `STOP`.
-   */
-  dir: string;
-  /** The fraction of merged heads that skipped fresh review which get an audit review (06 §8). */
-  auditSampleRate?: number;
-  pollSeconds?: number;
-  /** Runaway guards: reasoning turns in total, and minutes with nothing changing and nothing running. */
-  maxTurns?: number;
-  idleMinutes?: number;
-  /**
-   * The task's budget window: hard wall time from the start, and best-effort spend (default 120
-   * minutes, $25). Used when the task starts; an existing task keeps the window it started with.
-   */
-  budget?: Partial<BudgetWindow>;
-  /** How long to watch Linear after the merge for the GitHub integration to move the issue. */
-  completionWaitMinutes?: number;
-  log?: (line: string) => void;
-  /** Ends the loop at its next poll, never mid-turn: the service stopping. */
-  signal?: AbortSignal;
-  /** A human asking for a turn now (`sgt task wake`). */
-  wake?: Wake;
-  /** The task's slot (TECH-5008): told when the task waits on a human, and asked before each turn. */
-  slot?: Slot;
-};
-
-export type LoopResult = {
-  outcome: "done" | "merged_not_done" | "stopped" | "turn_limit" | "idle";
-  detail: string;
-};
 
 export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reasoner }): Promise<LoopResult> {
   const log = opts.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
@@ -171,26 +80,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // guard. Only in memory: a restart instead finds the turn's fingerprint uncommitted and takes a turn.
   let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
 
-  // Review telemetry (UNF-730): every reviewer run that has finished, merged or not, gets a
-  // `reviews.jsonl` line, and another only when a later-known fact (the merge, a resulting change)
-  // changes it. An audit's must-fix findings on merged code also go to `audit-followups.jsonl` for a
-  // human; nothing is reopened or reverted. Telemetry only: nothing here gates a turn or an effect.
-  const recordReviews = async (runs: RunRecord[]) => {
-    const facts: ReviewFacts[] = [];
-    for (const run of runs) {
-      if (run.role !== "reviewer" || run.status === "running") continue;
-      const trigger = run.runId === state.merged?.audit?.runId ? "audit" : "required";
-      const f = reviewFacts(run, { trigger, issue: opts.issueId, runs, merged: state.merged ? mergedHead(state.merged) : null });
-      const known = JSON.stringify([f.status, f.merged, f.resultingMutation]);
-      if (state.reviewsRecorded[run.runId] === known) continue;
-      if (f.followUp && state.reviewsRecorded[run.runId] === undefined) await logFollowUp(f, run, files.auditFollowups, log);
-      state.reviewsRecorded[run.runId] = known;
-      facts.push(f);
-    }
-    if (facts.length === 0) return;
-    await appendFile(files.reviews, facts.map((f) => `${JSON.stringify(f)}\n`).join(""));
-    await save();
-  };
+  const recordReviews = (runs: RunRecord[]) =>
+    recordReviewFacts(runs, state, { issueId: opts.issueId, auditFollowups: files.auditFollowups, reviews: files.reviews, log, save });
 
   // A PR GitHub refused to let Sergeant merge waits for a human: say so once on the issue, retried
   // every poll until Linear confirms it, only while the issue is still Sergeant's (A1 checked first).
@@ -382,35 +273,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const failedAsk = outcomes.find((o) => o.action.kind === "ask_human" && o.status === "failed");
     if (failedAsk) unposted = { action: failedAsk.action, situation };
     const retryMerge = outcomes.some((o) => mergeNotSettled(o, situation));
-    state.turns += 1;
-    state.turnCostUsd += turn.costUsd ?? 0;
-    state.lastTurnAt = at;
-    state.lastFingerprint = failedAsk || retryMerge ? undefined : fingerprint;
-    state.recentTurns = [...state.recentTurns, { at, summary: turn.output.summary, outcomes: described }].slice(-8);
-    const done = outcomes.flatMap((o) => (o.status === "done" ? [o] : []));
-    for (const o of done) {
-      const { started, granted } = o;
-      if (started) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== started.runId);
-      if (granted && !state.budget.grants.some((g) => g.commentId === granted.commentId)) state.budget.grants.push({ commentId: granted.commentId, at });
-      const { followup } = o;
-      if (followup && !state.followups.some((f) => f.key === followup.key)) state.followups.push(followup);
-    }
-    for (const o of outcomes) {
-      const refused = o.status === "denied" ? o.refused : undefined;
-      if (refused) state.refusedMerges = [...state.refusedMerges.filter((r) => r.repo !== refused.repo || r.number !== refused.number), refused];
-    }
-    // After the follow-ups, so a merge lists those filed earlier in the same turn.
-    for (const o of done) {
-      if (o.action.kind === "merge_pr" && o.merged) {
-        if (reportedClosing(situation.runs, o.merged.pr) !== true) {
-          log(`${o.action.repo}#${o.action.number} merged as Part of ${situation.conversation.issue.identifier}; the task continues`);
-          continue;
-        }
-        const mergedSha = Sha.parse(o.merged.mergedSha);
-        const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups);
-        state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, at, outcome };
-      }
-    }
+    applyTurn(
+      state,
+      { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: failedAsk || retryMerge ? undefined : fingerprint },
+      log,
+    );
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
     await postHandoffs(conversation.issue.id);
@@ -419,85 +286,4 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       await wait(pollMs);
     }
   }
-}
-
-/**
- * A merge that did not happen for a reason the poll may never show (TECH-4991): GitHub still computing
- * mergeability at merge time though the turn's poll saw it mergeable (M7), or the merge call failing
- * (a temporary 405 such as "Base branch was modified", a network error). The next poll can then look
- * exactly like this turn's, so the loop leaves the fingerprint uncommitted and takes another turn
- * rather than going quiet, across a restart too. An M7 denial the poll already showed is left to the
- * fingerprint: `mergeable` changing wakes the turn.
- */
-function mergeNotSettled(o: ActionOutcome, situation: SituationReport): boolean {
-  const a = o.action;
-  if (a.kind !== "merge_pr") return false;
-  if (o.status === "failed") return true;
-  const polled = situation.pullRequests.find((p) => p.repo === a.repo && p.number === a.number);
-  return o.status === "denied" && o.rule === "M7" && polled?.mergeable === true;
-}
-
-/**
- * Cancels each run through the runner and returns how many are not confirmed stopped. The runner
- * resolves `cancel` only once the run is stopped or gone; anything else is retried next poll.
- */
-async function cancelRuns(runIds: RunId[], deps: Ports, log: (line: string) => void): Promise<number> {
-  let unconfirmed = 0;
-  for (const runId of runIds) {
-    await deps.runner.cancel(runId).then(
-      () => log(`canceled ${runId}`),
-      (e: Error) => (unconfirmed++, log(`cancel ${runId} not confirmed: ${e.message}`)),
-    );
-  }
-  return unconfirmed;
-}
-
-/**
- * Every PR in an enrolled repository that Linear links to the issue or a worker reported, re-read
- * live. Linear's link is authoritative on its own: one no recorded run reported (a human attached it,
- * or a restart lost the run id) still has its head and checks polled.
- */
-async function readPullRequests(runs: RunRecord[], linked: PullRequestRef[], enrolled: RepoSlug[], deps: Ports): Promise<PullRequestFacts[]> {
-  const reported = runs.flatMap((run) => (run.role === "worker" ? (run.report?.pullRequests ?? []) : []));
-  const refs = new Map<string, PullRequestRef>();
-  for (const pr of [...linked, ...reported]) if (enrolled.includes(pr.repo)) refs.set(`${pr.repo}#${pr.number}`, { repo: pr.repo, number: pr.number });
-  return Promise.all([...refs.values()].map((r) => deps.github.readPullRequest(r.repo, r.number)));
-}
-
-/** What a turn depends on. `generatedAt` and recentTurns are excluded: they change every poll. */
-function fingerprintOf(s: SituationReport): string {
-  const facts = {
-    conversation: s.conversationRevision,
-    // A PR newly linked to the issue can make a refused review or merge allowable.
-    linked: s.conversation.issue.linkedPullRequests.map((p) => `${p.repo}#${p.number}`).sort(),
-    runs: s.runs.map((r) => [r.runId, r.status]),
-    budget: s.budget.grants.length,
-    prs: s.pullRequests.map((p) => [p.repo, p.number, p.state, p.draft, p.headSha, p.mergeable, p.checks]),
-  };
-  return createHash("sha256").update(JSON.stringify(facts)).digest("hex");
-}
-
-const describePr = (p: PullRequestFacts) =>
-  `${p.repo}#${p.number} ${p.state} @${p.headSha.slice(0, 12)} checks ${p.checks.required.map((c) => `${c.name}=${c.state}`).join(",") || "none"}`;
-
-/** The task's state, or a new task starting now with `window`; a task's stored window always wins. */
-async function loadState(file: string, issueId: string, window: BudgetWindow): Promise<State> {
-  const budget = { window, grants: [] };
-  const state =
-    (await readTaskState(file, window)) ??
-    TaskState.parse({ issueId, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget });
-  if (state.issueId !== issueId) throw new Error(`${file} belongs to ${state.issueId}, not ${issueId}`);
-  // Before TECH-4991 a temporary 405 "Pull Request is not mergeable" was recorded as a policy refusal,
-  // which M12 would keep holding until a human touched the conversation; it is not one, so drop it.
-  state.refusedMerges = state.refusedMerges.filter((r) => !/pull request is not mergeable/i.test(r.reason));
-  return state;
-}
-
-/** A task's saved `state.json`, if it has one. */
-export async function readTaskState(file: string, window: BudgetWindow = DEFAULT_BUDGET): Promise<TaskState | undefined> {
-  const raw = await readFile(file, "utf8").catch(() => undefined);
-  if (raw === undefined) return undefined;
-  const stored = JSON.parse(raw) as { budget?: object };
-  // A task saved before it had a window adopts the one it is resumed with, once.
-  return TaskState.parse({ ...stored, budget: { window, grants: [], ...stored.budget } });
 }
