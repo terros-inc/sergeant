@@ -32,6 +32,8 @@ const CancelIntent = z.object({
   unconfirmedStarts: z.array(RunId).optional(),
   /** The PRs this stop closed, for the issue comment and the API's answer. */
   closed: z.array(ClosedPullRequest).default([]),
+  /** Completed GitHub close effects, keyed per PR and exact head so a re-drive skips them. */
+  prCloseKeys: z.array(z.string()).default([]),
 });
 type CancelIntent = z.infer<typeof CancelIntent>;
 
@@ -76,7 +78,7 @@ export const stopReason = (issue: Conversation["issue"]) =>
  */
 export async function recordStop(dir: string, reason: string, requestId: string = randomUUID()): Promise<void> {
   if ((await readIntent(dir)) || !(await exists(join(dir, "state.json")))) return;
-  await writeIntent(dir, { reason, requestId, at: new Date().toISOString(), closed: [] });
+  await writeIntent(dir, { reason, requestId, at: new Date().toISOString(), closed: [], prCloseKeys: [] });
 }
 
 /**
@@ -156,8 +158,13 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open.
   const { issue } = await deps.linear.readConversation(ref);
   for (const pr of await openPullRequests(issue.linkedPullRequests, runs, enrolled, deps)) {
+    const key = prCloseKey(pr);
+    if (intent.prCloseKeys.includes(key)) continue;
     await deps.github.closePullRequest({ repo: pr.repo, number: pr.number, comment: `Closed: ${intent.reason}.` });
-    intent.closed.push({ repo: pr.repo, number: pr.number, url: pr.url });
+    intent.prCloseKeys.push(key);
+    if (!intent.closed.some((closed) => closed.repo === pr.repo && closed.number === pr.number)) {
+      intent.closed.push({ repo: pr.repo, number: pr.number, url: pr.url });
+    }
     await writeIntent(dir, intent);
     log(`${ref}: closed ${pr.url}`);
   }
@@ -168,6 +175,9 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   await rm(intentFile(dir), { force: true });
   return { stopping: [], closedPullRequests: intent.closed };
 }
+
+/** One durable close effect per PR head: a retry may close a later head, never the same one twice. */
+const prCloseKey = (pr: Pick<PullRequestFacts, "repo" | "number" | "headSha">) => `close-pr:${pr.repo}#${pr.number}:${pr.headSha}`;
 
 /**
  * The task's PRs still open: those Linear links to the issue or its workers reported, in enrolled
