@@ -1,4 +1,4 @@
-import type { RunDetail, RunSummary, TaskDetail, TaskSummary } from "@terros/sergeant-contracts";
+import type { AccountSummary, RunDetail, RunSummary, TaskDetail, TaskSummary } from "@terros/sergeant-contracts";
 
 // --- human output: one line per item, aligned; detail only in `show`
 
@@ -17,7 +17,15 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export const taskRow = (t: TaskSummary) => [t.ref, t.status, plural(t.turns, "turn"), plural(t.runs, "run"), minute(t.lastTurnAt), clip(t.lastSummary, 60)];
 
-export const runRow = (r: RunSummary) => [r.runId, r.task, r.role ?? "-", r.status, usd(r.costUsd), clip(r.summary ?? r.error, 60)];
+export const runRow = (r: RunSummary) => [r.runId, r.task, r.role ?? "-", r.status, usd(r.costUsd), clip(r.account, 30) || "-", clip(r.summary ?? r.error, 60)];
+
+export const accountRow = (a: AccountSummary) => [
+  a.id,
+  a.group,
+  `${a.holder}${a.mine ? " (yours)" : ""}`,
+  plural(a.usage.runs, "run"),
+  `${usd(a.usage.costUsd)}${a.usage.unknownCostRuns ? ` +${a.usage.unknownCostRuns} of unknown cost` : ""}`,
+];
 
 export function showTask(d: TaskDetail): string {
   const { task, issue, budget } = d;
@@ -46,6 +54,7 @@ export function showRun({ task, run }: RunDetail): string {
   const cost = run.costUsd === undefined && run.tokens ? `cost unknown, ${run.tokens.input} input and ${run.tokens.output} output tokens` : usd(run.costUsd);
   const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${cost}`];
   if (run.failureReason) lines.push(`failure reason: ${run.failureReason}`);
+  if (run.account) lines.push(`account: ${run.account.id} (${run.account.holder})${run.accountReason ? `, ${run.accountReason}` : ""}`);
   if (run.providerChoice) {
     const c = run.providerChoice;
     const window = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");

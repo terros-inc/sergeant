@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BudgetStatus } from "./budget.ts";
 import { RepoSlug } from "./conversation.ts";
-import { RunId, RunRecord } from "./runs.ts";
+import { QuotaReading, RunAccount, RunId, RunRecord } from "./runs.ts";
 import { FiledFollowup } from "./situation.ts";
 
 // The client API (11 §2, UNF-713): what `serve` answers on `/v1` and `sgt` and `sgt-mcp` read. The
@@ -48,6 +48,8 @@ export const RunSummary = z.object({
   status: z.enum(["running", "succeeded", "failed", "canceled", "unknown"]),
   model: z.string().optional(),
   costUsd: z.number().optional(),
+  /** Whose model account it ran on (TECH-5113). */
+  account: z.string().optional(),
   /** The report's summary, or why there is no report. */
   summary: z.string().optional(),
   /** Why the status could not be read. */
@@ -124,3 +126,41 @@ export const WhoAmI = z.object({
   enrolledRepositories: z.array(RepoSlug),
 });
 export type WhoAmI = z.infer<typeof WhoAmI>;
+
+// --- model accounts (TECH-5113)
+
+/** The agent CLI a model account serves: a Claude login for Claude Code, a ChatGPT login for Codex. */
+export const AccountAdapter = z.enum(["claude-code-local", "codex-local"]);
+export type AccountAdapter = z.infer<typeof AccountAdapter>;
+
+/** A model account Sergeant may run on, without its credential, and the runs it paid for. */
+export const AccountSummary = RunAccount.extend({
+  adapter: AccountAdapter,
+  /** The caller registered it, so may remove it. */
+  mine: z.boolean(),
+  registeredAt: z.string().optional(),
+  /** Runs of the tasks Sergeant knows that used it: dollars where the CLI reported them, else counted as unknown. */
+  usage: z.object({ runs: z.number().int(), costUsd: z.number(), unknownCostRuns: z.number().int() }),
+});
+export type AccountSummary = z.infer<typeof AccountSummary>;
+
+export const AccountList = z.object({ accounts: z.array(AccountSummary) });
+export type AccountList = z.infer<typeof AccountList>;
+
+/**
+ * A person's own subscription login for the adapter: the token `claude setup-token` prints, or the
+ * JSON of the `auth.json` a `codex login` writes. Stored in the installation's Secrets Manager; never
+ * echoed, logged, or returned.
+ */
+export const RegisterAccountRequest = z.strictObject({ credential: z.string().trim().min(1, "a credential is required").max(32_000, "credential too long") });
+export const RegisterAccountResponse = z.object({
+  account: AccountSummary.omit({ usage: true }),
+  /** It replaced the caller's earlier credential for this adapter. */
+  replaced: z.boolean(),
+  /** The quota read with it at registration, which proved it works. */
+  quota: QuotaReading,
+});
+export type RegisterAccountResponse = z.infer<typeof RegisterAccountResponse>;
+
+export const RemoveAccountResponse = z.object({ adapter: AccountAdapter, removed: z.boolean() });
+export type RemoveAccountResponse = z.infer<typeof RemoveAccountResponse>;

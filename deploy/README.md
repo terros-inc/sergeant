@@ -11,7 +11,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 
 | Path | What it is |
 |---|---|
-| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` on the config parameter (and an explicit deny on every other parameter, which SSM core would otherwise allow), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to seven with the webhook signing secrets and the Codex credential). |
+| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` on the config parameter (and an explicit deny on every other parameter, which SSM core would otherwise allow), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to twelve with the webhook signing secrets, the Codex credential, and model accounts), and `secretsmanager:PutSecretValue` on only the registered-accounts secret, when one is configured. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
@@ -182,6 +182,28 @@ format in `packages/runner/README.md`, under Codex):
    (`/var/lib/sergeant/state/runs/<run>/record.json`) says `"provider": "openai/codex"` and has `tokens`.
 
 To go back, remove `runners` (or set the role to `claude-code-local`) and update.
+
+### Several model accounts (TECH-5113)
+
+Runs use the owner's model accounts first (the model token, the Codex credential, then the config's
+`modelAccounts`), then accounts people register with `sgt`, each launch on the account with the most
+weekly capacity left whose 5-hour window is at least 20% (`packages/runner/README.md`). Every run
+records its `account`, and `sgt account list` shows what each one paid for.
+
+1. **The owner's further accounts.** Store each credential (the same forms as the model token and the
+   Codex credential) in its own Secrets Manager secret, add the names to `secret_names`, and add
+   `"modelAccounts": [{ "name": "terros-claude-2", "adapter": "claude-code-local", "credentialSecret": "<name>" }]`
+   to the installation config. A `codex-local` account needs the `codex` config, for its model.
+2. **Registration.** Create one secret with the value `{"accounts":[]}`, for example
+   `sergeant/<installation>/registered-accounts`; add its name to `secret_names` and set
+   `registered_accounts_secret` to it in the infrastructure-config parameter (`./init.sh`, plan, apply:
+   the role may then put that secret's value, and only that one's); and set the installation config's
+   `registeredAccountsSecret` to it. Update.
+3. **Check.** Someone in `humans.teams` runs `claude setup-token | sgt account register claude-code-local`
+   (or `sgt account register codex-local < ~/.codex/auth.json` after `codex login`): it answers with
+   the quota it read with the credential, and `sgt account list` shows the account as theirs. They
+   remove it with `sgt account remove <adapter>`. The secret then holds every registered credential:
+   treat it as the model token, readable by this host's role only.
 
 ### Taking over from Sergeant 1 (DNS)
 

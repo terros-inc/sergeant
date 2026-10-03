@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto";
 import type { QuotaReading } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import type { Adapter } from "./agents.ts";
 
-// Live quota for each provider's installation credential (TECH-5117): the weekly and 5-hour windows
-// Claude Code's `/usage` and Codex's usage endpoint show. A read never throws and never waits long: a
-// failure is an unknown reading, and the chooser then keeps the configured provider.
+// Live quota for each model account (TECH-5117, TECH-5113): the weekly and 5-hour windows Claude
+// Code's `/usage` and Codex's usage endpoint show. A read never throws and never waits long: a failure
+// is an unknown reading, and the chooser then passes the account over or keeps the configured provider.
 
-export type ReadQuota = (adapter: Adapter) => Promise<QuotaReading>;
+/** A model account to read: its id, the agent CLI it serves, and its credential. */
+export type QuotaAccount = { id: string; adapter: Adapter; credential: string };
+export type ReadQuota = (account: QuotaAccount) => Promise<QuotaReading>;
 
 const READ_TIMEOUT_MS = 5_000;
 /** A burst of launches shares one reading. */
@@ -47,20 +50,18 @@ const CodexUsage = z.object({ rate_limit: z.object({ primary_window: CodexWindow
 const CodexAuth = z.object({ tokens: z.object({ access_token: z.string(), account_id: z.string().nullish() }) });
 
 export type QuotaOptions = {
-  claudeOAuthToken: string;
-  codexCredential: string;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
 };
 
-/** Reads each provider's quota with the installation's own credential, cached for `QUOTA_CACHE_MS`. */
-export function providerQuota(opts: QuotaOptions): ReadQuota {
+/** Reads each account's quota with its own credential, cached for `QUOTA_CACHE_MS`. */
+export function accountQuota(opts: QuotaOptions = {}): ReadQuota {
   const fetchFn = opts.fetch ?? globalThis.fetch;
   const now = opts.now ?? Date.now;
   const get = (url: string, init: RequestInit = {}) => fetchFn(url, { signal: AbortSignal.timeout(READ_TIMEOUT_MS), ...init });
 
-  async function claude(): Promise<Omit<QuotaReading, "adapter" | "readAt">> {
-    const auth = { Authorization: `Bearer ${opts.claudeOAuthToken}`, "anthropic-beta": "oauth-2025-04-20" };
+  async function claude(token: string): Promise<Omit<QuotaReading, "adapter" | "readAt">> {
+    const auth = { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" };
     // One limit for the whole read, the header fallback included.
     const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
     const usage = await get("https://api.anthropic.com/api/oauth/usage", { headers: auth, signal });
@@ -80,9 +81,9 @@ export function providerQuota(opts: QuotaOptions): ReadQuota {
     return "error" in read ? { error: `usage endpoint answered ${usage.status}; messages answered ${probe.status} without limits` } : read;
   }
 
-  async function codex(): Promise<Omit<QuotaReading, "adapter" | "readAt">> {
-    if (!opts.codexCredential.startsWith("{")) return { error: "an OpenAI API key has no subscription quota" };
-    const { tokens } = CodexAuth.parse(JSON.parse(opts.codexCredential));
+  async function codex(credential: string): Promise<Omit<QuotaReading, "adapter" | "readAt">> {
+    if (!credential.startsWith("{")) return { error: "an OpenAI API key has no subscription quota" };
+    const { tokens } = CodexAuth.parse(JSON.parse(credential));
     const res = await get("https://chatgpt.com/backend-api/wham/usage", {
       headers: { Authorization: `Bearer ${tokens.access_token}`, ...(tokens.account_id && { "ChatGPT-Account-Id": tokens.account_id }) },
     });
@@ -93,21 +94,24 @@ export function providerQuota(opts: QuotaOptions): ReadQuota {
     return windows(window(all.find((w) => w.limit_window_seconds > 86_400)), window(all.find((w) => w.limit_window_seconds <= 86_400)));
   }
 
-  const cache = new Map<Adapter, { at: number; reading: Promise<QuotaReading> }>();
-  return (adapter) => {
-    const hit = cache.get(adapter);
+  // Keyed by the credential, so a replaced one is read afresh; the key is a hash, never the credential.
+  const cache = new Map<string, { at: number; reading: Promise<QuotaReading> }>();
+  return ({ id, adapter, credential }) => {
+    const key = `${id}:${createHash("sha256").update(credential).digest("hex")}`;
+    const hit = cache.get(key);
     if (hit && now() - hit.at < QUOTA_CACHE_MS) return hit.reading;
     const readAt = new Date(now()).toISOString();
     // A JSON or schema error can quote what it read, credential included, so only its kind is kept.
-    const reading = (adapter === "codex-local" ? codex() : claude()).then(
-      (r) => ({ adapter, readAt, ...r }),
+    const reading = (adapter === "codex-local" ? codex(credential) : claude(credential)).then(
+      (r) => ({ adapter, account: id, readAt, ...r }),
       (e: Error) => ({
         adapter,
+        account: id,
         readAt,
         error: e instanceof Unreadable ? e.message : e.name === "TimeoutError" ? "timed out" : `unreadable (${e.name})`,
       }),
     );
-    cache.set(adapter, { at: now(), reading });
+    cache.set(key, { at: now(), reading });
     return reading;
   };
 }

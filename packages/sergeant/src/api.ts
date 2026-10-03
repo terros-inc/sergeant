@@ -25,6 +25,8 @@ import {
   type WhoAmI,
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
+import type { AccountRegistry } from "./accounts.ts";
+import { accountsRoute } from "./api-accounts.ts";
 import { body, callerOf, notFound, ok, parse, Refusal, type Reply, send } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
 import { budgetStatus } from "./budget.ts";
@@ -66,6 +68,8 @@ export type ApiControl = {
   linearClientId?: string;
   /** A loopback caller with no token is an operator (`serve --trust-loopback`). */
   trustLoopback?: boolean;
+  /** The model accounts runs may use, and people's own (TECH-5113, api-accounts.ts). */
+  accounts?: AccountRegistry;
 };
 
 /** Handles `/v1/*`; anything else is a 404. */
@@ -115,6 +119,7 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
     if (verb === "report" && get) return { status: 200, markdown: await runReport(ctl, runId) };
     if (verb === "cancel" && post) return ok(await cancelRunOf(ctl, runId, parse(CancelRunRequest, await body(req)), caller));
   }
+  if (noun === "accounts") return accountsRoute(ctl.accounts, caller, req, { id, verb, pathname: url.pathname }, () => allRuns(ctl));
   throw notFound(url.pathname);
 }
 
@@ -226,7 +231,13 @@ const readRuns = (ctl: ApiControl, runIds: RunId[]): Promise<ReadRun[]> =>
 function runSummary(task: TaskRef, { runId, record: r, error }: ReadRun): RunSummary {
   if (!r) return { runId, task, status: "unknown", error };
   const summary = r.report ? (r.role === "reviewer" ? `${r.report.verdict}: ${r.report.summary}` : r.report.summary) : r.reportError;
-  return { runId, task, role: r.role, status: r.status, model: r.model, costUsd: r.costUsd, summary };
+  return { runId, task, role: r.role, status: r.status, model: r.model, costUsd: r.costUsd, account: r.account?.holder, summary };
+}
+
+/** Every readable run of every task Sergeant knows: what each model account paid for. */
+async function allRuns(ctl: ApiControl): Promise<RunRecord[]> {
+  const runs = await Promise.all((await allTasks(ctl)).map((t) => readRuns(ctl, runIdsOf(t.state))));
+  return runs.flat().flatMap((r) => (r.record ? [r.record] : []));
 }
 
 async function listRuns(ctl: ApiControl, taskFilter: string | null): Promise<RunList> {

@@ -18,7 +18,8 @@ import { parseArgs } from "node:util";
 import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
 import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliFeedbackJudge, claudeCliReasoner } from "@terros/sergeant-reasoning";
-import { containerRunner, providerQuota, reasoningFiles } from "@terros/sergeant-runner";
+import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
+import { modelAccounts } from "./accounts.ts";
 import { linearCallers } from "./auth.ts";
 import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { startService } from "./service.ts";
@@ -45,6 +46,8 @@ const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"))
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
 
 const installation = await connect(config, repositories);
+// The installation's own model accounts, the config's further ones, then people's registered ones (TECH-5113).
+const accounts = modelAccounts(config, installation, (line) => console.log(`[${new Date().toISOString()}] ${line}`));
 // The reasoning CLI inherits this process's environment: with the token set it authenticates as
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;
@@ -68,6 +71,7 @@ const service = await startService(
     auditSampleRate: config.review.auditSampleRate,
     webhookSecrets: installation.webhookSecrets,
     trustLoopback: values["trust-loopback"],
+    accounts: accounts.registry,
     ...(config.humans && {
       humans: {
         linearClientId: config.humans.linearClientId,
@@ -89,11 +93,7 @@ const service = await startService(
     runner: containerRunner({
       rootDir: join(stateDir, "runs"),
       ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
-      claudeOAuthToken: installation.modelToken,
-      ...(installation.codexCredential !== undefined && {
-        codexCredential: installation.codexCredential,
-        quota: providerQuota({ claudeOAuthToken: installation.modelToken, codexCredential: installation.codexCredential }),
-      }),
+      ...accounts.runner,
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
       fetchUpload: installation.linear.fetchUpload,

@@ -5,6 +5,7 @@ import {
   parseReport,
   ProviderChoice,
   ReviewReport,
+  RunAccount,
   RunRecord,
   WorkerReport,
   type RunId,
@@ -12,9 +13,9 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
+import { installationAccounts, pickAccount, runAccount, setAside } from "./accounts.ts";
 import { AGENTS, ADAPTERS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
-import { chooseReviewer, chooseWorker } from "./choose.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
@@ -41,9 +42,16 @@ const RunMeta = z.object({
   issueRevision: z.string().optional(),
   /** The provider chosen from quota and the readings behind it (TECH-5117); every record of the run carries it. */
   providerChoice: ProviderChoice.optional(),
+  /** The model account it runs on and why (TECH-5113); every record of the run carries them. */
+  account: RunAccount.optional(),
+  accountReason: z.string().optional(),
 });
 type RunMeta = z.infer<typeof RunMeta>;
-const recorded = ({ issueRevision, providerChoice }: RunMeta) => ({ ...(issueRevision !== undefined && { issueRevision }), ...(providerChoice && { providerChoice }) });
+const recorded = ({ issueRevision, providerChoice, account, accountReason }: RunMeta) => ({
+  ...(issueRevision !== undefined && { issueRevision }),
+  ...(providerChoice && { providerChoice }),
+  ...(account && { account, ...(accountReason && { accountReason }) }),
+});
 
 /**
  * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
@@ -58,10 +66,11 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   const image = opts.image ?? "sergeant-runner:local";
   if (!opts.claudeOAuthToken) throw new Error("containerRunner needs claudeOAuthToken");
   const adapterOf = (role: Role): Adapter => opts.adapters?.[role] ?? "claude-code-local";
-  const credentials: Record<Adapter, string | undefined> = { "claude-code-local": opts.claudeOAuthToken, "codex-local": opts.codexCredential };
   for (const role of ["worker", "reviewer"] as const) {
-    if (!credentials[adapterOf(role)]) throw new Error(`containerRunner needs codexCredential: the ${role} runs codex-local`);
+    if (adapterOf(role) === "codex-local" && !opts.codexCredential) throw new Error(`containerRunner needs codexCredential: the ${role} runs codex-local`);
   }
+  const installation = installationAccounts(opts.claudeOAuthToken, opts.codexCredential);
+  const asides = setAside();
   const exec = opts.exec ?? hostExec;
   const execOk = checked(exec);
   const fetchFn = opts.fetch ?? globalThis.fetch;
@@ -113,6 +122,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       ...(agent.tokens && { tokens: agent.tokens }),
       ...(agent.failureReason && { failureReason: agent.failureReason }),
     } as const;
+    // The next launch takes the next account (TECH-5113).
+    if (agent.failureReason && meta.account) asides.add(meta.account.id);
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
@@ -155,12 +166,10 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     return { claims, reviews, workerAdapter: worker?.adapter };
   }
 
-  /** The provider for a launch, from quota read now; undefined when there is no second provider to choose. */
-  async function chooseProvider(role: Role, workerAdapter: Adapter | undefined) {
-    const readQuota = opts.quota;
-    if (!readQuota || !opts.codexCredential) return undefined;
-    const candidates = await Promise.all(ADAPTERS.map(async (adapter) => ({ adapter, quota: await readQuota(adapter) })));
-    return role === "worker" ? chooseWorker(candidates, adapterOf(role)) : chooseReviewer(candidates, workerAdapter, adapterOf(role));
+  /** The provider and account for a launch, from quota read now (accounts.ts). */
+  async function chooseAccount(role: Role, workerAdapter: Adapter | undefined) {
+    const more = (await opts.accounts?.().catch(() => [])) ?? [];
+    return pickAccount({ accounts: [...installation, ...more], read: opts.quota, isSetAside: asides.has, role, configured: adapterOf(role), workerAdapter });
   }
 
   return {
@@ -219,8 +228,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
 
       const limits = opts.limits?.[spec.role] ?? DEFAULT_LIMITS[spec.role];
       // Right before the launch, so the reading is current; a failed read is an unknown reading, never a failed start.
-      const providerChoice = await chooseProvider(spec.role, workerAdapter);
-      const adapter = providerChoice?.adapter ?? adapterOf(spec.role);
+      const { account, accountReason, providerChoice } = await chooseAccount(spec.role, workerAdapter);
+      const adapter = account.adapter;
       const agent = AGENTS[adapter];
       const meta: RunMeta = {
         runId: spec.runId,
@@ -232,10 +241,12 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         startedAt: new Date().toISOString(),
         issueRevision: issueRevision(spec.conversation.issue),
         ...(providerChoice && { providerChoice }),
+        account: runAccount(account),
+        ...(accountReason && { accountReason }),
       };
       await writeFile(p.meta, JSON.stringify(meta, null, 2));
       // `--env NAME` copies the value from the docker CLI's own environment, so no token is ever on
-      // a command line. These are the only credentials that cross into the container: its agent's
+      // a command line. These are the only credentials that cross into the container: its account's
       // model credential, and a worker's own scoped GitHub token. The git identity variables are not secret.
       const worker = spec.role === "worker";
       await execOk(
@@ -251,7 +262,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           image, "sh", "-c", agent.script, "sh",
           String(limits.maxWallSeconds), meta.model, String(limits.maxCostUsd),
         ],
-        { env: { ...process.env, [agent.credentialEnv]: credentials[adapter], ...(worker && { GH_TOKEN: githubToken }) } },
+        { env: { ...process.env, [agent.credentialEnv]: account.credential, ...(worker && { GH_TOKEN: githubToken }) } },
       );
     },
 

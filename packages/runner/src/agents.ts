@@ -41,8 +41,16 @@ const ClaudeOutput = z.object({
   subtype: z.string().optional(),
   session_id: z.string().optional(),
   total_cost_usd: z.number().optional(),
+  result: z.string().optional(),
   modelUsage: z.record(z.string(), z.unknown()).optional(),
 });
+
+// A failed `claude -p` run's result text, checked against Claude Code 2.x's messages: the login was
+// refused, or the subscription's usage limit was reached. Only the category is kept, never the text.
+const CLAUDE_AUTH_FAILURE = /\b401\b|invalid api key|please run \/login|oauth token (?:has )?expired|authentication_error|not logged in/i;
+const CLAUDE_QUOTA_FAILURE = /usage limit|hit your limit|weekly limit|5-hour limit/i;
+const claudeFailure = (text: string): RunFailureReason | undefined =>
+  CLAUDE_AUTH_FAILURE.test(text) ? "authentication" : CLAUDE_QUOTA_FAILURE.test(text) ? "quota" : undefined;
 
 const claude: Agent = {
   provider: "anthropic/claude-code",
@@ -55,9 +63,11 @@ exec timeout "$wall" claude -p "${PROMPT}" \\
   parse(stdout) {
     const line = stdout.trim().split("\n").reverse().find((l) => l.startsWith("{"));
     const out = line ? ClaudeOutput.safeParse(JSON.parse(line)).data : undefined;
+    const failureReason = out?.is_error && out.result ? claudeFailure(out.result) : undefined;
     return {
       ok: out?.is_error === false,
       ...(out?.subtype && { detail: out.subtype }),
+      ...(failureReason && { failureReason }),
       ...(out?.session_id && { sessionId: out.session_id }),
       ...(out?.total_cost_usd !== undefined && { costUsd: out.total_cost_usd }),
       models: Object.keys(out?.modelUsage ?? {}),
@@ -95,7 +105,10 @@ const CODEX_REFRESH_FAILURES = [
 ] as const;
 const CODEX_STRUCTURED_AUTH_FAILURE = /(?:\b401\b|unauthori[sz]ed|authentication failed|invalid[_ -]?grant)/i;
 const isCodexRefreshFailure = (text: string) => CODEX_REFRESH_FAILURES.some((message) => text.includes(message));
-const CODEX_AUTH_DETAIL = "Codex authentication failed; replace the installation's Codex credential or switch to an OpenAI API key";
+const CODEX_AUTH_DETAIL = "Codex authentication failed; replace the account's Codex credential or switch to an OpenAI API key";
+// The pinned binary's usage-limit and credit messages ("Usage limit reached. You've reached your usage
+// limit.", "Your workspace is out of credits."), and the API's codes for them.
+const CODEX_QUOTA_FAILURE = /usage limit|out of credits|usage_limit_reached|insufficient_quota/i;
 
 /**
  * `CODEX_CREDENTIAL` is the installation's Codex secret: the JSON of a `codex login`'s `auth.json`
@@ -153,13 +166,14 @@ exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-g
     const authenticationFailed =
       (failure !== undefined && (isCodexRefreshFailure(failure) || CODEX_STRUCTURED_AUTH_FAILURE.test(failure))) ||
       (tokens === undefined && isCodexRefreshFailure(stderr));
+    const quotaFailed = !authenticationFailed && failure !== undefined && CODEX_QUOTA_FAILURE.test(failure);
     return {
       ok: tokens !== undefined && failure === undefined,
       // OpenAI's errors quote part of an API key; a run record never holds any of it.
       ...(authenticationFailed
         ? { detail: CODEX_AUTH_DETAIL, failureReason: "authentication" as const }
         : failure !== undefined
-          ? { detail: failure.replace(/sk-[\w*.-]+/g, "sk-[redacted]").slice(0, 300) }
+          ? { detail: failure.replace(/sk-[\w*.-]+/g, "sk-[redacted]").slice(0, 300), ...(quotaFailed && { failureReason: "quota" as const }) }
           : tokens === undefined && { detail: "no completed turn" }),
       ...(sessionId && { sessionId }),
       ...(tokens && { tokens }),

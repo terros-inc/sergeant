@@ -1,9 +1,9 @@
 import type { ProviderChoice, QuotaReading } from "@terros/sergeant-contracts";
 import type { Adapter } from "./agents.ts";
 
-// Which provider runs a worker or reviewer, from live quota (TECH-5117). Deterministic: no model is
-// asked. The candidates are the providers whose credential the installation holds; each is one
-// reading, so several accounts per provider (TECH-5113) can become more candidates of the same rule.
+// Which provider and which of its model accounts run a worker or reviewer, from live quota (TECH-5117,
+// TECH-5113). Deterministic: no model is asked. Each provider's candidate is the account
+// `chooseAccount` picked for it, so with one account per provider this is TECH-5117's choice unchanged.
 
 /** A provider whose 5-hour window has less than this percent left is not used while another is usable. */
 export const FIVE_HOUR_FLOOR_PERCENT = 20;
@@ -63,4 +63,25 @@ export function chooseReviewer(candidates: Candidate[], worker: Adapter | undefi
     readings,
     sameProviderAsWorker: true,
   };
+}
+
+/** A model account of one provider, in the owner's order: the owner's own accounts, then people's. */
+export type AccountCandidate<A> = Candidate & { account: A; group: "owner" | "registered" };
+
+/**
+ * The account a provider runs on (TECH-5113): the owner's own accounts first, then the ones people
+ * registered, and within each group the rule above: the most weekly capacity left among accounts
+ * whose 5-hour window is at the floor or above, and whose week is not spent. With none usable it is
+ * the first owner account, the installation's own, as an unknown reading keeps the configured provider.
+ */
+export function chooseAccount<A>(candidates: AccountCandidate<A>[]): AccountCandidate<A> & { reason: string } {
+  const first = candidates[0];
+  if (!first) throw new Error("chooseAccount needs at least one account");
+  const name = (c: AccountCandidate<A>) => c.quota.account ?? c.adapter;
+  const ready = (c: AccountCandidate<A>) => usable(c) && (c.quota.weekly?.remainingPercent ?? 0) > 0;
+  for (const group of ["owner", "registered"] as const) {
+    const best = candidates.filter((c) => c.group === group && ready(c)).sort(byWeeklyLeft)[0];
+    if (best) return { ...best, reason: `${group === "owner" ? "owner's account" : "registered account"} ${name(best)}, ${percent(best).replace(`${best.adapter} `, "")}${group === "registered" ? "; no owner's account usable" : ""}` };
+  }
+  return { ...first, reason: `no account usable (unknown, spent, or 5-hour window below ${FIVE_HOUR_FLOOR_PERCENT}%); first owner's account ${name(first)}` };
 }

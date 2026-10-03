@@ -33,10 +33,21 @@ test("alerts once for each Codex authentication failure with recovery instructio
   expect(posted[0]?.body).toContain("switch `codex-local` to an OpenAI API key");
 });
 
+// TECH-5113: a registered account's failure is its person's to fix, never the installation's secret.
+test("a registered account's alert names whose it is and how they fix it", async () => {
+  const posted: string[] = [];
+  const run = { ...failed("run_ada", "authentication"), provider: "anthropic/claude-code", account: { id: "person:u1:claude-code-local", group: "registered", holder: "Ada Example <ada@example.com>" } } as const;
+  await postAuthAlerts("i1", [run], [], { postComment: async ({ body }) => void posted.push(body) }, () => {});
+  expect(posted[0]).toContain("**Claude authentication failed**");
+  expect(posted[0]).toContain("Ada Example <ada@example.com>'s registered account");
+  expect(posted[0]).toContain("sgt account register claude-code-local");
+  expect(posted[0]).not.toContain("Secrets Manager secret");
+});
+
 test("a failed alert is left retryable", async () => {
   const logs: string[] = [];
   await expect(
     postAuthAlerts("i1", [failed("run_auth", "authentication")], [], { postComment: async () => { throw new Error("offline"); } }, (line) => logs.push(line)),
   ).resolves.toBeUndefined();
-  expect(logs).toEqual(["run_auth: Codex authentication alert not posted: offline"]);
+  expect(logs).toEqual(["run_auth: model authentication alert not posted: offline"]);
 });

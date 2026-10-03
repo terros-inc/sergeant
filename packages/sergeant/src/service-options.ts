@@ -1,6 +1,7 @@
 import type { RepoSlug } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { Reasoner } from "@terros/sergeant-reasoning";
+import type { AccountRegistry } from "./accounts.ts";
 import type { Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
 import type { Ports } from "./execute.ts";
@@ -36,6 +37,8 @@ export type ServiceOptions = {
   webhookGapSeconds?: number;
   /** Who may call the client API with a Linear login, and the client id `sgt login` uses (auth.ts). */
   humans?: { callerOf: (accessToken: string) => Promise<Caller>; linearClientId: string };
+  /** The model accounts, and people's registrations of their own, for `/v1/accounts` (TECH-5113). */
+  accounts?: AccountRegistry;
   /** Trusts a loopback caller with no login as an operator: for development on one machine, refused unless `host` is 127.0.0.1 or ::1. */
   trustLoopback?: boolean;
   log?: (line: string) => void;

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import {
+  AccountList,
   type ApiError,
   type ApiResult,
   apiClient,
@@ -8,6 +9,8 @@ import {
   CancelTaskResponse,
   LoginConfig,
   type Method,
+  RegisterAccountResponse,
+  RemoveAccountResponse,
   RunDetail,
   RunList,
   sergeantVersion,
@@ -17,7 +20,7 @@ import {
   WhoAmI,
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
-import { runRow, showRun, showTask, table, taskRow } from "./format.ts";
+import { accountRow, runRow, showRun, showTask, table, taskRow } from "./format.ts";
 import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
 
 // `sgt`, a thin client of the Sergeant 2 API (11 §7, UNF-714): it sends one request per command and
@@ -40,6 +43,11 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   run show <run>
   run report <run>                   the run's raw Markdown report
   run cancel <run> [--reason …]
+  account list                       model accounts runs may use, whose they are, and what each paid for
+  account register <adapter>         register your own subscription for claude-code-local or codex-local,
+                                     read from stdin: \`claude setup-token\`'s token, or the JSON of
+                                     ~/.codex/auth.json after \`codex login\`; it replaces one you had
+  account remove <adapter>           remove your own registered account
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
 one through an SSM port-forward). Each API URL has its own login. --json prints the API's JSON
@@ -52,6 +60,8 @@ export type Io = {
   fetch?: typeof globalThis.fetch;
   /** Shows the human a URL in their browser (`sgt login`); it is printed either way. */
   openUrl?: (url: string) => void;
+  /** All of standard input: a credential to register, never an argument a shell history would keep. */
+  stdin?: () => Promise<string>;
 };
 
 type Flags = { reason?: string | undefined; task?: string | undefined };
@@ -137,6 +147,30 @@ const commands: Record<string, Command> = {
     run: async (ctx, [runId]) => {
       const res = await call(ctx, "POST", `/v1/runs/${path(runId)}/cancel`, CancelRunResponse, { reason: ctx.flags.reason });
       print(ctx, res, () => `${res.runId} (${res.task}) ${res.status === "canceled" ? "canceled" : `already ${res.status}`}`);
+    },
+  },
+  "account list": {
+    args: 0,
+    run: async (ctx) => {
+      const { accounts } = await call(ctx, "GET", "/v1/accounts", AccountList);
+      print(ctx, { accounts }, () => (accounts.length ? table(accounts.map(accountRow)) : "no accounts"));
+    },
+  },
+  "account register": {
+    args: 1,
+    run: async (ctx, [adapter]) => {
+      const credential = (await ctx.io.stdin?.())?.trim();
+      if (!credential) throw new Usage("account register reads your credential from stdin, for example `sgt account register codex-local < ~/.codex/auth.json`");
+      const res = await call(ctx, "POST", `/v1/accounts/${path(adapter)}/register`, RegisterAccountResponse, { credential });
+      const left = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
+      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${res.account.id} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it after the owner's accounts.`);
+    },
+  },
+  "account remove": {
+    args: 1,
+    run: async (ctx, [adapter]) => {
+      const res = await call(ctx, "POST", `/v1/accounts/${path(adapter)}/remove`, RemoveAccountResponse, {});
+      print(ctx, res, () => (res.removed ? `removed your ${res.adapter} account; runs already on it finish on it` : `you have no registered ${res.adapter} account`));
     },
   },
   login: {

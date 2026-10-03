@@ -2,6 +2,7 @@ import type { RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
 import type { AttachmentLimits, FetchUpload } from "./attachments.ts";
 import type { Adapter } from "./agents.ts";
 import type { Exec } from "./exec.ts";
+import type { ModelAccount } from "./accounts.ts";
 import type { ReadQuota } from "./quota.ts";
 import type { FetchLink } from "./public-fetch.ts";
 
@@ -21,20 +22,28 @@ export type ContainerRunnerOptions = {
    */
   adapters?: Partial<Record<Role, Adapter>>;
   /**
-   * Live quota per provider (TECH-5117). With it and the Codex credential, each launch picks its
-   * provider from quota read just before it (`choose.ts`) and records the readings on the run.
+   * Live quota per model account (TECH-5117, TECH-5113). With it and more than one account, each
+   * launch picks its provider and account from quota read just before it (`accounts.ts`, `choose.ts`)
+   * and records the readings on the run.
    */
   quota?: ReadQuota;
   /**
-   * The Sergeant Claude worker token. It enters every Claude Code container, always and only as
+   * The installation's own Claude worker token, its first Claude account (`installation-claude`). A
+   * Claude account's credential enters only that run's Claude Code container, always and only as
    * `CLAUDE_CODE_OAUTH_TOKEN`. There is deliberately no generic environment input.
    */
   claudeOAuthToken: string;
   /**
-   * The installation's Codex credential (`auth.json` JSON or an OpenAI API key), required when a role
-   * runs `codex-local`. It enters only Codex containers, only as `CODEX_CREDENTIAL`.
+   * The installation's own Codex credential (`auth.json` JSON or an OpenAI API key), its first Codex
+   * account (`installation-codex`), required when a role runs `codex-local`. A Codex account's
+   * credential enters only that run's Codex container, only as `CODEX_CREDENTIAL`.
    */
   codexCredential?: string;
+  /**
+   * The installation's further model accounts (TECH-5113), read at each launch: the owner's own, then
+   * those people registered, in that order. Never throws: an unreadable list is an empty one.
+   */
+  accounts?: () => Promise<ModelAccount[]>;
   /**
    * Mints each run's GitHub token from the worker App, scoped to the run's repositories. A worker's
    * write token is its only GitHub credential and enters its container as `GH_TOKEN`; a reviewer's
