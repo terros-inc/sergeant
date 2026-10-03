@@ -61,7 +61,7 @@ export type ActionOutcome =
       status: "denied";
       rule: string;
       reason: string;
-      /** GitHub refused the merge by repository policy: the PR now waits for a human to merge it. */
+      /** GitHub explicitly refused the merge by repository policy. */
       refused?: RefusedMerge;
     }
   | { action: ProposedAction; status: "failed"; error: string };
@@ -193,8 +193,8 @@ export async function execute(action: ProposedAction, situation: SituationReport
         if (!verdict.allowed) return denied(verdict);
         const result = await ports.github.mergePullRequest(action);
         if ("refused" in result) {
-          // Repository policy, not a fault: retrying cannot help until something changes (M12). The
-          // loop records it and tells the issue the PR is ready for a human to merge.
+          // Repository policy, not a fault. The loop gives it the same one bounded re-check as a
+          // failed merge call, then hands it to a human if nothing changed (TECH-5077).
           const refused = { repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: liveRevision, reason: result.refused, at: new Date().toISOString() };
           return { action, status: "denied", rule: "GitHub", reason: `refused by repository policy: ${result.refused}`, refused };
         }

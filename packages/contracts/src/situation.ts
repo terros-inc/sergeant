@@ -9,9 +9,9 @@ export const FiledFollowup = z.object({ key: z.string(), title: z.string(), iden
 export type FiledFollowup = z.infer<typeof FiledFollowup>;
 
 /**
- * A merge GitHub refused by repository policy (405 or `merged: false`: a required review Sergeant
- * cannot give, such as a code owner's). Sergeant told the issue the PR is ready for a human to merge;
- * M12 refuses another try at the same head until the conversation, PR feedback included, changes.
+ * A merge whose bounded attempt and re-check both failed, including a repository-policy refusal.
+ * Sergeant told the issue the PR is ready for a human to merge; M12 refuses another try at the same
+ * facts until the conversation or PR changes.
  */
 export const RefusedMerge = z.object({
   repo: RepoSlug,
@@ -49,7 +49,7 @@ export const SituationReport = z.object({
   runs: z.array(RunRecord),
   /** Follow-ups already filed for this task: never file the same idea again under another key. */
   followups: z.array(FiledFollowup).default([]),
-  /** Merges GitHub refused by repository policy: each PR waits for a human to merge it. */
+  /** Merges handed off after their bounded attempts: each PR waits for a human or a fact change. */
   refusedMerges: z.array(RefusedMerge).default([]),
   budget: BudgetStatus,
   recentTurns: z.array(

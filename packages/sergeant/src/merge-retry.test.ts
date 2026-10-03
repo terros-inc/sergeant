@@ -1,13 +1,13 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import type { Conversation, MergePr, PullRequestFacts, RunRecord, SituationReport } from "@terros/sergeant-contracts";
+import type { Conversation, MergePr, PullRequestFacts, RunRecord } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
 
-// TECH-5062: a merge that did not happen takes no paid turn per poll. The turn's fingerprint is
-// committed, so the task reasons again only when the facts change: here a moved base or head, or
-// GitHub settling a mergeability the merge's own live read found still computing (M7).
+// TECH-5077: a merge call that fails gets one re-check after the existing waiting grace. A second
+// unchanged failure hands the same head to a human once; this is derived from timestamps and the
+// keyed handoff record, never a turn counter.
 
 const head = "a".repeat(40);
 const repo = "o/canary";
@@ -55,116 +55,112 @@ const merge: MergePr = { kind: "merge_pr", repo, number: 7, expectedHeadSha: hea
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
-test.each([
-  ["M7 denies it: the merge's live read finds GitHub still computing", "M7", /denied by M7/],
-  ["GitHub rejects it with a temporary 405 (the base branch moved)", "405", /failed \(GitHub 405: Base branch was modified\)/],
-])("a merge that did not happen takes no turn until the facts change, then exactly one (%s)", async (_, path, firstOutcome) => {
+async function fixture(waitingGraceMinutes = 0) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-merge-retry-test-"));
-  // A task saved before TECH-4991 holds a temporary 405 recorded as a policy refusal: it must not
-  // hold the merge under M12.
-  const stale = { repo, number: 7, url: pr.url, headSha: head, conversationRevision: "0".repeat(64), reason: "Pull Request is not mergeable", at: "2026-10-02T00:00:00.000Z", commentPostedAt: "2026-10-02T00:00:01.000Z" };
-  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: ["run_worker", "run_review"], recentTurns: [], refusedMerges: [stale] }));
+  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: [worker.runId, review.runId], recentTurns: [] }));
   let live: Conversation = {
     issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
   let livePr = pr;
-  // Set during the first turn: from the merge's own read on, GitHub is still computing mergeability
-  // (M7), or it answers the merge with a temporary 405.
-  let computing = false;
-  let notReadyOnce = false;
-  const attempts: number[] = [];
-  const seen: SituationReport[] = [];
-
-  // idleMinutes 0: the first poll whose facts match the committed fingerprint ends the loop idle.
+  let failures = Infinity;
+  let attempts = 0;
+  let turns = 0;
+  let computeOnFirstTurn = false;
+  const comments: { key: string; body: string }[] = [];
   const run = () => runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, idleMinutes: 0, completionWaitMinutes: 0, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, waitingGraceMinutes, idleMinutes: 0, completionWaitMinutes: 0, log: () => {} },
     {
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => live,
-        postComment: async () => {},
+        postComment: async (comment) => void comments.push(comment),
         createFollowupIssue: async () => { throw new Error("unused"); },
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
       github: {
         closePullRequest: async () => {},
-        readPullRequest: async () => (computing ? { ...livePr, mergeable: null } : livePr),
+        readPullRequest: async () => livePr,
         mergePullRequest: async () => {
-          attempts.push(seen.length);
-          if (notReadyOnce) throw ((notReadyOnce = false), new Error("GitHub 405: Base branch was modified"));
+          attempts++;
+          if (attempts <= failures) throw new Error("GitHub 405: Pull Request is not mergeable");
           livePr = { ...livePr, state: "merged", mergedSha: "c".repeat(40) };
-          live = { ...live, issue: { ...live.issue, state: "Done" } };
+          live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
           return { mergedSha: "c".repeat(40) };
         },
       },
       runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: {
-        async turn(situation) {
-          seen.push(situation);
-          if (seen.length === 1 && path === "M7") computing = true;
-          else if (seen.length === 1) notReadyOnce = true;
+        turn: async () => {
+          turns++;
+          if (computeOnFirstTurn && turns === 1) livePr = { ...livePr, mergeable: null };
           return { output: { summary: "merge", actions: [merge] }, model: "m", promptVersion: "p" };
         },
       },
     },
   );
+  return {
+    run,
+    recoverAfter(count: number) { failures = count; },
+    computeOnFirst() { computeOnFirstTurn = true; },
+    settleMergeability() { livePr = { ...livePr, mergeable: true }; },
+    async matureRetry() {
+      const file = join(dir, "state.json");
+      const saved = JSON.parse(await readFile(file, "utf8"));
+      saved.mergeRetries[0].at = "2000-01-01T00:00:00.000Z";
+      await writeFile(file, JSON.stringify(saved));
+    },
+    changeBase() { livePr = { ...livePr, baseSha: "d".repeat(40) }; },
+    attempts: () => attempts,
+    turns: () => turns,
+    handoffs: () => comments.filter((c) => c.key.startsWith("merge-handoff:")),
+  };
+}
 
-  // The merge does not happen. The polls after it, and a restart, show no new fact (GitHub still
-  // computing is what the merge's read found): no more turns.
-  expect((await run()).outcome).toBe("idle");
-  expect((await run()).outcome).toBe("idle");
-  expect(seen).toHaveLength(1);
-  expect(seen[0]?.refusedMerges).toEqual([]);
-  // GitHub settles, or the base moves: one turn, which merges.
-  if (path === "M7") computing = false;
-  else livePr = { ...livePr, baseSha: "d".repeat(40) };
-  expect((await run()).outcome).toBe("done");
-  expect(seen).toHaveLength(2);
-  expect(seen[1]?.recentTurns.at(-1)?.outcomes[0]).toMatch(firstOutcome);
-  expect(attempts).toEqual(path === "M7" ? [2] : [1, 2]);
+test("TECH-5062 still waits for an M7 mergeability fact change", async () => {
+  const f = await fixture();
+  f.computeOnFirst();
+  f.recoverAfter(0);
+  expect((await f.run()).outcome).toBe("idle");
+  expect((await f.run()).outcome).toBe("idle");
+  expect(f.attempts()).toBe(0);
+  expect(f.turns()).toBe(1);
+  f.settleMergeability();
+  expect((await f.run()).outcome).toBe("done");
+  expect(f.attempts()).toBe(1);
+  expect(f.turns()).toBe(2);
 });
 
-test("a failed merge takes one more turn for a new head, then none while the facts stay put", async () => {
-  dir = await mkdtemp(join(tmpdir(), "sergeant-merge-retry-test-"));
-  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: ["run_worker", "run_review"], recentTurns: [] }));
-  const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
-    humanComments: [],
-    agentComments: [],
-  };
-  let livePr = pr;
-  let turns = 0;
-  const run = () => runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, idleMinutes: 0, completionWaitMinutes: 0, log: () => {} },
-    {
-      agentUserId: "agent-v2",
-      workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
-      github: {
-        closePullRequest: async () => {},
-        readPullRequest: async () => livePr,
-        mergePullRequest: async () => { throw new Error("GitHub 405: Pull Request is not mergeable"); },
-      },
-      runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
-      reasoner: {
-        async turn(situation) {
-          turns++;
-          const now = situation.pullRequests[0]?.headSha ?? head;
-          return { output: { summary: "merge", actions: [{ ...merge, expectedHeadSha: now }] }, model: "m", promptVersion: "p" };
-        },
-      },
-    },
-  );
+test("a temporary merge failure recovers on its one delayed re-check", async () => {
+  const f = await fixture(1);
+  f.recoverAfter(1);
+  expect((await f.run()).outcome).toBe("idle");
+  expect(f.attempts()).toBe(1);
+  await f.matureRetry();
+  expect((await f.run()).outcome).toBe("done");
+  expect(f.attempts()).toBe(2);
+  expect(f.turns()).toBe(2);
+  expect(f.handoffs()).toEqual([]);
+});
 
-  expect((await run()).outcome).toBe("idle");
-  expect((await run()).outcome).toBe("idle");
-  expect(turns).toBe(1);
-  const next = "e".repeat(40);
-  livePr = { ...livePr, headSha: next, checks: { ...livePr.checks, sha: next } };
-  expect((await run()).outcome).toBe("idle");
-  expect((await run()).outcome).toBe("idle");
-  expect(turns).toBe(2);
+test("a persistent 405 gets one re-check, one handoff, and no more turns", async () => {
+  const f = await fixture();
+  expect((await f.run()).outcome).toBe("idle");
+  expect((await f.run()).outcome).toBe("idle");
+  expect(f.attempts()).toBe(2);
+  expect(f.turns()).toBe(2);
+  expect(f.handoffs()).toEqual([{ issueId: "i1", key: `merge-handoff:i1:${repo}#7:${head}`, body: expect.stringContaining("Ready for a human to merge") }]);
+});
+
+test("a fact change after the handoff starts fresh and can merge", async () => {
+  const f = await fixture();
+  expect((await f.run()).outcome).toBe("idle");
+  f.changeBase();
+  f.recoverAfter(2);
+  expect((await f.run()).outcome).toBe("done");
+  expect(f.attempts()).toBe(3);
+  expect(f.turns()).toBe(3);
+  expect(f.handoffs()).toHaveLength(1);
 });
