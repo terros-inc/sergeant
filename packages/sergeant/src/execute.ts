@@ -14,6 +14,7 @@ import {
   type LinearPort,
   type ProposedAction,
   type PullRequestFacts,
+  type RefusedMerge,
   type RunId,
   type RunnerPort,
   type RunRecord,
@@ -57,7 +58,14 @@ export type ActionOutcome =
       /** The human comment that extended the budget by one window. */
       granted?: { commentId: string };
     }
-  | { action: ProposedAction; status: "denied"; rule: string; reason: string }
+  | {
+      action: ProposedAction;
+      status: "denied";
+      rule: string;
+      reason: string;
+      /** GitHub refused the merge by repository policy: the PR now waits for a human to merge it. */
+      refused?: RefusedMerge;
+    }
   | { action: ProposedAction; status: "failed"; error: string };
 
 /**
@@ -159,25 +167,35 @@ export async function execute(action: ProposedAction, situation: SituationReport
         ]);
         const delegation = checkDelegation(live.issue, ports.agentUserId);
         if (!delegation.allowed) return denied(delegation);
+        // The revision covers human feedback on the task's PRs too: the deciding turn's, and the same
+        // PRs with the one being merged re-read live, so feedback on it since the turn denies (M10).
+        const liveRevision = conversationRevision(live, situation.pullRequests.map((p) => (p.repo === pr.repo && p.number === pr.number ? pr : p)));
         const verdict = checkMerge(
           // The revision of the conversation reasoning was actually shown, never a supplied one.
-          { ...action, conversationRevision: conversationRevision(conversation) },
+          { ...action, conversationRevision: conversationRevision(conversation, situation.pullRequests) },
           {
             pr,
             issueIdentifier: live.issue.identifier,
             pullRequests: situation.pullRequests,
-            liveConversationRevision: conversationRevision(live),
+            liveConversationRevision: liveRevision,
             linkedPullRequests: live.issue.linkedPullRequests,
             workerLogin: ports.workerLogin,
             enrolledRepositories,
             runs,
+            refusedMerges: situation.refusedMerges,
           },
         );
         if (!verdict.allowed) return denied(verdict);
         const late = inBudget();
         if (!late.allowed) return denied(late);
-        const { mergedSha } = await ports.github.mergePullRequest(action);
-        return { action, status: "done", result: { mergedSha }, merged: { pr, mergedSha } };
+        const result = await ports.github.mergePullRequest(action);
+        if ("refused" in result) {
+          // Repository policy, not a fault: retrying cannot help until something changes (M12). The
+          // loop records it and tells the issue the PR is ready for a human to merge.
+          const refused = { repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: liveRevision, reason: result.refused, at: new Date().toISOString() };
+          return { action, status: "denied", rule: "GitHub", reason: `refused by repository policy: ${result.refused}`, refused };
+        }
+        return { action, status: "done", result: { mergedSha: result.mergedSha }, merged: { pr, mergedSha: result.mergedSha } };
       }
       case "ask_human":
         // Keyed by the revision reasoning asked from, so a restart or a second ask before any human

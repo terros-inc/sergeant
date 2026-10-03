@@ -37,6 +37,7 @@ const pr: PullRequestFacts = {
   body: "Fixes UNF-1",
   mergeable: true,
   checks: { sha: head, required: [{ name: "validate", state: "passed" }] },
+  humanFeedback: [],
 };
 const worker = (status: RunRecord["status"], costUsd?: number): RunRecord => ({
   runId: "run_w",

@@ -8,6 +8,7 @@ import {
   commentIdFor,
   conversationRevision,
   FiledFollowup,
+  RefusedMerge,
   RepoSlug,
   reportedClosing,
   RunId,
@@ -23,6 +24,7 @@ import { z } from "zod";
 import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
 import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
 import { askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
+import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import { outcomeComment } from "./outcome.ts";
 import { openQuestion } from "./question.ts";
@@ -80,6 +82,12 @@ const TaskState = z.object({
       audit: z.object({ runId: RunId }).optional(),
     })
     .optional(),
+  /**
+   * Merges GitHub refused by repository policy, one per PR (the latest head), with when the
+   * ready-for-human-merge comment was confirmed posted (TECH-4987). Lost, a merge is tried once more
+   * and refused again, and the comment's key posts nothing new.
+   */
+  refusedMerges: z.array(RefusedMerge.extend({ commentPostedAt: z.iso.datetime().optional() })).default([]),
   /** Per finished review: the later-known facts its last `reviews.jsonl` line carried. */
   reviewsRecorded: z.record(z.string(), z.string()).default({}),
 });
@@ -181,6 +189,16 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     await save();
   };
 
+  // A PR GitHub refused to let Sergeant merge waits for a human: say so once on the issue, retried
+  // every poll until Linear confirms it, only while the issue is still Sergeant's (A1 checked first).
+  const postHandoffs = async (issueId: string) => {
+    for (const r of state.refusedMerges) {
+      if (r.commentPostedAt || !(await postHandoff(issueId, r, deps.linear, log))) continue;
+      r.commentPostedAt = new Date().toISOString();
+      await save();
+    }
+  };
+
   // A run whose status cannot be read is unknown, never stopped (04 §6).
   const readRuns = async () => {
     const read = await Promise.all(state.runIds.map((id) => deps.runner.status(id).catch((e: Error) => ({ unknown: id, error: e.message }))));
@@ -265,7 +283,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       await wait(pollMs);
       continue;
     }
-    if (unposted?.situation.conversationRevision === conversationRevision(conversation)) {
+    if (unposted && conversationRevision(unposted.situation.conversation) === conversationRevision(conversation)) {
       const retry = await execute(unposted.action, unposted.situation, deps);
       log(`asking again: ${describeOutcome(retry)}`);
       if (retry.status !== "failed") unposted = undefined;
@@ -275,6 +293,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     unposted = undefined;
     const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
+    await postHandoffs(conversation.issue.id);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
@@ -298,12 +317,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const situation = SituationReport.parse({
       taskId: `canary_${conversation.issue.identifier}`,
       generatedAt: new Date().toISOString(),
-      conversationRevision: conversationRevision(conversation),
+      conversationRevision: conversationRevision(conversation, pullRequests),
       conversation,
       enrolledRepositories: opts.enrolledRepositories,
       pullRequests,
       runs,
       followups: state.followups,
+      refusedMerges: state.refusedMerges,
       budget,
       recentTurns: state.recentTurns,
     });
@@ -360,6 +380,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       const { followup } = o;
       if (followup && !state.followups.some((f) => f.key === followup.key)) state.followups.push(followup);
     }
+    for (const o of outcomes) {
+      const refused = o.status === "denied" ? o.refused : undefined;
+      if (refused) state.refusedMerges = [...state.refusedMerges.filter((r) => r.repo !== refused.repo || r.number !== refused.number), refused];
+    }
     // After the follow-ups, so a merge lists those filed earlier in the same turn.
     for (const o of done) {
       if (o.action.kind === "merge_pr" && o.merged) {
@@ -374,6 +398,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
+    await postHandoffs(conversation.issue.id);
   }
 }
 

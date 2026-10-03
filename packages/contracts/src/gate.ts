@@ -1,8 +1,8 @@
 import type { Conversation, ConversationRevision, PullRequestRef, RepoSlug } from "./conversation.ts";
-import type { PullRequestFacts } from "./github.ts";
+import type { HumanPullRequestFeedback, PullRequestFacts } from "./github.ts";
 import type { MergePr, ProposedAction, ReviewStanding } from "./actions.ts";
 import type { RunRecord } from "./runs.ts";
-import type { FiledFollowup } from "./situation.ts";
+import type { FiledFollowup, RefusedMerge } from "./situation.ts";
 
 // The Gate: pure checks that refuse a proposed action which would cause a material harm (00 P3).
 // Rule ids follow 03 §7 and 08 §7; only the rules the walking skeleton needs exist.
@@ -103,11 +103,28 @@ export type MergeFacts = Ownership & {
   liveConversationRevision: ConversationRevision;
   enrolledRepositories: RepoSlug[];
   runs: RunRecord[];
+  /** Merges GitHub refused by repository policy, from the task's record. */
+  refusedMerges: RefusedMerge[];
 };
 
 /**
+ * The humans whose latest review of the PR, at any head, requests changes (M8). A later approval or a
+ * dismissal by anyone with the right clears that reviewer's request; a later plain comment does not,
+ * as on GitHub.
+ */
+export function outstandingChangeRequests(feedback: HumanPullRequestFeedback[]): string[] {
+  const latest = new Map<string, HumanPullRequestFeedback["state"]>();
+  const decisive = feedback
+    .filter((f) => f.kind === "review" && f.state !== "COMMENTED")
+    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const review of decisive) latest.set(review.author, review.state);
+  return [...latest].filter(([, state]) => state === "CHANGES_REQUESTED").map(([author]) => author);
+}
+
+/**
  * L1 (no unreviewed or red merge), M2 (only this task's PRs), M9 (no early or missing completion),
- * and L4 (no merge that overtakes unseen human input).
+ * L4 (no merge that overtakes unseen human input or a human's requested changes), and M12 (no retry
+ * of a merge GitHub refused by policy while nothing changed).
  * `conversationRevision` is the one the proposing turn saw, attached by the core, not by reasoning.
  */
 export function checkMerge(
@@ -120,6 +137,10 @@ export function checkMerge(
   if (pr.repo !== repo || pr.number !== number) return deny("M4", "live facts are for a different PR");
   if (!isOwned(action, pr.author, facts)) return deny("M2", `${repo}#${number} is not this task's PR`);
   if (pr.headSha !== sha) return deny("M4", `head moved: expected ${sha}, live ${pr.headSha}`);
+
+  // M8: a human's "changes requested" outranks Sergeant's own reviewer, whatever head it was left on.
+  const requested = outstandingChangeRequests(pr.humanFeedback);
+  if (requested.length > 0) return deny("M8", `changes requested by ${requested.join(", ")} and not since approved or dismissed`);
 
   const { checks } = pr;
   if (checks.sha !== sha) return deny("M5", `checks were read for ${checks.sha}, not ${sha}`);
@@ -145,7 +166,12 @@ export function checkMerge(
   if (closing && open.length > 0) return deny("M9", `the closing PR merges last; still open: ${open.map((p) => `${p.repo}#${p.number}`).join(", ")}`);
 
   if (facts.liveConversationRevision !== action.conversationRevision) {
-    return deny("M10", "the Linear conversation changed since the deciding turn; take another turn");
+    return deny("M10", "the conversation (Linear, or human feedback on the task's PRs) changed since the deciding turn; take another turn");
+  }
+
+  const refused = facts.refusedMerges.find((r) => r.repo === repo && r.number === number && r.headSha === sha);
+  if (refused?.conversationRevision === facts.liveConversationRevision) {
+    return deny("M12", `GitHub refused merging this head by repository policy (${refused.reason}) and nothing has changed since; a human merges it`);
   }
 
   // A merge ends its turn, so it must not leave a run working on the task, including one its turn started.

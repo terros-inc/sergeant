@@ -20,6 +20,7 @@ const agent = { id: "agent-v2", name: "Sergeant" };
 const prAt = (headSha: string, validate: "passed" | "failed"): PullRequestFacts => ({
   repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", mergeable: true,
   checks: { sha: headSha, required: [{ name: "validate", state: validate }] },
+  humanFeedback: [],
 });
 const workerRun = (runId: string, headSha: string, summary: string): RunRecord => ({
   runId, role: "worker", status: "succeeded", provider: "p", model: "m",

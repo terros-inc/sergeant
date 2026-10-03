@@ -105,10 +105,11 @@ live GitHub and Linear facts at execution time:
 | M5 | the base branch has at least one required check, and every required check passed on `expectedHeadSha` |
 | M6 | a `ReviewDisposition` exists for this PR at `expectedHeadSha` and still passes D1–D6 against the evidence recorded by now (06 §6) |
 | M7 | GitHub reports the PR mergeable (`clean`, or `unstable` when only non-required checks failed) |
-| M8 | no `sergeant:hold` label on the issue or the PR, and no outstanding human "changes requested" review on the PR |
+| M8 | no `sergeant:hold` label on the issue or the PR, and no outstanding human "changes requested" review on the PR: no human whose latest review, at any head, is `CHANGES_REQUESTED` (a later approval by that human or a dismissal clears it; a later plain comment does not). Built: the review check (TECH-4987); the label is not |
 | M9 | if any other PR linked to the task is still open, this PR's body does not carry a closing reference to the issue |
-| M10 | re-read Linear: the current conversation revision (issue title and description, and every human comment's id and `updatedAt`) equals the `conversationRevision` the proposing turn saw. Otherwise refuse and wake the task, so a fresh turn decides with the new input in front of it (no locking; a comment arriving in the instant between this read and the merge is an accepted race) |
+| M10 | re-read Linear and the PR: the current conversation revision (issue title and description, every human comment's id and `updatedAt`, and every human review and comment on the task's PRs: id, `updatedAt`, review state, and body hash) equals the `conversationRevision` the proposing turn saw. Otherwise refuse and wake the task, so a fresh turn decides with the new input in front of it (no locking; a comment arriving in the instant between this read and the merge is an accepted race) |
 | M11 | no run of the task is running, including one started earlier in the same turn; and once a merge succeeds, no later action in that turn executes |
+| M12 | GitHub has not already refused merging this PR at `expectedHeadSha` by repository policy against the same live conversation revision (see below) |
 
 Plus G1–G3 (not paused, task open, PR belongs to the task). Budget exhaustion does not block a merge:
 merging spends nothing, and landing finished work is the cheapest way to stop.
@@ -122,7 +123,11 @@ Execution: once M1–M11 and G1–G3 pass, the control-plane App submits an `APP
 `commit_id = expectedHeadSha`, then immediately calls GitHub's merge endpoint with
 `sha = expectedHeadSha` and the repository's `mergeMethod`. A failed approval stops the merge. A head
 that moved in between is refused by GitHub (M4 again). On a retry, "already merged at that SHA"
-counts as success. The merged SHA goes in the action result. The Linear issue's Done state follows from
+counts as success. The merged SHA goes in the action result. A merge GitHub refuses by repository
+policy (405, or `merged: false`: a required review Sergeant cannot give, such as a code owner's, or not
+mergeable) is not retried while nothing changes (M12): Sergeant records it, posts one Linear comment
+that the PR is ready for a human to merge (its link and the reviewed head), and waits. A changed head,
+a new human review or comment, or a human edit on the issue lets a later turn try again. The Linear issue's Done state follows from
 automation, not from Sergeant (07 §7).
 
 Where `mergePolicy` is `human`, Sergeant gets the PR ready (green, reviewed, disposition recorded),
@@ -143,7 +148,8 @@ Sergeant does not rebase, merge main into branches, or resolve anything itself.
 
 ## 9. Webhooks and reconciliation
 
-Webhooks (`pull_request`, `pull_request_review`, `check_suite`, `check_run`, `status`, `push`)
+Webhooks (`pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment` on a
+PR, `check_suite`, `check_run`, `status`, `push`)
 are verified by signature and translated into wake reasons for the owning task. Nothing else happens
 on a webhook. A reconcile poll every 5 minutes refreshes facts for linked PRs of open tasks, so a
 missed webhook delays a turn but loses nothing.
@@ -152,7 +158,11 @@ missed webhook delays a turn but loses nothing.
 
 - **A human pushes to a worker's PR**: the new head has no worker recommendation. Sergeant starts a
   reviewer, or an approver waives (06 §3).
-- **A human requests changes**: M8 blocks merge; Sergeant sends the review to the worker.
+- **A human requests changes or leaves a review comment**: every human review and comment on a task PR
+  (author, state, body, file/line) is in the Situation Report and the conversation revision, so it
+  wakes a turn. Reasoning treats a request for changes as a blocking finding that outranks Sergeant's
+  own reviewer, and continues the work on the same PR; a successor's brief carries the feedback. M8
+  blocks the merge until that human approves or the review is dismissed.
 - **A human merges or closes a PR**: a fact. A merge with a closing reference completes the issue
   through automation.
 - **A human approves**: informative; it does not replace the fresh-review disposition unless an

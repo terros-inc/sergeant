@@ -27,6 +27,7 @@ const pr: PullRequestFacts = {
   body: "Fixes UNF-1",
   mergeable: true,
   checks: { sha: head, required: [{ name: "validate", state: "passed" }] },
+  humanFeedback: [],
 };
 const review: RunRecord = {
   runId: "run_review",

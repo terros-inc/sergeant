@@ -159,13 +159,17 @@ const GitHubEvent = z.object({
   repository: z.object({ full_name: z.string() }),
   number: z.number().int().optional(),
   pull_request: z.object({ number: z.number().int(), head: z.object({ sha }).optional() }).optional(),
+  /** An `issue_comment` names its issue; only one that is a PR (it has `pull_request`) counts. */
+  issue: z.object({ number: z.number().int(), pull_request: z.object({}).passthrough().optional() }).optional(),
   check_run: z.object({ head_sha: sha, pull_requests: prNumbers }).optional(),
   check_suite: z.object({ head_sha: sha, pull_requests: prNumbers }).optional(),
   sha: sha.optional(),
   before: sha.optional(),
   after: sha.optional(),
 });
-const GITHUB_EVENTS = new Set(["pull_request", "pull_request_review", "check_run", "check_suite", "status", "push"]);
+const GITHUB_EVENTS = new Set([
+  "pull_request", "pull_request_review", "pull_request_review_comment", "issue_comment", "check_run", "check_suite", "status", "push",
+]);
 
 /**
  * The PRs and heads a GitHub event in an enrolled repository is about. A push names the head it moved
@@ -179,7 +183,7 @@ export function githubNudge(event: string, payload: unknown, enrolled: Set<strin
   const repo = e.repository.full_name;
   if (!enrolled.has(repo.toLowerCase())) return undefined;
   const check = e.check_run ?? e.check_suite;
-  const numbers = [e.number, e.pull_request?.number, ...(check?.pull_requests.map((p) => p.number) ?? [])];
+  const numbers = [e.number, e.pull_request?.number, e.issue?.pull_request && e.issue.number, ...(check?.pull_requests.map((p) => p.number) ?? [])];
   const heads = [e.pull_request?.head?.sha, check?.head_sha, e.sha, e.before, e.after];
   return {
     keys: [
