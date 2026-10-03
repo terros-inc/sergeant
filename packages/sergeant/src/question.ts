@@ -104,7 +104,8 @@ const at = (c: { createdAt: string }) => Date.parse(c.createdAt);
  * Nothing about the resolve itself is stored: a process lost after the turn was saved resolves the
  * thread on the restarted loop's first pass, from the same facts, with no new turn or human comment
  * needed. The adapter leaves a resolved thread alone, so a retry is harmless; `done` (this process's
- * memory) only spares Linear a call per pass. A failure is logged and retried on the next pass.
+ * memory) only spares Linear a call per pass. A failure is logged and retried on the next pass; the
+ * result says whether every due thread is resolved, so an ending task can wait for that (TECH-5138).
  */
 export async function resolveAnswered(
   conversation: Conversation,
@@ -112,8 +113,8 @@ export async function resolveAnswered(
   linear: Pick<LinearPort, "resolveThread">,
   done: Set<string>,
   log: (line: string) => void,
-): Promise<void> {
-  if (!linear.resolveThread || actedThrough === undefined) return;
+): Promise<boolean> {
+  if (!linear.resolveThread || actedThrough === undefined) return true;
   const at = (c: { createdAt: string }) => Date.parse(c.createdAt);
   const latest = new Map<string, AgentComment>();
   for (const c of conversation.agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING))) {
@@ -122,12 +123,14 @@ export async function resolveAnswered(
     if (!seen || at(c) > at(seen)) latest.set(thread, c);
   }
   const acted = Date.parse(actedThrough);
+  let resolvedAll = true;
   for (const [thread, question] of latest) {
     if (done.has(thread)) continue;
     if (!conversation.humanComments.some((c) => at(c) > at(question) && at(c) <= acted)) continue;
     await linear.resolveThread(thread).then(
       (result) => (done.add(thread), log(`question ${question.id} answered and acted on: ${result.replaceAll("_", " ")}`)),
-      (e: Error) => log(`could not resolve the thread of question ${question.id}: ${e.message}`),
+      (e: Error) => ((resolvedAll = false), log(`could not resolve the thread of question ${question.id}: ${e.message}`)),
     );
   }
+  return resolvedAll;
 }
