@@ -75,6 +75,9 @@ export async function checkHolds(
     return { hold: "budget" };
   }
   if (unknown.length > 0) {
+    // An unreadable runner is a wait like any other: past the grace it gives up the slot (TECH-5015),
+    // unless a readable run is confirmed running (live lists the unknown runs too).
+    if (live.length === unknown.length) opts.slot?.waiting(Date.now());
     log(`waiting: status unavailable for ${unknown.map((u) => `${u.unknown} (${u.error})`).join(", ")}`);
     return { hold: "unknown" };
   }

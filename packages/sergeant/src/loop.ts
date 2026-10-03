@@ -16,7 +16,6 @@ import { cancelRuns, describePr, fingerprintOf, landedOf, mergeNotSettled, readP
 import { resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
-import { humanWait } from "./slots.ts";
 import { applyTurn, loadState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -248,20 +247,19 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const fingerprint = fingerprintOf(situation);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
-      // Running work holds a slot: a task resumed with its runs going asks for one.
-      if (running.length > 0) opts.slot?.work();
-      // Waiting on a human merge or requested changes is a human wait like a question: no idle end.
-      const human = running.length === 0 ? humanWait(situation) : undefined;
-      if (human) opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
-      if (running.length === 0 && !human && quietMinutes > (opts.idleMinutes ?? 60)) {
+      if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
         return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMinutes)} minutes` };
       }
-      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : human ? `waiting on ${human}` : "waiting: nothing changed since the last turn");
+      // Running work holds a slot: a task resumed with its runs going asks for one. Any other wait (CI,
+      // mergeability, a human merge) keeps it for the grace from the last turn, then quietly frees it.
+      if (running.length > 0) opts.slot?.work();
+      else opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
+      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : "waiting: nothing changed since the last turn");
       await wait(pollMs);
       continue;
     }
-    // A task whose slot was released while it waited on a human queues for one before its turn.
+    // A task whose slot was released while it waited queues for one before its turn.
     if (opts.slot && !opts.slot.work()) {
       log("queued: waiting for a free task slot");
       await wait(pollMs);
