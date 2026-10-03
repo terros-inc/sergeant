@@ -157,9 +157,9 @@ export function taskBudget(config: InstallationConfig): Partial<BudgetWindow> {
 }
 
 /** Configured reviewer identity lookup. GitHub logins are case-insensitive. */
-export function reviewerProfileLookup(config: InstallationConfig): (login: string) => Promise<string | undefined> {
+export function reviewerProfileLookup(config: InstallationConfig): (login: string) => string | undefined {
   const profiles = new Map(Object.entries(config.linear.reviewerProfiles).map(([login, url]) => [login.toLowerCase(), url]));
-  return async (login) => profiles.get(login.toLowerCase());
+  return (login) => profiles.get(login.toLowerCase());
 }
 
 export async function loadConfig(file: string): Promise<InstallationConfig> {

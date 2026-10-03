@@ -30,7 +30,7 @@ export function rereviewComment(pr: PullRequestFacts, reviewers: ReviewerMention
  */
 export async function postRereviewRequests(
   situation: SituationReport,
-  owner: { workerLogin: string; agentUserId: string; linearProfileForGitHubLogin?: (login: string) => Promise<string | undefined> },
+  owner: { workerLogin: string; agentUserId: string; linearProfileForGitHubLogin?: (login: string) => string | undefined },
   linear: Pick<LinearPort, "postComment">,
   log: (line: string) => void,
 ): Promise<void> {
@@ -42,17 +42,10 @@ export async function postRereviewRequests(
     const reviewers = rereviewRequests({ ...facts, ...live, pr });
     const key = rereviewKey(issue.id, pr);
     if (reviewers.length === 0 || agentComments.some((c) => c.id === commentIdFor(key))) continue;
-    const mentions = await Promise.all(
-      reviewers.map(async (githubLogin): Promise<ReviewerMention> => {
-        try {
-          const linearProfileUrl = await owner.linearProfileForGitHubLogin?.(githubLogin);
-          return { githubLogin, ...(linearProfileUrl && { linearProfileUrl }) };
-        } catch (e) {
-          log(`${pr.repo}#${pr.number}: Linear profile lookup failed for ${githubLogin}: ${(e as Error).message}`);
-          return { githubLogin };
-        }
-      }),
-    );
+    const mentions = reviewers.map((githubLogin): ReviewerMention => {
+      const linearProfileUrl = owner.linearProfileForGitHubLogin?.(githubLogin);
+      return { githubLogin, ...(linearProfileUrl && { linearProfileUrl }) };
+    });
     await linear.postComment({ issueId: issue.id, body: rereviewComment(pr, mentions), key }).then(
       () => log(`${pr.repo}#${pr.number}: asked ${reviewers.join(", ")} to re-review or dismiss`),
       (e: Error) => log(`${pr.repo}#${pr.number}: re-review request not posted: ${e.message}`),

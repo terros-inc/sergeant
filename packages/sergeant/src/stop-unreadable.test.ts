@@ -43,7 +43,10 @@ test("a stop whose run status read fails once reads it again after the cancel an
 
 test("a stop whose run status stays unreadable after the cancel stays pending, says nothing, and finishes once it reads", async () => {
   const { seen, task, drive } = await stopWithFlakyStatus(4);
-  for (let i = 0; i < 2; i++) expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  const intent = await readFile(join(task, "cancel.json"), "utf8");
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(await readFile(join(task, "cancel.json"), "utf8")).toBe(intent);
   expect(seen.closed).toEqual([]);
   expect(seen.comments).toEqual([]);
   expect(await readdir(task)).toEqual(expect.arrayContaining(["cancel.json", "state.json"]));
@@ -86,7 +89,7 @@ test.each(["unreadable status and failed cancel", "readable running status and f
   deps.runner.cancel = async () => Promise.reject(new Error("Docker unavailable"));
   await ageStop(task);
   expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
-  expect(seen.comments[0]).toMatchObject({ key: expect.stringMatching(/^cancel-stalled:i1:/), body: expect.stringContaining("could not confirm") });
+  expect(seen.comments[0]).toMatchObject({ key: expect.stringMatching(/^cancel-stalled:i1:/), body: expect.stringContaining("for over 16 minutes") });
 });
 
 test("a warning failure is retried without failing the stop and reuses its idempotency key", async () => {

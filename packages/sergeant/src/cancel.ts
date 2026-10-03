@@ -35,8 +35,6 @@ const CancelIntent = z.object({
   closed: z.array(ClosedPullRequest).default([]),
   /** Completed GitHub close effects, keyed per PR and exact head so a re-drive skips them. */
   prCloseKeys: z.array(z.string()).default([]),
-  /** Drives on which a run's stop could not be confirmed. */
-  unreadableStatusAttempts: z.number().int().nonnegative().default(0),
   /** Whether the durable, idempotent warning about an unconfirmed stop was posted. */
   unreadableStatusSurfaced: z.boolean().default(false),
 });
@@ -166,19 +164,19 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   const unreadablePastGrace = Date.now() - Date.parse(intent.at) >= SURFACE_STALLED_STOP_AFTER_MS ? unreadable : [];
   const stillStopping = stopping.filter((runId) => !unreadablePastGrace.includes(runId));
   if (stillStopping.length > 0 && !intent.unreadableStatusSurfaced) {
-    intent.unreadableStatusAttempts++;
-    await writeIntent(dir, intent);
-    if (Date.now() - Date.parse(intent.at) >= SURFACE_STALLED_STOP_AFTER_MS) {
+    const stalledForMs = Date.now() - Date.parse(intent.at);
+    if (stalledForMs >= SURFACE_STALLED_STOP_AFTER_MS) {
+      const stalledForMinutes = Math.floor(stalledForMs / 60_000);
       try {
         const { issue } = await deps.linear.readConversation(ref);
         await deps.linear.postComment({
           issueId: issue.id,
           key: `cancel-stalled:${issue.id}:${intent.requestId}`,
-          body: stalledStopComment(stillStopping, intent.unreadableStatusAttempts),
+          body: stalledStopComment(stillStopping, stalledForMinutes),
         });
         intent.unreadableStatusSurfaced = true;
         await writeIntent(dir, intent);
-        log(`${ref}: surfaced stalled stop after ${intent.unreadableStatusAttempts} attempts`);
+        log(`${ref}: surfaced stop stalled for over ${stalledForMinutes} minutes`);
       } catch (e) {
         // Warning delivery must not make an API cancel fail. Its stable key makes a retry safe even
         // if Linear accepted the comment before this process lost the response or crashed.
@@ -232,8 +230,8 @@ function stopComment(intent: CancelIntent, unreadable: RunId[]): string {
   return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled.${missing} ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
 }
 
-function stalledStopComment(runIds: RunId[], attempts: number): string {
-  return `Sergeant is still trying to stop this task, but could not confirm the run status or cancellation after ${attempts} attempts: ${runIds.map((id) => `\`${id}\``).join(", ")}. The stop remains pending so a worker-reported PR is not missed, and Sergeant will not restart this issue while it is pending. To clear it, restore the runner so Sergeant can read the final run status; Sergeant will keep retrying automatically.`;
+function stalledStopComment(runIds: RunId[], stalledForMinutes: number): string {
+  return `Sergeant has been trying to stop this task for over ${stalledForMinutes} minutes, but could not confirm the run status or cancellation: ${runIds.map((id) => `\`${id}\``).join(", ")}. The stop remains pending so a worker-reported PR is not missed, and Sergeant will not restart this issue while it is pending. To clear it, restore the runner so Sergeant can read the final run status; Sergeant will keep retrying automatically.`;
 }
 
 /**
