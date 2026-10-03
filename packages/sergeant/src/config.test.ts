@@ -24,7 +24,7 @@ test("the control-plane and worker GitHub Apps must differ, however the App ID i
   expect(InstallationConfig.parse(config(42, "43")).github.workerApp.appId).toBe(43);
 });
 
-test("reviewer profiles are validated and GitHub logins are matched case-insensitively", async () => {
+test("reviewer profiles are validated and GitHub logins are matched case-insensitively", () => {
   const profile = "https://linear.app/acme/profiles/ada";
   const parsed = InstallationConfig.parse({
     ...config(1, 2),
@@ -32,8 +32,8 @@ test("reviewer profiles are validated and GitHub logins are matched case-insensi
   });
   const lookup = reviewerProfileLookup(parsed);
 
-  expect(await lookup("ada-lovelace")).toBe(profile);
-  expect(await lookup("grace")).toBeUndefined();
+  expect(lookup("ada-lovelace")).toBe(profile);
+  expect(lookup("grace")).toBeUndefined();
   expect(InstallationConfig.safeParse({ ...config(1, 2), linear: { ...config(1, 2).linear, reviewerProfiles: { ada: "https://example.com/ada" } } }).success).toBe(false);
 });
 

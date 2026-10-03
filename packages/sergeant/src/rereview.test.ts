@@ -54,7 +54,7 @@ const situation = (over: SituationOver = {}): SituationReport => {
 
 async function postedFor(
   over: SituationOver = {},
-  linearProfileForGitHubLogin?: (login: string) => Promise<string | undefined>,
+  linearProfileForGitHubLogin?: (login: string) => string | undefined,
 ) {
   const posted: { key: string; body: string }[] = [];
   await postRereviewRequests(
@@ -67,29 +67,15 @@ async function postedFor(
 }
 
 test("mentions a mapped Linear reviewer and keeps the GitHub login for context", async () => {
-  const [comment] = await postedFor({}, async (login) => (login === "captain" ? "https://linear.app/acme/profiles/ada" : undefined));
+  const [comment] = await postedFor({}, (login) => (login === "captain" ? "https://linear.app/acme/profiles/ada" : undefined));
 
   expect(comment?.body).toContain("https://linear.app/acme/profiles/ada (GitHub: @captain)");
 });
 
 test("falls back to the plain GitHub login when no Linear reviewer is mapped", async () => {
-  const [comment] = await postedFor({}, async () => undefined);
+  const [comment] = await postedFor({}, () => undefined);
 
   expect(comment?.body).toContain("@captain on GitHub");
-});
-
-test("a failed Linear reviewer lookup logs and posts the plain GitHub login", async () => {
-  const posted: { body: string }[] = [];
-  const logs: string[] = [];
-  await postRereviewRequests(
-    situation(),
-    { agentUserId: agent.id, workerLogin: "sergeant-worker[bot]", linearProfileForGitHubLogin: async () => Promise.reject(new Error("lookup unavailable")) },
-    { postComment: async ({ body }) => void posted.push({ body }) },
-    (line) => logs.push(line),
-  );
-
-  expect(posted[0]?.body).toContain("@captain on GitHub");
-  expect(logs).toContain(`${repo}#7: Linear profile lookup failed for captain: lookup unavailable`);
 });
 
 let dir = "";
