@@ -1,6 +1,6 @@
 import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
-import { readHumanFeedback } from "./pr-feedback.ts";
+import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
 
 const pullRequest = z.object({
   number: z.number().int().positive(),
@@ -296,7 +296,10 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     async closePullRequest({ repo, number, comment }) {
       configFor(repo);
       const json = { method: "POST", headers: { "Content-Type": "application/json" } };
-      await request(`/repos/${repo}/issues/${number}/comments`, { ...json, body: JSON.stringify({ body: comment }) });
+      // A close that failed after its comment is retried; the comment is not posted twice.
+      if (!(await hasComment((path) => request(path), repo, number, comment))) {
+        await request(`/repos/${repo}/issues/${number}/comments`, { ...json, body: JSON.stringify({ body: comment }) });
+      }
       await request(`/repos/${repo}/pulls/${number}`, { ...json, method: "PATCH", body: JSON.stringify({ state: "closed" }) });
     },
   };

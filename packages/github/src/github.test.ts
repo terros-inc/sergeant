@@ -237,3 +237,25 @@ test("a merge GitHub refuses by repository policy resolves to refused", async ()
     refused: "Waiting on code owner review from terros-inc/owners.",
   });
 });
+
+// TECH-4989: a canceled task's PR is commented on, then closed. A close that fails is retried by the
+// next drive, which must not post the "Closed: ..." comment a second time.
+test("closing a PR comments once, and a retry after a failed close does not comment again", async () => {
+  const comment = "Closed: the Linear issue was canceled or moved to Backlog.";
+  const comments: string[] = [];
+  let closeFails = true;
+  const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith("/issues/7/comments?per_page=100&page=1")) {
+      return json(comments.map((body, i) => ({ id: i, user: { login: "sergeant-control[bot]", type: "Bot" }, body, created_at: "2026-10-03T01:00:00Z", updated_at: "2026-10-03T01:00:00Z", html_url: `https://github.com/${repo}/pull/7#c${i}` })));
+    }
+    if (path.endsWith("/issues/7/comments") && init?.method === "POST") return (comments.push(JSON.parse(String(init.body)).body), json({ id: 1 }));
+    if (path.endsWith("/pulls/7") && init?.method === "PATCH") return closeFails ? ((closeFails = false), json({ message: "Server Error" }, 502)) : json(pr);
+    throw new Error(`unexpected request: ${init?.method ?? "GET"} ${path}`);
+  };
+  const github = adapter(fetch);
+
+  await expect(github.closePullRequest({ repo, number: 7, comment })).rejects.toThrow("(502)");
+  await github.closePullRequest({ repo, number: 7, comment });
+  expect(comments).toEqual([comment]);
+});

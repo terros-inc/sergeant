@@ -81,3 +81,8 @@ export async function readHumanFeedback(request: Get, repo: string, number: numb
   }
   return feedback.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
+
+/** Whether the PR's conversation already has a comment with exactly `body`, by anyone. */
+export async function hasComment(request: Get, repo: string, number: number, body: string): Promise<boolean> {
+  return (await readAll(request, `/repos/${repo}/issues/${number}/comments`, issueComment)).some((c) => c.body === body);
+}

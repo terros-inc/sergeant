@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -225,4 +225,98 @@ test("a stop the loop could not finish and serve's intake finished is said once 
   expect(files).not.toContain("state.json");
   expect(files).not.toContain("cancel.json");
   expect(files.filter((f) => f.startsWith("state.stopped-"))).toHaveLength(1);
+});
+
+/** The next intake of UNF-1, back in Todo: it starts a fresh task, with nothing of the stopped one's. */
+async function intakeStartsFresh(deps: ServiceDeps, seen: { starts: number }, live: { conversation: Conversation }) {
+  live.conversation = issue("unstarted", "Todo");
+  const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, log: () => {} }, deps);
+  try {
+    await vi.waitFor(() => expect(seen.starts).toBe(1), { timeout: 5_000 });
+  } finally {
+    await service.stop();
+  }
+  const fresh = JSON.parse(await readFile(join(taskDir(dir, "UNF-1"), "state.json"), "utf8")) as { runIds: string[]; turns: number };
+  expect(fresh.turns).toBe(1);
+  expect(fresh.runIds).toHaveLength(1);
+  expect(fresh.runIds).not.toContain("run_w1");
+}
+
+// The loop records a stop by state, and the human moves the issue back before it is done. The old task
+// must not continue: its runs and budget are the stopped task's, and its state.json is set aside, so a
+// run it started would have no id on disk for any later cancel or restart to find (UNF-728).
+test.each([
+  ["Todo", "unstarted"],
+  ["In Progress", "started"],
+])("an issue moved back to %s while its stop is still pending only finishes the stop, and intake then starts a fresh task", async (name, stateType) => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), state(["run_w1"]));
+  const live = { conversation: issue("backlog", "Backlog") };
+  const { deps, seen } = fakes(live);
+  // The runner refuses every cancel until the issue is back, and a few polls after.
+  let refuse = true;
+  let refusals = 0;
+  const cancel = deps.runner.cancel;
+  deps.runner.cancel = async (id) => (refuse ? (refusals++, Promise.reject(new Error("docker stop timed out"))) : cancel(id));
+
+  const loop = runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir: task, pollSeconds: 0.01, log: () => {} }, deps);
+  await vi.waitFor(() => expect(refusals).toBeGreaterThan(0));
+  live.conversation = issue(stateType, name);
+  const seenBack = refusals;
+  await vi.waitFor(() => expect(refusals).toBeGreaterThan(seenBack + 2));
+  refuse = false;
+
+  expect(await loop).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("Backlog") });
+  expect(seen).toMatchObject({ turns: 0, starts: 0 });
+  expect(seen.closed).toEqual([{ number: 7, comment: "Closed: the Linear issue was canceled or moved to Backlog." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining("moved to Backlog") }]);
+  expect(await readdir(task)).not.toContain("state.json");
+
+  await intakeStartsFresh(deps, seen, live);
+  expect(seen.closed).toHaveLength(1);
+  expect(seen.comments).toHaveLength(1);
+});
+
+test.each([
+  ["Todo", "unstarted"],
+  ["In Progress", "started"],
+])("an issue moved back to %s after intake finished the loop's stop ends the old loop, and intake then starts a fresh task", async (name, stateType) => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), state(["run_w1"]));
+  const live = { conversation: issue("backlog", "Backlog") };
+  const { deps, seen } = fakes(live);
+  // The runner refuses the loop's cancels; intake's drive, under the same task lock, goes through, and
+  // the human moves the issue back before the loop's next poll.
+  let chain: Promise<unknown> = Promise.resolve();
+  deps.exclusive = <T>(step: () => Promise<T>) => {
+    const next = chain.then(step);
+    chain = next.catch(() => {});
+    return next;
+  };
+  let intake = false;
+  let refusals = 0;
+  const cancel = deps.runner.cancel;
+  deps.runner.cancel = async (id) => (intake ? cancel(id) : (refusals++, Promise.reject(new Error("docker stop timed out"))));
+
+  const loop = runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir: task, pollSeconds: 0.02, log: () => {} }, deps);
+  await vi.waitFor(() => expect(refusals).toBeGreaterThan(0));
+  await deps.exclusive(async () => {
+    intake = true;
+    await driveCancel(task, "UNF-1", deps, [repo], () => {}).finally(() => (intake = false));
+    live.conversation = issue(stateType, name);
+  });
+
+  expect(await loop).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("Backlog") });
+  expect(seen).toMatchObject({ turns: 0, starts: 0 });
+  expect(seen.closed).toEqual([{ number: 7, comment: "Closed: the Linear issue was canceled or moved to Backlog." }]);
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining("moved to Backlog") }]);
+  expect(await readdir(task)).not.toContain("state.json");
+
+  await intakeStartsFresh(deps, seen, live);
+  expect(seen.closed).toHaveLength(1);
+  expect(seen.comments).toHaveLength(1);
 });

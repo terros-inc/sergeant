@@ -141,13 +141,15 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   };
   await mkdir(opts.dir, { recursive: true });
   const state = await loadState(files.state, opts.issueId, { ...DEFAULT_BUDGET, ...opts.budget });
-  // A stop by state this loop recorded (cancel.ts); whichever of this loop or `serve`'s intake drives it
-  // to the end sets `state.json` aside.
-  let stopRecorded = false;
+  // Why this task is stopping: set once a cancel (cancel.ts) is recorded for it, by this loop or anyone
+  // else. From then on the loop takes no turn and makes no effect; it only drives that cancel, and ends
+  // once it is done, whatever the issue's delegation or state is by then.
+  let stopping: string | undefined;
   // Replaced whole, never rewritten in place: the API and a task cancel read it while the loop runs.
-  // Once a stop set it aside, it is never written again, so the issue back in Todo is a fresh task.
+  // A stop by state sets it aside, so the issue back in Todo is a fresh task; nothing writes it again,
+  // and a write after that, a run's id before its start above all, fails rather than being lost.
   const save = async () => {
-    if (stopRecorded && !(await exists(files.state))) return;
+    if (stopping && !(await exists(files.state))) throw new Error(`${files.state} was set aside by a stop: ${stopping}`);
     const tmp = `${files.state}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify(state, null, 2));
     await rename(tmp, files.state);
@@ -212,28 +214,36 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const budgetOf = (runs: RunRecord[], unknownRuns: number, questionId?: string) =>
     budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, ...(questionId && { questionId }), runs, unknownRuns });
 
-  // The task's durable cancel (cancel.ts), recorded here and driven under the task's lock every poll
-  // until the runner confirms each run stopped, its open PRs are closed, and the issue is told. A stop
-  // by state sets `state.json` aside, so nothing here saves it again.
-  const stop = async (cause: Parameters<typeof recordStop>[1], reason: string): Promise<LoopResult | undefined> => {
-    // A stop by state already driven to the end, by `serve`'s intake while this loop retried, is done:
-    // recording it again would stop the task twice and say so twice on the issue.
-    if (cause.cause === "state" && stopRecorded && !(await cancelPending(opts.dir))) return { outcome: "stopped", detail: reason };
-    if ((await recordStop(opts.dir, cause)) === "state") stopRecorded = true;
-    const exclusive = deps.exclusive ?? ((step) => step());
-    const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
-    const progress = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
-    if (progress?.stopping.length === 0) {
-      if (cause.cause !== "state") await recordReviews((await readRuns()).runs);
-      return { outcome: "stopped", detail: reason };
+  // The task's durable cancel (cancel.ts), driven under the task's lock every poll until the runner
+  // confirms each run stopped, its open PRs are closed, and the issue is told. Whichever of this loop,
+  // `serve`'s intake, or the API drives it to the end, the loop then ends: an issue moved back to Todo
+  // meanwhile is a fresh task for intake to start, never this one continued.
+  const driveStop = async (): Promise<LoopResult | undefined> => {
+    const reason = stopping ?? "the task is canceled";
+    if (await cancelPending(opts.dir)) {
+      const exclusive = deps.exclusive ?? ((step) => step());
+      const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
+      const progress = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
+      if (progress?.stopping.length !== 0) {
+        log(`stopping (${reason}): retrying cancellation`);
+        return undefined;
+      }
     }
-    log(`stopping (${reason}): retrying cancellation`);
-    return undefined;
+    // A cancel that keeps the task (not a stop by state) records the reviews its runs finished.
+    if (await exists(files.state)) await recordReviews((await readRuns()).runs);
+    return { outcome: "stopped", detail: reason };
   };
 
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };
     if (opts.signal?.aborted) return { outcome: "stopped", detail: "the service is stopping" };
+    if (!stopping && (await cancelPending(opts.dir))) stopping = "the task is canceled";
+    if (stopping) {
+      const stopped = await driveStop();
+      if (stopped) return stopped;
+      await wait(pollMs);
+      continue;
+    }
     // A start never seen through: the runner either knows the run, or confirms it stopped or never
     // started, which drops it. Until then it stays in `runIds`, unknown, so it is canceled like any
     // other run on an undelegation or an exhausted budget.
@@ -278,9 +288,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       conversation.issue.stateType === "completed" &&
       landedOf(await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps), runs, deps.workerLogin) !== undefined;
     if (!active.allowed && !finished) {
-      const stopped = await stop(active.rule === "A1" ? { cause: "undelegated" } : { cause: "state", state: conversation.issue.state }, active.reason);
-      if (stopped) return stopped;
-      await wait(pollMs);
+      await recordStop(opts.dir, active.rule === "A1" ? { cause: "undelegated" } : { cause: "state", state: conversation.issue.state });
+      stopping = active.reason;
       continue;
     }
     // The budget question of the current window, if Linear has it: its id is derived from a key, so a
