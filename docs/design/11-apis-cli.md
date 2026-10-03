@@ -127,8 +127,10 @@ sgt config show | diff | set <installation> …
 sgt config repo add | set | enable | disable | remove | list <installation> …
 sgt config claude-profile <installation> <name>      # token on stdin
 sgt doctor [repo <slug>]
-sgt admin status | health | logs | exec | upgrade [--release] [--history] | restart | drain | undrain <installation>
+sgt admin status | health | logs | exec | restart | drain | undrain <installation>
 ```
+
+Hosts update themselves from green commits of `main` (10 §6), so there is no `sgt admin upgrade`.
 
 Removed from S1: `sgt tool …` (capability/tool authorization), phase, wait, grant (other than
 budget), repo-scope, fresh-run, retry, rethink, decision-answer commands, and safety governor views.
