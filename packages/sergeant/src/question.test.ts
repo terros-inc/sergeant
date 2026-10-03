@@ -229,3 +229,55 @@ test("a question whose post failed or went unconfirmed is posted again until Lin
   expect(merged).toEqual([]);
   expect(live.agentComments).toHaveLength(1);
 });
+
+test("an open question clears its stale in-memory post retry", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-question-test-"));
+  let live: Conversation = { issue, humanComments: [], agentComments: [] };
+  let reads = 0;
+  let turns = 0;
+  let attempts = 0;
+
+  const outcome = await runLoop(
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {} },
+    {
+      agentUserId: agent.id,
+      workerLogin: "sergeant-worker[bot]",
+      linear: {
+        async moveIssueToStarted() { return { moved: false as const }; },
+        async readConversation() {
+          reads += 1;
+          // One poll observes the question. Its disappearance without a human revision then exposes
+          // whether the loop retained the stale retry that produced it.
+          if (reads === 6) live = { ...live, agentComments: [] };
+          return live;
+        },
+        async postComment({ key, body }) {
+          attempts += 1;
+          if (attempts === 2) {
+            live = { ...live, agentComments: [{ id: commentIdFor(key), createdAt: "2026-10-02T06:00:30.000Z", body }] };
+          }
+          if (attempts === 3) await writeFile(join(dir, "STOP"), "");
+          throw new Error("connection reset");
+        },
+        createFollowupIssue: async () => { throw new Error("unused"); },
+      },
+      github: {
+        readPullRequest: async () => pr,
+        closePullRequest: async () => {},
+        mergePullRequest: async () => { throw new Error("unused"); },
+      },
+      runner: { start: async () => {}, status: async () => review, cancel: async () => {} },
+      reasoner: {
+        async turn() {
+          turns += 1;
+          if (turns === 2) await writeFile(join(dir, "STOP"), "");
+          return { output: { summary: "s", actions: turns === 1 ? [ask] : [] }, model: "m", promptVersion: "p" };
+        },
+      },
+    },
+  );
+
+  expect(outcome.outcome).toBe("stopped");
+  expect(turns).toBe(2);
+  expect(attempts).toBe(2);
+});
