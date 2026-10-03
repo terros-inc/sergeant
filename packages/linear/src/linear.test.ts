@@ -221,14 +221,17 @@ test("createFollowupIssue files one issue per key in the origin's team and proje
 
 // TECH-4998: a follow-up filed in Triage was auto-assigned to whoever was on the PagerDuty rotation.
 // It must land in Backlog with the origin's owner: its assignee, else the human who delegated it to
-// Sergeant, else nobody — never Sergeant itself.
+// Sergeant, else nobody — never Sergeant itself. TECH-5004: falling back to nobody logs a warning
+// naming the origin, so a history query that is wrong against live Linear is visible.
 test("createFollowupIssue files in Backlog, assigned to the origin's owner, and falls back to unassigned", async () => {
   type Origin = { assignee: { id: string } | null; delegate: { id: string } | null };
+  const logs: string[] = [];
   const fileFor = async (origin: Origin, history: unknown[] | Response = []) => {
     const created: Record<string, unknown>[] = [];
     const linear = createLinearPort({
       apiKey: "test",
       sergeantUserIds: ["sergeant-user"],
+      log: (line) => logs.push(line),
       fetch: async (_i, init) => {
         const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { input?: Record<string, unknown> } };
         if (query.includes("SergeantFollowupOrigin")) {
@@ -255,24 +258,33 @@ test("createFollowupIssue files in Backlog, assigned to the origin's owner, and 
   // No assignee: the human whose delegation to Sergeant is the latest.
   const history = [delegatedBy({ id: "earlier" }, 1), delegatedBy({ id: "d" }, 3), { createdAt: at(4), actor: { id: "other" }, toDelegate: null }];
   expect(await fileFor({ assignee: null, delegate: sergeant }, history)).toMatchObject({ stateId: "s-backlog", assigneeId: "d" });
+  expect(logs).toEqual([]);
   // No assignee and no human delegator (none in history, an automation, or Sergeant itself): unassigned, still Backlog.
   for (const h of [[], [delegatedBy(null, 1)], [delegatedBy(sergeant, 1)]]) {
     const filed = await fileFor({ assignee: null, delegate: sergeant }, h);
     expect(filed).toMatchObject({ stateId: "s-backlog" });
     expect(filed).not.toHaveProperty("assigneeId");
+    expect(logs.splice(0)).toEqual([`warning: no human delegator of origin-1 in its first ${h.length} history entries, follow-up left unassigned`]);
   }
+  // Not delegated at all: there is no delegator to look for, so nothing to warn about.
   expect(await fileFor({ assignee: null, delegate: null })).not.toHaveProperty("assigneeId");
+  expect(logs).toEqual([]);
   // Assigned to Sergeant itself: falls through to the human delegator.
   expect(await fileFor({ assignee: sergeant, delegate: sergeant }, history)).toMatchObject({ stateId: "s-backlog", assigneeId: "d" });
   // The history lookup is best-effort: an error or a schema mismatch still files the follow-up, unassigned in Backlog.
+  // Each failure is logged with the origin and the error.
   const brokenHistory = [
-    Response.json({ errors: [{ message: "Cannot query field 'toDelegate' on type 'IssueHistory'." }] }),
-    new Response("unavailable", { status: 503 }),
-    Response.json({ data: { issue: { history: null } } }),
-  ];
-  for (const h of brokenHistory) {
+    [Response.json({ errors: [{ message: "Cannot query field 'toDelegate' on type 'IssueHistory'." }] }), /Cannot query field 'toDelegate'/],
+    [new Response("unavailable", { status: 503 }), /\(503\)/],
+    [Response.json({ data: { issue: { history: null } } }), /history/],
+  ] as const;
+  for (const [h, error] of brokenHistory) {
     const filed = await fileFor({ assignee: null, delegate: sergeant }, h);
     expect(filed).toMatchObject({ stateId: "s-backlog" });
     expect(filed).not.toHaveProperty("assigneeId");
+    const [warning, ...rest] = logs.splice(0);
+    expect(rest).toEqual([]);
+    expect(warning).toMatch(/^warning: delegation history of origin-1 unreadable, follow-up left unassigned: /);
+    expect(warning).toMatch(error);
   }
 });
