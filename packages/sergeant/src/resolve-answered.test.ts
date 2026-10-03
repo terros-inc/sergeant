@@ -17,33 +17,36 @@ const convo = (agentComments: AgentComment[], humanComments: HumanComment[]): { 
   },
 });
 
-const run = async (acted: boolean, situation: { conversation: Conversation }) => {
+const run = async (actedThrough: string | undefined, situation: { conversation: Conversation }) => {
   const resolved: string[] = [];
-  await resolveAnswered(acted, situation, { resolveThread: async (id) => (resolved.push(id), "resolved") }, () => {});
+  await resolveAnswered(situation.conversation, actedThrough, { resolveThread: async (id) => (resolved.push(id), "resolved") }, new Set(), () => {});
   return resolved;
 };
 
-test("resolves the question once a human replied after it and the turn moved on", async () => {
+test("resolves the question once a human replied after it and a turn moved on from the reply", async () => {
   const situation = convo([question("q1", t("10"))], [reply("c1", t("20"))]);
-  expect(await run(true, situation)).toEqual(["q1"]);
+  expect(await run(t("20"), situation)).toEqual(["q1"]);
 });
 
-test("never resolves a question no human has replied to, even when the turn acted", async () => {
-  const situation = convo([question("q1", t("10"))], []);
-  expect(await run(true, situation)).toEqual([]);
+test("never resolves a question no human has replied to, even after a turn that acted", async () => {
+  const situation = convo([question("q1", t("10"))], [reply("c0", t("05"))]);
+  expect(await run(t("05"), situation)).toEqual([]);
 });
 
-test("does not resolve when the only human comment predates the question (a stale comment)", async () => {
-  const situation = convo([question("q1", t("20"))], [reply("c1", t("10"))]);
-  expect(await run(true, situation)).toEqual([]);
+test("does not resolve when no turn has acted since the reply (a follow-up asked, or no turn yet)", async () => {
+  const situation = convo([question("q1", t("10"))], [reply("c0", t("05")), reply("c1", t("20"))]);
+  expect(await run(t("05"), situation)).toEqual([]);
+  expect(await run(undefined, situation)).toEqual([]);
 });
 
-test("does not resolve on a turn that asked again (a follow-up), reply or not", async () => {
-  const situation = convo([question("q1", t("10"))], [reply("c1", t("20"))]);
-  expect(await run(false, situation)).toEqual([]);
+test("a follow-up in the thread keeps it open until a turn acts on the follow-up's reply", async () => {
+  const followUp = { ...question("q1b", t("30")), parentId: "q1" };
+  const situation = convo([question("q1", t("10")), followUp], [reply("c1", t("20")), reply("c2", t("40"))]);
+  expect(await run(t("20"), situation)).toEqual([]);
+  expect(await run(t("40"), situation)).toEqual(["q1"]);
 });
 
-test("resolves the latest question when several have been asked", async () => {
-  const situation = convo([question("q1", t("05")), question("q2", t("20"))], [reply("c1", t("25"))]);
-  expect(await run(true, situation)).toEqual(["q2"]);
+test("resolves an earlier answered thread too, while a newer question still waits", async () => {
+  const situation = convo([question("q1", t("05")), question("q2", t("30"))], [reply("c1", t("20"))]);
+  expect(await run(t("20"), situation)).toEqual(["q1"]);
 });
