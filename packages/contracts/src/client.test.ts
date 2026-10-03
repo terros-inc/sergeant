@@ -41,6 +41,30 @@ test("a login is never sent over plain HTTP off this host", async () => {
   expect(await apiClient({ api: "http://sergeant.example.com", fetch }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
 });
 
+test.each(["http://localhost:8080", "http://[::1]:8080"])("a login may be sent over plain HTTP to the loopback API at %s", async (api) => {
+  const { fetch, seen } = fakeFetch(() => Response.json({ tasks: [] }));
+
+  expect(await apiClient({ api, fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
+  expect(seen).toEqual([
+    {
+      url: `${api}/v1/tasks`,
+      method: "GET",
+      headers: { Authorization: "Bearer t-1" },
+      body: undefined,
+    },
+  ]);
+});
+
+test("an invalid API URL is rejected before sending a login", async () => {
+  const { fetch, seen } = fakeFetch(() => Response.json({ tasks: [] }));
+
+  expect(await apiClient({ api: "https://[invalid", fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({
+    ok: false,
+    error: { code: "bad_request", message: "invalid Sergeant API URL: https://[invalid" },
+  });
+  expect(seen).toEqual([]);
+});
+
 test("a refusal, a non-contract error, an off-contract answer, and an unreachable API are each an ApiError", async () => {
   const api = "http://127.0.0.1:8080";
   const refusal = { error: { code: "conflict", message: "UNF-7 is not delegated" } };
