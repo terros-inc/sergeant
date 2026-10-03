@@ -2,42 +2,48 @@ import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { afterEach, expect, test } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 
 // The real `sgt-mcp` process over stdio, as an MCP client starts it, against a fake Sergeant API:
 // that its tools return the API's own answers (what `sgt task show` prints from), that failures are
 // tool errors an agent can read, and that it only ever reads.
 
-type Route = { status?: number; json?: unknown; text?: string };
-const closers: (() => Promise<unknown>)[] = [];
-afterEach(async () => {
-  await Promise.all(closers.splice(0).map((close) => close()));
-});
+type Route = { status?: number; json?: unknown; text?: string; drop?: boolean };
+let routes: Record<string, Route> = {};
+const seen: string[] = [];
+let server: Server;
+let api: string;
+let client: Client;
 
-async function fakeApi(routes: Record<string, Route>) {
-  const seen: string[] = [];
-  const server: Server = createServer((req, res) => {
+beforeAll(async () => {
+  server = createServer((req, res) => {
     seen.push(`${req.method} ${req.url}`);
     const route = routes[`${req.method} ${req.url}`] ?? { status: 404, json: { error: { code: "not_found", message: `no ${req.url}` } } };
+    if (route.drop) return req.socket.destroy();
     res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown" });
     res.end(route.text ?? JSON.stringify(route.json));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  closers.push(() => new Promise((resolve) => server.close(resolve)));
   const address = server.address();
-  return { api: `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`, seen };
-}
+  api = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
 
-async function connect(api: string) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [fileURLToPath(new URL("./sgt-mcp.ts", import.meta.url)), "--api", api],
   });
-  const client = new Client({ name: "test", version: "0.0.0" });
+  client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(transport);
-  closers.push(() => client.close());
-  return client;
-}
+});
+
+beforeEach(() => {
+  routes = {};
+  seen.length = 0;
+});
+
+afterAll(async () => {
+  await client.close();
+  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+});
 
 const detail = {
   task: { ref: "UNF-12", status: "active", startedAt: "2026-10-02T10:00:00.000Z", turns: 2, lastTurnAt: "2026-10-02T10:30:00.000Z", runs: 1 },
@@ -69,15 +75,14 @@ const run = {
 };
 
 test("an MCP client reads a task and its runs as the API answers them, through read-only tools that only GET", async () => {
-  const { api, seen } = await fakeApi({
+  routes = {
     "GET /v1/tasks": { json: { tasks: [detail.task] } },
     "GET /v1/tasks/UNF-12": { json: detail },
     "GET /v1/runs?task=UNF-12": { json: { runs: detail.runs } },
     "GET /v1/runs/run_w1": { json: run },
     "GET /v1/runs/run_w1/report": { text: "# Report\n\nFixed the login\n" },
     "GET /health": { status: 503, json: { ok: false } },
-  });
-  const client = await connect(api);
+  };
 
   const { tools } = await client.listTools();
   expect(tools.map((t) => t.name).sort()).toEqual(["health", "run_list", "run_report", "run_show", "task_list", "task_show"]);
@@ -99,8 +104,7 @@ test("an MCP client reads a task and its runs as the API answers them, through r
 });
 
 test("refusals, an unreachable API, answers outside the contract, and bad refs are tool errors, not guesses", async () => {
-  const { api, seen } = await fakeApi({ "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: "run_x" } } } });
-  const client = await connect(api);
+  routes = { "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: "run_x" } } } };
   const errorOf = async (name: string, args: Record<string, unknown>) => {
     const res = await client.callTool({ name, arguments: args });
     expect(res.isError).toBe(true);
@@ -112,8 +116,10 @@ test("refusals, an unreachable API, answers outside the contract, and bad refs a
   expect(await errorOf("task_show", { ref: "not a ref" })).toMatch(/Linear issue identifier/);
   expect(seen).toEqual(["GET /v1/tasks/UNF-99", "GET /v1/runs/run_x"]);
 
-  const down = await connect("http://127.0.0.1:1");
-  const res = await down.callTool({ name: "task_list", arguments: {} });
+  // Dropping the API connection exercises the same fetch rejection as an unreachable port without
+  // paying for another cold `sgt-mcp` process in this integration suite.
+  routes["GET /v1/tasks"] = { drop: true };
+  const res = await client.callTool({ name: "task_list", arguments: {} });
   expect(res.isError).toBe(true);
   expect(JSON.parse((res.content as { text: string }[])[0]?.text ?? "").error.code).toBe("unavailable");
 });
