@@ -2,8 +2,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { commentIdFor, type Conversation, type HumanPullRequestFeedback, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { commentIdFor, conversationRevision, type Conversation, type HumanPullRequestFeedback, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
+import { postRereviewRequests } from "./rereview.ts";
 
 // TECH-4992: once a successor addressed the captain's requested changes, the new head would merge but
 // for M8, yet the task sat blocked and nobody told the captain. Sergeant must ask on the issue once
@@ -30,6 +31,37 @@ const worker: RunRecord = {
   report: { reportVersion: "s2-worker-report/1", outcome: "completed", summary: "", knownGaps: [], followups: [], pullRequests: [{ repo, number: 7, url, headSha: second, closesIssue: true, review: { required: true, reason: "r" } }] },
 };
 const records = [worker, approval("run_review_2", second), approval("run_review_3", third)];
+const agent = { id: "agent-v2", name: "Sergeant" };
+const issue: Conversation["issue"] = {
+  id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started",
+  delegate: agent, linkedPullRequests: [{ repo, number: 7 }],
+};
+const budget: SituationReport["budget"] = {
+  window: { wallMinutes: 120, costUsd: 25 }, windowStart: at, wallDeadline: "2999-10-03T04:00:00.000Z",
+  spentUsd: 1, costLimitUsd: 25, unknownCostRuns: 0,
+};
+
+type SituationOver = { issue?: Partial<Conversation["issue"]>; budget?: Partial<SituationReport["budget"]> };
+const situation = (over: SituationOver = {}): SituationReport => {
+  const conversation: Conversation = { issue: { ...issue, ...over.issue }, humanComments: [], agentComments: [] };
+  const pullRequests = [prAt(second)];
+  return {
+    taskId: "canary_UNF-1", generatedAt: at, conversationRevision: conversationRevision(conversation, pullRequests), conversation,
+    uploads: [], enrolledRepositories: [repo], pullRequests, runs: records, followups: [], refusedMerges: [],
+    budget: { ...budget, ...over.budget }, recentTurns: [],
+  };
+};
+
+async function postedFor(over: SituationOver = {}) {
+  const posted: { key: string; body: string }[] = [];
+  await postRereviewRequests(
+    situation(over),
+    { agentUserId: agent.id, workerLogin: "sergeant-worker[bot]" },
+    { postComment: async ({ key, body }) => void posted.push({ key, body }) },
+    () => {},
+  );
+  return posted;
+}
 
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
@@ -87,4 +119,18 @@ test("asks the human who requested changes to re-review once per addressed, revi
   expect(posted[0]?.body).toContain("@captain");
   expect(posted[0]?.body).toContain(`[${repo}#7](${url})`);
   expect(posted[0]?.body).toContain("re-review it, or dismiss your review");
+});
+
+// TECH-5076: protect the app call site, including its spread of the poll's budget and live issue into
+// the shared merge preflight. Every denial is paired with the identical passing poll as a control.
+test.each([
+  ["the wall deadline has passed", { budget: { wallDeadline: "2000-01-01T00:00:00.000Z" } }],
+  ["the spend limit is reached", { budget: { spentUsd: 25 } }],
+  ["the issue is undelegated", { issue: { delegate: null } }],
+  ["the issue is stopped", { issue: { state: "Done", stateType: "completed" } }],
+] satisfies [string, SituationOver][])("posts no re-review request when %s", async (_case, blocked) => {
+  const control = await postedFor();
+
+  expect(control).toEqual([expect.objectContaining({ key: `rereview:i1:${repo}#7:${second}`, body: expect.stringContaining("@captain") })]);
+  expect(await postedFor(blocked)).toEqual([]);
 });
