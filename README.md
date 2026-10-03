@@ -65,7 +65,7 @@ The Linear token must act as `agentUserId` (checked at startup); every Linear re
 Optional `linear.otherAgentUserIds` lists other agents' users (V1's) whose comments are not human
 input. Optional `review.auditSampleRate` (0 to 1, default 0.2) is the fraction of merged heads that
 skipped fresh review which get an audit review. Optional `budget` is the budget window a task gets
-when it starts, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
+when it starts or a human answers one of its questions, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
 numbers, each optional; unset, 120 minutes and $25; see the task budget under Commands). Optional
 `maxTasks` (a positive integer, default 2) is how many task slots `serve` fills, and optional
 `waitingGraceMinutes` (default 15) how long a task waiting on a human keeps its slot; `serve
@@ -120,8 +120,8 @@ repositories; the merge is one control-plane action: fresh exact-head PR, check,
 the Gate, and GitHub's SHA-guarded merge. A blocking review finding or a failed required check
 wakes a turn that may start a successor worker (one at a time, R1) on the same PR; its brief carries
 the PRs with their check states and every earlier run's report and findings. The fix is a new head,
-so the merge again needs a fresh approving review of it or the worker's waiver for it (M6); the
-loop's `maxTurns` bounds the iterations. This runner cannot resume a worker's session, so every
+so the merge again needs a fresh approving review of it or the worker's waiver for it (M6). No
+turn count bounds the iterations: the budget window does (TECH-5059). This runner cannot resume a worker's session, so every
 continuation is a successor. Re-running the same command resumes from `<dir>/state.json`.
 
 Reasoning may ask a human (`ask_human`): the V2 agent posts one question comment, keyed by the issue
@@ -165,18 +165,20 @@ Each task has a budget window, saved in `state.json` with the task's start befor
 happens. It is the installation config's `budget` (`{ "minutes": 45, "usd": 10 }`, say; TECH-4964),
 each field unset defaulting to 120 minutes and $25; `canary`'s `--budget-minutes` and `--budget-usd`
 override the config's for its task. A restart keeps the stored window and logs that it ignores a
-different one, so changing the config's `budget` affects only tasks that start afterward; only a grant
-extends a task's window. Wall time is hard and runs from the task's start, including time spent
-waiting for a human. Spend is best-effort: the cost runs and reasoning turns report when they end (a turn's cost counts before its proposals run), so a running or
+different one, so changing the config's `budget` affects only tasks that start afterward, and their
+next fresh window. A human's answer to any of the V2 agent's questions gives the task a fresh window
+(TECH-5059): from the answer's time, with zero spend (runs of earlier windows no longer count) and the
+config's current `budget`. Wall time is hard and runs from the window's start, including time spent
+waiting for a human before an answer, and for a task slot after one. Spend is best-effort: the cost runs and reasoning turns report when they end (a turn's cost counts before its proposals run), so a running or
 canceled run's cost is unknown and the wall time is the backstop; there is no billing ledger. Once
 either is exhausted, no run, message, follow-up, or merge happens (Gate rule B1, checked before every
 effect and again right after its live reads), running runs are canceled until the runner confirms it,
 and the V2 agent asks one **Question for you**, summarizing spend, runs, and PRs, with the options to
 extend or accept as-is. It is posted like any question, under a key of the task and the window, so a
 restart finds it on Linear instead of asking again, and nothing happens until a human replies after it.
-A reply that reasoning reads as "extend" becomes `grant_budget` citing that comment (K1, K3): one more
-window of wall time from the grant and of spend, and nothing else happens in that turn (K4). Any other
-reply grants nothing, and the loop ends on its idle guard. The outcome comment after a merge is the one
+A reply opens a fresh window like any answer, so "extend" needs nothing more: the next turn carries on
+with the work. On "accept as-is" reasoning proposes nothing, and the loop ends on its idle guard. A task
+that runs away in its fresh window is stopped at that window's end and asked once more. The outcome comment after a merge is the one
 effect B1 does not hold back: it reports a merge that already happened, and withholding it would hide
 the merge from the human. A run's id is saved before the runner starts it, so a crash in between still
 leaves a run the loop cancels; one the runner never started is dropped once a cancel confirms it.
@@ -241,7 +243,7 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   sweep) keeps feedback from before the rollout out. Per issue, at most 3 follow-ups are filed and 10
   pieces of feedback judged; past that, or after 3 failed attempts at one piece, Sergeant says so in a
   comment on the issue rather than dropping it silently.
-- A loop that ends (idle, the turn limit, a failed read) is admitted again on a later intake while
+- A loop that ends (idle, a failed read) is admitted again on a later intake while
   the issue is still delegated: an unchanged task takes no turn, a changed one does. A failed intake
   is logged and retried next interval.
 - SIGINT or SIGTERM stops intake and ends each loop at its next poll, never mid-turn; a second signal
@@ -407,8 +409,9 @@ On a controlled issue delegated to the V2 agent whose work takes more than a few
    no `sergeant-run_*` container, and one **Question for you** comment from the V2 agent with the spend,
    the runs (the worker `canceled`), any PR, and the extend / accept-as-is options. No run starts and
    nothing merges while it waits.
-2. Reply "extend". The next turn logs `grant_budget: done`, and the following one resumes the work in a
-   fresh five-minute window. Replying "accept as-is" instead grants nothing; the loop ends `idle`.
+2. Reply "extend". The loop logs `a human answered (...): a fresh budget window ...`, and the next turn
+   resumes the work in it. Replying "accept as-is" instead opens a window that nothing uses; the loop
+   ends `idle`.
 3. With `--budget-usd 1`, the first finished run's reported cost exhausts the spend instead
    (`spent $... of $1.00`), with the same question.
 4. On another issue, undelegate it while a worker runs: the loop logs `canceled run_...` and stops only

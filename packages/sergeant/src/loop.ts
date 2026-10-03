@@ -13,7 +13,7 @@ import {
 } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { drawAudit, exists, finishReviews, observeCompletion, postOutcome } from "./after-merge.ts";
-import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
+import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, openWindow } from "./budget.ts";
 import { cancelPending, driveCancel, recordStop, stopReason } from "./cancel.ts";
 import { askHuman, checkLive, describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
@@ -21,7 +21,7 @@ import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns, describePr, fingerprintOf, landedOf, mergeNotSettled, readPullRequests } from "./poll.ts";
-import { noteEdit, openQuestion, resolveAnswered } from "./question.ts";
+import { latestAnswer, noteEdit, openQuestion, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { humanWait } from "./slots.ts";
@@ -54,7 +54,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     stop: join(opts.dir, "STOP"),
   };
   await mkdir(opts.dir, { recursive: true });
-  const state = await loadState(files.state, opts.issueId, { ...DEFAULT_BUDGET, ...opts.budget });
+  // The installation's budget now: a new task's window, and any fresh window it opens later.
+  const configured = { ...DEFAULT_BUDGET, ...opts.budget };
+  const state = await loadState(files.state, opts.issueId, configured);
   // Why this task is stopping: set once a stop (cancel.ts) is recorded for it, by this loop or anyone
   // else. From then on the loop takes no turn and makes no effect; it only drives that stop, and ends
   // once it is done, whatever the issue's delegation or state is by then.
@@ -74,7 +76,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   await save();
   const requested = { ...state.budget.window, ...opts.budget };
   if (requested.wallMinutes !== state.budget.window.wallMinutes || requested.costUsd !== state.budget.window.costUsd) {
-    log(`ignoring the budget options: this task keeps its window of ${JSON.stringify(state.budget.window)}; only a grant extends it`);
+    log(`ignoring the budget options: this task keeps its window of ${JSON.stringify(state.budget.window)} until a human answers one of its questions`);
   }
   // A run's id is saved before the runner is asked to start it (UNF-728).
   const ports: Ports & { reasoner: Reasoner } = {
@@ -109,8 +111,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const read = await Promise.all(state.runIds.map((id) => deps.runner.status(id).catch((e: Error) => ({ unknown: id, error: e.message }))));
     return { runs: read.filter((r): r is RunRecord => !("unknown" in r)), unknown: read.filter((r) => "unknown" in r) };
   };
-  const budgetOf = (runs: RunRecord[], unknownRuns: number, questionId?: string) =>
-    budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, ...(questionId && { questionId }), runs, unknownRuns });
+  const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
+    budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
 
   // The task's durable stop (cancel.ts), driven under the task's lock every poll until the runner
   // confirms each run stopped, its open PRs are closed, and the issue is told. Whichever of this loop,
@@ -195,11 +197,20 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       stopping = active.reason;
       continue;
     }
+    // TECH-5059: a human's answer to Sergeant's latest question, the budget question included, opens a
+    // fresh window from the answer, with zero spend and the installation's budget now. Only an answer
+    // newer than the window's start does, so it opens one window once, across restarts too.
+    const answer = latestAnswer(conversation);
+    if (answer && Date.parse(answer.createdAt) > Date.parse(state.budget.since ?? state.startedAt)) {
+      openWindow(state, answer.createdAt, configured);
+      await save();
+      log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
+    }
     // The budget question of the current window, if Linear has it: its id is derived from a key, so a
     // crash between posting it and saving anything loses nothing.
-    const questionId = commentIdFor(budgetQuestionKey(conversation.issue.id, state.budget.grants.length));
+    const questionId = commentIdFor(budgetQuestionKey(conversation.issue.id, state.budget.since));
     const budgetAsked = conversation.agentComments.find((c) => c.id === questionId);
-    const budget = budgetOf(runs, unknown.length, budgetAsked && questionId);
+    const budget = budgetOf(runs, unknown.length);
     // UNF-728: an exhausted budget cancels running work through the runner, every poll until confirmed,
     // whatever else is going on; the executor refuses every new effect (B1).
     const exhausted = checkBudget(budget, new Date());
@@ -278,10 +289,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     });
     // One question per exhausted window, posted like any question but under a key of the task and the
     // window, and retried every poll until Linear shows it. Until a human replies after it, nothing
-    // happens and no runaway guard ends the wait (UNF-727); the reply wakes a turn, which may grant one
-    // more window.
+    // happens and no runaway guard ends the wait (UNF-727); the reply opens a fresh window (above) and
+    // wakes a turn that reads it.
     if (!exhausted.allowed && !budgetAsked) {
-      const key = budgetQuestionKey(conversation.issue.id, state.budget.grants.length);
+      const key = budgetQuestionKey(conversation.issue.id, state.budget.since);
       const asked = await askHuman(budgetQuestion(situation, exhausted.reason), situation, deps, key);
       log(`budget exhausted (${exhausted.reason}): asking whether to continue: ${describeOutcome(asked)}`);
       await wait(pollMs);
@@ -316,7 +327,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       await wait(pollMs);
       continue;
     }
-    if (state.turns >= (opts.maxTurns ?? 12)) return { outcome: "turn_limit", detail: `${state.turns} turns taken` };
     if (opts.wake) opts.wake.pending = false;
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);

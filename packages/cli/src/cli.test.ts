@@ -60,7 +60,7 @@ const detail = {
     spentUsd: 3.5,
     costLimitUsd: 25,
     unknownCostRuns: 1,
-    grants: [],
+    windowStart: "2026-10-02T10:00:00.000Z",
   },
   runs: [{ runId: "run_w1", task: "UNF-12", role: "worker", status: "running", model: "opus" }],
   recentTurns: [{ at: "2026-10-02T10:30:00.000Z", summary: "Started a worker on the login fix", outcomes: ["start_worker: done"] }],

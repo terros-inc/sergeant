@@ -23,7 +23,7 @@ export type ApiError = z.infer<typeof ApiError>;
  * `active`: its loop is running. `queued`: delegated, waiting for a free task slot. Otherwise how its
  * loop last ended in this process, `merged` when its closing PR merged before that, or `inactive`.
  */
-export const TaskStatus = z.enum(["active", "queued", "done", "merged_not_done", "stopped", "turn_limit", "idle", "failed", "merged", "inactive"]);
+export const TaskStatus = z.enum(["active", "queued", "done", "merged_not_done", "stopped", "idle", "failed", "merged", "inactive"]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
 export const TaskSummary = z.object({

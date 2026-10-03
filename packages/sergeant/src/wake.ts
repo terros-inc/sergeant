@@ -3,7 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 /**
  * A human's request that a task take a turn now (`sgt task wake`, 11 §2). It ends the loop's current
  * wait, and the next poll takes a turn even if nothing changed. It skips no hold: running work, an open
- * question, an exhausted budget, and the turn limit still apply. Only in memory: lost on a restart.
+ * question, and an exhausted budget still apply. Only in memory: lost on a restart.
  */
 export class Wake {
   /** A turn is owed; cleared when the loop takes one. */

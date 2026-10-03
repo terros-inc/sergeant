@@ -8,11 +8,11 @@ import { cleanup, dir, human, issue, merge, review, saved, scenario, start, stop
 // UNF-728: runaway time is a material harm Sergeant must prevent. An exhausted task budget, or a human
 // undelegating the issue, must cancel running work for real (an unconfirmed cancel is retried, never
 // taken as stopped), and an exhausted budget must refuse every new effect until a human's reply to the
-// one budget question grants another window. These hold across a crash at any point and a restart.
+// one budget question opens a fresh window. These hold across a crash at any point and a restart.
 
 afterEach(cleanup);
 
-test("exhausted wall time cancels the running worker, asks once, refuses effects, and a reply grants one more window", async () => {
+test("exhausted wall time cancels the running worker, asks once, refuses effects, and a reply opens a fresh window", async () => {
   const threeHoursAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
   const before = human("c0", threeHoursAgo, "Please go ahead.");
   let w = worker("running");
@@ -35,11 +35,7 @@ test("exhausted wall time cancels the running worker, asks once, refuses effects
     },
     reasoner: async (situation) => {
       decisions.push(situation.conversation.humanComments.map((c) => c.id));
-      // An old comment cannot grant; the reply to the question can, once. Nothing else happens in
-      // the turn that grants, and the next turn works in the new window.
-      return situation.budget.grants.length === 0
-        ? turnOf([{ kind: "grant_budget", commentId: "c0" }, { kind: "grant_budget", commentId: "c1" }, { kind: "grant_budget", commentId: "c1" }, merge])
-        : turnOf([start]);
+      return turnOf([start]);
     },
     onPoll: async (poll, live) => {
       if (poll >= stopAt) await writeFile(join(dir, "STOP"), "");
@@ -58,17 +54,14 @@ test("exhausted wall time cancels the running worker, asks once, refuses effects
   expect(posted).toHaveLength(1);
   expect(posted[0]).toMatch(/budget is exhausted \(wall time exhausted at /);
   expect(posted[0]).toContain("worker canceled");
-  expect(posted[0]).toContain("Extend: one more window (120 more minutes and $25 more)");
-  // No turn until the human replied; then one that grants, and one in the new window that starts.
-  expect(decisions).toEqual([["c0", "c1"], ["c0", "c1"]]);
+  expect(posted[0]).toContain("Extend: continue in a fresh window");
+  // No turn until the human replied; then one in the fresh window, which starts. The old comment
+  // before the question opened nothing.
+  expect(decisions).toEqual([["c0", "c1"]]);
   const { budget, recentTurns } = await saved();
-  expect(recentTurns[0]?.outcomes).toEqual([
-    expect.stringMatching(/^grant_budget: denied by K3/),
-    expect.stringMatching(/^grant_budget: done/),
-    expect.stringMatching(/^grant_budget: denied by K4/),
-    expect.stringMatching(/^merge_pr .*denied by K4/),
-  ]);
-  expect(budget.grants).toHaveLength(1);
+  expect(recentTurns[0]?.outcomes).toEqual([expect.stringMatching(/^start_worker: done/)]);
+  expect(budget.since).not.toBe(threeHoursAgo);
+  expect(budget.priorRuns).toEqual(["run_w"]);
   expect(merged).toEqual([]);
   expect(started).toHaveLength(1);
 });
@@ -159,7 +152,7 @@ test("a start whose runner call fails after starting the run lets no other start
 test("a restart keeps the task's stored budget window whatever the options say", async () => {
   let turns = 0;
   const { posted } = await scenario({
-    state: { startedAt: new Date(Date.now() - 10 * 60_000).toISOString(), runIds: [], budget: { window: { wallMinutes: 5, costUsd: 1 }, grants: [] } },
+    state: { startedAt: new Date(Date.now() - 10 * 60_000).toISOString(), runIds: [], budget: { window: { wallMinutes: 5, costUsd: 1 } } },
     runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },
     reasoner: async () => (turns++, turnOf([start])),
     onPoll: stopAfter(3),
@@ -172,22 +165,25 @@ test("a restart keeps the task's stored budget window whatever the options say",
 });
 
 test.each([
-  ["Extend, one more window.", 1],
-  ["Accept as-is.", 0],
-])("a budget question posted before a crash is found again, never asked twice, and its reply %j is honored", async (reply, grants) => {
+  ["Extend, one more window.", [start]],
+  ["Accept as-is.", []],
+])("a budget question posted before a crash is found again, never asked twice, and its reply %j is honored", async (reply, actions) => {
   const asked = new Date(Date.now() - 60_000).toISOString();
-  const question = { id: commentIdFor(budgetQuestionKey(issue.id, 0)), createdAt: asked, body: "**Question for you** ... Continue?" };
+  const answeredAt = new Date(Date.parse(asked) + 1_000).toISOString();
+  const question = { id: commentIdFor(budgetQuestionKey(issue.id, undefined)), createdAt: asked, body: "**Question for you** ... Continue?" };
+  const started: string[] = [];
   const { result, posted } = await scenario({
     // The question is on Linear, but nothing about it reached state.json.
     state: { startedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), runIds: [] },
-    conversation: { agentComments: [question], humanComments: [human("c1", new Date(Date.parse(asked) + 1_000).toISOString(), reply)] },
-    runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },
-    reasoner: async (situation) =>
-      turnOf(situation.budget.grants.length === 0 && reply.startsWith("Extend") ? [{ kind: "grant_budget", commentId: "c1" }] : []),
+    conversation: { agentComments: [question], humanComments: [human("c1", answeredAt, reply)] },
+    runner: { start: async (spec) => void started.push(spec.runId), status: async () => worker("succeeded", 0), cancel: async () => {} },
+    // Either reply opens a fresh window; reasoning reads which it was, and only "Extend" works on.
+    reasoner: async (situation) => turnOf(situation.recentTurns.length === 0 ? actions : []),
     onPoll: (_poll, live) => live,
   });
 
   expect(result.outcome).toBe("idle");
   expect(posted).toEqual([]);
-  expect((await saved()).budget.grants).toHaveLength(grants);
+  expect((await saved()).budget.since).toBe(answeredAt);
+  expect(started).toHaveLength(actions.length);
 });

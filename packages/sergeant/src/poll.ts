@@ -58,7 +58,8 @@ export function fingerprintOf(s: SituationReport): string {
     // A PR newly linked to the issue can make a refused review or merge allowable.
     linked: s.conversation.issue.linkedPullRequests.map((p) => `${p.repo}#${p.number}`).sort(),
     runs: s.runs.map((r) => [r.runId, r.status]),
-    budget: s.budget.grants.length,
+    // A fresh budget window can allow what the last one refused.
+    budget: s.budget.windowStart,
     prs: s.pullRequests.map((p) => [p.repo, p.number, p.state, p.draft, p.headSha, p.mergeable, p.checks]),
   };
   return createHash("sha256").update(JSON.stringify(facts)).digest("hex");

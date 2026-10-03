@@ -31,7 +31,7 @@ const situation: SituationReport = {
   followups: [],
   uploads: [],
   refusedMerges: [],
-  budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2999-01-01T00:00:00.000Z", spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 0, grants: [] },
+  budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2999-01-01T00:00:00.000Z", spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 0, windowStart: "2026-10-02T10:00:00.000Z" },
   recentTurns: [],
 };
 

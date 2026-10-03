@@ -72,16 +72,6 @@ export const CreateFollowup = z.object({
 });
 export type CreateFollowup = z.infer<typeof CreateFollowup>;
 
-/**
- * A human's reply to Sergeant's budget question extends the budget by one more window of wall time and
- * spend. Reasoning reads the reply and cites it; the Gate checks the citation (K1, K3).
- */
-export const GrantBudget = z.object({
-  kind: z.literal("grant_budget"),
-  commentId: z.string().min(1),
-});
-export type GrantBudget = z.infer<typeof GrantBudget>;
-
 /** Everything reasoning may propose. Reasoning only proposes; the core gates and performs. */
 export const ProposedAction = z.discriminatedUnion("kind", [
   StartWorker,
@@ -90,7 +80,6 @@ export const ProposedAction = z.discriminatedUnion("kind", [
   MergePr,
   AskHuman,
   CreateFollowup,
-  GrantBudget,
 ]);
 export type ProposedAction = z.infer<typeof ProposedAction>;
 

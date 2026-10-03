@@ -6,6 +6,7 @@ import {
   type AgentComment,
   type Conversation,
   type ConversationRevision,
+  type HumanComment,
   type LinearPort,
   type ProposedAction,
   type SituationReport,
@@ -74,33 +75,39 @@ export const ownQuestion = (conversation: Conversation, id: string | undefined) 
   id === undefined ? undefined : conversation.agentComments.find((c) => c.id === id && c.body.startsWith(QUESTION_HEADING));
 
 /**
+ * TECH-5059: the human's answer to Sergeant's latest question (its budget question included): the first
+ * human comment after it. An answer gives the task a fresh budget window from the answer (budget.ts).
+ */
+export function latestAnswer(conversation: Conversation): HumanComment | undefined {
+  const at = (c: { createdAt: string }) => Date.parse(c.createdAt);
+  const asked = conversation.agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING)).sort((a, b) => at(b) - at(a))[0];
+  if (!asked) return undefined;
+  return conversation.humanComments.filter((c) => at(c) > at(asked)).sort((a, b) => at(a) - at(b))[0];
+}
+
+/**
  * TECH-5052: once Sergeant has acted on a human's answer, its question thread is resolved in Linear,
- * so an open thread only ever means "still needs a human". Acted on means a grant of the budget
- * question's window, or a turn that named the question it `answered`, asked nothing, and whose every
- * action was done. An unusable answer gets a follow-up in the same thread instead
- * (`ask_human.followsUp`) and stays open. The adapter resolves only a thread Sergeant started and leaves a resolved one alone.
+ * so an open thread only ever means "still needs a human". Acted on means a turn that named the
+ * question it `answered` (the budget question included), asked nothing, and whose every action was
+ * done. An unusable answer gets a follow-up in the same thread instead (`ask_human.followsUp`) and
+ * stays open. The adapter resolves only a thread Sergeant started and leaves a resolved one alone.
  * Best-effort: a failure is logged and never retried, and it never stops the task.
  */
 export async function resolveAnswered(
   turn: { answered?: string | undefined; outcomes: ActionOutcome[] },
-  situation: Pick<SituationReport, "conversation" | "budget">,
+  situation: Pick<SituationReport, "conversation">,
   linear: Pick<LinearPort, "resolveThread">,
   log: (line: string) => void,
 ): Promise<void> {
-  const { conversation, budget } = situation;
+  const { conversation } = situation;
   const { outcomes } = turn;
-  const granted = outcomes.some((o) => o.status === "done" && o.granted);
   // A turn that asks does nothing else (Q1), so it acted on no answer: its question follows one up.
   const applied = outcomes.every((o) => o.status === "done" && o.action.kind !== "ask_human");
   const answered = applied ? ownQuestion(conversation, turn.answered) : undefined;
-  const ids = new Set<string>();
-  if (granted && budget.questionId) ids.add(budget.questionId);
-  if (answered) ids.add(answered.id);
-  for (const id of ids) {
-    if (!linear.resolveThread) return;
-    await linear.resolveThread(id).then(
-      (result) => log(`question ${id} answered and acted on: ${result.replaceAll("_", " ")}`),
-      (e: Error) => log(`could not resolve the thread of question ${id}: ${e.message}`),
-    );
-  }
+  if (!answered || !linear.resolveThread) return;
+  const { id } = answered;
+  await linear.resolveThread(id).then(
+    (result) => log(`question ${id} answered and acted on: ${result.replaceAll("_", " ")}`),
+    (e: Error) => log(`could not resolve the thread of question ${id}: ${e.message}`),
+  );
 }

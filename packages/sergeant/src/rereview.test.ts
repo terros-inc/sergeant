@@ -41,9 +41,10 @@ test("asks the human who requested changes to re-review once per addressed, revi
   let livePr: PullRequestFacts = { ...prAt(second), checks: { sha: second, required: [{ name: "validate", state: "pending" }] } };
   const posted: { key: string; body: string; checks: string[] }[] = [];
   let turns = 0;
+  const stop = new AbortController();
 
   const result = await runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, maxTurns: 3, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {}, signal: stop.signal },
     {
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
@@ -67,13 +68,15 @@ test("asks the human who requested changes to re-review once per addressed, revi
           if (turns === 1) livePr = prAt(second);
           if (turns === 2) live.humanComments.push({ id: "c1", author: { id: "u1", name: "Trevor" }, createdAt: at, updatedAt: at, body: "Any news?" });
           if (turns === 3) livePr = prAt(third);
+          // 4: the third head's request was posted on the poll before it; that is all this test needs.
+          if (turns === 4) stop.abort();
           return { output: { summary: "waiting on the captain", actions: [] }, model: "m", promptVersion: "p" };
         },
       },
     },
   );
 
-  expect(result.outcome).toBe("turn_limit");
+  expect(result.outcome).toBe("stopped");
   expect(posted.map((p) => p.key)).toEqual([`rereview:i1:${repo}#7:${second}`, `rereview:i1:${repo}#7:${third}`]);
   // Not while the first head's checks were still pending, before the first turn.
   expect(posted.map((p) => p.checks)).toEqual([["passed"], ["passed"]]);
