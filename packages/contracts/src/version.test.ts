@@ -60,7 +60,9 @@ test("a checkout owned by another user is trusted, and a refusal is reported as 
   // serve runs as the sergeant user against the root-owned host checkout; git calls that dubious ownership.
   const r = repo(1);
   r.git("tag", "v2.0.0");
-  process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = "1";
+  // Without the system and global config, which may trust every directory (CI runners do).
+  const isolate = { GIT_TEST_ASSUME_DIFFERENT_OWNER: "1", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
+  Object.assign(process.env, isolate);
   try {
     expect(sergeantVersion(r.dir)).toEqual({ version: `2.0.0+${r.sha()}` });
     expect(sergeantVersion(r.dir, { trust: false })).toEqual({
@@ -68,6 +70,6 @@ test("a checkout owned by another user is trusted, and a refusal is reported as 
       fallback: expect.stringMatching(/^git cannot read the checkout: fatal: detected dubious ownership/),
     });
   } finally {
-    delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
+    for (const k of Object.keys(isolate)) delete process.env[k];
   }
 });
