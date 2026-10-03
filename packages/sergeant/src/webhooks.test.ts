@@ -18,6 +18,7 @@ const agent = { id: "agent-v2", name: "Sergeant" };
 const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] });
 const secrets = { linear: "linear-secret", github: "github-secret" };
 const head = "a".repeat(40);
+const webhookGapMs = 50;
 const pr: PullRequestFacts = {
   repo: "o/r",
   number: 7,
@@ -85,7 +86,7 @@ async function start() {
     },
   };
   service = await startService(
-    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, webhookGapSeconds: 0.05, log: () => {} },
+    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, webhookGapSeconds: webhookGapMs / 1000, log: () => {} },
     deps,
   );
   const port = service.port;
@@ -121,7 +122,7 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
   // Signed, but about a head and a repository no task watches.
   expect(await post("github", { repository: { full_name: "o/r" }, check_suite: { head_sha: "b".repeat(40), pull_requests: [{ number: 8 }] } })).toBe(200);
   expect(await post("github", { repository: { full_name: "other/repo" }, pull_request: { number: 7 } }, { event: "pull_request" })).toBe(200);
-  await sleep(70);
+  await sleep(200);
   expect(reads("UNF-1")).toBe(before);
 
   // A check on the PR's watched head rereads at once, but nothing changed, so no turn.
@@ -130,11 +131,13 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
   // A burst, then a steady stream across three gaps, rereads at most once per 50 ms gap (each event would
   // reread without the cap), and still owes no turn.
   const pullRequest = () => post("github", { repository: { full_name: "o/r" }, pull_request: { number: 7 } }, { event: "pull_request" });
+  const streamStarted = Date.now();
   await Promise.all(Array.from({ length: 10 }, pullRequest));
   for (let i = 0; i < 30; i++) await Promise.all([pullRequest(), sleep(5)]);
   await sleep(70);
+  const streamElapsed = Date.now() - streamStarted;
   expect(reads("UNF-1") - (before + 1)).toBeGreaterThanOrEqual(2);
-  expect(reads("UNF-1") - (before + 1)).toBeLessThanOrEqual(6);
+  expect(reads("UNF-1") - (before + 1)).toBeLessThanOrEqual(Math.ceil(streamElapsed / webhookGapMs) + 1);
   expect(counts.turns).toEqual(["UNF-1"]);
 
   // A human comments: the comment's webhook, naming the issue only by id, gets it a turn now.
@@ -153,7 +156,7 @@ test("a delegation to the V2 agent runs an intake now, which admits the issue", 
   delegated.push("UNF-2");
   // Someone else's delegation is not Sergeant's to look at.
   expect(await post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-2", identifier: "UNF-2", delegateId: "someone-else" }, updatedFrom: { delegateId: null } })).toBe(200);
-  await sleep(70);
+  await sleep(200);
   expect(counts.intakes).toBe(intakes);
 
   expect(await post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-2", identifier: "UNF-2", delegateId: agent.id }, updatedFrom: { delegateId: null } })).toBe(200);

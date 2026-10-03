@@ -41,8 +41,8 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-  await client.close();
-  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  await client?.close().catch(() => {});
+  if (server?.listening) await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
 
 const detail = {
@@ -121,5 +121,7 @@ test("refusals, an unreachable API, answers outside the contract, and bad refs a
   routes["GET /v1/tasks"] = { drop: true };
   const res = await client.callTool({ name: "task_list", arguments: {} });
   expect(res.isError).toBe(true);
-  expect(JSON.parse((res.content as { text: string }[])[0]?.text ?? "").error.code).toBe("unavailable");
+  const error = JSON.parse((res.content as { text: string }[])[0]?.text ?? "").error;
+  expect(error.code).toBe("unavailable");
+  expect(error.message).toMatch(/cannot reach the Sergeant API/);
 });
