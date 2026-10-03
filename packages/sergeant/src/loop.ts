@@ -3,8 +3,6 @@ import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises
 import { join } from "node:path";
 import {
   BudgetStatus,
-  checkBudget,
-  commentIdFor,
   conversationRevision,
   FiledFollowup,
   RefusedMerge,
@@ -15,19 +13,18 @@ import {
   SituationReport,
   type ProposedAction,
   type PullRequestFacts,
-  type PullRequestRef,
   type RunRecord,
 } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { z } from "zod";
 import { drawAudit, exists, finishReviews, logFollowUp, mergedHead, observeCompletion, postOutcome } from "./after-merge.ts";
-import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
-import { cancelPending, driveCancel, recordStop } from "./cancel.ts";
-import { askHuman, checkLive, describeOutcome, execute, type Ports } from "./execute.ts";
+import { budgetStatus, DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
+import { cancelPending, driveCancel } from "./cancel.ts";
+import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import { outcomeComment } from "./outcome.ts";
-import { openQuestion } from "./question.ts";
+import { cancelRuns, checkHolds, checkStop, holdForBudget, landedOf, readPullRequests } from "./poll-checks.ts";
 import { type ReviewFacts, reviewFacts } from "./review-quality.ts";
 import { pause, type Wake } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -275,48 +272,16 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       opts.wake.watched = [conversation.issue.id, ...keys];
     };
     watch(conversation.issue.linkedPullRequests);
-    // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer
-    // (A1), or that a human moved to Backlog, Canceled, or Done (A2), is not Sergeant's to work on. Each
-    // is the human's cancel: its runs are canceled so they publish nothing more, its open PRs are
-    // closed, and the loop stops only once the runner confirms each run stopped. Done after the
-    // worker's closing PR merged is the task's normal end instead, taken below. The executor re-checks
-    // both live before each effect.
-    const active = checkLive(conversation.issue, deps.agentUserId);
-    const finished =
-      !active.allowed &&
-      active.rule === "A2" &&
-      conversation.issue.stateType === "completed" &&
-      landedOf(await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps), runs, deps.workerLogin) !== undefined;
-    if (!active.allowed && !finished) {
-      await recordStop(opts.dir, active.rule === "A1" ? { cause: "undelegated" } : { cause: "state", state: conversation.issue.state });
-      stopping = active.reason;
+    // Is the issue still Sergeant's (A1/A2), within budget, and not waiting on a human? See poll-checks.ts.
+    const stop = await checkStop(conversation, runs, { dir: opts.dir, enrolledRepositories: opts.enrolledRepositories }, deps);
+    if (stop) {
+      stopping = stop;
       continue;
     }
-    // The budget question of the current window, if Linear has it: its id is derived from a key, so a
-    // crash between posting it and saving anything loses nothing.
-    const questionId = commentIdFor(budgetQuestionKey(conversation.issue.id, state.budget.grants.length));
-    const budgetAsked = conversation.agentComments.find((c) => c.id === questionId);
-    const budget = budgetOf(runs, unknown.length, budgetAsked && questionId);
-    // UNF-728: an exhausted budget cancels running work through the runner, every poll until confirmed,
-    // whatever else is going on; the executor refuses every new effect (B1).
-    const exhausted = checkBudget(budget, new Date());
-    if (!exhausted.allowed && live.length > 0) {
-      log(`budget exhausted (${exhausted.reason}): canceling ${live.join(", ")}`);
-      await cancelRuns(live, deps, log);
-      await wait(pollMs);
-      continue;
-    }
-    if (unknown.length > 0) {
-      log(`waiting: status unavailable for ${unknown.map((u) => `${u.unknown} (${u.error})`).join(", ")}`);
-      await wait(pollMs);
-      continue;
-    }
-    // While the question Sergeant asked is unanswered it takes no turn and makes no effect, and no
-    // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts.
-    const question = openQuestion(conversation);
-    if (question) {
-      unposted = undefined;
-      log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);
+    const grants = state.budget.grants.length;
+    const checked = await checkHolds(conversation, { live, unknown }, { grants, of: (questionId) => budgetOf(runs, unknown.length, questionId) }, deps, log);
+    if ("hold" in checked) {
+      if (checked.hold === "question") unposted = undefined;
       await wait(pollMs);
       continue;
     }
@@ -361,22 +326,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       runs,
       followups: state.followups,
       refusedMerges: state.refusedMerges,
-      budget,
+      budget: checked.budget,
       recentTurns: state.recentTurns,
     });
-    // One question per exhausted window, posted like any question but under a key of the task and the
-    // window, and retried every poll until Linear shows it. Until a human replies after it, nothing
-    // happens and no runaway guard ends the wait (UNF-727); the reply wakes a turn, which may grant one
-    // more window.
-    if (!exhausted.allowed && !budgetAsked) {
-      const key = budgetQuestionKey(conversation.issue.id, state.budget.grants.length);
-      const asked = await askHuman(budgetQuestion(situation, exhausted.reason), situation, deps, key);
-      log(`budget exhausted (${exhausted.reason}): asking whether to continue: ${describeOutcome(asked)}`);
-      await wait(pollMs);
-      continue;
-    }
-    if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {
-      log(`waiting: the budget question posted at ${budgetAsked.createdAt} has no human reply yet`);
+    if (await holdForBudget(situation, checked, grants, deps, log)) {
       await wait(pollMs);
       continue;
     }
@@ -437,37 +390,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     await save();
     await postHandoffs(conversation.issue.id);
   }
-}
-
-/**
- * Cancels each run through the runner and returns how many are not confirmed stopped. The runner
- * resolves `cancel` only once the run is stopped or gone; anything else is retried next poll.
- */
-async function cancelRuns(runIds: RunId[], deps: Ports, log: (line: string) => void): Promise<number> {
-  let unconfirmed = 0;
-  for (const runId of runIds) {
-    await deps.runner.cancel(runId).then(
-      () => log(`canceled ${runId}`),
-      (e: Error) => (unconfirmed++, log(`cancel ${runId} not confirmed: ${e.message}`)),
-    );
-  }
-  return unconfirmed;
-}
-
-/** The worker's own PR it reported closing the issue, merged. */
-const landedOf = (pullRequests: PullRequestFacts[], runs: RunRecord[], workerLogin: string) =>
-  pullRequests.find((p) => p.state === "merged" && p.author === workerLogin && reportedClosing(runs, p) === true);
-
-/**
- * Every PR in an enrolled repository that Linear links to the issue or a worker reported, re-read
- * live. Linear's link is authoritative on its own: one no recorded run reported (a human attached it,
- * or a restart lost the run id) still has its head and checks polled.
- */
-async function readPullRequests(runs: RunRecord[], linked: PullRequestRef[], enrolled: RepoSlug[], deps: Ports): Promise<PullRequestFacts[]> {
-  const reported = runs.flatMap((run) => (run.role === "worker" ? (run.report?.pullRequests ?? []) : []));
-  const refs = new Map<string, PullRequestRef>();
-  for (const pr of [...linked, ...reported]) if (enrolled.includes(pr.repo)) refs.set(`${pr.repo}#${pr.number}`, { repo: pr.repo, number: pr.number });
-  return Promise.all([...refs.values()].map((r) => deps.github.readPullRequest(r.repo, r.number)));
 }
 
 /** What a turn depends on. `generatedAt` and recentTurns are excluded: they change every poll. */
