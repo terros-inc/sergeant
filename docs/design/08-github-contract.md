@@ -169,7 +169,13 @@ missed webhook delays a turn but loses nothing.
   (author, state, body, file/line) is in the Situation Report and the conversation revision, so it
   wakes a turn. Reasoning treats a request for changes as a blocking finding that outranks Sergeant's
   own reviewer, and continues the work on the same PR; a successor's brief carries the feedback. M8
-  blocks the merge until that human approves or the review is dismissed.
+  blocks the merge until that human approves or the review is dismissed. Once the PR's current head
+  has addressed the request (it was left on an earlier head), has review standing, GitHub reports it
+  mergeable, and every required check passed on it, Sergeant posts one Linear comment per head naming that human and linking the PR,
+  asking them to re-review or dismiss (TECH-4992). It is keyed by the head, and Sergeant rereads the
+  issue's comments rather than recording it: a new head that reaches the same point asks again. Like
+  a handoff, it is posted even while the task is held for budget: it costs none, and the human's
+  re-review is needed whatever the budget decision.
 - **A human merges or closes a PR**: a fact. A merge with a closing reference completes the issue
   through automation.
 - **A human approves**: informative; it does not replace the fresh-review disposition unless an
