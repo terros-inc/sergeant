@@ -47,14 +47,14 @@ export function outcomeComment(
 /**
  * What the merged head leaves unmet of the current acceptance criteria, as far as the records show:
  * every run that checked this head started from an earlier title or description, or the latest review
- * of it found requirements unmet (a reviewer reports each as a blocking finding).
+ * that started from the current text found requirements unmet (marked as blocking acceptance findings).
  */
 function acceptanceGaps(pr: PullRequestFacts, runs: RunRecord[], current: string): string[] {
   const atHead = (r: { repo: string; number: number; headSha: string }) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha;
   const checked = runs.filter((r) => (r.role === "reviewer" ? r.report?.reviewed.some(atHead) : r.report?.pullRequests.some(atHead)));
   const stale = checked.length > 0 && checked.every((r) => r.issueRevision !== undefined && r.issueRevision !== current);
-  const review = checked.findLast((r) => r.role === "reviewer");
-  const unmet = review?.role === "reviewer" && review.issueRevision === current ? (review.report?.findings ?? []).filter((f) => f.severity === "blocking") : [];
+  const review = checked.findLast((r) => r.role === "reviewer" && r.issueRevision === current);
+  const unmet = review?.role === "reviewer" ? (review.report?.findings ?? []).filter((f) => f.severity === "blocking" && f.category === "acceptance") : [];
   return [
     ...(stale ? ["this head was checked only against an earlier title or description of the issue, not its current acceptance criteria"] : []),
     ...unmet.map((f) => `unmet per review: ${f.description.split("\n")[0]?.slice(0, 200)}`),

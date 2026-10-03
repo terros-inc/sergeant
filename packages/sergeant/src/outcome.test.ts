@@ -39,7 +39,7 @@ const worker = (issue: typeof before): RunRecord => ({
     followups: [],
   },
 });
-const review = (issue: typeof before, blocking: string[]): RunRecord => ({
+const review = (issue: typeof before, findings: { description: string; category?: "acceptance" }[]): RunRecord => ({
   runId: "run_r",
   role: "reviewer",
   status: "succeeded",
@@ -49,8 +49,8 @@ const review = (issue: typeof before, blocking: string[]): RunRecord => ({
   report: {
     reportVersion: "s2-review-report/1",
     reviewed: [{ repo: "o/r", number: 7, headSha: head }],
-    verdict: blocking.length > 0 ? "changes_requested" : "approve",
-    findings: blocking.map((description, i) => ({ id: `f${i}`, severity: "blocking" as const, description })),
+    verdict: findings.length > 0 ? "changes_requested" : "approve",
+    findings: findings.map(({ description, category }, i) => ({ id: `f${i}`, severity: "blocking" as const, description, category })),
     summary: "",
   },
 });
@@ -63,8 +63,26 @@ test("a human merge of work checked only against an earlier description lists th
   expect(gaps([worker(before), review(now, [])])).toBe("- Known gaps: the doc link needs access.");
 });
 
-test("a human merge over a current review's unmet requirements lists each as a known gap", () => {
-  expect(gaps([worker(now), review(now, ["references/documentation-standard.md is not bundled\nDetails follow."])])).toBe(
+test("a human merge lists acceptance findings, but not ordinary defects, as known gaps", () => {
+  expect(
+    gaps([
+      worker(now),
+      review(now, [
+        { description: "The retry loop can overflow." },
+        { description: "references/documentation-standard.md is not bundled\nDetails follow.", category: "acceptance" },
+      ]),
+    ]),
+  ).toBe(
     "- Known gaps: the doc link needs access; unmet per review: references/documentation-standard.md is not bundled.",
   );
+});
+
+test("uses the latest review that started from the current issue text", () => {
+  expect(
+    gaps([
+      worker(now),
+      review(now, [{ description: "the required reference is missing", category: "acceptance" }]),
+      review(before, [{ description: "a stale requirement is missing", category: "acceptance" }]),
+    ]),
+  ).toBe("- Known gaps: the doc link needs access; unmet per review: the required reference is missing.");
 });

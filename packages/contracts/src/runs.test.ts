@@ -47,3 +47,13 @@ test("rejects a review report that does not say which head it reviewed or what i
   expect(parseReport(report({ ...review, reviewed: [] }), ReviewReport).ok).toBe(false);
   expect(parseReport(report({ ...review, verdict: "lgtm" }), ReviewReport).ok).toBe(false);
 });
+
+test("marks acceptance findings explicitly while ordinary defects omit the category", () => {
+  const base = { reportVersion: "s2-review-report/1", reviewed: [pr], verdict: "changes_requested", summary: "s" };
+  const findings = [
+    { id: "f1", severity: "blocking", category: "acceptance", description: "A required output is missing." },
+    { id: "f2", severity: "blocking", description: "The retry loop can overflow." },
+  ];
+  const parsed = parseReport(report({ ...base, findings }), ReviewReport);
+  expect(parsed.ok && parsed.report.findings).toEqual(findings);
+});
