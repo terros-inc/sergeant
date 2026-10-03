@@ -32,11 +32,13 @@ How it fits together:
   the model token and, for a worker, its scoped worker-App token.
 - **State is on the data volume** (`/var/lib/sergeant/state`: `tasks/`, `runs/`, `service.lock`). It
   survives an instance replacement and Terraform refuses to destroy it (`prevent_destroy`).
-- **Only `/health` and the two webhook endpoints are public.** `serve` listens on `127.0.0.1:8080`;
-  Caddy terminates HTTPS for the hostname (Let's Encrypt over HTTP-01) and proxies `GET /health` and
-  `POST /webhooks/linear` and `/webhooks/github` (bodies up to 1 MB), nothing else. `/health` answers
-  only `{"ok":true}`, or 503 `{"ok":false}` while stopping or after a failed intake; active task ids
-  and intake errors are on `/status`, which Caddy does not proxy. A webhook endpoint answers 404
+- **Only `/health`, `/v1`, and the two webhook endpoints are public.** `serve` listens on
+  `127.0.0.1:8080`; Caddy terminates HTTPS for the hostname (Let's Encrypt over HTTP-01) and proxies
+  `/v1` without granting trust to the proxy. `serve` checks a person's Linear bearer on every
+  operational `/v1` call. `/status` and installation-admin operations remain loopback-only. Caddy
+  also proxies `GET /health` and `POST /webhooks/linear` and `/webhooks/github` (bodies up to 1 MB),
+  nothing else. `/health` answers only `{"ok":true}`, or 503 `{"ok":false}` while stopping or after a
+  failed intake; active task ids and intake errors are on `/status`, which Caddy does not proxy. A webhook endpoint answers 404
   until the installation config names its signing secret, and 401 to any delivery whose signature
   does not verify.
 - **The config lives in AWS.** Every install reads the SSM parameter (default
@@ -87,12 +89,14 @@ anything, and the state backend and the provider refuse any other account.
 6. **Linear**: the token acts as the agent user in `linear.agentUserId` (`live-check` verifies it).
 7. **Human login** for `sgt` (below): the config's `humans`, and the callback URL on the Linear app.
 
-### Human login for `sgt` (TECH-4938)
+### Public human API and login for `sgt` (TECH-4938, TECH-4939)
 
-People use `sgt` with their own Linear login, never AWS credentials (root `README.md`, The `sgt` CLI).
-`serve` runs without `--trust-loopback` here, so every `/v1` call needs one, an SSM port-forwarded
-call included; `/health` and `/status` are unchanged. Once per installation, before updating the host
-to a version with it (without `humans`, `serve` admits no caller and `sgt` is refused):
+People use `sgt` from a laptop with their own Linear login, never AWS credentials (root `README.md`,
+The `sgt` CLI). `serve` runs without `--trust-loopback` here. Caddy publishes `/v1`, but every
+operational call still needs an admitted Linear user; `/status` is not published. Once per
+installation, configure all of the following before updating the host. If `humans` is absent,
+`GET /v1/auth/config` returns 404 and every operational `/v1` route returns 401, including every
+mutation:
 
 1. In the installation's Linear workspace, open the V2 agent's OAuth application (Settings, API,
    OAuth applications) and add the callback URL `http://localhost:4546/callback`. Note its client id.
@@ -101,9 +105,33 @@ to a version with it (without `humans`, `serve` admits no caller and `sgt` is re
 2. Add `humans` to the installation-config parameter: `linearClientId` (that client id, which is
    public), `teams` (the keys of the Linear teams whose members may use Sergeant), and `approvers`
    (Linear user ids of members of those teams). Then update.
-3. Check from a laptop through the port-forward: `sgt login`, then `sgt whoami` names you.
+3. Update the host so it rereads the installation config and installs the Caddyfile.
+4. From a laptop with no AWS session or credentials, point `sgt` at the permanent HTTPS endpoint and
+   sign in. `whoami` must name that person, and task listing must succeed:
 
-The API stays on loopback: publishing it through Caddy is a separate change.
+   ```sh
+   export SGT_API_URL=https://<hostname>
+   sgt login
+   sgt whoami
+   sgt task list
+   ```
+
+5. From a logged-out shell, check every published operational route. Each must return `401`; the
+   three POSTs must not change a task or run. Placeholder ids are sufficient because authentication
+   happens before resource lookup or body parsing:
+
+   ```sh
+   api=https://<hostname>
+   for path in /v1/whoami /v1/tasks /v1/tasks/NOT-A-TASK /v1/runs /v1/runs/not-a-run /v1/runs/not-a-run/report; do
+     test "$(curl -sS -o /dev/null -w '%{http_code}' "$api$path")" = 401 || exit 1
+   done
+   for path in /v1/tasks/NOT-A-TASK/wake /v1/tasks/NOT-A-TASK/cancel /v1/runs/not-a-run/cancel; do
+     test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$api$path")" = 401 || exit 1
+   done
+   ```
+
+`GET /v1/auth/config` is the sole unauthenticated `/v1` exception: `sgt login` needs the public
+`linearClientId` from it. It exposes no task, run, user, or installation-admin data.
 
 ### Webhooks
 
