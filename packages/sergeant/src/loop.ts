@@ -238,7 +238,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       budget,
       recentTurns: state.recentTurns,
     });
-    await postRereviewRequests(situation, deps.workerLogin, deps.linear, log);
+    await postRereviewRequests(situation, deps, deps.linear, log);
     if (await holdForBudget(situation, conversation, holds, ctx)) {
       await wait(pollMs);
       continue;

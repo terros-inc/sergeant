@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { checkMerge, rereviewRequests, type MergeFacts } from "./gate.ts";
+import { checkMayMerge, checkMerge, rereviewRequests, type MergeFacts, type MergePreflightFacts } from "./gate.ts";
 import type { MergePr } from "./actions.ts";
 import type { HumanPullRequestFeedback } from "./github.ts";
 import type { RefusedMerge } from "./situation.ts";
@@ -64,8 +64,11 @@ type Over = {
   refusedMerges?: RefusedMerge[];
   liveIssueRevision?: string;
   agentComments?: MergeFacts["agentComments"];
+  issue?: Partial<MergePreflightFacts["issue"]>;
+  budget?: Partial<MergePreflightFacts["budget"]>;
 };
-const facts = (over: Over = {}): MergeFacts => ({
+const now = new Date("2026-10-03T03:00:00.000Z");
+const facts = (over: Over = {}): MergePreflightFacts => ({
   pr: {
     ...pr,
     url: "https://github.com/trevorallred/canary/pull/7",
@@ -91,6 +94,16 @@ const facts = (over: Over = {}): MergeFacts => ({
   enrolledRepositories: [pr.repo],
   runs: over.runs ?? [reviewer(), worker(true)],
   refusedMerges: over.refusedMerges ?? [],
+  issue: {
+    id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started",
+    delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: over.linked ?? [pr], ...over.issue,
+  },
+  agentUserId: "agent-v2",
+  budget: {
+    window: { wallMinutes: 120, costUsd: 25 }, windowStart: "2026-10-03T02:00:00.000Z", wallDeadline: "2026-10-03T04:00:00.000Z",
+    spentUsd: 1, costLimitUsd: 25, unknownCostRuns: 0, ...over.budget,
+  },
+  now,
 });
 
 test("a reviewed, green, exact-head merge against an unchanged conversation is allowed", () => {
@@ -220,4 +233,30 @@ test("asks a human to re-review only when their requested changes are all that b
   // Not blocked by M8 at all: approved since, or requested on this very head, so nothing has addressed it yet.
   expect(ask({ pr: { humanFeedback: [requested, review("APPROVED", head, 2)] } })).toEqual([]);
   expect(ask({ pr: { humanFeedback: [review("CHANGES_REQUESTED", head, 1)] } })).toEqual([]);
+});
+
+// TECH-5065: the merge itself also waits on the budget (B1) and the live issue (A1, A2), so with M8 the
+// only rule checkMerge refuses, Sergeant still must not tell a human the merge waits on their review.
+test("asks no one to re-review while the budget is exhausted or the live issue stops the merge", () => {
+  const requested: HumanPullRequestFeedback = {
+    id: "review:1", kind: "review", author: "captain", state: "CHANGES_REQUESTED", body: "", path: null, line: null, commitId: moved,
+    createdAt: "2026-10-03T01:00:00.000Z", updatedAt: "2026-10-03T01:00:00.000Z", url: "https://github.com/x/y/pull/7#r1",
+  };
+  const ask = (over: Over = {}) => rereviewRequests(facts({ ...over, pr: { humanFeedback: [requested] } }));
+  expect(checkMerge(merge, facts({ pr: { humanFeedback: [requested] } }))).toMatchObject({ allowed: false, rule: "M8" });
+  expect(ask()).toEqual(["captain"]);
+
+  const blocked: [string, Over][] = [
+    ["B1", { budget: { spentUsd: 25 } }],
+    ["B1", { budget: { wallDeadline: now.toISOString() } }],
+    ["A1", { issue: { delegate: null } }],
+    ["A1", { issue: { delegate: { id: "agent-v1", name: "Sergeant V1" } } }],
+    ["A2", { issue: { state: "Done", stateType: "completed" } }],
+  ];
+  for (const [rule, over] of blocked) {
+    // The same preflight the merge applies refuses it on that rule; so no one is asked.
+    expect(checkMayMerge(merge, facts(over))).toMatchObject({ allowed: false, rule });
+    expect(ask(over)).toEqual([]);
+  }
+  expect(checkMayMerge(merge, facts())).toEqual({ allowed: true });
 });

@@ -1,18 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   checkBudget,
-  checkDelegation,
-  checkIssueState,
   checkFollowup,
-  checkMerge,
+  checkLive,
+  checkMayMerge,
   checkSend,
   checkStart,
   commentIdFor,
   conversationRevision,
   issueRevision,
-  type Conversation,
   type FiledFollowup,
-  type GateVerdict,
   type GitHubPort,
   type LinearPort,
   type ProposedAction,
@@ -68,15 +65,6 @@ export type ActionOutcome =
       refused?: RefusedMerge;
     }
   | { action: ProposedAction; status: "failed"; error: string };
-
-/**
- * The live read's check before every effect: the issue is delegated to the V2 agent (A1) and not in
- * Backlog, Canceled, or Done (A2, TECH-4989).
- */
-export function checkLive(issue: Conversation["issue"], agentUserId: string): GateVerdict {
-  const delegation = checkDelegation(issue, agentUserId);
-  return delegation.allowed ? checkIssueState(issue) : delegation;
-}
 
 /**
  * Performs one proposed action if the Gate allows it. This is the only path from reasoning to an
@@ -176,12 +164,12 @@ export async function execute(action: ProposedAction, situation: SituationReport
           ports.github.readPullRequest(action.repo, action.number),
           ports.linear.readConversation(conversation.issue.id),
         ]);
-        const active = checkLive(live.issue, ports.agentUserId);
-        if (!active.allowed) return denied(active);
         // The revision covers human feedback on the task's PRs too: the deciding turn's, and the same
         // PRs with the one being merged re-read live, so feedback on it since the turn denies (M10).
         const liveRevision = conversationRevision(live, situation.pullRequests.map((p) => (p.repo === pr.repo && p.number === pr.number ? pr : p)));
-        const verdict = checkMerge(
+        // The shared "may merge now?" preflight (TECH-5065): A1/A2 on the live issue, the merge gate, and
+        // B1 again as of now, the same one a re-review request is asked against (rereview.ts).
+        const verdict = checkMayMerge(
           // The revision of the conversation reasoning was actually shown, never a supplied one.
           { ...action, conversationRevision: conversationRevision(conversation, situation.pullRequests) },
           {
@@ -196,11 +184,13 @@ export async function execute(action: ProposedAction, situation: SituationReport
             enrolledRepositories,
             runs,
             refusedMerges: situation.refusedMerges,
+            issue: live.issue,
+            agentUserId: ports.agentUserId,
+            budget: situation.budget,
+            now: new Date(),
           },
         );
         if (!verdict.allowed) return denied(verdict);
-        const late = inBudget();
-        if (!late.allowed) return denied(late);
         const result = await ports.github.mergePullRequest(action);
         if ("refused" in result) {
           // Repository policy, not a fault: retrying cannot help until something changes (M12). The

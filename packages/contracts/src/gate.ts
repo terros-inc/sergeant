@@ -2,6 +2,7 @@ import type { AgentComment, Conversation, ConversationRevision, PullRequestRef, 
 import type { HumanPullRequestFeedback, PullRequestFacts } from "./github.ts";
 import type { MergePr, ProposedAction, ReviewStanding } from "./actions.ts";
 import type { RunRecord } from "./runs.ts";
+import { checkBudget, type BudgetStatus } from "./budget.ts";
 import type { FiledFollowup, RefusedMerge } from "./situation.ts";
 
 // The Gate: pure checks that refuse a proposed action which would cause a material harm (00 P3).
@@ -34,6 +35,15 @@ export const STOP_STATE_TYPES: readonly string[] = ["backlog", "canceled", "comp
 export function checkIssueState(issue: Conversation["issue"]): GateVerdict {
   if (!STOP_STATE_TYPES.includes(issue.stateType)) return allow;
   return deny("A2", `${issue.identifier} is in ${issue.state} (${issue.stateType})`);
+}
+
+/**
+ * The live read's check before every effect: the issue is delegated to the V2 agent (A1) and not in
+ * Backlog, Canceled, or Done (A2, TECH-4989).
+ */
+export function checkLive(issue: Conversation["issue"], agentUserId: string): GateVerdict {
+  const delegation = checkDelegation(issue, agentUserId);
+  return delegation.allowed ? checkIssueState(issue) : delegation;
 }
 
 /** Who says which PRs are this task's: one live Linear read and Sergeant's worker App login. */
@@ -143,20 +153,36 @@ function standingChangeRequests(feedback: HumanPullRequestFeedback[]): HumanPull
   return [...latest.values()].filter((r) => r.state === "CHANGES_REQUESTED");
 }
 
+/** What "may this merge now?" reads beyond the merge facts: the live issue (A1, A2) and the budget as of `now` (B1). */
+export type MergePreflightFacts = MergeFacts & { issue: Conversation["issue"]; agentUserId: string; budget: BudgetStatus; now: Date };
+
+/**
+ * May this merge happen now (TECH-5065): the live checks (A1, A2), the merge gate, and the budget (B1),
+ * in that order. The one preflight `execute(merge_pr)` applies right before GitHub's merge, and the
+ * one a re-review request is asked against, so neither can drift from the other.
+ */
+export function checkMayMerge(action: MergePr & { conversationRevision: ConversationRevision }, facts: MergePreflightFacts): GateVerdict {
+  const live = checkLive(facts.issue, facts.agentUserId);
+  if (!live.allowed) return live;
+  const merge = checkMerge(action, facts);
+  if (!merge.allowed) return merge;
+  return checkBudget(facts.budget, facts.now);
+}
+
 /**
  * The humans to ask on the issue to re-review or dismiss (TECH-4992): each requested changes on an
- * earlier head, which this head has since addressed, and the real merge gate would merge this head,
- * under some run's review standing, but for M8 (TECH-5051). A review whose commit GitHub no longer
- * reports (commitId null, say after a force push) was not left on this head, so it counts as addressed:
- * asking costs nothing, and M8 still holds. Empty when there is no one to ask yet.
+ * earlier head, which this head has since addressed, and the merge preflight would merge this head,
+ * under some run's review standing, but for M8 (TECH-5051, TECH-5065). A review whose commit GitHub no
+ * longer reports (commitId null, say after a force push) was not left on this head, so it counts as
+ * addressed: asking costs nothing, and M8 still holds. Empty when there is no one to ask yet.
  */
-export function rereviewRequests(facts: MergeFacts): string[] {
+export function rereviewRequests(facts: MergePreflightFacts): string[] {
   const { pr, runs, liveConversationRevision: conversationRevision } = facts;
   const asked = standingChangeRequests(pr.humanFeedback).filter((r) => r.commitId !== pr.headSha).map((r) => r.author);
-  // M8 is the only rule that reads human reviews; without them the gate decides everything else.
+  // M8 is the only rule that reads human reviews; without them the preflight decides everything else.
   const withoutM8 = { ...facts, pr: { ...pr, humanFeedback: [] } };
   const standings = runs.map((r): ReviewStanding => (r.role === "reviewer" ? { kind: "reviewed", reviewRunId: r.runId } : { kind: "not_required", workerRunId: r.runId }));
-  return standings.some((reviewStanding) => checkMerge({ kind: "merge_pr", repo: pr.repo, number: pr.number, expectedHeadSha: pr.headSha, reviewStanding, conversationRevision }, withoutM8).allowed) ? asked : [];
+  return standings.some((reviewStanding) => checkMayMerge({ kind: "merge_pr", repo: pr.repo, number: pr.number, expectedHeadSha: pr.headSha, reviewStanding, conversationRevision }, withoutM8).allowed) ? asked : [];
 }
 
 /** The first line of every question Sergeant asks on an issue (07 §4). */

@@ -1,7 +1,7 @@
-import { checkBudget, commentIdFor, type AgentComment, type BudgetStatus, type Conversation, type GateVerdict, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { checkBudget, checkLive, commentIdFor, type AgentComment, type BudgetStatus, type Conversation, type GateVerdict, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { budgetQuestion, budgetQuestionKey, openWindow, type BudgetWindow } from "./budget.ts";
 import { recordStop, stopReason } from "./cancel.ts";
-import { askHuman, checkLive, describeOutcome, type Ports } from "./execute.ts";
+import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";

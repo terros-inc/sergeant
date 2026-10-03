@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   conversationRevision,
   type Conversation,
@@ -138,6 +138,23 @@ test("a head pushed or a human comment added after the turn's snapshot stops the
   expect(await execute(merge, situation, commented.p)).toMatchObject({ status: "denied", rule: "M10" });
 
   expect([...pushed.merged, ...commented.merged]).toEqual([]);
+});
+
+// B1 is checked again after the live reads, in the merge preflight: a deadline that passes while they
+// run (TECH-5065 moved it into the shared preflight) still stops the merge before GitHub.
+test("a wall deadline that passes during the merge's live reads stops the merge", async () => {
+  const deadline = new Date(Date.now() + 60_000);
+  const { p, merged } = ports();
+  const read = p.github.readPullRequest;
+  p.github.readPullRequest = async (repo, number) => (vi.setSystemTime(deadline), read(repo, number));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const late = { ...situation, budget: { ...situation.budget, wallDeadline: deadline.toISOString() } };
+    expect(await execute(merge, late, p)).toMatchObject({ status: "denied", rule: "B1", reason: expect.stringContaining("wall time exhausted") });
+    expect(merged).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 const followup = (key: string): ProposedAction => ({ kind: "create_followup", key, title: `Do ${key}`, description: `Why ${key}.`, relation: "related" });
