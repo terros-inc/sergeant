@@ -34,8 +34,14 @@ const CancelIntent = z.object({
   closed: z.array(ClosedPullRequest).default([]),
   /** Completed GitHub close effects, keyed per PR and exact head so a re-drive skips them. */
   prCloseKeys: z.array(z.string()).default([]),
+  /** Drives on which a run's stop could not be confirmed. */
+  unreadableStatusAttempts: z.number().int().nonnegative().default(0),
+  /** Whether the durable, idempotent warning about an unconfirmed stop was posted. */
+  unreadableStatusSurfaced: z.boolean().default(false),
 });
 type CancelIntent = z.infer<typeof CancelIntent>;
+
+const SURFACE_STALLED_STOP_AFTER_MS = 15 * 60 * 1000;
 
 /** The request cannot be carried out as asked; nothing was recorded. */
 export class CancelConflict extends Error {}
@@ -63,7 +69,7 @@ async function readIntent(dir: string): Promise<CancelIntent | undefined> {
   return raw === undefined ? undefined : CancelIntent.parse(JSON.parse(raw));
 }
 
-async function writeIntent(dir: string, intent: CancelIntent): Promise<void> {
+async function writeIntent(dir: string, intent: z.input<typeof CancelIntent>): Promise<void> {
   await mkdir(dir, { recursive: true });
   await writeFile(intentFile(dir), JSON.stringify(intent, null, 2));
 }
@@ -78,7 +84,7 @@ export const stopReason = (issue: Conversation["issue"]) =>
  */
 export async function recordStop(dir: string, reason: string, requestId: string = randomUUID()): Promise<void> {
   if ((await readIntent(dir)) || !(await exists(join(dir, "state.json")))) return;
-  await writeIntent(dir, { reason, requestId, at: new Date().toISOString(), closed: [], prCloseKeys: [] });
+  await writeIntent(dir, { reason, requestId, at: new Date().toISOString(), closed: [] });
 }
 
 /**
@@ -154,6 +160,27 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
       log(`${ref}: status of ${runId} unreadable after its cancel, retrying`);
     }
   }
+  if (stopping.length > 0 && !intent.unreadableStatusSurfaced) {
+    intent.unreadableStatusAttempts++;
+    await writeIntent(dir, intent);
+    if (Date.now() - Date.parse(intent.at) >= SURFACE_STALLED_STOP_AFTER_MS) {
+      try {
+        const { issue } = await deps.linear.readConversation(ref);
+        await deps.linear.postComment({
+          issueId: issue.id,
+          key: `cancel-stalled:${issue.id}:${intent.requestId}`,
+          body: stalledStopComment(stopping, intent.unreadableStatusAttempts),
+        });
+        intent.unreadableStatusSurfaced = true;
+        await writeIntent(dir, intent);
+        log(`${ref}: surfaced stalled stop after ${intent.unreadableStatusAttempts} attempts`);
+      } catch (e) {
+        // Warning delivery must not make an API cancel fail. Its stable key makes a retry safe even
+        // if Linear accepted the comment before this process lost the response or crashed.
+        log(`${ref}: could not surface stalled stop, retrying: ${(e as Error).message}`);
+      }
+    }
+  }
   if (stopping.length > 0) return { stopping, closedPullRequests: intent.closed };
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open.
   const { issue } = await deps.linear.readConversation(ref);
@@ -195,6 +222,10 @@ async function openPullRequests(linked: PullRequestRef[], runs: RunRecord[], enr
 function stopComment(intent: CancelIntent): string {
   const closed = intent.closed.length > 0 ? `Closed ${intent.closed.map((p) => `[${p.repo}#${p.number}](${p.url})`).join(", ")}.` : "No open PR to close.";
   return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled. ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
+}
+
+function stalledStopComment(runIds: RunId[], attempts: number): string {
+  return `Sergeant is still trying to stop this task, but could not confirm the run status or cancellation after ${attempts} attempts: ${runIds.map((id) => `\`${id}\``).join(", ")}. The stop remains pending so a worker-reported PR is not missed, and Sergeant will not restart this issue while it is pending. To clear it, restore the runner so Sergeant can read the final run status; Sergeant will keep retrying automatically.`;
 }
 
 /**

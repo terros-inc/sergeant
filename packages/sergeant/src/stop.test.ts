@@ -48,7 +48,7 @@ afterEach(() => rm(dir, { recursive: true, force: true }));
 function fakes(live: { conversation: Conversation }) {
   const runs = [worker("running")];
   const wrote = new Map<string, RunRecord["report"]>();
-  const seen = { turns: 0, starts: 0, canceled: [] as string[], closed: [] as { number: number; comment: string }[], comments: [] as { key: string; body: string }[] };
+  const seen = { turns: 0, starts: 0, canceled: [] as string[], closed: [] as { number: number; comment: string }[], comments: [] as { key: string; body: string }[], commentAttempts: [] as string[] };
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
@@ -57,7 +57,10 @@ function fakes(live: { conversation: Conversation }) {
     linear: {
       readConversation: async () => structuredClone(live.conversation),
       moveIssueToStarted: async () => ({ moved: false as const }),
-      postComment: async ({ key, body }) => void seen.comments.push({ key, body }),
+      postComment: async ({ key, body }) => {
+        seen.commentAttempts.push(key);
+        if (!seen.comments.some((comment) => comment.key === key)) seen.comments.push({ key, body });
+      },
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
     github: {
@@ -228,6 +231,12 @@ async function stopWithFlakyStatus(failures: number) {
   return { deps, seen, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
 }
 
+async function ageStop(task: string) {
+  const file = join(task, "cancel.json");
+  const intent = JSON.parse(await readFile(file, "utf8"));
+  await writeFile(file, JSON.stringify({ ...intent, at: new Date(Date.now() - 16 * 60 * 1000).toISOString() }));
+}
+
 test("a stop whose run status read fails once reads it again after the cancel and closes the worker's unlinked PR", async () => {
   const { seen, drive } = await stopWithFlakyStatus(1);
   expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
@@ -248,6 +257,58 @@ test("a stop whose run status stays unreadable after the cancel stays pending, s
   expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("No open PR to close") }]);
   expect(await readdir(task)).not.toContain("cancel.json");
+});
+
+test("a stop stalled on unreadable status warns only after 15 minutes and remains pending", async () => {
+  const { seen, task, drive } = await stopWithFlakyStatus(6);
+
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([]);
+  await ageStop(task);
+
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([
+    {
+      key: expect.stringMatching(/^cancel-stalled:i1:/),
+      body: expect.stringMatching(/could not confirm.*after 2 attempts: `run_w1`.*worker-reported PR.*not restart.*restore the runner.*retrying/),
+    },
+  ]);
+  expect(await readdir(task)).toContain("cancel.json");
+
+  // A later intake neither duplicates the warning nor gives up the TECH-5070 wait.
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toHaveLength(1);
+  expect(await readdir(task)).toContain("cancel.json");
+
+  // Once status is readable, the normal stop still finds and closes the worker-reported PR.
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(seen.closed).toEqual([{ number: 9, comment: "Closed: the task was canceled by Ada: wrong approach." }]);
+  expect(seen.comments.map((comment) => comment.key)).toEqual([expect.stringMatching(/^cancel-stalled:i1:/), expect.stringMatching(/^cancel:i1:/)]);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
+test.each(["unreadable status and failed cancel", "readable running status and failed cancel"])("a stop with %s is surfaced", async (failure) => {
+  const { deps, seen, task, drive } = await stopWithFlakyStatus(failure.startsWith("unreadable") ? 99 : 0);
+  deps.runner.cancel = async () => Promise.reject(new Error("Docker unavailable"));
+  await ageStop(task);
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments[0]).toMatchObject({ key: expect.stringMatching(/^cancel-stalled:i1:/), body: expect.stringContaining("could not confirm") });
+});
+
+test("a warning failure is retried without failing the stop and reuses its idempotency key", async () => {
+  const { deps, seen, task, drive } = await stopWithFlakyStatus(99);
+  await ageStop(task);
+  const post = deps.linear.postComment;
+  deps.linear.postComment = async (comment) => {
+    await post(comment);
+    deps.linear.postComment = post;
+    throw new Error("connection lost after Linear accepted comment");
+  };
+  await expect(drive()).resolves.toMatchObject({ stopping: ["run_w1"] });
+  await expect(drive()).resolves.toMatchObject({ stopping: ["run_w1"] });
+  expect(seen.commentAttempts).toHaveLength(2);
+  expect(new Set(seen.commentAttempts).size).toBe(1);
+  expect(seen.comments).toHaveLength(1);
 });
 
 // A start the runner never confirmed and still does not know never started, so it does not hold the
