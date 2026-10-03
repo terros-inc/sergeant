@@ -67,7 +67,7 @@ test("each role runs Claude Code unless the config selects Codex for it, with th
   const none = { worker: undefined, reviewer: undefined };
   expect(runnerRoles(InstallationConfig.parse(config(1, 2)), none)).toEqual({
     adapters: { worker: "claude-code-local", reviewer: "claude-code-local" },
-    models: { worker: "opus", reviewer: "opus" },
+    models: { worker: { "claude-code-local": "opus", "codex-local": "opus" }, reviewer: { "claude-code-local": "opus", "codex-local": "opus" } },
   });
 
   const codexReviewer = { ...config(1, 2), runners: { reviewer: "codex-local" } };
@@ -76,7 +76,14 @@ test("each role runs Claude Code unless the config selects Codex for it, with th
   const parsed = InstallationConfig.parse({ ...codexReviewer, codex: { credentialSecret: "sergeant/codex", model: "gpt-5.5-codex" } });
   expect(runnerRoles(parsed, none)).toEqual({
     adapters: { worker: "claude-code-local", reviewer: "codex-local" },
-    models: { worker: "opus", reviewer: "gpt-5.5-codex" },
+    models: {
+      worker: { "claude-code-local": "opus", "codex-local": "gpt-5.5-codex" },
+      reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5.5-codex" },
+    },
   });
-  expect(runnerRoles(parsed, { worker: "sonnet", reviewer: "gpt-6" }).models).toEqual({ worker: "sonnet", reviewer: "gpt-6" });
+  // A model flag is for the role's configured adapter; quota may still move the role to the other one (TECH-5117).
+  expect(runnerRoles(parsed, { worker: "sonnet", reviewer: "gpt-6" }).models).toEqual({
+    worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5.5-codex" },
+    reviewer: { "claude-code-local": "opus", "codex-local": "gpt-6" },
+  });
 });

@@ -46,6 +46,12 @@ export function showRun({ task, run }: RunDetail): string {
   const cost = run.costUsd === undefined && run.tokens ? `cost unknown, ${run.tokens.input} input and ${run.tokens.output} output tokens` : usd(run.costUsd);
   const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${cost}`];
   if (run.failureReason) lines.push(`failure reason: ${run.failureReason}`);
+  if (run.providerChoice) {
+    const c = run.providerChoice;
+    const window = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
+    const readings = c.readings.map((q) => `${q.adapter} ${q.error ? `unknown (${q.error})` : `${window(q.weekly)} weekly, ${window(q.fiveHour)} 5-hour left`}`);
+    lines.push(`provider: ${c.adapter}${c.sameProviderAsWorker ? " (same as its worker)" : ""}, ${c.reason}`, `quota: ${readings.join("; ")}`);
+  }
   if (!run.report) {
     lines.push(run.reportError ? `no report: ${run.reportError}` : "no report yet");
   } else if (run.role === "worker") {

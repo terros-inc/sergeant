@@ -138,15 +138,19 @@ export type InstallationConfig = z.infer<typeof InstallationConfig>;
 type Role = RunSpec["role"];
 
 /**
- * Each role's adapter and model, for `containerRunner` (TECH-5009). A role's model flag wins; without
- * one, a Codex role runs `codex.model` and a Claude Code role "opus", today's default.
+ * Each role's configured adapter, and its model on each adapter, for `containerRunner` (TECH-5009). A
+ * role's model flag is for its configured adapter; otherwise Codex runs `codex.model` and Claude Code
+ * "opus", today's default. With a Codex credential, quota may run a role on the other adapter (TECH-5117).
  */
 export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role, string | undefined>) {
   const adapter = (role: Role): Adapter => config.runners?.[role] ?? "claude-code-local";
-  const model = (role: Role) => modelFlags[role] ?? (adapter(role) === "codex-local" && config.codex ? config.codex.model : "opus");
+  const models = (role: Role): Record<Adapter, string> => {
+    const flag = (a: Adapter) => (a === adapter(role) ? modelFlags[role] : undefined);
+    return { "claude-code-local": flag("claude-code-local") ?? "opus", "codex-local": flag("codex-local") ?? config.codex?.model ?? "opus" };
+  };
   return {
     adapters: { worker: adapter("worker"), reviewer: adapter("reviewer") },
-    models: { worker: model("worker"), reviewer: model("reviewer") },
+    models: { worker: models("worker"), reviewer: models("reviewer") },
   };
 }
 

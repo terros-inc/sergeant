@@ -241,6 +241,13 @@ Claude token). Checked against Codex CLI 0.160.0:
   fallback is a fresh run from pushed branches and the earlier runs' reports in the brief (05 §2), as
   for Claude Code here. The thread id is kept in the run's `agent.json` for a future `resume`.
 
+**Provider by quota (TECH-5117).** With both credentials configured, the runner picks each run's
+adapter right before launch from each provider's live quota (weekly and 5-hour percent left), by
+deterministic code: the worker gets the most weekly capacity left unless its 5-hour window is below
+20%; the reviewer gets the other provider than its worker's unless that one is below the floor. An
+unknown reading keeps the `runners` default, so a quota read never blocks a launch. The run record's
+`providerChoice` keeps the choice and the readings behind it.
+
 An adapter may wrap a tiny native helper (for example a Rust binary that owns process groups and clean
 termination) if OS process handling genuinely needs one. Sergeant itself stays TypeScript.
 

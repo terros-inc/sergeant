@@ -18,7 +18,7 @@ import { parseArgs } from "node:util";
 import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
 import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliFeedbackJudge, claudeCliReasoner } from "@terros/sergeant-reasoning";
-import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
+import { containerRunner, providerQuota, reasoningFiles } from "@terros/sergeant-runner";
 import { linearCallers } from "./auth.ts";
 import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { startService } from "./service.ts";
@@ -90,7 +90,10 @@ const service = await startService(
       rootDir: join(stateDir, "runs"),
       ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
       claudeOAuthToken: installation.modelToken,
-      ...(installation.codexCredential !== undefined && { codexCredential: installation.codexCredential }),
+      ...(installation.codexCredential !== undefined && {
+        codexCredential: installation.codexCredential,
+        quota: providerQuota({ claudeOAuthToken: installation.modelToken, codexCredential: installation.codexCredential }),
+      }),
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
       fetchUpload: installation.linear.fetchUpload,

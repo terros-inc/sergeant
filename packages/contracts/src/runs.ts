@@ -84,6 +84,32 @@ export const ReviewReport = z.object({
 });
 export type ReviewReport = z.infer<typeof ReviewReport>;
 
+/** One quota window as its provider reports it: the percent left and, when known, when it resets. */
+const QuotaWindow = z.object({ remainingPercent: z.number(), resetsAt: z.string().optional() });
+
+/**
+ * A provider's quota as read just before a launch (TECH-5117): its weekly and 5-hour windows, or why
+ * they could not be read. A reading without both windows is unknown.
+ */
+export const QuotaReading = z.object({
+  adapter: z.string(),
+  readAt: z.string(),
+  weekly: QuotaWindow.optional(),
+  fiveHour: QuotaWindow.optional(),
+  error: z.string().optional(),
+});
+export type QuotaReading = z.infer<typeof QuotaReading>;
+
+/** Which provider a run got and the quota readings behind it, for telemetry and `/sarge`. */
+export const ProviderChoice = z.object({
+  adapter: z.string(),
+  reason: z.string(),
+  readings: z.array(QuotaReading),
+  /** A reviewer that runs on its worker's provider, because the other one was unusable. */
+  sameProviderAsWorker: z.boolean().optional(),
+});
+export type ProviderChoice = z.infer<typeof ProviderChoice>;
+
 const RunBase = {
   runId: RunId,
   status: z.enum(["running", "succeeded", "failed", "canceled"]),
@@ -113,6 +139,8 @@ const RunBase = {
    * Absent on records made before TECH-5034.
    */
   issueRevision: z.string().optional(),
+  /** Absent when the installation has one provider, and on records made before TECH-5117. */
+  providerChoice: ProviderChoice.optional(),
 };
 
 /** One worker or reviewer run as the runner reports it. A reviewer is always its own fresh run. */

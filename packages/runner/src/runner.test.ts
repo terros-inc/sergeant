@@ -52,7 +52,7 @@ async function started(extra: Record<string, unknown> = {}) {
   const minted: unknown[] = [];
   const options = {
     rootDir: await mkdtemp(join(tmpdir(), "sergeant-runner-test-")),
-    models: { worker: "sonnet", reviewer: "opus" },
+    models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
     claudeOAuthToken: TOKEN,
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async (req: unknown) => (minted.push(req), GH),
@@ -138,7 +138,7 @@ test("gives the run the issue's files read-only, fetched on the host, skipping o
   const rootDir = await mkdtemp(join(tmpdir(), "sergeant-runner-test-"));
   const runner = containerRunner({
     rootDir,
-    models: { worker: "sonnet", reviewer: "opus" },
+    models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
     claudeOAuthToken: TOKEN,
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => GH,
@@ -182,7 +182,7 @@ test("a codex-local run gets only the Codex credential in place of the Claude to
   ]);
   expect(run?.opts.env).toMatchObject({ CODEX_CREDENTIAL: CODEX, GH_TOKEN: GH });
   expect(run?.args.join(" ")).toContain("codex exec --json");
-  expect(run?.args.slice(-3)).toEqual(["3600", "sonnet", "10"]);
+  expect(run?.args.slice(-3)).toEqual(["3600", "gpt-5", "10"]);
   expect(host.calls.flatMap((c) => c.args).join(" ")).not.toContain("codex-test-token");
   expect(() => containerRunner({ ...({} as ContainerRunnerOptions), rootDir: "/x", claudeOAuthToken: TOKEN, adapters: { reviewer: "codex-local" } })).toThrow(
     /codexCredential/,
@@ -216,7 +216,7 @@ test("a Codex run records its summed tokens and no cost; a Claude run its report
   ].join("\n");
   const codex = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, codexLogs);
   // M13 skips a record without `issueRevision`, so a Codex run must carry it like a Claude run (TECH-5045).
-  expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "sonnet", issueRevision: issueRevision(spec.conversation.issue) });
+  expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "gpt-5", issueRevision: issueRevision(spec.conversation.issue) });
   expect(codex.tokens).toEqual({ input: 1010, cachedInput: 400, output: 55, reasoningOutput: 20 });
   expect(codex.costUsd).toBeUndefined();
   expect(codex.report).not.toBeNull();

@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import {
   issueRevision,
   parseReport,
+  ProviderChoice,
   ReviewReport,
   RunRecord,
   WorkerReport,
@@ -13,6 +14,7 @@ import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
 import { AGENTS, ADAPTERS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
+import { chooseReviewer, chooseWorker } from "./choose.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
@@ -37,9 +39,11 @@ const RunMeta = z.object({
   startedAt: z.string(),
   /** The issue text the run started from; every record of the run carries it (M13). */
   issueRevision: z.string().optional(),
+  /** The provider chosen from quota and the readings behind it (TECH-5117); every record of the run carries it. */
+  providerChoice: ProviderChoice.optional(),
 });
 type RunMeta = z.infer<typeof RunMeta>;
-const recorded = (meta: RunMeta) => (meta.issueRevision !== undefined ? { issueRevision: meta.issueRevision } : {});
+const recorded = ({ issueRevision, providerChoice }: RunMeta) => ({ ...(issueRevision !== undefined && { issueRevision }), ...(providerChoice && { providerChoice }) });
 
 /**
  * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
@@ -129,12 +133,14 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
 
   /**
    * Earlier runs naming these PRs: the worker reports are the implementer's claims a reviewer checks,
-   * and earlier reviews are the findings it checks were addressed (06 §2).
+   * and earlier reviews are the findings it checks were addressed (06 §2). The latest such worker's
+   * adapter is the one a reviewer should not share (TECH-5117).
    */
   async function priorReports(subjects: { repo: string; number: number }[]) {
     const names = (pr: { repo: string; number: number }) => subjects.some((s) => s.repo === pr.repo && s.number === pr.number);
     const claims: string[] = [];
     const reviews: ReviewReport[] = [];
+    let worker: RunMeta | undefined;
     for (const runId of await readdir(root)) {
       const record = await readRecord(runId).catch(() => undefined);
       if (!record?.report) continue;
@@ -142,9 +148,19 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         if (record.report.reviewed.some(names)) reviews.push(record.report);
       } else if (record.report.pullRequests.some(names)) {
         claims.push(await readFile(join(paths(runId).dir, "report.md"), "utf8"));
+        const meta = await readMeta(runId).catch(() => undefined);
+        if (meta && (!worker || meta.startedAt > worker.startedAt)) worker = meta;
       }
     }
-    return { claims, reviews };
+    return { claims, reviews, workerAdapter: worker?.adapter };
+  }
+
+  /** The provider for a launch, from quota read now; undefined when there is no second provider to choose. */
+  async function chooseProvider(role: Role, workerAdapter: Adapter | undefined) {
+    const readQuota = opts.quota;
+    if (!readQuota || !opts.codexCredential) return undefined;
+    const candidates = await Promise.all(ADAPTERS.map(async (adapter) => ({ adapter, quota: await readQuota(adapter) })));
+    return role === "worker" ? chooseWorker(candidates, adapterOf(role)) : chooseReviewer(candidates, workerAdapter, adapterOf(role));
   }
 
   return {
@@ -173,6 +189,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       const files = renderAttachments(attachments);
 
       let brief: string;
+      let workerAdapter: Adapter | undefined;
       if (spec.role === "worker") {
         const existing: string[] = [];
         for (const repo of spec.repositories) {
@@ -195,22 +212,26 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           subjects.push({ ...s, url: pr.html_url, title: pr.title, body: pr.body ?? "", baseRef: pr.base.ref, path: `/workspace/${rel}` });
         }
         const prior = await priorReports(spec.subject);
+        workerAdapter = prior.workerAdapter;
         brief = reviewerBrief(spec, subjects, prior.claims, prior.reviews, files);
       }
       await writeFile(join(p.workspace, "sergeant-brief.md"), brief);
 
       const limits = opts.limits?.[spec.role] ?? DEFAULT_LIMITS[spec.role];
-      const adapter = adapterOf(spec.role);
+      // Right before the launch, so the reading is current; a failed read is an unknown reading, never a failed start.
+      const providerChoice = await chooseProvider(spec.role, workerAdapter);
+      const adapter = providerChoice?.adapter ?? adapterOf(spec.role);
       const agent = AGENTS[adapter];
       const meta: RunMeta = {
         runId: spec.runId,
         role: spec.role,
         adapter,
-        model: opts.models[spec.role],
+        model: opts.models[spec.role][adapter],
         repositories: spec.repositories,
         container: `sergeant-${spec.runId}`,
         startedAt: new Date().toISOString(),
         issueRevision: issueRevision(spec.conversation.issue),
+        ...(providerChoice && { providerChoice }),
       };
       await writeFile(p.meta, JSON.stringify(meta, null, 2));
       // `--env NAME` copies the value from the docker CLI's own environment, so no token is ever on
