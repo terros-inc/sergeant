@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -30,7 +30,7 @@ function fakes(issues: DelegatedIssue[]) {
   const conversations = new Map<string, Conversation>();
   const conversation = (identifier: string) => {
     const c = conversations.get(identifier) ?? {
-      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [] },
+      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [] },
       humanComments: [],
       agentComments: [],
     };
@@ -53,7 +53,7 @@ function fakes(issues: DelegatedIssue[]) {
       moveIssueToStarted: async () => ({ moved: false as const }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
@@ -94,8 +94,16 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+/** A started issue runs only as a task already under way (TECH-4989). */
+const underway = async (identifier: string) => {
+  await mkdir(join(dir, "tasks", identifier), { recursive: true });
+  const task = { issueId: identifier, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 }, grants: [] } };
+  await writeFile(join(dir, "tasks", identifier, "state.json"), JSON.stringify(task));
+};
+
 const start = async (deps: ServiceDeps, opts: { maxTasks: number; waitingGraceMinutes?: number }, logs: string[] = []) => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-slots-test-"));
+  for (const { identifier, state } of await deps.delegatedIssues()) if (state.type === "started") await underway(identifier);
   service = await startService(
     { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 0, log: (l) => logs.push(l), ...opts },
     deps,
@@ -158,6 +166,7 @@ test("a task waiting past the grace frees its slot, and once answered is readmit
   // Answered while the slot is taken, the task queues; an In Review issue delegated meanwhile is ahead of it.
   f.answer("ASKS");
   await vi.waitFor(() => expect(logs).toContainEqual("ASKS: queued: waiting for a free task slot"), { timeout: 5_000 });
+  await underway("REVIEW");
   f.delegated.push(issue("REVIEW", "In Review", 0, "2026-09-01T00:00:00.000Z"));
   await sleep(100);
   await f.finish("NEWER");
@@ -166,6 +175,6 @@ test("a task waiting past the grace frees its slot, and once answered is readmit
   expect(f.turns).toHaveLength(3);
   await f.finish("REVIEW");
   await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER", "REVIEW", "ASKS"]), { timeout: 5_000 });
-  expect(logs).toContainEqual("ASKS: the human answered; admitted to a task slot again");
+  expect(logs).toContainEqual("ASKS: has work again; admitted to a task slot");
   await f.finish("ASKS");
 });

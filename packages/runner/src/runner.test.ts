@@ -38,6 +38,7 @@ const spec: RunSpec = {
       title: "T",
       description: "D",
       state: "Todo",
+      stateType: "unstarted",
       delegate: null,
       linkedPullRequests: [],
     },

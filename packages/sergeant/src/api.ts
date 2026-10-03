@@ -190,7 +190,7 @@ async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetail> {
 
 async function wakeTask(ctl: ApiControl, ref: TaskRef, req: z.infer<typeof WakeRequest>, caller: Caller): Promise<WakeResponse> {
   const woke = await ctl.wake(ref);
-  if (woke === "not_delegated") throw new Refusal(409, "conflict", `${ref} is not delegated to Sergeant's agent, so it has no loop to wake`);
+  if (woke === "not_delegated") throw new Refusal(409, "conflict", `${ref} has no loop to wake: it is not delegated to Sergeant's agent, or it waits in Triage or Backlog until it moves to Todo`);
   ctl.log(`${ref}: woken through the API by ${callerName(caller)} (${woke})${req.reason ? `: ${req.reason}` : ""}`);
   return { ref, woke };
 }

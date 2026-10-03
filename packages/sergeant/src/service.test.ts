@@ -30,7 +30,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
     issues.map((id) => [
       id,
       {
-        issue: { id: `i-${id}`, identifier: id, url: `https://linear.app/x/issue/${id}`, title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [] },
+        issue: { id: `i-${id}`, identifier: id, url: `https://linear.app/x/issue/${id}`, title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
         humanComments: [],
         agentComments: [],
       },
@@ -59,7 +59,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
       postComment: async () => {},
       createFollowupIssue: async () => ({ identifier: "UNF-9", url: "https://linear.app/x/issue/UNF-9" }),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
@@ -106,7 +106,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
 /** Fakes for one delegated issue whose turns hold for `turnMs`, counting turns in flight. */
 function oneIssue(ids: string[], turnMs: number) {
   const conversation: Conversation = {
-    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [] },
+    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
     humanComments: [],
     agentComments: [],
   };
@@ -116,7 +116,7 @@ function oneIssue(ids: string[], turnMs: number) {
     workerLogin: "sergeant-worker[bot]",
     delegatedIssues: async () => ids.map(todo),
     linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")), moveIssueToStarted: async () => ({ moved: false as const }) },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn() {

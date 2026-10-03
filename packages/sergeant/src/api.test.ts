@@ -28,7 +28,7 @@ afterEach(async () => {
 
 function fakes(runs: RunRecord[] = []) {
   const conversation: Conversation = {
-    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Fix the login", description: "D", state: "In Progress", delegate: agent, linkedPullRequests: [] },
+    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Fix the login", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
     humanComments: [],
     agentComments: [],
   };
@@ -38,7 +38,7 @@ function fakes(runs: RunRecord[] = []) {
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
-    delegatedIssues: async () => (conversation.issue.delegate ? [todo("UNF-1")] : []),
+    delegatedIssues: async () => (conversation.issue.delegate ? [{ ...todo("UNF-1"), state: { name: conversation.issue.state, type: conversation.issue.stateType } }] : []),
     undelegate: async () => {
       conversation.issue.delegate = null;
     },
@@ -48,7 +48,7 @@ function fakes(runs: RunRecord[] = []) {
       postComment: async ({ key, body }) => void comments.push({ key, body }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: {
       start: async () => {},
       status: async (runId) => runs.find((r) => r.runId === runId) ?? Promise.reject(new Error(`no ${runId}`)),
@@ -133,8 +133,6 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   await vi.waitFor(async () => expect((await call(port, "GET", "/v1/tasks/UNF-1")).json.task.status).toBe("stopped"), { timeout: 5_000 });
   expect(f.canceled).toEqual(["run_r1", "run_w1"]);
   expect(f.turns()).toBe(0);
-  const { json: runs } = await call(port, "GET", "/v1/runs?task=UNF-1");
-  expect(runs.runs.map((r: { runId: string; status: string }) => [r.runId, r.status])).toEqual([["run_w1", "canceled"], ["run_r1", "canceled"]]);
 
   // Repeating it changes nothing: no second comment.
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" })).json).toEqual({ ref: "UNF-1", undelegated: false, stopping: [] });
@@ -151,6 +149,8 @@ test.each([
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
   const f = fakes([{ runId: "run_w1", role: "worker", status: "running", provider: "p", model: "m", report: null }]);
   if (!delegated) f.conversation.issue.delegate = null;
+  // Sergeant moved it to In Progress when it started: once stopped, it is not started again.
+  Object.assign(f.conversation.issue, { state: "In Progress", stateType: "started" });
   // The runner cannot confirm the first cancel of each run.
   const cancel = f.deps.runner.cancel;
   const refused = new Set<string>();
@@ -171,8 +171,9 @@ test.each([
   await start(f.deps);
   await vi.waitFor(async () => expect(await exists(join(task, "cancel.json"))).toBe(false), { timeout: 5_000 });
   expect(f.canceled.sort()).toEqual(["run_lost", "run_w1"]);
-  expect(f.conversation.issue.delegate).toBeNull();
-  expect(f.comments.map((c) => c.key)).toEqual(delegated ? ["cancel:i-UNF-1:req-1"] : []);
+  // Said once the runs are stopped, under the cancel's key: a cancel recorded before the restart
+  // that had already said it posts nothing new.
+  expect(f.comments.map((c) => c.key)).toEqual(["cancel:i-UNF-1:req-1"]);
   expect(f.turns()).toBe(0);
 });
 
@@ -283,5 +284,5 @@ test("only an admitted Linear user may call the API, and approvers are told apar
   });
   expect((await call(port, "GET", "/v1/whoami", undefined, as("approver"))).json).toMatchObject({ user: { id: "Grace" }, approver: true });
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" }, as("member"))).json).toMatchObject({ undelegated: true });
-  expect(f.comments).toEqual([expect.objectContaining({ body: expect.stringContaining("at the request of Ada: wrong approach") })]);
+  expect(f.comments).toEqual([expect.objectContaining({ body: expect.stringContaining("the task was canceled by Ada: wrong approach") })]);
 });

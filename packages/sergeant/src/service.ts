@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,22 +9,26 @@ import { apiHandler } from "./api.ts";
 import { fromThisHost, send } from "./api-http.ts";
 import { isLoopbackHost, type Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
-import { driveCancel, pendingCancels, recordCancel } from "./cancel.ts";
+import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import { sweepFeedbackEvery, type FeedbackDeps } from "./feedback.ts";
-import { runLoop, type LoopResult } from "./loop.ts";
+import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { Wake } from "./wake.ts";
 import { WEBHOOK_PATHS, webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
-// existing loop (loop.ts), at most `maxTasks` holding a slot at a time (slots.ts). Each task loop already re-reads its runs,
+// existing loop (loop.ts), at most `maxTasks` holding a slot at a time (slots.ts). Linear's list only
+// discovers new work, and a task starts only from Todo (TECH-4989): an issue in Triage or Backlog waits
+// until a human moves it there. Every task already under way locally (its `state.json`) with no loop
+// resumes at every intake, listed or not, holding no slot until it has work to do: its loop's own live
+// checks continue it, stop it (cancel.ts), or see it through after its merge. Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
 // when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) only ends a loop's wait
 // or runs an intake sooner. Nothing is kept but each task's own `state.json` and a
-// recorded API cancel not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, stopped, failed) is admitted again on a later intake while its issue is still
-// delegated, and a restarted process rereads everything and continues, repeating some work. One
+// recorded stop not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, failed) resumes on a
+// later intake, and a restarted process rereads everything and continues, repeating some work. One
 // process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
 // The same server answers the client API (api.ts) that the `sgt` CLI uses. Feedback that arrives
 // after a task's work landed is swept separately (feedback.ts) and may file an ordinary Backlog
@@ -67,7 +71,7 @@ export type ServiceOptions = {
 
 export type ServiceDeps = Ports & {
   reasoner: Reasoner;
-  /** Open issues delegated to the V2 agent, with their status, priority, and creation time. */
+  /** Open issues delegated to the V2 agent, with their status, priority, and creation time: only to discover new work in Todo. */
   delegatedIssues: () => Promise<DelegatedIssue[]>;
   /** Removes the issue's delegation to the V2 agent: a human's cancel through the API. */
   undelegate?: (issueId: string) => Promise<void>;
@@ -97,9 +101,12 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string }>();
   let lastIntake: { at: string; error?: string } | undefined;
   let intakeStartedAt = 0;
-  // The open issues delegated to the V2 agent at the last intake, in admission order, and each task's wake (API).
+  // The delegated issues intake would run at the last intake, in admission order, and each task's wake (API).
   let ordered: DelegatedIssue[] = [];
   let delegated: string[] = [];
+  // Each open delegated issue's place in admission order; a task Linear no longer lists goes last.
+  let rank = new Map<string, number>();
+  const byRank = (a: string, b: string) => (rank.get(a) ?? rank.size) - (rank.get(b) ?? rank.size);
   const wakes = new Map<string, Wake>();
   const wakeOf = (issueId: string) => {
     const wake = wakes.get(issueId) ?? new Wake();
@@ -109,9 +116,11 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   // Ends the intake loop's wait: a webhook naming a delegated issue with no loop, or a delegation change.
   const intakeWake = new Wake();
 
-  const admit = (issueId: string) => {
+  /** Runs the task's loop; `released`, it holds no slot until it has work to do (`Slot.work`). */
+  const admit = (issueId: string, released = false) => {
     if (active.has(issueId)) return;
     const slot = new Slot(() => schedule());
+    slot.released = released;
     let outcome: LoopResult["outcome"] | "failed" = "failed";
     let detail = "";
     const loop = runLoop(
@@ -149,9 +158,10 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   };
 
   // TECH-5008: releases each slot held past the grace by a task waiting on a human, then gives every
-  // free slot to the highest-ordered task that wants one: a released task whose human answered, or a
-  // delegated issue with no loop. A woken task (`sgt task wake`) goes first. A loop that ended since
+  // free slot to the task that wants one: first a released task with work again (its human answered,
+  // say), then a new Todo issue in admission order. A woken task (`sgt task wake`) goes first. A loop that ended since
   // the latest intake waits for the next one, so an idle task is not readmitted at once, over and over.
+  const freeSlots = () => maxTasks - [...slots.values()].filter((s) => !s.released).length;
   const schedule = () => {
     if (abort.signal.aborted) return;
     for (const [issueId, slot] of slots) {
@@ -160,13 +170,13 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       slot.waitingSince = undefined;
       log(`${issueId}: waiting on a human past the grace; its task slot is free until the human answers`);
     }
-    let free = maxTasks - [...slots.values()].filter((s) => !s.released).length;
+    let free = freeSlots();
     if (free <= 0) return;
     const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
-    const queued = ordered
-      .map((issue) => issue.identifier)
-      .filter((id) => (active.has(id) ? slots.get(id)?.wanted : (ended.get(id)?.at ?? 0) < intakeStartedAt))
-      .sort((a, b) => woken(a) - woken(b));
+    const queued = [
+      ...[...slots].filter(([, s]) => s.wanted).map(([id]) => id).sort(byRank),
+      ...ordered.map((issue) => issue.identifier).filter((id) => !active.has(id) && (ended.get(id)?.at ?? 0) < intakeStartedAt),
+    ].sort((a, b) => woken(a) - woken(b));
     for (const issueId of queued) {
       if (free-- <= 0) break;
       const slot = slots.get(issueId);
@@ -176,14 +186,14 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       }
       slot.released = false;
       slot.wanted = false;
-      log(`${issueId}: the human answered; admitted to a task slot again`);
+      log(`${issueId}: has work again; admitted to a task slot`);
       wakeOf(issueId).interrupt();
     }
   };
 
-  // A task cancel recorded through the API and not yet confirmed (cancel.ts): driven at once, again
-  // at every intake until the runner confirms its runs stopped, and so after a restart too, whether or
-  // not the issue is still delegated. One step per task at a time, so a request's own drive is the one
+  // A task stop recorded and not yet done (cancel.ts): driven at once, again at every intake until the
+  // runner confirms its runs stopped, and so after a restart too, whatever the issue's delegation or
+  // state is by then. One step per task at a time, so a request's own drive is the one
   // that answers it; it is not held to the task limit. The same per-task lock holds a run's start from
   // its delegation check to the runner (execute.ts), so a cancel lists every run that got past it.
   const locks = new Map<string, Promise<unknown>>();
@@ -203,15 +213,36 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     void next.finally(() => active.has(ref) && wakeOf(ref).interrupt()).catch(() => {});
     return next;
   };
-  const drive = (ref: string) => driveCancel(opts.stateDir, ref, deps, log);
+  const drive = (ref: string) => driveCancel(taskDir(opts.stateDir, ref), ref, deps, opts.enrolledRepositories, log);
 
   const intake = async () => {
     for (const ref of await pendingCancels(opts.stateDir)) {
       await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
     }
     const startedAt = Date.now();
-    const issues = new Map((await deps.delegatedIssues()).map((issue) => [issue.identifier, issue]));
-    ordered = [...issues.values()].sort(admissionOrder);
+    let listed: DelegatedIssue[] | undefined;
+    let failed: Error | undefined;
+    try {
+      listed = (await deps.delegatedIssues()).sort(admissionOrder);
+      rank = new Map(listed.map((issue, n) => [issue.identifier, n]));
+    } catch (e) {
+      failed = e as Error;
+    }
+    // Every task under way locally resumes, whether or not Linear lists it, taking free slots in
+    // admission order; one past them runs its live checks with no slot. One seen through after its
+    // merge does not resume. An unreadable `state.json` holds up no other task, nor discovery.
+    const resumable: string[] = [];
+    for (const ref of await readdir(join(opts.stateDir, "tasks")).catch(() => [])) {
+      if (active.has(ref)) continue;
+      const task = await readTaskState(join(taskDir(opts.stateDir, ref), "state.json")).catch((e: Error) => log(`${ref}: not resumed: ${e.message}`));
+      if (task && !task.merged?.completedAt) resumable.push(ref);
+    }
+    for (const ref of resumable.sort(byRank)) admit(ref, freeSlots() <= 0);
+    if (failed) throw failed;
+    // New work: a delegated issue in Todo, not one whose stop is still under way.
+    const todo = listed?.filter((issue) => issue.state.type === "unstarted") ?? [];
+    const issues = await Promise.all(todo.map(async (issue) => ((await cancelPending(taskDir(opts.stateDir, issue.identifier))) ? [] : [issue])));
+    ordered = issues.flat();
     delegated = ordered.map((issue) => issue.identifier);
     intakeStartedAt = startedAt;
     schedule();
@@ -254,7 +285,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       if (end) return { status: end.outcome, detail: end.detail };
       return delegated.includes(ref) ? { status: "queued" } : undefined;
     },
-    known: () => [...new Set([...active.keys(), ...delegated])],
+    // A task stopped in this process stays known, so its stop shows.
+    known: () => [...new Set([...active.keys(), ...delegated, ...ended.keys()])],
     async wake(ref) {
       wakeOf(ref).request();
       if (active.has(ref)) return "active";
@@ -266,14 +298,14 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     },
     cancelTask: (ref, req, by) =>
       serialized(ref, async () => {
-        await recordCancel(opts.stateDir, ref, { ...req, by }, deps);
-        return drive(ref);
+        const undelegated = await recordCancel(opts.stateDir, ref, { ...req, by }, deps);
+        return { undelegated, stopping: await drive(ref) };
       }),
     ...(opts.humans && { callerOf: opts.humans.callerOf, linearClientId: opts.humans.linearClientId }),
     trustLoopback: opts.trustLoopback ?? false,
   });
-  // A webhook ends the wait of each loop watching what it names, and runs an intake for a delegated
-  // issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
+  // A webhook ends the wait of each loop watching what it names, and runs an intake for a task or a
+  // delegated issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
   // most once per `webhookGapSeconds`. An issue or PR no task knows is ignored; the polls cover it.
   const gapMs = (opts.webhookGapSeconds ?? 5) * 1000;
   const nudge = ({ keys, intake }: Nudge) => {
@@ -282,7 +314,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     for (const [issueId, wake] of wakes) {
       if (!named.has(issueId) && !wake.watched.some((k) => named.has(k))) continue;
       if (active.has(issueId)) wake.nudge(gapMs);
-      else if (delegated.includes(issueId)) admit = true;
+      else admit = true;
     }
     if (delegated.some((id) => named.has(id) && !active.has(id))) admit = true;
     if (admit) intakeWake.nudge(gapMs);

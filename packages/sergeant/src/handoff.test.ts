@@ -73,7 +73,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
   dir = await mkdtemp(join(tmpdir(), "sergeant-handoff-test-"));
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: ["run_worker", "run_review"], recentTurns: [] }));
   let live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -96,11 +96,11 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
       },
       github: {
         readPullRequest: async () => livePr,
-        mergePullRequest: async () => {
+        closePullRequest: async () => {}, mergePullRequest: async () => {
           attempts.push(seen.length);
           if (!livePr.humanFeedback.some((f) => f.author === "code-owner")) return { refused: "Waiting on code owner review from terros-inc/owners." };
           livePr = { ...livePr, state: "merged", mergedSha: "c".repeat(40) };
-          live = { ...live, issue: { ...live.issue, state: "Done" } };
+          live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
           return { mergedSha: "c".repeat(40) };
         },
       },

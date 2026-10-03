@@ -22,7 +22,6 @@ import {
   moveState,
   resolveComment,
   response,
-  unstartedTypes,
   viewerQuery,
 } from "./queries.ts";
 
@@ -146,6 +145,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
           title: first.title,
           description: first.description ?? "",
           state: first.state.name,
+          stateType: first.state.type,
           delegate: first.delegate,
           linkedPullRequests: linkedPullRequests(first.attachments.nodes),
           // Only a human's: Sergeant's own, and an integration's with no creator, are not human input.
@@ -195,9 +195,9 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     async moveIssueToStarted(issueId) {
       const { issue } = await request(issueWorkflow, { id: issueId }, issueWorkflowShape);
       if (!issue) throw new Error(`Linear issue not found: ${issueId}`);
-      // Only ever move forward out of an unstarted-like state: already started, completed, or canceled
-      // issues (and teams with no started state) are left exactly as they are.
-      if (!unstartedTypes.has(issue.state.type)) return { moved: false };
+      // Only ever Todo to In Progress (TECH-4989): an issue in Triage or Backlog, or already started,
+      // completed, or canceled (and a team with no started state) is left exactly as it is.
+      if (issue.state.type !== "unstarted") return { moved: false };
       const target = issue.team.states.nodes
         .filter((s) => s.type === "started")
         .sort((a, b) => a.position - b.position)[0];

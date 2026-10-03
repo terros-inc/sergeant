@@ -1,6 +1,6 @@
 import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
-import { readHumanFeedback } from "./pr-feedback.ts";
+import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
 
 const pullRequest = z.object({
   number: z.number().int().positive(),
@@ -86,7 +86,7 @@ const checkRunState = (run: z.infer<typeof checkRun>): ObservedCheck["state"] =>
 const statusState = (state: z.infer<typeof commitStatus>["state"]): ObservedCheck["state"] =>
   state === "success" ? "passed" : state === "pending" ? "pending" : "failed";
 
-/** The control plane's live GitHub surface: fact reads and the SHA-guarded merge. */
+/** The control plane's live GitHub surface: fact reads, the SHA-guarded merge, and a canceled task's PR close. */
 export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
   const repositories = new Map(
     Object.entries(options.repositories).map(
@@ -293,6 +293,16 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
           return { refused: error.detail ?? "405 Method Not Allowed" };
         }
       }
+    },
+
+    async closePullRequest({ repo, number, comment }) {
+      configFor(repo);
+      const json = { method: "POST", headers: { "Content-Type": "application/json" } };
+      // A close that failed after its comment is retried; the comment is not posted twice.
+      if (!(await hasComment((path) => request(path), repo, number, comment))) {
+        await request(`/repos/${repo}/issues/${number}/comments`, { ...json, body: JSON.stringify({ body: comment }) });
+      }
+      await request(`/repos/${repo}/pulls/${number}`, { ...json, method: "PATCH", body: JSON.stringify({ state: "closed" }) });
     },
   };
 }

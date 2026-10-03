@@ -52,6 +52,8 @@ export interface GitHubPort {
    * being computed) included.
    */
   mergePullRequest(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<{ mergedSha: Sha } | { refused: string }>;
+  /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
+  closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
 }
 
 /**

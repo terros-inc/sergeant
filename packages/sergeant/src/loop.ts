@@ -3,12 +3,10 @@ import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   checkBudget,
-  checkDelegation,
   commentIdFor,
   conversationRevision,
   linearUploads,
   issueRevision,
-  reportedClosing,
   SituationReport,
   type ProposedAction,
   type RunRecord,
@@ -16,12 +14,13 @@ import {
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { drawAudit, exists, finishReviews, observeCompletion, postOutcome } from "./after-merge.ts";
 import { budgetQuestion, budgetQuestionKey, budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
-import { askHuman, describeOutcome, execute, type Ports } from "./execute.ts";
+import { cancelPending, driveCancel, recordStop, stopReason } from "./cancel.ts";
+import { askHuman, checkLive, describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { outcomeComment } from "./outcome.ts";
-import { cancelRuns, describePr, fingerprintOf, mergeNotSettled, readPullRequests } from "./poll.ts";
+import { cancelRuns, describePr, fingerprintOf, landedOf, mergeNotSettled, readPullRequests } from "./poll.ts";
 import { noteEdit, openQuestion, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
@@ -37,8 +36,8 @@ export { readTaskState, type TaskState } from "./task-state.ts";
 // Situation Report, take a reasoning turn when something changed, execute through the Gate, and
 // after the closing PR's merge post one outcome comment and watch Linear for the issue reaching Done;
 // a `Part of` PR's merge leaves the task working on the rest (UNF-734). It runs only while the issue
-// is delegated to Sergeant's V2 agent (UNF-724) and within its budget (UNF-728), and holds while a
-// question it asked is unanswered (UNF-727). Every finished review is recorded as telemetry, and a
+// is delegated to Sergeant's V2 agent (UNF-724), not in Backlog, Canceled, or Done (TECH-4989), and
+// within its budget (UNF-728), and holds while a question it asked is unanswered (UNF-727). Every finished review is recorded as telemetry, and a
 // merged head that skipped fresh review may be sampled for a nonblocking audit review (UNF-730). A
 // deliberately temporary local store (`state.json`) lets a restarted loop resume; Linear, GitHub, and
 // the runner's own run records stay the authority for everything else.
@@ -56,8 +55,17 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   };
   await mkdir(opts.dir, { recursive: true });
   const state = await loadState(files.state, opts.issueId, { ...DEFAULT_BUDGET, ...opts.budget });
+  // Why this task is stopping: set once a stop (cancel.ts) is recorded for it, by this loop or anyone
+  // else. From then on the loop takes no turn and makes no effect; it only drives that stop, and ends
+  // once it is done, whatever the issue's delegation or state is by then.
+  let stopping: string | undefined;
   // Replaced whole, never rewritten in place: the API and a task cancel read it while the loop runs.
+  // A stop sets it aside, so the issue back in Todo is a fresh task; nothing writes it again, and a
+  // write after that, a run's id before its start above all, fails rather than being lost.
+  let saved = false;
   const save = async () => {
+    if (saved && !(await exists(files.state))) throw new Error(`${files.state} was set aside by a stop`);
+    saved = true;
     const tmp = `${files.state}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify(state, null, 2));
     await rename(tmp, files.state);
@@ -104,9 +112,38 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const budgetOf = (runs: RunRecord[], unknownRuns: number, questionId?: string) =>
     budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, ...(questionId && { questionId }), runs, unknownRuns });
 
+  // The task's durable stop (cancel.ts), driven under the task's lock every poll until the runner
+  // confirms each run stopped, its open PRs are closed, and the issue is told. Whichever of this loop,
+  // `serve`'s intake, or the API drives it to the end, the loop then ends: an issue moved back to Todo
+  // meanwhile is a fresh task for intake to start, never this one continued.
+  const driveStop = async (reason: string): Promise<LoopResult | undefined> => {
+    const exclusive = deps.exclusive ?? ((step) => step());
+    const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
+    const unconfirmed = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
+    if (unconfirmed?.length !== 0) {
+      log(`stopping (${reason}): retrying cancellation`);
+      return undefined;
+    }
+    return { outcome: "stopped", detail: reason };
+  };
+
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };
     if (opts.signal?.aborted) return { outcome: "stopped", detail: "the service is stopping" };
+    if (!stopping && (await cancelPending(opts.dir))) stopping = "the task is stopped";
+    // A stop another driver (the API, intake) finished set the task aside: it is over.
+    if (!stopping && !(await exists(files.state))) return { outcome: "stopped", detail: "the task was stopped" };
+    if (stopping) {
+      // A stop holds no task slot: new work may start while the runner confirms this one's runs.
+      if (opts.slot && !opts.slot.released) {
+        Object.assign(opts.slot, { released: true, wanted: false, waitingSince: undefined });
+        opts.slot.changed();
+      }
+      const stopped = await driveStop(stopping);
+      if (stopped) return stopped;
+      await wait(pollMs);
+      continue;
+    }
     // A start never seen through: the runner either knows the run, or confirms it stopped or never
     // started, which drops it. Until then it stays in `runIds`, unknown, so it is canceled like any
     // other run on an undelegation or an exhausted budget.
@@ -124,7 +161,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       // The audit sample is drawn after the merge, so it cannot hold it up.
       await drawAudit(state.merged, state.runIds, opts, deps, log, save, budgetOf);
       const result = await observeCompletion(state.merged, opts, deps, log);
-      return finishReviews(state.merged, result, { runIds: state.runIds, recordReviews, stop: files.stop, opts, deps, log });
+      const finished = await finishReviews(state.merged, result, { runIds: state.runIds, recordReviews, stop: files.stop, opts, deps, log });
+      // Seen through: the issue is Done and every review finished, so intake resumes it no more.
+      if (finished.outcome === "done" && !opts.signal?.aborted && !(await exists(files.stop))) {
+        state.merged.completedAt = new Date().toISOString();
+        await save();
+      }
+      return finished;
     }
 
     const { runs, unknown } = await readRuns();
@@ -138,18 +181,18 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       opts.wake.watched = [conversation.issue.id, ...keys];
     };
     watch(conversation.issue.linkedPullRequests);
-    // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer,
-    // is not Sergeant's to work on. Undelegation is the human's cancel: its runs are canceled so they
-    // publish nothing more, and the loop stops only once the runner confirms each one stopped. The
-    // executor re-checks live before each start and merge (A1).
-    const delegation = checkDelegation(conversation.issue, deps.agentUserId);
-    if (!delegation.allowed) {
-      if ((await cancelRuns(live, deps, log)) === 0) {
-        await recordReviews((await readRuns()).runs);
-        return { outcome: "stopped", detail: delegation.reason };
-      }
-      log(`stopping (${delegation.reason}): retrying cancellation`);
-      await wait(pollMs);
+    // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer
+    // (A1), or that a human moved to Backlog, Canceled, or Done (A2), is not Sergeant's to work on, and
+    // its task stops for good (cancel.ts). Done after the worker's closing PR merged is the task's
+    // normal end instead, taken below. The executor re-checks both live before each effect.
+    const active = checkLive(conversation.issue, deps.agentUserId);
+    const finished =
+      !active.allowed &&
+      conversation.issue.stateType === "completed" &&
+      landedOf(await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps), runs, deps.workerLogin) !== undefined;
+    if (!active.allowed && !finished) {
+      await recordStop(opts.dir, stopReason(conversation.issue));
+      stopping = active.reason;
       continue;
     }
     // The budget question of the current window, if Linear has it: its id is derived from a key, so a
@@ -203,7 +246,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
     // own PR reported closing: a human may link one merged elsewhere, and a merged `Part of` PR is only
     // a fact for the next turn.
-    const landed = pullRequests.find((p) => p.state === "merged" && p.author === deps.workerLogin && reportedClosing(runs, p) === true);
+    const landed = landedOf(pullRequests, runs, deps.workerLogin);
     if (landed?.mergedSha) {
       const outcome = outcomeComment(landed, landed.mergedSha, runs, state.followups, conversation.issue);
       state.merged = {
@@ -254,6 +297,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const fingerprint = fingerprintOf(situation);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     if (running.length > 0 || (fingerprint === state.lastFingerprint && !opts.wake?.pending)) {
+      // Running work holds a slot: a task resumed with its runs going asks for one.
+      if (running.length > 0) opts.slot?.work();
       // Waiting on a human merge or requested changes is a human wait like a question: no idle end.
       const human = running.length === 0 ? humanWait(situation) : undefined;
       if (human) opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));

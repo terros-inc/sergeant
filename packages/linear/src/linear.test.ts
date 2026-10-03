@@ -18,7 +18,7 @@ const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | nu
       url: "https://linear.app/unforgotten/issue/UNF-1",
       title: "Canary",
       description: null,
-      state: { name: "Todo" },
+      state: { name: "Todo", type: "unstarted" },
       delegate: { id: "sergeant-user", name: "Sergeant" },
       attachments: {
         nodes: [
@@ -77,7 +77,7 @@ test("reads every page, separates human-authored comments from the rest, and lin
   const conversation = await createLinearPort({ apiKey: "test", sergeantUserIds: ["sergeant-user"], fetch }).readConversation("UNF-1");
 
   expect(requests.map((r) => r.variables.after)).toEqual([null, "cursor-1"]);
-  expect(conversation.issue).toMatchObject({ state: "Todo", delegate: { id: "sergeant-user" }, description: "" });
+  expect(conversation.issue).toMatchObject({ state: "Todo", stateType: "unstarted", delegate: { id: "sergeant-user" }, description: "" });
   expect(conversation.humanComments.map((c) => c.id)).toEqual(["external-1", "human-2"]);
   expect(conversation.agentComments.map((c) => c.id)).toEqual(["bot", "sergeant"]);
   expect(conversation.issue.linkedPullRequests).toEqual([{ repo: "o/canary", number: 7 }]);
@@ -131,7 +131,7 @@ const workflow = [
 ];
 
 // TECH-4947: the first worker starting must make the issue visibly In Progress, moving it to the
-// team's first `started` state only from an unstarted-like state, by position, and never backward.
+// team's first `started` state only from Todo, by position, and never backward.
 test("moveIssueToStarted moves an unstarted issue to the first started state and is a no-op otherwise", async () => {
   const states = workflow;
   const updates: { id: string; stateId: string }[] = [];
@@ -149,19 +149,14 @@ test("moveIssueToStarted moves an unstarted issue to the first started state and
       },
     });
 
-  // Unstarted-like states move forward to the lowest-position started state.
-  for (const type of ["triage", "backlog", "unstarted"]) {
-    expect(await portFor({ name: type, type }).moveIssueToStarted("UNF-1")).toEqual({ moved: true, from: type, to: "In Progress" });
-  }
-  expect(updates).toEqual([
-    { id: "UNF-1", stateId: "s-progress" },
-    { id: "UNF-1", stateId: "s-progress" },
-    { id: "UNF-1", stateId: "s-progress" },
-  ]);
+  // Todo moves forward to the lowest-position started state.
+  expect(await portFor({ name: "Todo", type: "unstarted" }).moveIssueToStarted("UNF-1")).toEqual({ moved: true, from: "Todo", to: "In Progress" });
+  expect(updates).toEqual([{ id: "UNF-1", stateId: "s-progress" }]);
 
-  // Already started, completed, or canceled: never touched, so never moved backward.
+  // Triage or Backlog (never moved forward, TECH-4989), or already started, completed, or canceled
+  // (never moved backward): never touched.
   updates.length = 0;
-  for (const current of [{ name: "In Progress", type: "started" }, { name: "Done", type: "completed" }, { name: "Canceled", type: "canceled" }]) {
+  for (const current of [{ name: "Triage", type: "triage" }, { name: "Backlog", type: "backlog" }, { name: "In Progress", type: "started" }, { name: "Done", type: "completed" }, { name: "Canceled", type: "canceled" }]) {
     expect(await portFor(current).moveIssueToStarted("UNF-1")).toEqual({ moved: false });
   }
   expect(updates).toEqual([]);
