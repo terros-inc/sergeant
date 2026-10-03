@@ -170,11 +170,12 @@ test.each([
 ])("a budget question posted before a crash is found again, never asked twice, and its reply %j is honored", async (reply, actions) => {
   const asked = new Date(Date.now() - 60_000).toISOString();
   const answeredAt = new Date(Date.parse(asked) + 1_000).toISOString();
-  const question = { id: commentIdFor(budgetQuestionKey(issue.id, undefined)), createdAt: asked, body: "**Question for you** ... Continue?" };
+  const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  const question = { id: commentIdFor(budgetQuestionKey(issue.id, startedAt)), createdAt: asked, body: "**Question for you** ... Continue?" };
   const started: string[] = [];
   const { result, posted } = await scenario({
     // The question is on Linear, but nothing about it reached state.json.
-    state: { startedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), runIds: [] },
+    state: { startedAt, runIds: [] },
     conversation: { agentComments: [question], humanComments: [human("c1", answeredAt, reply)] },
     runner: { start: async (spec) => void started.push(spec.runId), status: async () => worker("succeeded", 0), cancel: async () => {} },
     // Either reply opens a fresh window; reasoning reads which it was, and only "Extend" works on.

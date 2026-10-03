@@ -43,6 +43,7 @@ const pr: PullRequestFacts = {
 };
 const budget: BudgetStatus = {
   window: { wallMinutes: 120, costUsd: 25 },
+  taskStart: "2026-10-03T00:00:00.000Z",
   windowStart: "2026-10-03T00:00:00.000Z",
   wallDeadline: "2999-10-03T02:00:00.000Z",
   spentUsd: 0,

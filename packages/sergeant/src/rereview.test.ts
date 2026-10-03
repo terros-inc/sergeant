@@ -37,7 +37,7 @@ const issue: Conversation["issue"] = {
   delegate: agent, linkedPullRequests: [{ repo, number: 7 }],
 };
 const budget: SituationReport["budget"] = {
-  window: { wallMinutes: 120, costUsd: 25 }, windowStart: at, wallDeadline: "2999-10-03T04:00:00.000Z",
+  window: { wallMinutes: 120, costUsd: 25 }, taskStart: at, windowStart: at, wallDeadline: "2999-10-03T04:00:00.000Z",
   spentUsd: 1, costLimitUsd: 25, unknownCostRuns: 0,
 };
 

@@ -15,7 +15,7 @@ import type { TaskState } from "./task-state.ts";
 
 const now = new Date().toISOString();
 const conversation = { issue: { id: "i-1", identifier: "T-1" }, humanComments: [], agentComments: [] } as unknown as Conversation;
-const budget: BudgetStatus = { window: DEFAULT_BUDGET, windowStart: now, wallDeadline: new Date(Date.now() + 3_600_000).toISOString(), spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 1 };
+const budget: BudgetStatus = { window: DEFAULT_BUDGET, taskStart: now, windowStart: now, wallDeadline: new Date(Date.now() + 3_600_000).toISOString(), spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 1 };
 const unknown = [{ unknown: "run_gone", error: "503" }];
 
 let dir = "";

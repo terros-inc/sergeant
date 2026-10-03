@@ -1,5 +1,5 @@
-import { checkBudget, checkLive, commentIdFor, type AgentComment, type BudgetStatus, type Conversation, type GateVerdict, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
-import { budgetQuestion, budgetQuestionKey, openWindow, type BudgetWindow } from "./budget.ts";
+import { checkBudget, checkLive, type AgentComment, type BudgetStatus, type Conversation, type GateVerdict, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { budgetQuestion, budgetQuestionKey, isBudgetQuestion, openWindow, type BudgetWindow } from "./budget.ts";
 import { recordStop, stopReason } from "./cancel.ts";
 import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
@@ -61,10 +61,11 @@ export async function checkHolds(
     log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
   }
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a
-  // crash between posting it and saving anything loses nothing.
-  const budgetKey = budgetQuestionKey(conversation.issue.id, state.budget.since);
-  const questionId = commentIdFor(budgetKey);
-  const budgetAsked = conversation.agentComments.find((c) => c.id === questionId);
+  // crash between posting it and saving anything loses nothing. The first window's key is the task's
+  // start, so an earlier task's budget question, answered or not, is never this one's (TECH-5145).
+  const windowStart = state.budget.since ?? state.startedAt;
+  const budgetKey = budgetQuestionKey(conversation.issue.id, windowStart);
+  const budgetAsked = conversation.agentComments.find((c) => isBudgetQuestion(c, conversation.issue.id, state.startedAt, windowStart));
   const budget = poll.budgetOf();
   // UNF-728: an exhausted budget cancels running work through the runner, every poll until confirmed,
   // whatever else is going on; the executor refuses every new effect (B1).

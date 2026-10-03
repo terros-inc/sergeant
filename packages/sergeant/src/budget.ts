@@ -1,4 +1,4 @@
-import { commentIdFor, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, type AgentComment, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { latestAnswer, latestQuestion } from "./question.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
@@ -33,31 +33,46 @@ export function openWindow(state: { turnCostUsd: number; runIds: string[]; budge
 }
 
 /**
- * The budget question's idempotency key: one per task and window, so a restart finds the question
- * already asked from Linear alone and never asks it twice. The first window keeps its pre-TECH-5059 key.
+ * The budget question's idempotency key: one per task and window, keyed by the window's start (the
+ * task's start for its first window), so a restart finds the question already asked from Linear alone
+ * and never asks it twice. TECH-5145: the first window's key was `0` for every task, so a re-triggered
+ * task's first budget question matched the earlier task's, Linear posted nothing, and the task found
+ * that earlier, answered question and never waited for a human.
  */
-export const budgetQuestionKey = (issueId: string, since: string | undefined) => `budget-question:${issueId}:${since ?? 0}`;
+export const budgetQuestionKey = (issueId: string, windowStart: string) => `budget-question:${issueId}:${windowStart}`;
+
+/**
+ * Whether `comment` is this task's budget question for the window from `windowStart`. A first-window
+ * question posted under the old `0` key before TECH-5145 is this task's only if posted since it started.
+ */
+export function isBudgetQuestion(comment: Pick<AgentComment, "id" | "createdAt">, issueId: string, taskStart: string, windowStart: string): boolean {
+  if (comment.id === commentIdFor(budgetQuestionKey(issueId, windowStart))) return true;
+  return windowStart === taskStart && comment.id === commentIdFor(`budget-question:${issueId}:0`) && Date.parse(comment.createdAt) >= Date.parse(taskStart);
+}
 
 /**
  * TECH-5118: whether a human has replied to Sergeant's budget question, the question it asked last (or a
  * clarifying question in that question's thread). Read from the conversation alone, so it survives a
- * restart: a window opens at the task's start or at a human comment's time, so every budget question's
- * id is one of the keys of those times.
+ * restart: a window opens at the task's start or at a later human comment's time, so every budget
+ * question of this task has the key of one of those times.
  *
  * TECH-5137: only a reply given in the current window counts. A reply to one of this task's questions
  * opens a window from itself (poll-checks.ts), so it is never older than `windowStart`; a reply from
  * before a re-trigger predates this task's start, and so its first window. Without this, a re-triggered
  * task whose latest answer was still the earlier task's could end on it, and its acknowledgment, keyed
- * by that reply (accepted.ts), matched the earlier one, so Linear posted nothing.
+ * by that reply (accepted.ts), matched the earlier one, so Linear posted nothing. TECH-5145: nor is an
+ * earlier task's budget question this task's, whatever was said after it.
  */
-export function answeredBudgetQuestion(conversation: Conversation, windowStart: string): boolean {
+export function answeredBudgetQuestion(conversation: Conversation, budget: Pick<BudgetStatus, "taskStart" | "windowStart">): boolean {
   const asked = latestQuestion(conversation);
   const reply = latestAnswer(conversation);
-  if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(windowStart)) return false;
-  const { issue, humanComments } = conversation;
-  const windows = [undefined, ...humanComments.map((c) => c.createdAt)];
+  if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(budget.windowStart)) return false;
+  const { issue, humanComments, agentComments } = conversation;
   const thread = asked.parentId ?? asked.id;
-  return windows.some((since) => commentIdFor(budgetQuestionKey(issue.id, since)) === thread);
+  const root = agentComments.find((c) => c.id === thread) ?? { id: thread, createdAt: asked.createdAt };
+  const since = (at: string) => Date.parse(at) >= Date.parse(budget.taskStart);
+  const windows = [budget.taskStart, ...humanComments.map((c) => c.createdAt).filter(since)];
+  return windows.some((windowStart) => isBudgetQuestion(root, issue.id, budget.taskStart, windowStart));
 }
 
 /** The task's budget now, from what `state.json` keeps (start, window, turn spend) and the run records. */
@@ -77,6 +92,7 @@ export function budgetStatus(input: {
   const runCost = runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
   return {
     window,
+    taskStart: input.startedAt,
     windowStart,
     wallDeadline: new Date(Date.parse(windowStart) + window.wallMinutes * 60_000).toISOString(),
     spentUsd: round(runCost + input.turnCostUsd),

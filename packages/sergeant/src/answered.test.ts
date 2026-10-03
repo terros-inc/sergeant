@@ -23,7 +23,7 @@ const replyTo = (live: Conversation, id: string, body: string): Conversation => 
 
 test("a budget question answered \"Extend\" is resolved after the turn that continues", async () => {
   const threeHoursAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
-  const budgetQuestion = commentIdFor(budgetQuestionKey("i1", undefined));
+  const budgetQuestion = commentIdFor(budgetQuestionKey("i1", threeHoursAgo));
   const { resolved, posted } = await scenario({
     state: { startedAt: threeHoursAgo, runIds: [] },
     runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },

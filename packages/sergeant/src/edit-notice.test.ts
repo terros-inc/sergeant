@@ -36,7 +36,7 @@ const posting = () => {
 };
 
 test("an edit while a budget question waits is noted once, and not after a human replied", async () => {
-  const budget = { id: commentIdFor(budgetQuestionKey("i1", undefined)), createdAt: asked, body: "Continue?" };
+  const budget = { id: commentIdFor(budgetQuestionKey("i1", "2026-10-02T10:00:00.000Z")), createdAt: asked, body: "Continue?" };
   const { posted, linear } = posting();
   expect(await noteEdit(edited([budget]), seen, budget, linear)).toBe(true);
   expect(posted).toEqual([{ key: `edit-noted:i1:${issueRevision(edited([]).issue)}`, body: expect.stringContaining("changed while Sergeant was waiting") }]);
