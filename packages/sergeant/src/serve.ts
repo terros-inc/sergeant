@@ -52,7 +52,7 @@ process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;
 // An explicit flag wins, then the config, then the service's default (2 slots, 15 minutes).
 const maxTasks = values["max-tasks"] !== undefined ? count(values["max-tasks"], "--max-tasks", 1) : config.maxTasks;
 const waitingGraceMinutes =
-  values["waiting-grace-minutes"] !== undefined ? count(values["waiting-grace-minutes"], "--waiting-grace-minutes", 0) : config.waitingGraceMinutes;
+  values["waiting-grace-minutes"] !== undefined ? amount(values["waiting-grace-minutes"], "--waiting-grace-minutes", 0) : config.waitingGraceMinutes;
 
 const service = await startService(
   {
@@ -122,6 +122,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 function count(value: string, flag: string, min: number): number {
   const n = Number(value);
   return Number.isInteger(n) && n >= min ? n : fail(`${flag} must be an integer of at least ${min}`);
+}
+
+function amount(value: string, flag: string, min: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= min ? n : fail(`${flag} must be a number of at least ${min}`);
 }
 
 function fail(message: string): never {

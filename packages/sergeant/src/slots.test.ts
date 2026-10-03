@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
-import { commentIdFor, type Conversation, type ProposedAction } from "@terros/sergeant-contracts";
+import { commentIdFor, type Conversation, type HumanPullRequestFeedback, type ProposedAction } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { startService, type Service, type ServiceDeps } from "./service.ts";
 
@@ -45,6 +45,7 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
   const asking = new Set<string>();
   const posted: string[] = [];
   const ci = { state: "pending" as "pending" | "passed" };
+  const feedback: HumanPullRequestFeedback[] = [];
   const sha = "a".repeat(40);
   const deps: ServiceDeps = {
     agentUserId: agent.id,
@@ -63,10 +64,10 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
     github: {
       readPullRequest: async (repo, number) => {
         const checks = { sha, required: [{ name: "ci", state: ci.state }] };
-        return { repo, number, url: "https://github.com/o/r/pull/1", author: "sergeant-worker[bot]", state: "open", draft: false, headSha: sha, mergedSha: null, baseRef: "main", body: "", mergeable: true, checks, humanFeedback: [] };
+        return { repo, number, url: "https://github.com/o/r/pull/1", author: "sergeant-worker[bot]", state: "open", draft: false, headSha: sha, mergedSha: null, baseRef: "main", body: "Fixes WAITS", mergeable: true, checks, humanFeedback: [...feedback] };
       },
-      closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
-    runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
+      closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no merge configured")) },
+    runner: { start: async () => {}, status: async () => Promise.reject(new Error("no run")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
         const id = situation.conversation.issue.identifier;
@@ -90,7 +91,13 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
     const now = new Date().toISOString();
     conversations.set(id, { ...c, humanComments: [...c.humanComments, { id: `reply-${id}`, author: { id: "u1", name: "Human" }, createdAt: now, updatedAt: now, body: "A" }] });
   };
-  return { delegated, deps, turns, asking, posted, ci, finish, answer };
+  const complete = (id: string) => {
+    const c = conversation(id);
+    conversations.set(id, { ...c, issue: { ...c.issue, state: "Done", stateType: "completed", delegate: null } });
+    const listed = delegated.findIndex((i) => i.identifier === id);
+    if (listed >= 0) delegated.splice(listed, 1);
+  };
+  return { delegated, deps, turns, asking, posted, ci, feedback, finish, answer, complete };
 }
 
 let dir = "";
@@ -113,9 +120,15 @@ const underway = async (identifier: string) => {
   await writeFile(join(dir, "tasks", identifier, "state.json"), JSON.stringify(task));
 };
 
-const start = async (deps: ServiceDeps, opts: { maxTasks: number; waitingGraceMinutes?: number; idleMinutes?: number }, logs: string[] = []) => {
+const start = async (
+  deps: ServiceDeps,
+  opts: { maxTasks: number; waitingGraceMinutes?: number; idleMinutes?: number; intakeSeconds?: number },
+  logs: string[] = [],
+  setup?: () => Promise<void>,
+) => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-slots-test-"));
   for (const { identifier, state } of await deps.delegatedIssues()) if (state.type === "started") await underway(identifier);
+  await setup?.();
   service = await startService(
     { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 0, log: (l) => logs.push(l), ...opts },
     deps,
@@ -137,9 +150,9 @@ test("free slots go to In Review, then In Progress, then Todo; then by priority;
   expect(new Set(f.turns)).toEqual(new Set(["REVIEW-NONE-OLD", "PROGRESS-HIGH-NEW", "PROGRESS-HIGH-OLD"]));
 
   // Each slot that frees goes to the next in order: the low-priority In Progress task before the urgent
-  // Todo, and the urgent Todo before the one with no priority. One slot at a time: two admitted
-  // together may start their turns in either order.
+  // Todo, and the urgent Todo before the one with no priority, at the next periodic intake.
   for (const [n, id] of ["REVIEW-NONE-OLD", "PROGRESS-HIGH-NEW", "PROGRESS-HIGH-OLD"].entries()) {
+    f.complete(id);
     await f.finish(id);
     await vi.waitFor(() => expect(f.turns).toHaveLength(4 + n), { timeout: 5_000 });
   }
@@ -165,8 +178,10 @@ test("a Todo issue waits while a blocker is unfinished, then is admitted in its 
   // ahead of the one with no priority, as if it had never been blocked.
   f.delegated[0] = { ...f.delegated[0]!, blockedBy: [] };
   await sleep(100);
+  f.complete("FREE-HIGH");
   await f.finish("FREE-HIGH");
   await vi.waitFor(() => expect(f.turns).toEqual(["FREE-HIGH", "BLOCKED-URGENT"]), { timeout: 5_000 });
+  f.complete("BLOCKED-URGENT");
   await f.finish("BLOCKED-URGENT");
   await vi.waitFor(() => expect(f.turns).toEqual(["FREE-HIGH", "BLOCKED-URGENT", "LATER-NONE"]), { timeout: 5_000 });
 });
@@ -237,4 +252,94 @@ test("a task waiting on CI past the grace frees its slot quietly, and is readmit
   await f.finish("WAITS");
   await vi.waitFor(() => expect(f.turns).toEqual(["WAITS", "TODO-OLD", "WAITS", "TODO-URGENT"]), { timeout: 5_000 });
   expect(f.posted).toEqual([]);
+});
+
+test("a just-ended Todo task is not readmitted until the next periodic intake", async () => {
+  const f = fakes([issue("TODO", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
+  await start(f.deps, { maxTasks: 1, intakeSeconds: 3_600 });
+  await vi.waitFor(() => expect(f.turns).toEqual(["TODO"]), { timeout: 5_000 });
+
+  // It remains listed in Linear, but ending its loop does not trigger an immediate intake that
+  // readmits it, ends it again, and repeats without the configured intake delay.
+  await f.finish("TODO");
+  await sleep(100);
+  expect(f.turns).toEqual(["TODO"]);
+});
+
+test("post-merge effects wait for a task slot", async () => {
+  const f = fakes([issue("HOLDS", "In Progress", 1, "2026-10-03T00:00:00.000Z")]);
+  const logs: string[] = [];
+  const at = new Date().toISOString();
+  await start(f.deps, { maxTasks: 1, intakeSeconds: 3_600 }, logs, async () => {
+    await mkdir(join(dir, "tasks", "MERGED"), { recursive: true });
+    await writeFile(join(dir, "tasks", "MERGED", "state.json"), JSON.stringify({
+      issueId: "MERGED",
+      startedAt: at,
+      turns: 1,
+      runIds: [],
+      recentTurns: [],
+      budget: { window: { wallMinutes: 120, costUsd: 25 }, grants: [] },
+      merged: { repo: "o/r", number: 1, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at, outcome: "Merged." },
+    }));
+  });
+  await vi.waitFor(() => expect(f.turns).toEqual(["HOLDS"]), { timeout: 5_000 });
+  await vi.waitFor(() => expect(logs).toContainEqual("MERGED: queued: waiting for a free task slot"), { timeout: 5_000 });
+  expect(f.posted).toEqual([]);
+
+  await f.finish("HOLDS");
+  await vi.waitFor(() => expect(logs).toContainEqual("MERGED: has work again; admitted to a task slot"), { timeout: 5_000 });
+  await vi.waitFor(() => expect(f.posted.join("\n")).toContain("Merged."), { timeout: 5_000 });
+});
+
+test.each([
+  ["a merge refused by GitHub", "refused"],
+  ["human-requested changes", "changes"],
+] as const)("%s is a quiet wait that releases its slot past the grace", async (_, kind) => {
+  const f = fakes([
+    issue("WAITS", "In Progress", 2, "2026-10-01T00:00:00.000Z"),
+    issue("NEXT", "Todo", 1, "2026-10-03T00:00:00.000Z"),
+  ], "WAITS");
+  f.ci.state = "passed";
+  const head = "a".repeat(40);
+  if (kind === "changes") {
+    f.feedback.push({ id: "review:1", kind: "review", author: "captain", state: "CHANGES_REQUESTED", body: "Please revise.", path: null, line: null, commitId: head, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), url: "https://github.com/o/r/pull/1#pullrequestreview-1" });
+  }
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0, idleMinutes: 60 }, logs, async () => {
+    if (kind !== "refused") return;
+    const saved = JSON.parse(await readFile(join(dir, "tasks", "WAITS", "state.json"), "utf8"));
+    saved.refusedMerges = [{
+      repo: "o/r", number: 1, url: "https://github.com/o/r/pull/1", headSha: head,
+      conversationRevision: "0".repeat(64), reason: "repository policy requires a human", at: new Date().toISOString(), commentPostedAt: new Date().toISOString(),
+    }];
+    await writeFile(join(dir, "tasks", "WAITS", "state.json"), JSON.stringify(saved));
+  });
+  await f.finish("WAITS");
+  await vi.waitFor(() => expect(logs).toContainEqual("WAITS: waiting: nothing changed since the last turn"), { timeout: 5_000 });
+  await vi.waitFor(() => expect(logs).toContainEqual("WAITS: waiting past the grace; its task slot is free until it has work again"), { timeout: 5_000 });
+  await vi.waitFor(() => expect(f.turns).toEqual(["WAITS", "NEXT"]), { timeout: 5_000 });
+  expect(logs.some((line) => line.includes("WAITS: loop ended idle"))).toBe(false);
+});
+
+test("an unanswered budget question releases its slot and is never ended by the idle guard", async () => {
+  const f = fakes([
+    issue("BUDGET", "In Progress", 2, "2026-10-01T00:00:00.000Z"),
+    issue("NEXT", "Todo", 1, "2026-10-03T00:00:00.000Z"),
+  ]);
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0, idleMinutes: 0 }, logs, async () => {
+    const startedAt = new Date(Date.now() - 2 * 60_000).toISOString();
+    await writeFile(join(dir, "tasks", "BUDGET", "state.json"), JSON.stringify({
+      issueId: "BUDGET",
+      startedAt,
+      turns: 0,
+      runIds: [],
+      recentTurns: [],
+      budget: { window: { wallMinutes: 1, costUsd: 25 }, grants: [] },
+    }));
+  });
+  await vi.waitFor(() => expect(f.turns).toEqual(["NEXT"]), { timeout: 5_000 });
+  expect(f.posted.join("\n")).toContain("budget is exhausted");
+  expect(logs).toContainEqual("BUDGET: waiting past the grace; its task slot is free until it has work again");
+  expect(logs.some((line) => line.includes("BUDGET: loop ended idle"))).toBe(false);
 });

@@ -111,7 +111,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   // finished, say), then a new Todo issue in admission order. A woken task (`sgt task wake`) goes first. A loop that ended since
   // the latest intake waits for the next one, so an idle task is not readmitted at once, over and over.
   const freeSlots = () => maxTasks - [...slots.values()].filter((s) => !s.released).length;
-  const schedule = () => {
+  const schedule = (freshIssues: DelegatedIssue[] = []) => {
     if (abort.signal.aborted) return;
     for (const [issueId, slot] of slots) {
       if (slot.released || slot.waitingSince === undefined || Date.now() - slot.waitingSince < graceMs) continue;
@@ -124,7 +124,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
     const queued = [
       ...[...slots].filter(([, s]) => s.wanted).map(([id]) => id).sort(byRank),
-      ...ordered.map((issue) => issue.identifier).filter((id) => !active.has(id) && (ended.get(id)?.at ?? 0) < intakeStartedAt),
+      ...freshIssues.map((issue) => issue.identifier).filter((id) => !active.has(id) && (ended.get(id)?.at ?? 0) < intakeStartedAt),
     ].sort((a, b) => woken(a) - woken(b));
     for (const issueId of queued) {
       if (free-- <= 0) break;
@@ -186,7 +186,10 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       const task = await readTaskState(join(taskDir(opts.stateDir, ref), "state.json")).catch((e: Error) => log(`${ref}: not resumed: ${e.message}`));
       if (task && !task.merged?.completedAt) resumable.push(ref);
     }
-    for (const ref of resumable.sort(byRank)) admit(ref, freeSlots() <= 0);
+    // A loop that already ended resumes cheaply and asks for a slot only if its live checks find work.
+    // This leaves the same intake free to admit newly listed Todo work instead of letting unchanged
+    // local tasks reclaim every slot on each periodic intake.
+    for (const ref of resumable.sort(byRank)) admit(ref, ended.has(ref) || freeSlots() <= 0);
     if (failed) throw failed;
     // New work: a delegated issue in Todo, not one whose stop is still under way nor one a Linear
     // "blocked by" issue still holds up (TECH-5066); it starts at the first intake after its last
@@ -205,7 +208,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     ordered = issues.flat();
     delegated = ordered.map((issue) => issue.identifier);
     intakeStartedAt = startedAt;
-    schedule();
+    schedule(ordered);
   };
 
   const intakeLoop = (async () => {

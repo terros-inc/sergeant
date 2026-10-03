@@ -156,6 +156,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
 
     if (state.merged) {
+      // Post-merge effects and an audit reviewer are task work too. A resumed task that gave up its
+      // slot while waiting must be readmitted before it can post, draw, or start that reviewer.
+      if (opts.slot && !opts.slot.work()) {
+        log("queued: waiting for a free task slot");
+        await wait(pollMs);
+        continue;
+      }
       await deps.linear.readConversation(opts.issueId).then(resolveDue, (e: Error) => log(`could not read the conversation: ${e.message}`));
       const stopped = await postOutcome(state.merged, opts, deps, log, save);
       if (stopped) return stopped;

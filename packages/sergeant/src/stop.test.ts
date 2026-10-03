@@ -179,7 +179,7 @@ test("an idle local task whose closing PR merged completes when resumed in Done:
   let reads = 0;
   const read = deps.linear.readConversation;
   deps.linear.readConversation = async (ref) => (reads++, read(ref));
-  const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, maxTasks: 0, auditSampleRate: 0, log: () => {} }, deps);
+  const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, maxTasks: 1, auditSampleRate: 0, log: () => {} }, deps);
   try {
     await vi.waitFor(async () => expect(JSON.parse(await readFile(join(task, "state.json"), "utf8"))).toMatchObject({ merged: { completedAt: expect.any(String) } }), { timeout: 5_000 });
     const after = reads;
