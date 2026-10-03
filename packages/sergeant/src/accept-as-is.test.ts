@@ -159,3 +159,30 @@ test("a turn retried after its acknowledgment reached Linear posts no second one
   expect(keys).toEqual([acceptedKey("i1", reply.id), acceptedKey("i1", reply.id)]);
   expect(live.agentComments.filter((c) => c.body === acknowledged)).toHaveLength(1);
 });
+
+test("a failed resolve of the accepted budget question keeps the task until a retry resolves it", async () => {
+  // TECH-5138: the task used to be set aside even when the resolve failed, so nothing retried it and
+  // the accepted question stayed open. Each event notes whether the task's state was still in place.
+  const events: string[] = [];
+  const note = async (event: string) => events.push(`${event}${(await readdir(dir)).includes("state.json") ? "" : " (set aside)"}`);
+  let attempts = 0;
+  const { result, resolved } = await scenario({
+    state: exhausted,
+    conversation: { agentComments: [budgetAsked], humanComments: [human("c1", ago(1), "2")] },
+    runner: runner([]),
+    reasoner: async () => (await note("turn"), turnOf([accept])),
+    onPoll: (_poll, live) => live,
+    beforeResolve: async () => {
+      await note(`resolve ${++attempts}`);
+      if (attempts === 1) throw new Error("Linear is unavailable");
+    },
+  });
+
+  expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
+  // The next pass resolves the thread before the turn it committed no fingerprint for is taken again.
+  expect(events).toEqual(["turn", "resolve 1", "resolve 2", "turn"]);
+  expect(resolved).toEqual([budgetAsked.id]);
+  const files = await readdir(dir);
+  expect(files).not.toContain("state.json");
+  expect(files.some((f) => /^state\.accepted-.+\.json$/.test(f))).toBe(true);
+});

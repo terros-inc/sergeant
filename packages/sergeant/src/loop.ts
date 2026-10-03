@@ -313,10 +313,14 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       // aside like a stop's, so intake resumes it no more; its PRs and the issue are left for a human.
       // The marker keeps intake from starting it afresh while the issue stays in Todo (accepted.ts).
       // One keyed line says so first (TECH-5120); a failed post fails the loop before the task is set
-      // aside, and the retried turn posts it under the same key.
+      // aside, and the retried turn posts it under the same key. A failed resolve leaves the task as it
+      // is too (TECH-5138): the next pass resolves the thread first, and its retried turn ends the task.
       const reply = latestAnswer(conversation);
       if (reply) await postAccepted(conversation.issue.id, reply.id, situation.pullRequests, deps.linear);
-      await resolveDue(conversation);
+      if (!(await resolveDue(conversation))) {
+        await wait(pollMs);
+        continue;
+      }
       await markAccepted(opts.dir, at);
       await rename(files.state, join(opts.dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
       return { outcome: "accepted", detail: "a human accepted the work as it is" };
