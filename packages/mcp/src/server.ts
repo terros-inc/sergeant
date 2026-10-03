@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { ApiError, RunDetail, RunId, RunList, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
+import { ApiError, RunDetail, RunId, RunList, sergeantVersion, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 // `sgt-mcp` (TECH-4940): Sergeant for MCP clients such as ChatGPT and Firstmate, the read-only half
@@ -18,7 +18,7 @@ type Result = { content: { type: "text"; text: string }[]; structuredContent?: R
 
 /** An MCP server whose tools read the Sergeant API at `api`; connect it to a transport to serve. */
 export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = globalThis.fetch): McpServer {
-  const server = new McpServer({ name: "sergeant", version: "0.0.0" });
+  const server = new McpServer({ name: "sergeant", version: sergeantVersion().version });
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
   /** One GET; a refusal, an unreachable API, or an answer outside the contract is a tool error. */

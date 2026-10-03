@@ -44,7 +44,15 @@ mkdir -p "$src"
 [ -d "$src/.git" ] || git init -q "$src"
 git -C "$src" remote remove origin 2>/dev/null || true
 git -C "$src" remote add origin "$SERGEANT_SOURCE_REPOSITORY_URL.git"
-git -C "$src" fetch -q --depth 1 origin "$ref"
+# Tags and full history, so the version (packages/contracts/src/version.ts) can count the commits since
+# the nearest vMAJOR.MINOR.PATCH tag. Versioning never fails an update: if that fetch fails, a shallow
+# fetch still updates and the version falls back to 0.0.0+<sha>.
+deepen=()
+[ "$(git -C "$src" rev-parse --is-shallow-repository)" = true ] && deepen=(--unshallow)
+git -C "$src" fetch -q --tags "${deepen[@]}" origin "$ref" || {
+  echo "cannot fetch tags and history for $ref; fetching it shallow, so the version will be 0.0.0+<sha>" >&2
+  git -C "$src" fetch -q --depth 1 origin "$ref"
+}
 git -C "$src" checkout -q --force --detach FETCH_HEAD
 git -C "$src" clean -qfdx -e node_modules
 printf 'ref=%s\nsha=%s\nat=%s\n' "$ref" "$(git -C "$src" rev-parse HEAD)" "$(date -u +%FT%TZ)" >/etc/sergeant/release

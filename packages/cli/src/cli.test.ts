@@ -173,12 +173,12 @@ test("login signs in through the browser with PKCE, keeps the token privately, a
   expect(seen.at(-1)?.authorization).toBeUndefined();
 });
 
-test("-v and --version print the CLI version and exit 0 without touching the API", async () => {
+test("-v and --version print Sergeant's git version and exit 0 without touching the API", async () => {
   // A fetch that fails the test if the version flag reaches the API; no server is running either.
   const fetch = (() => {
     throw new Error("version must not call the API");
   }) as unknown as typeof globalThis.fetch;
-  const line = /^sgt \d+\.\d+\.\d+( \([0-9a-f]{7,}\))?\n$/;
+  const line = /^sgt \d+\.\d+\.\d+\+([0-9a-f]{7,}|unknown)\n$/;
 
   for (const flag of ["-v", "--version"]) {
     const human = await sgtWith({ fetch }, "http://127.0.0.1:0", flag);
@@ -189,7 +189,6 @@ test("-v and --version print the CLI version and exit 0 without touching the API
     const json = await sgtWith({ fetch }, "http://127.0.0.1:0", "--json", flag);
     expect(json.code).toBe(0);
     const parsed = JSON.parse(json.out);
-    expect(parsed.version).toMatch(/^\d+\.\d+\.\d+$/);
-    if (parsed.commit !== undefined) expect(parsed.commit).toMatch(/^[0-9a-f]{7,}$/);
+    expect(parsed).toEqual({ version: expect.stringMatching(/^\d+\.\d+\.\d+\+([0-9a-f]{7,}|unknown)$/) });
   }
 });

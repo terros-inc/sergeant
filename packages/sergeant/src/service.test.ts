@@ -80,7 +80,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
   await vi.waitFor(() => expect(new Set(turns.map((t) => t.issue))).toEqual(new Set(issues)), { timeout: 5_000 });
   const status = await fetch(`http://127.0.0.1:${first.port}/status`);
   expect(status.status).toBe(200);
-  expect(await status.json()).toMatchObject({ ok: true, lastIntake: { at: expect.any(String) } });
+  expect(await status.json()).toMatchObject({ ok: true, version: expect.stringMatching(/^\d+\.\d+\.\d+\+/), lastIntake: { at: expect.any(String) } });
   await first.stop();
 
   // Three tasks admitted together would overlap in their first turns; only two may run at once.

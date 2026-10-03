@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { RepoSlug } from "@terros/sergeant-contracts";
+import { sergeantVersion, type RepoSlug } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { apiHandler } from "./api.ts";
@@ -273,6 +273,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     log,
   });
   const webhookPaths = new Set<string>(Object.values(WEBHOOK_PATHS));
+  const { version } = sergeantVersion();
 
   const server =
     opts.port === undefined
@@ -280,12 +281,12 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       : createServer((req, res) => {
           // `/health` and the webhooks are the only paths the host's proxy publishes, so `/health` says
           // only whether serve is healthy: not stopping, and its latest intake succeeded. Task ids and
-          // intake errors are private, served on `/status` to loopback only.
+          // intake errors are private, served on `/status` to loopback only, with Sergeant's git version.
           const ok = !abort.signal.aborted && !lastIntake?.error;
           if (req.method === "GET" && (req.url === "/health" || req.url === "/status")) {
             res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
             const released = [...slots].filter(([, s]) => s.released).map(([id]) => id);
-            const detail = req.url === "/status" && { stopping: abort.signal.aborted, tasks: [...active.keys()], released, lastIntake };
+            const detail = req.url === "/status" && { version, stopping: abort.signal.aborted, tasks: [...active.keys()], released, lastIntake };
             res.end(JSON.stringify({ ok, ...detail }));
           } else if (webhookPaths.has(new URL(req.url ?? "/", "http://localhost").pathname)) {
             webhooks(req, res);

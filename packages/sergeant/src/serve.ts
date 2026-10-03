@@ -15,7 +15,7 @@
 // operator on this host with no login, for development, and is refused unless `--host` is 127.0.0.1 or ::1.
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { RepoSlug } from "@terros/sergeant-contracts";
+import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
 import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner } from "@terros/sergeant-runner";
@@ -97,7 +97,8 @@ const service = await startService(
     undelegate: (issueId) => installation.linear.undelegate(issueId),
   },
 );
-console.log(`Sergeant serving ${repositories.join(", ")}; GET http://${values.host}:${service.port}/health`);
+const { version, fallback } = sergeantVersion();
+console.log(`Sergeant ${version}${fallback ? ` (${fallback})` : ""} serving ${repositories.join(", ")}; GET http://${values.host}:${service.port}/health`);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
