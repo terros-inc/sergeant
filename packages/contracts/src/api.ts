@@ -138,8 +138,10 @@ export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "c
  * was not registered (TECH-5202).
  */
 export const REVOKE: Record<Provider, string> = {
-  claude: "on claude.ai, open Settings → Claude Code → Authorization tokens and revoke the token `claude setup-token` made",
-  codex: "in ChatGPT, open Settings → Security and choose Log out of all devices",
+  claude:
+    "open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference token `claude setup-token` made (match it by its Connected time)",
+  codex:
+    "open https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created (match it by its time; use Log out of all devices only if you cannot tell which it is)",
 };
 
 export const WhoAmI = z.object({

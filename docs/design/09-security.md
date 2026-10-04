@@ -68,8 +68,10 @@ keeps working until its holder revokes or rotates it with the provider.
 - A token is used only for runs of tasks its owner was assigned and delegated themselves (TECH-5179),
   so a compromised run exposes the token of the person whose work it is, never a colleague's.
 - Removal means revocation: `sgt account remove` tells the person that removal does not revoke a copy,
-  and where to revoke the token with the provider (for Claude, the `claude setup-token` token in their
-  claude.ai settings; for Codex, ChatGPT's Settings → Security, Log out of all devices). Neither
+  and where to revoke the token with the provider (for Claude, the user:inference `claude setup-token`
+  token under Authorization tokens at https://claude.ai/new#settings/claude-code; for Codex, the session
+  sgt's sign-in created at https://chatgpt.com/settings/security?view=sessions, with Log out of all
+  devices only as the fallback). Neither
   provider documents a revoke Sergeant could call with the stored credential, so Sergeant reminds and
   does not revoke it itself.
 
