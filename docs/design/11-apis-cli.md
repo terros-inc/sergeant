@@ -131,7 +131,7 @@ sgt task wake <ref> [--reason]                       # take a turn now
 sgt task cancel <ref> --reason "…"                   # stop; removes delegation
 
 sgt run list [--task <ref>] | show <run> | report <run> | transcript <run> | cancel <run>
-sgt account list | register <adapter> (credential on stdin) | remove <adapter>
+sgt account list | register <claude|codex> [--name <name>] | remove <name>
 
 sgt review quality [--since 30d] [--by category|provider|mode]
 
