@@ -139,7 +139,7 @@ export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "c
  */
 export const REVOKE: Record<Provider, string> = {
   claude:
-    "open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference token `claude setup-token` made (match it by its Connected time)",
+    "open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference-scoped token `claude setup-token` made (match it by its Connected time)",
   codex:
     "open https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created (match it by its time; use Log out of all devices only if you cannot tell which it is)",
 };

@@ -325,7 +325,7 @@ test("account register asks first, refuses before any sign-in, and says what to 
   expect(failed.code).toBe(1);
   expect(failed.err).toContain("claudeWork was not registered.");
   expect(failed.err).toContain("`pbpaste | sgt account register claude --name claudeWork`");
-  expect(failed.err).toContain("open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference token `claude setup-token` made");
+  expect(failed.err).toContain("open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference-scoped token `claude setup-token` made");
   expect(failed.out + failed.err).not.toContain("sk-ant-oat01-made");
   const codex = await sgtWith({ signIn }, api, "account", "register", "codex");
   expect(codex.err).toContain("signs in again. The login itself stays valid with OpenAI until you revoke it: open https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created");
