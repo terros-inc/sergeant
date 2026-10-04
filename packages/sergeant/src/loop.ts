@@ -3,8 +3,8 @@ import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { conversationRevision, linearUploads, issueRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
-import { drawAudit, exists, finishReviews, observeCompletion, postOutcome } from "./after-merge.ts";
-import { acceptedComment, markAccepted, postAccepted } from "./accepted.ts";
+import { driveMerged, exists, mergedOf } from "./after-merge.ts";
+import { acceptedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
 import { cancelPending, driveCancel } from "./cancel.ts";
@@ -13,7 +13,6 @@ import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
-import { outcomeComment } from "./outcome.ts";
 import { checkHolds, checkStop, holdForBudget, type PollContext } from "./poll-checks.ts";
 import { cancelRuns, describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
@@ -158,48 +157,19 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     if (state.accepted) {
       // TECH-5118: a human accepted the work as it is in reply to the budget question, so the task ends
-      // with no fresh window and nothing more asked. The accepting turn was saved, so this ending is only
-      // replayed, never decided again by a fresh turn (TECH-5136): its question thread is resolved first
-      // (TECH-5138), then one keyed line says Sergeant has stopped (TECH-5120), then `state.json` is set
-      // aside like a stop's, so intake resumes it no more; its PRs and the issue are left for a human. The
-      // marker keeps intake from starting it afresh while the issue stays in Todo (accepted.ts). A failed
-      // resolve waits for the next pass; a failed post fails the loop, and the resumed task replays the
-      // ending under the same key. Either way the acknowledgment appears only on a task that is ending.
-      const { at, replyId, comment } = state.accepted;
-      const conversation = await deps.linear.readConversation(opts.issueId);
-      if (!(await resolveDue(conversation))) {
-        await wait(pollMs);
-        continue;
-      }
-      if (replyId) await postAccepted(conversation.issue.id, replyId, comment, deps.linear);
-      await markAccepted(opts.dir, at);
-      await rename(files.state, join(opts.dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
-      return { outcome: "accepted", detail: "a human accepted the work as it is" };
+      // with no fresh window and nothing more asked, its saved ending replayed (accepted.ts).
+      const ended = await endAccepted(state.accepted, opts.dir, opts.issueId, deps.linear, resolveDue);
+      if (ended) return ended;
+      await wait(pollMs);
+      continue;
     }
 
     if (state.merged) {
-      // Post-merge effects and an audit reviewer are task work too. A resumed task that gave up its
-      // slot while waiting must be readmitted before it can post, draw, or start that reviewer. Once
-      // both are done, observing completion and waiting on a running audit need no slot (TECH-5127).
-      const effects = (state.merged.outcome && !state.merged.outcomePostedAt) || !state.merged.auditDrawnAt;
-      if (effects && opts.slot && !opts.slot.work()) {
-        log("queued: waiting for a free task slot");
-        await wait(pollMs);
-        continue;
-      }
-      await deps.linear.readConversation(opts.issueId).then(resolveDue, (e: Error) => log(`could not read the conversation: ${e.message}`));
-      const stopped = await postOutcome(state.merged, opts, deps, log, save);
-      if (stopped) return stopped;
-      // The audit sample is drawn after the merge, so it cannot hold it up.
-      await drawAudit(state.merged, state.runIds, opts, deps, log, save, budgetOf);
-      const result = await observeCompletion(state.merged, opts, deps, log);
-      const finished = await finishReviews(state.merged, result, { runIds: state.runIds, recordReviews, stop: files.stop, opts, deps, log });
-      // Seen through: the issue is Done and every review finished, so intake resumes it no more.
-      if (finished.outcome === "done" && !opts.signal?.aborted && !(await exists(files.stop))) {
-        state.merged.completedAt = new Date().toISOString();
-        await save();
-      }
-      return finished;
+      const afterMerge = { runIds: state.runIds, stop: files.stop, opts, deps, log, save, resolveDue, recordReviews, budgetOf };
+      const finished = await driveMerged(state.merged, afterMerge);
+      if (finished) return finished;
+      await wait(pollMs);
+      continue;
     }
 
     const { runs, unknown } = await readRuns();
@@ -244,15 +214,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // a fact for the next turn.
     const landed = landedOf(pullRequests, runs, deps.workerLogin);
     if (landed?.mergedSha) {
-      const outcome = outcomeComment(landed, landed.mergedSha, runs, state.followups, conversation.issue);
-      state.merged = {
-        repo: landed.repo,
-        number: landed.number,
-        headSha: landed.headSha,
-        mergedSha: landed.mergedSha,
-        at: new Date().toISOString(),
-        outcome,
-      };
+      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue);
       await save();
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
       continue;
