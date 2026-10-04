@@ -53,6 +53,14 @@ test("an account whose quota cannot be read is usable after every known one, the
   expect((await pick([claude, codex], { [codex.id]: [10, 90] })).account.id).toBe(codex.id);
   const unknown = await pick([claude, codex], {}, { configured: "claude-code-local" });
   expect(unknown).toMatchObject({ account: { id: claude.id }, accountReason: expect.stringContaining("quota unknown (usage endpoint answered 401)") });
+  // Only one window read: ranked after a known reading, however much week it shows; a known zero stays spent.
+  const partial: ReadQuota = async ({ id, adapter }) =>
+    id === claude.id
+      ? { adapter, account: id, readAt: "2026-10-04T12:00:00.000Z", weekly: { remainingPercent: 95 } }
+      : { adapter, account: id, readAt: "2026-10-04T12:00:00.000Z", weekly: { remainingPercent: 10 }, fiveHour: { remainingPercent: 90 } };
+  expect((await pick([claude, codex], {}, { read: partial })).account.id).toBe(codex.id);
+  const spentPartial: ReadQuota = async ({ id, adapter }) => ({ adapter, account: id, readAt: "2026-10-04T12:00:00.000Z", ...(id === claude.id ? { weekly: { remainingPercent: 0 } } : {}) });
+  expect((await pick([claude, codex], {}, { read: spentPartial, configured: "claude-code-local" })).account.id).toBe(codex.id);
 });
 
 // A run that failed on an account's quota or login moves the next launch to another of the owner's
