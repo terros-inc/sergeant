@@ -31,16 +31,14 @@ const resetOf = (w: { resetsAt?: string | undefined }) => (w.resetsAt ? Date.par
 
 /**
  * When a failed account may be usable again (epoch ms), for its set-aside after a quota or
- * authentication failure. From `fresh`, read at the failure: the windows now at 0% are the ones it ran
- * out of, and it is usable once the last of them resets. With none at 0% (a reading still cached from
- * launch, an unreadable one, or a failure the windows do not show), the soonest reset still ahead in
- * `fresh` or `atLaunch`, when its quota next changes. Undefined when that reset is unknown: the hour applies.
+ * authentication failure. From `fresh`, read past the cache as the run fails: the windows now at 0%
+ * are the ones it ran out of, and it is usable once the last of them resets. Undefined, so the hour
+ * applies, when none is at 0% (unreadable, or a failure the windows do not show) or a reset is unknown:
+ * another window's sooner reset might bring it back before the one it ran out of.
  */
-export function failingReset(fresh: QuotaReading | undefined, atLaunch: QuotaReading | undefined, now: number): number | undefined {
+export function failingReset(fresh: QuotaReading | undefined): number | undefined {
   const out = windowsOf(fresh).filter((w) => w.remainingPercent <= 0).map(resetOf);
-  if (out.length > 0) return out.some(Number.isNaN) ? undefined : Math.max(...out);
-  const ahead = [...windowsOf(fresh), ...windowsOf(atLaunch)].map(resetOf).filter((t) => t > now);
-  return ahead.length > 0 ? Math.min(...ahead) : undefined;
+  return out.length === 0 || out.some(Number.isNaN) ? undefined : Math.max(...out);
 }
 
 export type AccountPick = {

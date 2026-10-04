@@ -127,8 +127,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     } as const;
     // The next launch takes the next account (TECH-5113); this one is back when the window it ran out of resets, if within the hour.
     if (agent.failureReason && meta.account) {
-      const atLaunch = meta.providerChoice?.readings.find((r) => r.account === meta.account?.id);
-      asides.add(meta.account.id, failingReset(await readNow(meta), atLaunch, Date.now()));
+      asides.add(meta.account.id, failingReset(await readNow(meta)));
     }
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
@@ -137,11 +136,11 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     return finish(meta, RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: `no report written; ${why}` }) }), facts);
   }
 
-  /** The run's account's quota read again as it fails, to see which window ran out; undefined when it cannot be read. */
+  /** The run's account's quota read again as it fails, past the launch cache, to see which window ran out; undefined when it cannot be read. */
   async function readNow(meta: RunMeta) {
     if (!opts.quota || !meta.ownerId) return undefined;
     const account = (await opts.accounts(meta.ownerId).catch(() => [])).find((a) => a.id === meta.account?.id);
-    return account && opts.quota(account).catch(() => undefined);
+    return account && opts.quota(account, { fresh: true }).catch(() => undefined);
   }
 
   /** The report the agent wrote in its workspace, if any: copied out as `report.md` and parsed for its role. */

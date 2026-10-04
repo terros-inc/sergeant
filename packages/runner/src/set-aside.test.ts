@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { NoModelAccount, type QuotaReading, type RunSpec } from "@terros/sergeant-contracts";
 import type { Exec } from "./exec.ts";
+import { accountQuota } from "./quota.ts";
 import { containerRunner } from "./runner.ts";
 
 // TECH-5213, through the runner's own set-aside: a run that fails on quota or authentication benches
 // its account for an hour, or until the window it ran out of resets if that is sooner. The window is
-// told from the account's quota read again as the run fails. Docker is faked; so is the clock.
+// told from the account's quota read again, past the launch cache, as the run fails. Docker is faked;
+// so is the clock.
 
 const NOW = Date.parse("2026-10-04T12:00:00.000Z");
 const MINUTE = 60_000;
@@ -26,13 +28,15 @@ const healthy: Windows = { weekly: { remainingPercent: 60, resetsAt: at(3 * 24 *
 afterEach(() => vi.useRealTimers());
 
 /**
- * Launches a worker on Ann's only account with `atLaunch` read, fails it after 5 minutes with `logs`
+ * Launches a worker on Ann's only account with `atLaunch` read, fails it after 2 minutes, within the quota cache's 4, with `logs`
  * while its quota reads `atFailure`, and answers how many minutes after launch the account is usable again.
  */
-async function benchedUntil(logs: string, atLaunch: Windows, atFailure: Windows) {
+async function benchedUntil(logs: string, atLaunch: Windows, atFailure: Windows, reader: "uncached" | "production" = "uncached") {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   let windows = atLaunch;
+  const claudeWindow = (w: Windows["weekly"]) => w && { utilization: 100 - w.remainingPercent, resets_at: w.resetsAt ?? null };
+  const usageEndpoint = (async () => Response.json({ seven_day: claudeWindow(windows.weekly), five_hour: claudeWindow(windows.fiveHour) })) as unknown as typeof fetch;
   const exec: Exec = async (cmd, args) => {
     if (cmd === "docker" && args[0] === "inspect") return { code: 0, stdout: "exited 1\n", stderr: "" };
     if (cmd === "docker" && args[0] === "logs") return { code: 0, stdout: logs, stderr: "" };
@@ -42,20 +46,21 @@ async function benchedUntil(logs: string, atLaunch: Windows, atFailure: Windows)
     rootDir: await mkdtemp(join(tmpdir(), "sergeant-set-aside-test-")),
     models: { worker: { "claude-code-local": "opus", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
     accounts: async (ownerId) => (ownerId === ann.id ? [account] : []),
-    // Uncached, so each read is what the test says the account shows at that moment.
-    quota: async ({ id, adapter }) => ({ adapter, account: id, readAt: new Date().toISOString(), ...windows }),
+    // Uncached, so each read is what the test says the account shows at that moment; or the production
+    // reader, caching for 4 minutes, over a faked usage endpoint.
+    quota: reader === "production" ? accountQuota({ fetch: usageEndpoint }) : async ({ id, adapter }) => ({ adapter, account: id, readAt: new Date().toISOString(), ...windows }),
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
     exec,
   });
 
   await runner.start(worker);
-  vi.setSystemTime(NOW + 5 * MINUTE);
+  vi.setSystemTime(NOW + 2 * MINUTE);
   windows = atFailure;
   expect(await runner.status(worker.runId)).toMatchObject({ status: "failed", account: { id: account.id } });
   // Afterwards the account reads healthy, so only the set-aside can refuse it.
   windows = healthy;
-  for (let minute = 6; minute <= 120; minute++) {
+  for (let minute = 3; minute <= 120; minute++) {
     vi.setSystemTime(NOW + minute * MINUTE);
     const refused = await runner.start({ ...worker, runId: `run_at_${minute}` }).then(() => undefined, (e: unknown) => e);
     if (!refused) return minute;
@@ -71,23 +76,34 @@ test("a quota failure's set-aside ends when the window now at 0% resets, before 
   expect(await benchedUntil(QUOTA_LOGS, atLaunch, atFailure)).toBe(20);
 });
 
-test("an authentication failure's set-aside ends at the account's next known reset, before the hour", async () => {
-  // A failed login cannot read quota either: the reset ahead comes from the launch reading.
+test("an authentication failure's set-aside ends when a window now at 0% resets, else keeps the hour", async () => {
   const atLaunch: Windows = { weekly: { remainingPercent: 50, resetsAt: at(3 * 24 * 60) }, fiveHour: { remainingPercent: 40, resetsAt: at(30) } };
-  expect(await benchedUntil(AUTH_LOGS, atLaunch, { error: "usage endpoint answered 401" })).toBe(30);
-  // One that reads, with a window at 0%, waits for that window instead.
+  // A failed login cannot read quota either: no window is known to have run out, so the hour applies.
+  expect(await benchedUntil(AUTH_LOGS, atLaunch, { error: "usage endpoint answered 401" })).toBe(62);
+  // One that reads, with a window at 0%, waits for that window.
   const atFailure: Windows = { weekly: { remainingPercent: 0, resetsAt: at(45) }, fiveHour: { remainingPercent: 40, resetsAt: at(30) } };
   expect(await benchedUntil(AUTH_LOGS, atLaunch, atFailure)).toBe(45);
 });
 
 test("a set-aside keeps the hour when the window resets later, or its reset is unknown", async () => {
-  // The run fails 5 minutes after launch, so its hour ends 65 minutes after launch.
+  // The run fails 2 minutes after launch, so its hour ends 62 minutes after launch.
   const atLaunch: Windows = { weekly: { remainingPercent: 5, resetsAt: at(2 * 24 * 60) }, fiveHour: { remainingPercent: 50, resetsAt: at(30) } };
   // The week ran out: the 5-hour window resetting in half an hour does not bring the account back.
   const weekOut: Windows = { weekly: { remainingPercent: 0, resetsAt: at(2 * 24 * 60) }, fiveHour: { remainingPercent: 50, resetsAt: at(30) } };
-  expect(await benchedUntil(QUOTA_LOGS, atLaunch, weekOut)).toBe(65);
+  expect(await benchedUntil(QUOTA_LOGS, atLaunch, weekOut)).toBe(62);
   const unknownReset: Windows = { weekly: { remainingPercent: 0 }, fiveHour: { remainingPercent: 50, resetsAt: at(30) } };
-  expect(await benchedUntil(QUOTA_LOGS, atLaunch, unknownReset)).toBe(65);
+  expect(await benchedUntil(QUOTA_LOGS, atLaunch, unknownReset)).toBe(62);
   const nothingKnown: Windows = { weekly: { remainingPercent: 50 }, fiveHour: { remainingPercent: 50 } };
-  expect(await benchedUntil(AUTH_LOGS, nothingKnown, { error: "usage endpoint answered 401" })).toBe(65);
+  expect(await benchedUntil(AUTH_LOGS, nothingKnown, { error: "usage endpoint answered 401" })).toBe(62);
+});
+
+test("a failure within the quota cache's 4 minutes reads past it, so the week running out keeps the hour", async () => {
+  // Through the production reader: the launch reading, still cached at the failure, shows nothing at 0%
+  // and a 5-hour reset 30 minutes ahead. The fresh read shows the week ran out.
+  const atLaunch: Windows = { weekly: { remainingPercent: 5, resetsAt: at(2 * 24 * 60) }, fiveHour: { remainingPercent: 50, resetsAt: at(30) } };
+  const weekOut: Windows = { weekly: { remainingPercent: 0, resetsAt: at(2 * 24 * 60) }, fiveHour: { remainingPercent: 50, resetsAt: at(30) } };
+  expect(await benchedUntil(QUOTA_LOGS, atLaunch, weekOut, "production")).toBe(62);
+  // The 5-hour window ran out instead: back at its reset.
+  const fiveHourOut: Windows = { weekly: { remainingPercent: 5, resetsAt: at(2 * 24 * 60) }, fiveHour: { remainingPercent: 0, resetsAt: at(30) } };
+  expect(await benchedUntil(QUOTA_LOGS, atLaunch, fiveHourOut, "production")).toBe(30);
 });

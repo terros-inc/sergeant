@@ -99,4 +99,9 @@ test("a burst of launches shares one reading until it is 4 minutes old", async (
   clock += 1;
   await read(claude());
   expect(calls).toHaveLength(3);
+  // A fresh read, as a run fails, goes past the cache and replaces what it holds.
+  await read(claude(), { fresh: true });
+  expect(calls).toHaveLength(4);
+  await read(claude());
+  expect(calls).toHaveLength(4);
 });

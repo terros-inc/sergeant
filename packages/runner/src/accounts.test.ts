@@ -86,9 +86,9 @@ test("a set-aside ends at the reset of the window the account ran out of, when t
   const inMinutes = (m: number) => new Date(NOW + m * 60_000).toISOString();
   const reading = (weekly: number, fiveHour: number, fiveHourReset = inMinutes(20)) => ({ adapter: "claude-code-local", readAt, weekly: { remainingPercent: weekly, resetsAt: WEEKLY_RESET }, fiveHour: { remainingPercent: fiveHour, resetsAt: fiveHourReset } });
   // The 5-hour window is the one at 0%, though the week showed less left at launch.
-  asides.add(claude.id, failingReset(reading(40, 0), reading(5, 30), NOW));
+  asides.add(claude.id, failingReset(reading(40, 0)));
   // The week ran out: the 5-hour window's sooner reset does not bring it back.
-  asides.add(codex.id, failingReset(reading(0, 50), reading(5, 50), NOW));
+  asides.add(codex.id, failingReset(reading(0, 50)));
   now += 20 * 60_000 - 1;
   expect([asides.has(claude.id), asides.has(codex.id)]).toEqual([true, true]);
   now += 1;
@@ -96,8 +96,8 @@ test("a set-aside ends at the reset of the window the account ran out of, when t
   now = NOW + SET_ASIDE_MS;
   expect(asides.has(codex.id)).toBe(false);
 
-  // Nothing at 0% (unreadable, or still cached from launch): the soonest reset still ahead, from either reading.
-  expect(failingReset({ adapter: "claude-code-local", readAt, error: "usage endpoint answered 401" }, reading(5, 30), NOW)).toBe(NOW + 20 * 60_000);
-  expect(failingReset(undefined, reading(5, 30, inMinutes(-1)), NOW)).toBe(Date.parse(WEEKLY_RESET));
-  expect(failingReset(undefined, undefined, NOW)).toBeUndefined();
+  // The failing window unknown (unreadable, or none at 0%): the hour, never another window's sooner reset.
+  expect(failingReset({ adapter: "claude-code-local", readAt, error: "usage endpoint answered 401" })).toBeUndefined();
+  expect(failingReset(reading(5, 30))).toBeUndefined();
+  expect(failingReset(undefined)).toBeUndefined();
 });
