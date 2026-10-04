@@ -48,36 +48,6 @@ test("rejects model output that invents an action or merges without an exact hea
   const ok = await answering({ summary: "Start the worker.", actions: [{ kind: "start_worker", objective: "Do UNF-1.", repositories: ["trevorallred/canary"] }] }).turn(situation);
   expect(ok.output.actions[0]?.kind).toBe("start_worker");
 });
-
-test("includes linked issue background in the Situation Report with its reference-only label", async () => {
-  let input = "";
-  const reasoner = claudeCliReasoner({
-    runCli: async (_args, stdin) => {
-      input = stdin;
-      return JSON.stringify({ is_error: false, structured_output: { summary: "Wait.", actions: [] } });
-    },
-  });
-  await reasoner.turn({
-    ...situation,
-    conversation: {
-      ...conversation,
-      linkedIssueBackground: [
-        {
-          status: "read",
-          identifier: "UNF-2",
-          url: "https://linear.app/x/issue/UNF-2",
-          title: "Prior decision",
-          state: "Done",
-          description: "Reference details.",
-          descriptionTruncated: false,
-        },
-      ],
-    },
-  });
-  expect(input).toContain('"linkedIssueBackground"');
-  expect(input).toContain("Reference details.");
-});
-
 // Acceptance (TECH-4994): a pasted screenshot and an attached log are visible to reasoning as an
 // image and readable text, marked as untrusted data; that needs the CLI's stream-json input.
 test("shows the issue's files to reasoning as an image and text, marked as untrusted", async () => {

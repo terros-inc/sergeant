@@ -43,8 +43,10 @@ export type AgentComment = z.infer<typeof AgentComment>;
 
 /**
  * An issue explicitly linked from the task's own description or a human comment. This is reference
- * material only, never part of the task's instructions or conversation revision. An unreadable link
- * is retained so briefs can say that Linear could not supply its contents.
+ * material only, never part of the task's instructions or conversation revision. Only its
+ * identifier, title, state, and URL are carried, never its description (TECH-5199): anyone who can
+ * edit a linked issue could otherwise put instructions in front of the model. An unreadable link is
+ * retained so briefs can say that Linear could not supply it.
  */
 export const LinkedIssueBackground = z.discriminatedUnion("status", [
   z.object({
@@ -53,8 +55,6 @@ export const LinkedIssueBackground = z.discriminatedUnion("status", [
     url: z.url(),
     title: z.string(),
     state: z.string(),
-    description: z.string(),
-    descriptionTruncated: z.boolean(),
   }),
   z.object({
     status: z.literal("unreadable"),
@@ -98,7 +98,7 @@ export const Conversation = z.object({
   humanComments: z.array(HumanComment),
   /** Every other comment, oldest first: context such as what Sergeant asked; never in the revision. */
   agentComments: z.array(AgentComment),
-  /** Bounded, one-hop background from explicit same-workspace issue links. Never instructions. */
+  /** Identifier, title, state, and URL of explicit same-workspace issue links. Never instructions. */
   linkedIssueBackground: z.array(LinkedIssueBackground).optional(),
 });
 export type Conversation = z.infer<typeof Conversation>;

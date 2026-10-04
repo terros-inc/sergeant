@@ -67,12 +67,11 @@ export const linkedIssue = z.object({
   identifier: z.string().min(1),
   url: z.url(),
   title: z.string(),
-  description: z.string().nullable(),
   state: z.object({ name: z.string() }),
 });
 export const linkedIssueQuery = `
   query SergeantLinkedIssue($id: String!) {
-    issue(id: $id) { identifier url title description state { name } }
+    issue(id: $id) { identifier url title state { name } }
   }
 `;
 
