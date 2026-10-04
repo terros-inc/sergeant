@@ -1,6 +1,7 @@
 import { appendFile, stat } from "node:fs/promises";
 import { checkBudget, checkDelegation, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { outcomeComment } from "./outcome.ts";
+import { reassigned } from "./owner.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions, LoopResult, TaskState } from "./loop.ts";
 import { approvedHead, auditDrawn, implementerOf, type ReviewFacts, reviewFacts } from "./review-quality.ts";
@@ -116,13 +117,16 @@ export async function drawAudit(
     const conversation = await deps.linear.readConversation(opts.issueId);
     const delegation = checkDelegation(conversation.issue, deps.agentUserId);
     // An audit is a new run, so it starts only within the task's budget too (B1, UNF-728), paid by the
-    // task's owner like every other run (TECH-5179).
+    // task's owner like every other run, and only while the issue is still assigned to them (TECH-5179).
     const { owner } = deps;
     const refused = delegation.allowed ? checkBudget(budgetOf(runs, 0), new Date()) : delegation;
+    const moved = owner && reassigned(owner, conversation.issue);
     if (!refused.allowed) {
       log(`audit of ${head.repo}#${head.number} not started: ${refused.reason}`);
     } else if (!owner) {
       log(`audit of ${head.repo}#${head.number} not started: the task has no admitted owner to pay for it`);
+    } else if (moved) {
+      log(`audit of ${head.repo}#${head.number} not started: ${moved}`);
     } else {
       const runId = RunId.parse(`run_audit-${head.headSha}`);
       const skipped = implementerOf(runs, head)?.reported?.review.reason ?? "no reason on record";

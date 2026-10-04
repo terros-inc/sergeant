@@ -26,7 +26,7 @@ test("a task accepted while its issue is in Todo is not started again until a hu
   const startedAt = ago(240);
   await writeFile(join(task, "state.json"), JSON.stringify({ issueId: "UNF-1", turns: 1, recentTurns: [], startedAt, runIds: ["run_w"], turnCostUsd: 0 }));
   const conversation: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
     agentComments: [{ id: commentIdFor(budgetQuestionKey("i1", startedAt)), createdAt: ago(60), body: `${QUESTION_HEADING}\n\nIts budget is exhausted. Continue?` }],
     humanComments: [human("c1", ago(1), "2")],
   };

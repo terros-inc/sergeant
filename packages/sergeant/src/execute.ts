@@ -22,7 +22,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { answeredBudgetQuestion } from "./budget.ts";
-import { accountRefusal, lowQuotaWarning, type TaskOwner } from "./owner.ts";
+import { accountRefusal, reassigned, type TaskOwner } from "./owner.ts";
 import { ownQuestion, questionComment, questionKey } from "./question.ts";
 
 export type Ports = {
@@ -109,6 +109,9 @@ export async function execute(action: ProposedAction, situation: SituationReport
           ]);
           const active = checkLive(issue, ports.agentUserId);
           if (!active.allowed) return denied(active);
+          // The issue reassigned since the task was admitted: the loop's next poll stops it (owner.ts).
+          const moved = reassigned(owner, issue);
+          if (moved) return denied({ rule: "O1", reason: moved });
           const verdict = checkStart(action, {
             runs,
             enrolledRepositories,
@@ -122,7 +125,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
           const runId = `run_${randomUUID()}`;
           // Accepted: the deadline can pass during this milliseconds-long write, and the run still starts.
           await ports.recordRun?.(runId);
-          const launched = await ports.runner.start(
+          await ports.runner.start(
             action.kind === "start_worker"
               ? {
                   runId,
@@ -144,12 +147,6 @@ export async function execute(action: ProposedAction, situation: SituationReport
                   ...(action.focus !== undefined && { focus: action.focus }),
                 },
           );
-          const lowQuota = launched?.lowQuota;
-          if (lowQuota) {
-            await ports.linear
-              .postComment({ issueId: conversation.issue.id, ...lowQuotaWarning(conversation.issue.id, owner, lowQuota, runId) })
-              .catch((e: Error) => ports.log?.(`could not warn ${owner.name} about ${lowQuota.accountId}'s 5-hour window: ${e.message}`));
-          }
           const role = action.kind === "start_worker" ? "worker" : "reviewer";
           const started: RunRecord = { runId, role, status: "running", provider: "unknown", model: "unknown", report: null, issueRevision: issueRevision(conversation.issue) };
           // Best effort, after the start is a done fact: show the issue as In Progress the moment the

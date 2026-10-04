@@ -6,6 +6,7 @@ import { heldAcceptances } from "./accepted.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
+import { setAsideCompleted } from "./task-state.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { startFeedbackLoop } from "./service-feedback.ts";
 import { lockStateDir } from "./service-lock.ts";
@@ -207,7 +208,14 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       blocked.set(issue.identifier, line);
       return false;
     });
-    const issues = await Promise.all(todo.map(async (issue) => ((await cancelPending(taskDir(opts.stateDir, issue.identifier))) ? [] : [issue])));
+    const issues = await Promise.all(
+      todo.map(async (issue) => {
+        const dir = taskDir(opts.stateDir, issue.identifier);
+        if (await cancelPending(dir)) return [];
+        if (!active.has(issue.identifier) && (await setAsideCompleted(dir))) log(`${issue.identifier}: reopened after its task was seen through: a new task`);
+        return [issue];
+      }),
+    );
     ordered = issues.flat();
     delegated = ordered.map((issue) => issue.identifier);
     intakeStartedAt = startedAt;

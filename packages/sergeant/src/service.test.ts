@@ -30,7 +30,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
     issues.map((id) => [
       id,
       {
-        issue: { id: `i-${id}`, identifier: id, url: `https://linear.app/x/issue/${id}`, title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
+        issue: { id: `i-${id}`, identifier: id, url: `https://linear.app/x/issue/${id}`, title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
         humanComments: [],
         agentComments: [],
       },
@@ -107,7 +107,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
 /** Fakes for one delegated issue whose turns hold for `turnMs`, counting turns in flight. */
 function oneIssue(ids: string[], turnMs: number) {
   const conversation: Conversation = {
-    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
+    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
     humanComments: [],
     agentComments: [],
   };

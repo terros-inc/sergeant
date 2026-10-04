@@ -1,23 +1,24 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
-import { NoModelAccount, type RunSpec, type StartedRun, type TaskOwnerCheck } from "@terros/sergeant-contracts";
+import { expect, test, vi } from "vitest";
+import { NoModelAccount, type RunSpec, type TaskOwnerCheck } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
+import { startService } from "./service.ts";
 import { fakes, issue, repo } from "./stop-fixtures.ts";
 
 // TECH-5179: a task spends only its owner's model quota. Its owner is the issue's human assignee, and
 // only when Linear shows that same person delegated it: nobody can assign an issue to someone else and
 // delegate it to spend their quota. Every refusal tells the humans what to do, once per condition,
-// however often intake polls; the owner, once admitted, holds for the task whatever happens to the
-// issue's assignee.
+// however often intake polls. The owner, once admitted, is the task's until it ends: the issue
+// reassigned mid-task stops it, and the new assignee's own delegation starts a new task.
 
 const ann = { id: "user-ann", name: "Ann" };
 const bob = { id: "user-bob", name: "Bob" };
 const succeeded = (runId: string) => ({ runId, role: "worker" as const, status: "succeeded" as const, provider: "p", model: "m", report: null });
 
-async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promise<StartedRun | void>) {
+async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "sergeant-owner-test-"));
   const live = { conversation: issue("unstarted", "Todo") };
   const { deps, seen } = fakes(live);
@@ -29,10 +30,9 @@ async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promi
   deps.runner = {
     start: async (spec) => {
       starts.push(spec);
-      const started = await start(spec);
+      await start(spec);
       ran.add(spec.runId);
       abort.abort();
-      return started;
     },
     status: async (id) => (ran.has(id) ? succeeded(id) : Promise.reject(new Error(`no run ${id}`))),
     cancel: async () => {},
@@ -42,7 +42,7 @@ async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promi
     return runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0.01, log: () => {}, signal: abort.signal, ...(idleMinutes !== undefined && { idleMinutes }) }, deps);
   };
   const saved = async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as { owner?: { id: string; name: string } };
-  return { loop, seen, starts, saved, dir, checks: () => checks };
+  return { loop, live, seen, starts, saved, dir, checks: () => checks };
 }
 
 test("someone delegating another person's issue is refused with one comment, however often intake retries", async () => {
@@ -88,18 +88,56 @@ test("an unreadable Linear history admits nobody and says nothing", async () => 
   expect(existsSync(join(t.dir, "state.json"))).toBe(false);
 });
 
-test("the admitted owner pays for every run of the task, and a reassignment while it runs moves nothing", async () => {
+test("the admitted owner pays for every run; a reassignment stops the task, and the new assignee's delegation starts a new one", async () => {
   let check: TaskOwnerCheck = { owner: ann };
   const t = await task(() => check, async () => {});
   expect(await t.loop()).toMatchObject({ outcome: "stopped" });
   expect((await t.saved()).owner).toMatchObject(ann);
   expect(t.starts.map((s) => s.owner)).toEqual([ann]);
 
-  // Bob is now the assignee and delegated it himself: this task is still Ann's, and is not checked again.
+  // Bob is made the assignee while Ann's task is active (no webhook needed: the loop rereads Linear).
+  t.live.conversation.issue.assignee = bob;
+  expect(await t.loop()).toEqual({ outcome: "stopped", detail: "the Linear issue was reassigned from Ann to Bob, and a task's model usage never moves to another person mid-task" });
+  expect(t.starts).toHaveLength(1);
+  expect(t.seen.turns).toBe(1);
+  expect(t.seen.comments.map((c) => c.body)).toEqual([expect.stringContaining("Sergeant stopped working on this issue: the Linear issue was reassigned from Ann to Bob")]);
+  expect(existsSync(join(t.dir, "state.json"))).toBe(false);
+
+  // Bob delegates it himself: a new task, checked afresh, that only Bob pays for.
   check = { owner: bob };
   await t.loop();
-  expect(t.starts.map((s) => s.owner)).toEqual([ann, ann]);
-  expect(t.checks()).toBe(1);
+  expect(t.checks()).toBe(2);
+  expect((await t.saved()).owner).toMatchObject(bob);
+  expect(t.starts.map((s) => s.owner)).toEqual([ann, bob]);
+});
+
+test("an issue reopened in Todo after its task was seen through is a new task, admitted for its owner now", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "sergeant-owner-reopen-test-"));
+  const live = { conversation: issue("unstarted", "Todo") };
+  live.conversation.issue.assignee = bob;
+  const { deps } = fakes(live);
+  deps.linear.readTaskOwner = async () => ({ owner: bob });
+  const owners: string[] = [];
+  const start = deps.runner.start;
+  deps.runner.start = async (spec) => (owners.push(spec.owner.id), start(spec));
+  const dir = join(stateDir, "tasks", "UNF-1");
+  await mkdir(dir, { recursive: true });
+  const merged = { repo, number: 7, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at: "2026-10-03T00:00:00.000Z", completedAt: "2026-10-03T01:00:00.000Z" };
+  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: "2026-10-02T00:00:00.000Z", turns: 3, runIds: [], recentTurns: [], owner: { ...ann, admittedAt: "2026-10-02T00:00:00.000Z" }, merged }));
+
+  const service = await startService({ enrolledRepositories: [repo], stateDir, intakeSeconds: 0.01, pollSeconds: 0.01, port: 0, log: () => {} }, deps);
+  await vi.waitFor(() => expect(owners).toEqual([bob.id]), { timeout: 5_000 });
+  await service.stop();
+  expect(JSON.parse(await readFile(join(dir, "state.json"), "utf8"))).toMatchObject({ owner: bob });
+  expect(existsSync(join(dir, "state.completed-2026-10-03T01-00-00-000Z.json"))).toBe(true);
+});
+
+test("an unassigned issue stops its task before anything more starts", async () => {
+  const t = await task(() => ({ owner: ann }), async () => {});
+  await t.loop();
+  t.live.conversation.issue.assignee = null;
+  expect(await t.loop()).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("unassigned from Ann") });
+  expect(t.starts).toHaveLength(1);
 });
 
 test("an owner with no usable account starts nothing and is told what to fix, once", async () => {
@@ -115,14 +153,4 @@ test("an owner with no usable account starts nothing and is told what to fix, on
   ]);
   const { runIds } = JSON.parse(await readFile(join(t.dir, "state.json"), "utf8")) as { runIds: string[] };
   expect(runIds).toEqual([]);
-});
-
-test("a run on the owner's only usable account below the 5-hour floor goes ahead, and the owner is warned", async () => {
-  const lowQuota = { accountId: "person:user-ann:codex-local", adapter: "codex-local", fiveHourPercent: 12.34, resetsAt: "2026-10-04T15:00:00.000Z" };
-  const t = await task(() => ({ owner: ann }), async () => ({ lowQuota }));
-  await t.loop();
-  expect(t.starts).toHaveLength(1);
-  expect(t.seen.comments.map((c) => c.body)).toEqual([
-    "Heads up, Ann: Sergeant is running this task on `person:user-ann:codex-local`, your only usable model account, with 12.3% of its 5-hour window left until it resets at 2026-10-04T15:00:00.000Z, so runs may stop short. Registering another account (`sgt account register <claude-code-local|codex-local>`) gives Sergeant one to switch to.",
-  ]);
 });

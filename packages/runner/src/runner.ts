@@ -182,7 +182,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       const prior = spec.role === "reviewer" ? await priorReports(spec.subject) : undefined;
       const workerAdapter = prior?.workerAdapter;
       // Quota is read now, before the clones; a burst of launches shares one reading (quota.ts).
-      const { account, accountReason, providerChoice, low } = await chooseAccount(spec, workerAdapter);
+      const { account, accountReason, providerChoice } = await chooseAccount(spec, workerAdapter);
       await mkdir(root, { recursive: true });
       try {
         await mkdir(p.dir);
@@ -267,7 +267,6 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         ],
         { env: { ...process.env, [agent.credentialEnv]: account.credential, ...(worker && { GH_TOKEN: githubToken }) } },
       );
-      return low ? { lowQuota: { accountId: account.id, adapter, ...low } } : undefined;
     },
 
     async status(runId) {

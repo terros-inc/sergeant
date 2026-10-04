@@ -135,18 +135,12 @@ export class NoModelAccount extends Error {
   }
 }
 
-/**
- * What a start says beyond starting: `lowQuota` when the run's account was the owner's only usable
- * one and its 5-hour window is below the floor, which Sergeant tells the owner (TECH-5179).
- */
-export type StartedRun = { lowQuota?: { accountId: string; adapter: string; fiveHourPercent: number; resetsAt?: string } };
-
 export interface RunnerPort {
   /**
    * Starts a run with a fresh session. A reviewer never inherits a worker's session. Throws
    * `NoModelAccount`, having started nothing, when the task owner has no usable model account.
    */
-  start(spec: RunSpec): Promise<StartedRun | void>;
+  start(spec: RunSpec): Promise<void>;
   status(runId: RunId): Promise<RunRecord>;
   cancel(runId: RunId): Promise<void>;
   /** The raw Markdown report a run ended with, if it wrote one; parsed, it is the record's `report`. */

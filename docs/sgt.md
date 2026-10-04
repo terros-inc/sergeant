@@ -91,10 +91,12 @@ sgt run report <run>                           # the run's Markdown report
 
 ## 6. Model accounts
 
-Sergeant runs workers and reviewers on the installation owner's Claude and Codex accounts first: while
-any owner account of either provider has room (5-hour window at least 20%, week not spent), it uses the
-one with the most weekly capacity left. Only when none of them has room does it use accounts people
-registered, by the same rule. You can register your own subscription, one per agent CLI, and remove it at any time:
+Each task's workers and reviewers run only on the model accounts its owner registered (TECH-5179): the
+issue's human assignee, who delegated it to Sergeant themselves. Among them Sergeant takes the usable
+one with the most weekly capacity left, skipping one whose 5-hour window is under 20% while another is
+usable; a reviewer prefers a different provider from its worker's. Sergeant's own system account runs
+its reasoning only, never a worker or reviewer. Register your own account, one per agent CLI, and
+remove it at any time:
 
 ```sh
 claude setup-token | sgt account register claude-code-local    # your Claude subscription
@@ -103,6 +105,9 @@ sgt account list                                # every account, whose it is, an
 sgt account remove codex-local                  # remove yours; runs already on it finish on it
 ```
 
+- **Register your Terros company seat** (for example Claude Team or ChatGPT Team), not a personal
+  subscription: whether personal plans may run Terros work is not settled (TECH-5129). `register`
+  says so each time; nothing enforces it.
 - The credential is read from stdin, never from an argument, and is kept only in the installation's
   Secrets Manager. Sergeant checks it by reading its quota before storing it. Registering again
   replaces your earlier one.

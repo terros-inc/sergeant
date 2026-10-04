@@ -30,8 +30,6 @@ export type AccountPick = {
   account: ModelAccount;
   accountReason: string;
   providerChoice?: ProviderChoice;
-  /** The account is below the 5-hour floor, the owner's only usable one: the owner is warned. */
-  low?: { fiveHourPercent: number; resetsAt?: string };
 };
 
 /**
@@ -65,12 +63,10 @@ export async function pickAccount(opts: {
   }
   const readings = candidates.flatMap((c) => (c.quota ? [c.quota] : []));
   const sameProviderAsWorker = avoid !== undefined && chosen.adapter === avoid;
-  const fiveHour = chosen.quota?.fiveHour;
   return {
     account: chosen.account,
     accountReason: chosen.reason,
     ...(readings.length > 0 && { providerChoice: { adapter: chosen.adapter, reason: chosen.reason, readings, ...(sameProviderAsWorker && { sameProviderAsWorker }) } }),
-    ...(chosen.low && fiveHour && { low: { fiveHourPercent: fiveHour.remainingPercent, ...(fiveHour.resetsAt && { resetsAt: fiveHour.resetsAt }) } }),
   };
 }
 

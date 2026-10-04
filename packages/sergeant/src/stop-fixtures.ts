@@ -25,7 +25,7 @@ export const pr = (number: number, author = "sergeant-worker[bot]"): PullRequest
   humanFeedback: [],
 });
 export const issue = (stateType: string, state: string): Conversation => ({
-  issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state, stateType, delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+  issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state, stateType, delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
   humanComments: [],
   agentComments: [],
 });

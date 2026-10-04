@@ -43,7 +43,7 @@ const conversation = (identifier: string): Conversation => ({
     description: "D",
     state: "Todo",
     stateType: "unstarted",
-    delegate: agent,
+    delegate: agent, assignee: { id: "user-ann", name: "Ann" },
     linkedPullRequests: identifier === "UNF-1" ? [{ repo: "o/r", number: 7 }] : [],
   },
   humanComments: [],

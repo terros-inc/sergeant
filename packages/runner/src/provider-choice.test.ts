@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { NoModelAccount, type QuotaReading, type RunSpec } from "@terros/sergeant-contracts";
 import type { Adapter } from "./agents.ts";
 import type { Exec } from "./exec.ts";
@@ -68,6 +68,7 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
 
   await runner.start(reviewer);
   expect(launched[1]).toContain("codex exec");
+  expect(launched[1]).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
   expect(await runner.status("run_r")).toMatchObject({ provider: "openai/codex", model: "gpt-5", providerChoice: { adapter: "codex-local" } });
 });
 
@@ -75,6 +76,8 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
 // the next launch to another of the owner's accounts, never to anyone else's, and once none of the
 // owner's is usable nothing starts.
 test("a quota failure moves the next run to another of the owner's accounts, and then to none", async () => {
+  // Sergeant's system account is in serve's own environment for reasoning only: no run gets it.
+  vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-sergeant-system");
   const env: (string | undefined)[] = [];
   const logs = '{"is_error":true,"result":"Claude AI usage limit reached|1791000000"}';
   const exec: Exec = async (cmd, args, opts) => {
@@ -115,6 +118,7 @@ test("a quota failure moves the next run to another of the owner's accounts, and
   expect(refused).toMatchObject({ kind: "none_usable", owner: ann, accountIds: [first.id, second.id] });
   expect(env).toHaveLength(2);
   await expect(readdir(rootDir)).resolves.not.toContain("run_w3");
+  vi.unstubAllEnvs();
 });
 
 // A terminal record keeps the launch metadata from run.json, and stays readable as written when

@@ -251,13 +251,13 @@ unknown reading keeps the `runners` default, so a quota read never blocks a laun
 **Model accounts (TECH-5179, replacing TECH-5113's shared pool).** Every run carries its task's owner
 (`RunSpec.owner`: the issue's human assignee, admitted only when Linear's history shows that person
 delegated it, 07 §5) and runs only on an account that person registered through `/v1/accounts`, never
-the installation's credentials or anyone else's. Among the owner's accounts the runner takes the one
-with the most weekly capacity left whose 5-hour window is at least 20% (a reviewer prefers one of
-another provider than its worker's, the provider choice above); with none, the one below the floor
-with the most weekly left, and the start says so, so the owner is warned on the issue; with none of
-those, one whose quota could not be read. A run that fails on the account's quota or authentication
-(`failureReason`) sets the account aside for an hour, in memory, so the next launch takes another of
-the owner's. An owner with no account, or none usable, gets `NoModelAccount` from `start`, which
+the installation's credentials or anyone else's. Among the owner's usable accounts the runner takes,
+by one rule, the one with the most weekly capacity left, skipping any whose 5-hour window is under
+20% while another usable one exists; one whose quota could not be read ranks after every known one.
+A reviewer prefers an account of another provider than its worker's when the owner has a usable one
+(the provider choice above), else the same provider. No low-quota warning is posted. A run that fails
+on the account's quota or authentication (`failureReason`) sets the account aside for an hour, in
+memory, so the next launch takes another of the owner's. An owner with no account, or none usable, gets `NoModelAccount` from `start`, which
 starts nothing; the core then tells the owner on the issue. The run record's `account` says whose
 subscription paid, never the credential.
 

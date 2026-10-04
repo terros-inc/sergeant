@@ -97,11 +97,12 @@ Terros now has its own Codex Team account, and nothing personal is ever used.
 - **Model accounts (TECH-5179).** Each run uses only its task owner's accounts (`RunSpec.owner`, the
   human assignee who delegated the issue), read at each launch from `accounts(ownerId)`, the ones that
   person registered; never the installation's credentials or anyone else's. `accounts.ts` and
-  `choose.ts` take the owner's account with the most weekly capacity left whose 5-hour window is at
-  least 20%; with none, the one below the floor with the most weekly left, and `start` returns
-  `lowQuota` so the owner is warned; with none of those, one whose quota could not be read, the
-  `runners` default's first. A spent account is never chosen. Only the chosen account's credential
-  enters the container. A run whose agent reports a quota or authentication failure (`failureReason`,
+  `choose.ts` apply one rule: among the owner's usable accounts (not set aside, not spent), the one
+  with the most weekly capacity left, skipping those whose 5-hour window is under 20% while another
+  usable one exists. An account whose quota could not be read is usable and ranks after every known
+  one, the `runners` default's first. A reviewer prefers an account of another provider than its
+  worker's when the owner has a usable one. There is no low-quota warning. Only the chosen account's
+  credential enters the container. A run whose agent reports a quota or authentication failure (`failureReason`,
   from Claude Code's result text or Codex's failed turn) sets its account aside for an hour, so the
   next launch takes another of the owner's. With no account, or none usable, `start` throws
   `NoModelAccount` before cloning anything, and nothing starts. The record's `account` and

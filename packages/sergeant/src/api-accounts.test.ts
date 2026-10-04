@@ -92,6 +92,7 @@ test("a person registers, replaces, and removes only their own account, and its 
   // The accepted exposure (09 §3a) is said at registration: where the credential goes, that it can leak, and the way out.
   const { notice } = registered.json;
   expect(notice).toContain("inside Sergeant's worker and reviewer containers");
+  expect(notice).toContain("Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription");
   expect(notice).toContain("could be exposed if a run is compromised");
   expect(notice).toContain("`sgt account remove claude-code-local`");
   expect(notice).toContain("`claude setup-token`");

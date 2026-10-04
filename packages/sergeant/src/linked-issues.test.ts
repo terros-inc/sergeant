@@ -22,6 +22,7 @@ test("an explicitly linked issue reaches the brief as background outside the Tas
             description: `Follow the ADR plan in ${url("TECH-2")}.`,
             state: { name: "In Progress", type: "started" },
             delegate: null,
+            assignee: null,
             attachments: { nodes: [] },
             comments: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
           },

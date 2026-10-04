@@ -73,7 +73,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   await writeFile(stateFile, beforeAsking);
 
   let live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -150,7 +150,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   expect(posted.filter((p) => p.key.startsWith("question:"))).toHaveLength(1);
 });
 
-const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] };
+const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] };
 const start: ProposedAction = { kind: "start_worker", objective: "o", repositories: [repo] };
 const followup: ProposedAction = { kind: "create_followup", key: "k", title: "T", description: "D", relation: "related" };
 

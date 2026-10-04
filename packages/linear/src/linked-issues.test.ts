@@ -21,6 +21,7 @@ const root = (description: string, commentBodies: string[] = []) => ({
       description,
       state: { name: "In Progress", type: "started" },
       delegate: null,
+      assignee: null,
       attachments: { nodes: [] },
       comments: {
         nodes: commentBodies.map((body, index) => ({

@@ -20,6 +20,7 @@ const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | nu
       description: null,
       state: { name: "Todo", type: "unstarted" },
       delegate: { id: "sergeant-user", name: "Sergeant" },
+      assignee: { id: "user-ann", name: "Ann" },
       attachments: {
         nodes: [
           { ...attachment("a1", "https://github.com/o/canary/pull/7", "github"), creator: null },

@@ -3,13 +3,14 @@ import { budgetQuestion, budgetQuestionKey, openWindow, type BudgetWindow } from
 import { recordStop, stopReason } from "./cancel.ts";
 import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
+import { reassigned } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
 import type { TaskState } from "./task-state.ts";
 
-// The checks the loop (loop.ts) makes on every poll before a turn: the delegation and stop-state
-// stop (A1/A2), the budget, and the holds on unknown runs and on unanswered questions. Each says
-// whether the loop goes on; the loop itself does all the waiting.
+// The checks the loop (loop.ts) makes on every poll before a turn: the delegation, stop-state, and
+// reassignment stop (A1/A2, TECH-5179), the budget, and the holds on unknown runs and on unanswered
+// questions. Each says whether the loop goes on; the loop itself does all the waiting.
 
 /** What the checks act through: the loop's options, ports, task state, and its log and save. */
 export type PollContext = {
@@ -23,8 +24,8 @@ export type PollContext = {
 /** The budget as this poll sees it, and the current window's budget question if Linear has it. */
 export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budgetKey: string; budgetAsked: AgentComment | undefined };
 
-/** A1/A2: why the task stops for good, once the stop is recorded (cancel.ts); undefined to go on. */
-export async function checkStop(conversation: Conversation, runs: RunRecord[], { opts, deps }: PollContext): Promise<string | undefined> {
+/** A1/A2, and the owner's reassignment: why the task stops for good, once the stop is recorded (cancel.ts); undefined to go on. */
+export async function checkStop(conversation: Conversation, runs: RunRecord[], { opts, deps, state }: PollContext): Promise<string | undefined> {
   // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer
   // (A1), or that a human moved to Backlog, Canceled, or Done (A2), is not Sergeant's to work on, and
   // its task stops for good (cancel.ts). Done after the worker's closing PR merged is the task's
@@ -37,6 +38,13 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
   if (!active.allowed && !finished) {
     await recordStop(opts.dir, stopReason(conversation.issue));
     return active.reason;
+  }
+  // TECH-5179 (owner.ts): the issue no longer assigned to the owner the task was admitted for stops it
+  // the same way, so token ownership never moves mid-task.
+  const moved = active.allowed && state.owner ? reassigned(state.owner, conversation.issue) : undefined;
+  if (moved) {
+    await recordStop(opts.dir, moved);
+    return moved;
   }
   return undefined;
 }

@@ -20,7 +20,7 @@ const conversation: Conversation = {
     description: "",
     state: "Done",
     stateType: "completed",
-    delegate: { id: "agent-v2", name: "Sergeant" },
+    delegate: { id: "agent-v2", name: "Sergeant" }, assignee: { id: "user-ann", name: "Ann" },
     linkedPullRequests: [{ repo, number: 7 }],
   },
   humanComments: [],

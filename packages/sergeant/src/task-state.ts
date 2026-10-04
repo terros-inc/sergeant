@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
+import { join } from "node:path";
 import {
   BudgetStatus,
   conversationRevision,
@@ -166,4 +167,16 @@ export async function readTaskState(file: string, window: BudgetWindow = DEFAULT
   const stored = JSON.parse(raw) as { budget?: object };
   // A task saved before it had a window adopts the one it is resumed with, once.
   return TaskState.parse({ ...stored, budget: { window, ...stored.budget } });
+}
+
+/**
+ * Sets aside the `state.json` in `dir` of a task seen through after its merge, which intake never
+ * resumes: its issue delegated in Todo again was reopened, a new episode (07 §9) whose owner is
+ * admitted afresh (TECH-5179). True when it did.
+ */
+export async function setAsideCompleted(dir: string): Promise<boolean> {
+  const completedAt = (await readTaskState(join(dir, "state.json")).catch(() => undefined))?.merged?.completedAt;
+  if (!completedAt) return false;
+  await rename(join(dir, "state.json"), join(dir, `state.completed-${completedAt.replace(/[:.]/g, "-")}.json`));
+  return true;
 }

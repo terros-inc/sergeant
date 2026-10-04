@@ -29,7 +29,7 @@ How it fits together:
   instance role at startup, as it does on a laptop (`secretResolver`), and holds them in memory.
 - **Runs cannot reach the instance role.** IMDSv2 is required with a hop limit of 1, so a Docker
   container, one hop further away, cannot get instance credentials. A run's container still gets only
-  the model token and, for a worker, its scoped worker-App token.
+  its task owner's registered model credential and, for a worker, its scoped worker-App token.
 - **State is on the data volume** (`/var/lib/sergeant/state`: `tasks/`, `runs/`, `service.lock`). It
   survives an instance replacement and Terraform refuses to destroy it (`prevent_destroy`).
 - **Only `/health`, `/v1`, and the two webhook endpoints are public.** `serve` listens on
@@ -189,12 +189,16 @@ To go back, remove `runners` (or set the role to `claude-code-local`) and update
 
 Workers and reviewers run only on model accounts people register with `sgt`, and each task only on its
 owner's: the issue's human assignee, who must also be the one who delegated it to Sergeant
-(`packages/sergeant/src/owner.ts`). The model token serves reasoning only, and the config's
-`modelAccounts` (TECH-5113) is ignored, with a warning at startup: remove it, and have each person
-register their own. Each launch runs on the owner's account with the most weekly capacity left whose
-5-hour window is at least 20% (`packages/runner/README.md`). Every run records its `account`, and
-`sgt account list` shows what each one paid for. An owner with no registered account, or none usable,
-gets a comment on the issue saying what to do, and nothing starts.
+(`packages/sergeant/src/owner.ts`); reassigning the issue stops the task. The model token is
+Sergeant's system account: it runs reasoning, retros, and system-health work only, never a worker or
+reviewer (not even the post-merge audit), so Sergeant can still tell an owner what is wrong when their
+accounts are spent. The config's `modelAccounts` (TECH-5113) is ignored, with a warning at startup:
+remove it, and have each person register their own Terros company seat (for example Claude Team or
+ChatGPT Team), not a personal subscription (TECH-5129). Each launch runs on the owner's usable account
+with the most weekly capacity left, skipping one whose 5-hour window is under 20% while another is
+usable (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
+what each one paid for. An owner with no registered account, or none usable, gets a comment on the
+issue saying what to do, and nothing starts.
 
 1. **Registration is required.** Without it no run can start.
  Create one secret with the value `{"accounts":[]}`, for example

@@ -1,16 +1,28 @@
-import type { LinearPerson, LinearPort, NoModelAccount, StartedRun, TaskOwnerCheck } from "@terros/sergeant-contracts";
+import type { Conversation, LinearPerson, LinearPort, NoModelAccount, TaskOwnerCheck } from "@terros/sergeant-contracts";
 
 // Who pays for a task's model usage (TECH-5179). A task belongs to one human: the issue's assignee,
 // admitted only when Linear's history shows that same person most recently delegated it to Sergeant,
 // so nobody can assign an issue to someone else and delegate it to spend that person's quota. The
-// owner is recorded in the task's `state.json` on admission and never changes for that task: a
-// reassignment while it runs moves no quota, and an issue stopped and delegated again is a new task
-// that is checked afresh. Every worker and reviewer runs only on the owner's registered accounts
-// (runner `accounts.ts`). Each refusal is said once on the issue per condition, keyed by what Linear
-// showed, so a reconciliation poll never repeats it.
+// owner is recorded in the task's `state.json` on admission and never changes for that task: the
+// issue reassigned while it is active stops it like an undelegation, so no quota moves mid-task, and
+// the new assignee delegates it again to start a new task, checked afresh like any other. Every worker
+// and reviewer runs only on the owner's registered accounts (runner `accounts.ts`). Each refusal is
+// said once on the issue per condition, keyed by what Linear showed, so a poll never repeats it.
 
 /** The task's owner as `state.json` records it: who, and when the task was admitted for them. */
 export type TaskOwner = LinearPerson & { admittedAt: string };
+
+/**
+ * Why a task stops because its issue is no longer assigned to its owner (poll-checks.ts), as the end
+ * of a sentence; undefined while it is. Read from the live issue every poll, so it holds after a
+ * missed webhook or a restart too.
+ */
+export function reassigned(owner: LinearPerson, issue: Conversation["issue"]): string | undefined {
+  const now = issue.assignee;
+  if (now?.id === owner.id) return undefined;
+  const to = now ? `reassigned from ${owner.name} to ${now.name}` : `unassigned from ${owner.name}`;
+  return `the Linear issue was ${to}, and a task's model usage never moves to another person mid-task`;
+}
 
 /** What a refusal tells the humans on the issue, and the key that keeps it to one comment per condition. */
 export function ownerRefusal(issueId: string, check: Exclude<TaskOwnerCheck, { owner: LinearPerson }>): { key: string; body: string } | undefined {
@@ -72,15 +84,5 @@ export function accountRefusal(issueId: string, owner: TaskOwner, e: NoModelAcco
   return {
     key,
     body: `Sergeant starts no new runs: ${e.message}. ${owner.name}: register or fix another model account with \`sgt account register <claude-code-local|codex-local>\`, ${wake}.`,
-  };
-}
-
-/** The warning when a run starts on the owner's only usable account below the 5-hour floor; one per account per 5-hour window. */
-export function lowQuotaWarning(issueId: string, owner: TaskOwner, low: NonNullable<StartedRun["lowQuota"]>, runId: string): { key: string; body: string } {
-  const left = Math.round(low.fiveHourPercent * 10) / 10;
-  const resets = low.resetsAt ? ` until it resets at ${low.resetsAt}` : "";
-  return {
-    key: `owner-low-quota:${issueId}:${low.accountId}:${low.resetsAt ?? runId}`,
-    body: `Heads up, ${owner.name}: Sergeant is running this task on \`${low.accountId}\`, your only usable model account, with ${left}% of its 5-hour window left${resets}, so runs may stop short. Registering another account (\`sgt account register <claude-code-local|codex-local>\`) gives Sergeant one to switch to.`,
   };
 }

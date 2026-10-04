@@ -33,7 +33,7 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
   const conversations = new Map<string, Conversation>();
   const conversation = (identifier: string) => {
     const c = conversations.get(identifier) ?? {
-      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: identifier === withPr ? [{ repo: "o/r", number: 1 }] : [] },
+      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: identifier === withPr ? [{ repo: "o/r", number: 1 }] : [] },
       humanComments: [],
       agentComments: [],
     };

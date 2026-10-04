@@ -24,14 +24,19 @@ const quota =
 const pick = (accounts: ModelAccount[], left: Record<string, [number, number]>, more: Partial<Parameters<typeof pickAccount>[0]> = {}) =>
   pickAccount({ owner: ann, accounts, read: quota(left), isSetAside: () => false, role: "worker", configured: "codex-local", workerAdapter: undefined, ...more });
 
-test("the account with the most weekly capacity left among those at the 5-hour floor or above", async () => {
+// The one rule: the most weekly capacity left among the usable accounts, skipping a 5-hour window
+// under 20% while another usable account exists.
+test("the most weekly capacity left, skipping a 5-hour window under the floor while another is usable", async () => {
   const chosen = await pick([claude, codex], { [claude.id]: [83, 90], [codex.id]: [53, 90] });
   expect(chosen).toMatchObject({ account: { id: claude.id }, accountReason: expect.stringContaining("the most weekly left of 2 usable") });
-  expect(chosen.low).toBeUndefined();
   // More week left but its 5-hour window below 20% (exactly, unrounded): the other one.
   expect((await pick([claude, codex], { [claude.id]: [83, 19.9], [codex.id]: [53, 20] })).account.id).toBe(codex.id);
-  // A spent week is never chosen, even with its 5-hour window full.
+  // Every usable account under the floor: still the most weekly left, rather than refusing the task.
+  const thin = await pick([claude, codex], { [claude.id]: [70, 12], [codex.id]: [80, 5] });
+  expect(thin).toMatchObject({ account: { id: codex.id }, accountReason: expect.stringContaining("every usable account under the 20% 5-hour floor") });
+  // A spent window is never chosen, even with the other one full.
   expect((await pick([claude, codex], { [claude.id]: [0, 100], [codex.id]: [10, 90] })).account.id).toBe(codex.id);
+  expect((await pick([claude, codex], { [claude.id]: [90, 0], [codex.id]: [10, 5] })).account.id).toBe(codex.id);
 });
 
 test("a reviewer prefers an account of another provider than its worker's, and says when it shares it", async () => {
@@ -39,23 +44,15 @@ test("a reviewer prefers an account of another provider than its worker's, and s
   const reviewer = await pick([claude, codex], left, { role: "reviewer", workerAdapter: "claude-code-local" });
   expect(reviewer.account.id).toBe(codex.id);
   expect(reviewer.providerChoice?.sameProviderAsWorker).toBeUndefined();
-  // The other provider below the floor: the worker's own, marked.
+  // The other provider skipped for its 5-hour window: the worker's own, marked.
   const shared = await pick([claude, codex], { ...left, [codex.id]: [43, 5] }, { role: "reviewer", workerAdapter: "claude-code-local" });
   expect(shared).toMatchObject({ account: { id: claude.id }, providerChoice: { sameProviderAsWorker: true } });
 });
 
-// The owner's rule: a thin account still runs rather than refusing the task, and the owner is told.
-test("the owner's only usable account below the 5-hour floor runs, flagged for a warning", async () => {
-  const chosen = await pick([claude, codex], { [claude.id]: [70, 12], [codex.id]: [0, 90] });
-  expect(chosen).toMatchObject({ account: { id: claude.id }, low: { fiveHourPercent: 12, resetsAt: "2026-10-04T15:00:00.000Z" } });
-  expect(chosen.accountReason).toMatch(/below it/);
-});
-
-test("an account whose quota cannot be read runs only when none is known usable, the configured provider's first", async () => {
-  expect((await pick([claude, codex], { [codex.id]: [10, 15] })).account.id).toBe(codex.id);
+test("an account whose quota cannot be read is usable after every known one, the configured provider's first", async () => {
+  expect((await pick([claude, codex], { [codex.id]: [10, 90] })).account.id).toBe(codex.id);
   const unknown = await pick([claude, codex], {}, { configured: "claude-code-local" });
   expect(unknown).toMatchObject({ account: { id: claude.id }, accountReason: expect.stringContaining("quota unknown (usage endpoint answered 401)") });
-  expect(unknown.low).toBeUndefined();
 });
 
 // A run that failed on an account's quota or login moves the next launch to another of the owner's

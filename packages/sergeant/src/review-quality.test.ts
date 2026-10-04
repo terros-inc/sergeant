@@ -89,7 +89,7 @@ async function scenario(opts: {
     JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: opts.runs.map((r) => r.runId), recentTurns: [] }),
   );
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", ...(opts.mergedOnGitHub ? done : inProgress), delegate: opts.delegated === false ? null : agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", ...(opts.mergedOnGitHub ? done : inProgress), delegate: opts.delegated === false ? null : agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };

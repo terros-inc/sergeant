@@ -26,7 +26,7 @@ const conversation: Conversation = {
     description: "D",
     state: "In Progress",
     stateType: "started",
-    delegate: { id: "agent-v2", name: "Sergeant" },
+    delegate: { id: "agent-v2", name: "Sergeant" }, assignee: { id: "user-ann", name: "Ann" },
     linkedPullRequests: [{ repo: "trevorallred/canary", number: 7 }],
   },
   humanComments: [],

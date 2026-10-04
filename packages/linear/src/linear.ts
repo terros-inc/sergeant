@@ -151,6 +151,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
           state: first.state.name,
           stateType: first.state.type,
           delegate: first.delegate,
+          assignee: first.assignee,
           linkedPullRequests: linkedPullRequests(first.attachments.nodes),
           // Only a human's: Sergeant's own, and an integration's with no creator, are not human input.
           attachments: first.attachments.nodes
