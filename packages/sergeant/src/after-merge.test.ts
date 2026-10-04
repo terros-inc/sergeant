@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import type { BudgetStatus, Conversation, PullRequestFacts } from "@terros/sergeant-contracts";
+import { NoModelAccount, type BudgetStatus, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
 import { drawAudit } from "./after-merge.ts";
 import type { Ports } from "./execute.ts";
 import type { TaskState } from "./task-state.ts";
@@ -59,12 +59,13 @@ const merged = (): NonNullable<TaskState["merged"]> => ({
   at: "2026-10-03T00:01:00.000Z",
 });
 
+const posted: Parameters<LinearPort["postComment"]>[0][] = [];
 const deps = (readPullRequest: Ports["github"]["readPullRequest"], start: Ports["runner"]["start"]): Ports =>
   ({
     agentUserId: "agent-v2",
     workerLogin: "sergeant-worker[bot]",
     owner: { id: "user-ann", name: "Ann", admittedAt: "2026-10-04T00:00:00.000Z" },
-    linear: { readConversation: async () => conversation },
+    linear: { readConversation: async () => conversation, postComment: async (c: Parameters<LinearPort["postComment"]>[0]) => void posted.push(c) },
     github: { readPullRequest },
     runner: { start },
   }) as unknown as Ports;
@@ -104,4 +105,17 @@ test("a failed audit runner start is logged as a start failure", async () => {
   expect(state.audit).toBeUndefined();
   expect(state.auditDrawnAt).toBeTypeOf("string");
   expect(logs).toEqual([`audit review ${runId} failed to start: runner unavailable`]);
+});
+
+test("a sampled audit the owner has no usable account for tells the owner on the issue, once per condition", async () => {
+  posted.length = 0;
+  const ann = { id: "user-ann", name: "Ann" };
+  const start = vi.fn<Ports["runner"]["start"]>().mockRejectedValue(new NoModelAccount(ann, "none_usable", ["acct-1"], "every one of Ann's model accounts is spent"));
+  const { state } = await draw(async () => pr, start);
+  await draw(async () => pr, start);
+
+  expect(state.audit).toBeUndefined();
+  expect(posted).toHaveLength(2);
+  expect(posted[0]?.body).toMatch(/register or fix another model account/);
+  expect(posted[1]?.key).toBe(posted[0]?.key);
 });

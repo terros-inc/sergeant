@@ -1,7 +1,7 @@
 import { appendFile, stat } from "node:fs/promises";
-import { checkBudget, checkDelegation, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { checkBudget, checkDelegation, NoModelAccount, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { outcomeComment } from "./outcome.ts";
-import { reassigned } from "./owner.ts";
+import { accountRefusal, reassigned } from "./owner.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions, LoopResult, TaskState } from "./loop.ts";
 import { approvedHead, auditDrawn, implementerOf, type ReviewFacts, reviewFacts } from "./review-quality.ts";
@@ -151,7 +151,13 @@ export async function drawAudit(
             merged.audit = { runId };
             log(`audit review ${runId} started for ${head.repo}#${head.number} (nonblocking: the merge is done)`);
           })
-          .catch((e: Error) => log(`audit review ${runId} failed to start: ${e.message}`));
+          .catch(async (e: Error) => {
+            log(`audit review ${runId} failed to start: ${e.message}`);
+            // The owner is told once per condition what to fix, as for any other start (owner.ts).
+            if (!(e instanceof NoModelAccount)) return;
+            const refusal = accountRefusal(conversation.issue.id, owner, e);
+            await deps.linear.postComment({ issueId: conversation.issue.id, ...refusal }).catch((p: Error) => log(`could not post the model-account refusal: ${p.message}`));
+          });
       }
     }
   }
