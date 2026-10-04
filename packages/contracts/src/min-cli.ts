@@ -10,7 +10,7 @@
 // (`sgt --version`). A value a few commits low only lets those commits' clients through; a value too
 // high refuses current ones.
 
-export const MIN_CLI_VERSION = "2.1.66";
+export const MIN_CLI_VERSION = "2.1.68";
 export const MIN_CLI_HEADER = "Sergeant-Min-Cli-Version";
 export const CLI_VERSION_HEADER = "Sergeant-Cli-Version";
 export const CLI_TOO_OLD = "Your sgt is older than this Sergeant server supports. Run `sgt update`.";

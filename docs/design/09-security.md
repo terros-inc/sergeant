@@ -82,9 +82,13 @@ build, secure, and keep working as the CLIs change. Instead, registration says p
 credential is used inside worker containers, can be exposed if a run is compromised, and how to remove
 it and rotate the token (11, `sgt account register`), and removal says again where to revoke it.
 
-**End state.** The exception ends when a run no longer shares a container with a token it could copy:
-isolated containers per user, so only the token's owner's own runs could ever reach it, or a broker that
-holds the token outside the container so workers never see the bearer. Either retires this section.
+**End state.** Two steps, with different effects:
+
+- **Isolated containers per user** remove cross-user exposure: no run, however compromised, can reach a
+  colleague's token, even co-resident (§4). They do not retire this exception, because the owner's
+  token is still inside the owner's own runs, and a compromised one can still copy it.
+- **A broker**, or any design that keeps the bearer outside the worker process (a proxy that holds the
+  token and forwards model calls), so no run ever sees it, is what retires this section.
 
 **What would change the decision.** Revisit it, with a broker or per-account isolation as the likely
 answer, when any of these holds:

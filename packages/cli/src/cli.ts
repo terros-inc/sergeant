@@ -214,7 +214,7 @@ const commands: Record<string, Command> = {
     args: 1,
     run: async (ctx, [name]) => {
       const res = await call(ctx, "POST", "/v1/accounts/remove", RemoveAccountResponse, { name });
-      print(ctx, res, () => (res.removed ? `removed your account ${res.name}.${res.notice ? ` ${res.notice}` : ""}` : `you have no registered account named ${res.name}`));
+      print(ctx, res, () => (res.removed ? `removed your account ${res.name}. ${res.notice ?? "It does not revoke a copy a run may have taken: revoke the credential with the provider too."}` : `you have no registered account named ${res.name}`));
     },
   },
   "admin account remove-person": {
