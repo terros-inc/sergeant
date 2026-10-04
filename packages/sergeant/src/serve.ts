@@ -50,6 +50,9 @@ const { values } = parseArgs({
 
 const configFile = values.config ?? fail("--config is required");
 const config = await loadConfig(configFile);
+// On the host, Terraform creates the registered-accounts secret and names it here (TECH-5204).
+const hostRegisteredAccounts = process.env.SERGEANT_REGISTERED_ACCOUNTS_SECRET;
+if (!config.registeredAccountsSecret && hostRegisteredAccounts) config.registeredAccountsSecret = hostRegisteredAccounts;
 const configParameterName = values["config-parameter"] ?? process.env.SERGEANT_CONFIG_PARAMETER;
 const parameter = configParameterName ? configParameter(config, configParameterName) : undefined;
 const log = (line: string) => console.log(`[${new Date().toISOString()}] ${line}`);

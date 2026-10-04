@@ -51,8 +51,8 @@ resource "aws_security_group" "host" {
   }
 }
 
-# --- Identity: SSM, its own log group and config parameter, and get-secret-value on exactly the
-# installation's secrets. ---
+# --- Identity: SSM, its own log group and config parameter, get-secret-value on exactly the
+# installation's secrets, and put-secret-value on the registered-accounts secret only. ---
 
 data "aws_iam_policy_document" "assume_ec2" {
   statement {
@@ -91,15 +91,12 @@ data "aws_iam_policy_document" "host" {
     ]
   }
 
-  # People register their own model accounts through the API (TECH-5113): the host writes this one
-  # secret's value, nothing else, and never creates or deletes a secret.
-  dynamic "statement" {
-    for_each = var.registered_accounts_secret == null ? [] : [var.registered_accounts_secret]
-    content {
-      sid       = "WriteRegisteredAccounts"
-      actions   = ["secretsmanager:PutSecretValue"]
-      resources = ["arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:${statement.value}-??????"]
-    }
+  # People register their own model accounts through the API (TECH-5113): the host reads and writes
+  # this one secret's value, nothing else, and never creates or deletes a secret.
+  statement {
+    sid       = "ReadWriteRegisteredAccounts"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]
+    resources = [aws_secretsmanager_secret.registered_accounts.arn]
   }
 
   statement {
@@ -129,6 +126,55 @@ data "aws_iam_policy_document" "host" {
     sid       = "WriteOwnLogs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
     resources = [aws_cloudwatch_log_group.host.arn, "${aws_cloudwatch_log_group.host.arn}:*"]
+  }
+}
+
+# --- The registered-accounts secret (TECH-5204): the model accounts people register with `sgt`. ---
+
+# An installation that created it by hand before TECH-5204 (Terros: sergeant/terros/registered-accounts)
+# has it adopted on the next apply, never recreated; afterwards the import is a no-op. The name filter
+# matches prefixes, so only the exact name counts.
+data "aws_secretsmanager_secrets" "registered_accounts" {
+  filter {
+    name   = "name"
+    values = [var.registered_accounts_secret]
+  }
+}
+
+locals {
+  existing_registered_accounts = toset([
+    for arn in data.aws_secretsmanager_secrets.registered_accounts.arns : arn
+    if replace(arn, "/^.*:secret:(.*)-[A-Za-z0-9]{6}$/", "$1") == var.registered_accounts_secret
+  ])
+}
+
+import {
+  for_each = local.existing_registered_accounts
+  to       = aws_secretsmanager_secret.registered_accounts
+  id       = each.value
+}
+
+resource "aws_secretsmanager_secret" "registered_accounts" {
+  name        = var.registered_accounts_secret
+  description = "Sergeant 2: the model accounts people register with sgt. Written by the host only; holds credentials."
+
+  # Destroying it would drop every registered account.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# The initial value. Its own staging label keeps this version, so Terraform never loses it and puts
+# it again. Only a secret's first version takes AWSCURRENT unasked, so on an adopted secret this
+# version is never current and the host's registrations stay as they are. Terraform never changes
+# the value afterwards: the host owns it.
+resource "aws_secretsmanager_secret_version" "registered_accounts_initial" {
+  secret_id      = aws_secretsmanager_secret.registered_accounts.id
+  secret_string  = jsonencode({ accounts = [] })
+  version_stages = ["sergeant-initial"]
+
+  lifecycle {
+    ignore_changes = [secret_string, version_stages]
   }
 }
 
@@ -177,6 +223,7 @@ resource "aws_instance" "host" {
       "SERGEANT_HOSTNAME=${var.hostname}",
       "SERGEANT_SOURCE_REPOSITORY_URL=${var.source_repository_url}",
       "SERGEANT_CONFIG_PARAMETER=${var.installation_config_parameter}",
+      "SERGEANT_REGISTERED_ACCOUNTS_SECRET=${var.registered_accounts_secret}",
       "SERGEANT_DATA_VOLUME_ID=${aws_ebs_volume.data.id}",
       "SERGEANT_LOG_GROUP=${local.log_group}",
       "AWS_REGION=${var.region}",

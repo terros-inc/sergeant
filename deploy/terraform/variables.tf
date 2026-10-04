@@ -27,24 +27,24 @@ variable "source_repository_url" {
 }
 
 variable "secret_names" {
-  description = "The only Secrets Manager secrets the host may read, by name: every secret reference in the installation config. None is created here."
+  description = "The Secrets Manager secrets the host may read, by name: every secret reference in the installation config except the registered-accounts secret, which is granted on its own. None is created here."
   type        = list(string)
 
   # They become IAM resource patterns, so a wildcard or an ARN here would widen the grant.
   validation {
     condition     = length(var.secret_names) >= 4 && length(var.secret_names) <= 12 && length(distinct(var.secret_names)) == length(var.secret_names) && alltrue([for name in var.secret_names : can(regex("^[A-Za-z0-9/_+=.@-]+$", name))])
-    error_message = "Expected four to twelve distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, the model token, and optionally the Linear and GitHub webhook signing secrets, the Codex credential, the owner's further model accounts, and the registered-accounts secret."
+    error_message = "Expected four to twelve distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, the model token, and optionally the Linear and GitHub webhook signing secrets, the Codex credential, and the owner's further model accounts. The registered-accounts secret need not be listed."
   }
 }
 
 variable "registered_accounts_secret" {
-  description = "The installation config's `registeredAccountsSecret` (TECH-5113), also listed in `secret_names`: the one secret the host may also write, holding the model accounts people register with `sgt`. Null, nobody can register."
+  description = "The secret holding the model accounts people register with `sgt` (TECH-5113), created here as {\"accounts\":[]} or adopted if it exists: the one secret the host may also write. The first boot gives its name to the host, which uses it unless the installation config sets `registeredAccountsSecret`."
   type        = string
-  default     = null
+  default     = "sergeant/v2/registered-accounts"
 
   validation {
-    condition     = var.registered_accounts_secret == null || (can(regex("^[A-Za-z0-9/_+=.@-]+$", var.registered_accounts_secret)) && contains(var.secret_names, var.registered_accounts_secret))
-    error_message = "Expected a literal Secrets Manager name (no wildcards or ARNs) that is also in secret_names."
+    condition     = can(regex("^[A-Za-z0-9/_+=.@-]+$", var.registered_accounts_secret))
+    error_message = "Expected a literal Secrets Manager name (letters, digits, and /_+=.@- only; no wildcards or ARNs)."
   }
 }
 

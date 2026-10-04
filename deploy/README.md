@@ -11,7 +11,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 
 | Path | What it is |
 |---|---|
-| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to twelve with the webhook signing secrets, the Codex credential, and model accounts), and `secretsmanager:PutSecretValue` on only the registered-accounts secret, when one is configured. |
+| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to twelve with the webhook signing secrets, the Codex credential, and model accounts); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
@@ -71,7 +71,9 @@ anything, and the state backend and the provider refuse any other account.
 
    The state bucket already exists; this configuration never creates it. `secret_names` lists every
    secret the config refers to, and nothing else: four literal names, or up to seven with the webhook
-   signing secrets (Webhooks below) and the Codex credential (A Codex reviewer below), which Terraform enforces. To change an input later, put the parameter again and rerun `./init.sh`.
+   signing secrets (Webhooks below) and the Codex credential (A Codex reviewer below), which Terraform enforces.
+   The registered-accounts secret is not one of them: Terraform creates it (Model accounts below).
+   To change an input later, put the parameter again and rerun `./init.sh`.
 2. **Secrets** exist in Secrets Manager under those names: both GitHub Apps' private keys, the Linear
    agent token, and the model token.
 3. **Installation config.** Write it (shape: `host/installation.example.json`; field notes in
@@ -202,12 +204,19 @@ whose quota is furthest ahead of its weekly and 5-hour reset schedule (`packages
 what each one paid for. An owner with no registered account, or none usable, gets a comment on the
 issue saying what to do, and nothing starts.
 
-1. **Registration is required.** Without it no run can start.
- Create one secret with the value `{"accounts":[]}`, for example
-   `sergeant/<installation>/registered-accounts`; add its name to `secret_names` and set
-   `registered_accounts_secret` to it in the infrastructure-config parameter (`./init.sh`, plan, apply:
-   the role may then put that secret's value, and only that one's); and set the installation config's
-   `registeredAccountsSecret` to it. Update.
+1. **Registration is required.** Without it no run can start, and it works out of the box
+   (TECH-5204): Terraform creates the secret `registered_accounts_secret` names
+   (`sergeant/v2/registered-accounts` by default) with the value `{"accounts":[]}`, lets the role
+   read and put that secret's value, and only that one's, and the first boot gives its name to the
+   host, where `serve` uses it unless the installation config sets `registeredAccountsSecret`.
+   Terraform never changes the value afterwards: the host owns it, and the initial value stays in
+   a version labelled `sergeant-initial`, never current once someone registers.
+   - **An existing secret** (made by hand before TECH-5204; Terros:
+     `sergeant/terros/registered-accounts`) is adopted, not recreated: with `registered_accounts_secret`
+     naming it, the next plan shows it imported (its description and tags updated in place) and a
+     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` or leave it.
+   - **Another name, later**: the host keeps the name from its first boot (Apply below), so also set
+     `registeredAccountsSecret` in the installation config and update.
 2. **Check.** Someone in `humans.teams` runs `sgt account register claude` (or `codex`), which signs
    them in with the provider's own CLI: it answers with the quota it read with the credential, and
    `sgt account list` shows the account as theirs. They remove it with `sgt account remove claude`. The secret then holds every registered credential:
@@ -232,13 +241,13 @@ Run no Sergeant 1 `apply` after V2's first apply: it would point the record back
 
 ```sh
 EXPECTED_ACCOUNT_ID=<account> ./init.sh   # the inputs and state location, from the parameter
-terraform plan -out tfplan     # first apply: the A record import (if any) and 10 new resources
+terraform plan -out tfplan     # first apply: the A record import (if any) and 12 new resources
 terraform apply tfplan
 ```
 
 `ami` and `user_data` are ignored after creation, so a newer Ubuntu image or an edited first-boot
 template never replaces the running host; the values written to `/etc/sergeant/host.env` (hostname,
-source repository, config parameter) are fixed then too. To change them, or to deliberately rebuild
+source repository, config parameter, registered-accounts secret) are fixed then too. To change them, or to deliberately rebuild
 the host, `terraform apply -replace=aws_instance.host`; the data volume and its state are reattached.
 
 ### Bootstrap

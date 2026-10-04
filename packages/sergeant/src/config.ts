@@ -159,8 +159,9 @@ export const InstallationConfig = z.strictObject({
     .default([]),
   /**
    * Secrets Manager id of the one secret that holds the accounts people register with `sgt account
-   * register` (TECH-5113), created by the operator as `{"accounts":[]}`; the host must be able to put
-   * its value. Absent, nobody can register an account.
+   * register` (TECH-5113), holding `{"accounts":[]}` at first; the host must be able to put its value.
+   * On the host, Terraform creates it and `serve` defaults to it (`SERGEANT_REGISTERED_ACCOUNTS_SECRET`,
+   * TECH-5204). Absent, nobody can register an account.
    */
   registeredAccountsSecret: SecretRef.optional(),
 })
