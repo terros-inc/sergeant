@@ -105,7 +105,7 @@ sgt account register claude                     # your Claude subscription, name
 sgt account register codex                      # your ChatGPT login for Codex, named "codex"
 sgt account register claude --name claudeWork   # another one, under a name of yours
 sgt account list                                # every account: name, provider, whose, the runs it paid for
-sgt account remove claudeWork                   # remove yours; runs already on it finish on it
+sgt account remove claudeWork                   # remove yours, then revoke it where it says
 ```
 
 - **Signing in.** `register` runs the provider's own sign-in on your terminal: for `claude`,
@@ -120,16 +120,16 @@ sgt account remove claudeWork                   # remove yours; runs already on 
   interchangeable to Sergeant: each run takes the one with the most weekly capacity left as above, and
   one that fails on quota or authentication is set aside for an hour so the next run takes another.
 
-- **Register your Terros company seat** (for example Claude Team or ChatGPT Team), not a personal
-  subscription: whether personal plans may run Terros work is not settled (TECH-5129). `register`
-  says so each time; nothing enforces it.
+- Any of your subscriptions may be registered, personal or company-paid (TECH-5198).
 - The credential is never an argument, and is kept only in the installation's Secrets Manager.
   Sergeant checks it by reading its quota before storing it.
 - **Your credential is used inside Sergeant's worker and reviewer containers** while a run works on it,
   so a compromised or prompt-injected run could copy it. `sgt account remove` stops Sergeant using it
-  but does not revoke a copy: to rotate it, revoke the token in your Claude account settings and make a
-  new one with `claude setup-token`, or sign out of all ChatGPT sessions and `codex login` again.
-  `register` says this each time. This risk is accepted on purpose (design/09-security.md §3a).
+  (runs already on it finish on it) but does not revoke a copy, so it tells you where to revoke it: for
+  Claude, revoke the `claude setup-token` token in your claude.ai settings (the Claude Code section
+  lists them); for Codex, in ChatGPT open Settings → Security and choose Log out of all devices. Then
+  register a new one if you want. `register` warns about this each time. This risk is accepted on
+  purpose until runs move to per-user isolation (design/09-security.md §3a).
 - You can only register or remove your own account. `sgt run show <run>` says which account a run used.
 - **Only your own tasks spend it** (TECH-5179): an issue assigned to you that you delegated to Sergeant
   yourself. Someone else delegating an issue assigned to you is refused with a comment; assign it to

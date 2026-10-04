@@ -56,21 +56,30 @@ export async function accountsRoute(
     return ok({ account: { ...res.account, mine: true }, replaced: res.replaced, quota: res.quota, notice: exposureNotice(adapter, name) } satisfies RegisterAccountResponse);
   }
   const { name } = parse(RemoveAccountRequest, await body(req));
-  return ok({ name, removed: await refusing(registry.remove(me, name)) } satisfies RemoveAccountResponse);
+  const removed = await refusing(registry.remove(me, name));
+  return ok({ name, removed: removed !== undefined, ...(removed && { notice: removalNotice(removed, name) }) } satisfies RemoveAccountResponse);
 }
 
-// Told to everyone who registers: register a company seat, not a personal plan (TECH-5179, TECH-5129;
-// notice only, nothing enforces it), and the accepted risk (09 §3a): a run's model credential is in its
-// container, so a compromised run can copy it, and removing it from Sergeant does not revoke a copy.
-const ROTATE: Record<AccountAdapter, string> = {
-  "claude-code-local": "revoke the token in your Claude account settings and make a new one with `claude setup-token`",
-  "codex-local": "sign out of all ChatGPT sessions in your ChatGPT security settings and `codex login` again",
+// The accepted risk (09 §3a), told at registration and again at removal: a run's model credential is in
+// its container, so a compromised run can copy it, and removing it from Sergeant does not revoke a copy.
+// Neither provider documents a revoke Sergeant could call with the stored credential (TECH-5198), so
+// removal tells the person where to revoke it themselves.
+const REVOKE: Record<AccountAdapter, string> = {
+  "claude-code-local": "in your claude.ai settings, revoke the token `claude setup-token` made (the Claude Code section lists them)",
+  "codex-local": "in ChatGPT, open Settings → Security and choose Log out of all devices",
+};
+const RENEW: Record<AccountAdapter, string> = {
+  "claude-code-local": "make a new one with `claude setup-token`",
+  "codex-local": "`codex login` again",
 };
 
 export const exposureNotice = (adapter: AccountAdapter, name: string): string =>
-  `Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription: whether personal plans may run Terros work is not settled (TECH-5129). ` +
   `Your credential is used inside Sergeant's worker and reviewer containers while runs work on it, so it could be exposed if a run is compromised, for example by prompt injection. ` +
-  `To stop Sergeant using it, run \`sgt account remove ${name}\`. That does not revoke a copy: to rotate it, ${ROTATE[adapter]}.`;
+  `To stop Sergeant using it, run \`sgt account remove ${name}\`. That does not revoke a copy: to rotate it, ${REVOKE[adapter]}, and ${RENEW[adapter]}.`;
+
+const removalNotice = (adapter: AccountAdapter, name: string): string =>
+  `Sergeant starts no new run on ${name}; runs already on it finish on it. A run could have copied it, and removing it here does not revoke that copy: ` +
+  `revoke it with the provider now: ${REVOKE[adapter]}.`;
 
 const refusing = <T>(p: Promise<T>): Promise<T> =>
   p.catch((e: Error) => {

@@ -66,9 +66,9 @@ async function serve(runs: RunRecord[] = []) {
   server = createServer(apiHandler(ctl));
   await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
-  const call = (method: string, path: string, as?: string, body?: unknown) =>
+  const call = (method: string, path: string, as?: string, body?: unknown, cli = MIN_CLI_VERSION) =>
     new Promise<{ status: number; json: any; text: string }>((resolve, reject) => {
-      const headers = { [CLI_VERSION_HEADER]: MIN_CLI_VERSION, ...(body !== undefined && { "Content-Type": "application/json" }), ...(as && { Authorization: `Bearer ${as}` }) };
+      const headers = { [CLI_VERSION_HEADER]: cli, ...(body !== undefined && { "Content-Type": "application/json" }), ...(as && { Authorization: `Bearer ${as}` }) };
       const req = request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
         let text = "";
         res.on("data", (d: Buffer) => (text += d.toString()));
@@ -92,7 +92,6 @@ test("a person registers, replaces, and removes only their own account, and its 
   // The accepted exposure (09 §3a) is said at registration: where the credential goes, that it can leak, and the way out.
   const { notice } = registered.json;
   expect(notice).toContain("inside Sergeant's worker and reviewer containers");
-  expect(notice).toContain("Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription");
   expect(notice).toContain("could be exposed if a run is compromised");
   expect(notice).toContain("`sgt account remove claude`");
   expect(notice).toContain("`claude setup-token`");
@@ -111,7 +110,13 @@ test("a person registers, replaces, and removes only their own account, and its 
   expect(await call("POST", "/v1/accounts/register", "ada", { provider: "codex", name: "codex", credential: "{}" })).toMatchObject({ status: 400 });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([expect.objectContaining({ credential: "sk-ant-oat01-ada-new" })]);
 
-  expect(await call("POST", "/v1/accounts/remove", "ada", { name: "claude" })).toMatchObject({ status: 200, json: { removed: true } });
+  // Removal says again that it does not revoke a copy a run took, and where to revoke it with the provider (TECH-5198).
+  // An sgt from before that would drop the notice, so it is refused before anything is removed.
+  expect(await call("POST", "/v1/accounts/remove", "ada", { name: "claude" }, "2.1.66")).toMatchObject({ status: 400 });
+  expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toHaveLength(1);
+  const removed = await call("POST", "/v1/accounts/remove", "ada", { name: "claude" });
+  expect(removed).toMatchObject({ status: 200, json: { removed: true, notice: expect.stringContaining("does not revoke that copy") } });
+  expect(removed.json.notice).toContain("in your claude.ai settings, revoke the token `claude setup-token` made");
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([]);
 
   for (const said of [registered.text, listed.text, refused.text, ...logs]) expect(said).not.toMatch(/sk-ant-oat01-(ada|expired)/);

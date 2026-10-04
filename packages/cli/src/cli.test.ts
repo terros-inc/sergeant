@@ -279,6 +279,14 @@ test("account register sends the piped or signed-in credential under its name an
   expect(list.out).toMatch(/codex\s+codex\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
 });
 
+// TECH-5198: removing an account passes on where to revoke it, since removal does not revoke a copy.
+test("account remove prints the server's revoke reminder", async () => {
+  const notice = "A run could have copied it, and removing it here does not revoke that copy: revoke it with the provider now: in ChatGPT, open Settings → Security and choose Log out of all devices.";
+  const { api, seen } = await fakeApi({ "POST /v1/accounts/remove": { json: { name: "codex", removed: true, notice } } });
+  expect(await sgt(api, "account", "remove", "codex")).toMatchObject({ code: 0, out: expect.stringContaining(`removed your account codex. ${notice}`) });
+  expect(seen.map((s) => [s.method, s.url, JSON.parse(s.body)])).toEqual([["POST", "/v1/accounts/remove", { name: "codex" }]]);
+});
+
 // TECH-5130: a three-word command, sending the person's Linear user id in the body.
 test("admin account remove-person posts the user id and says what it removed", async () => {
   const { api, seen } = await fakeApi({

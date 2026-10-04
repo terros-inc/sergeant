@@ -108,11 +108,11 @@ export function accountRegistry(opts: {
       return { account: listed(entry), replaced, quota };
     },
 
-    /** Removes the person's own account named `accountName`; false when they had none. */
-    async remove(person: Pick<Person, "id" | "name">, accountName: string): Promise<boolean> {
+    /** Removes the person's own account named `accountName`; its adapter, or undefined when they had none. */
+    async remove(person: Pick<Person, "id" | "name">, accountName: string): Promise<AccountAdapter | undefined> {
       const removed = await change(async (current) => {
-        const next = current.filter((e) => !(e.userId === person.id && e.accountName === accountName));
-        return { next, result: next.length < current.length };
+        const mine = (e: Entry) => e.userId === person.id && e.accountName === accountName;
+        return { next: current.filter((e) => !mine(e)), result: current.find(mine)?.adapter };
       });
       if (removed) opts.log(`${person.name} removed their model account ${accountName}`);
       return removed;
