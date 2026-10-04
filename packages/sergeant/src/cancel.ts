@@ -213,7 +213,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
         await deps.linear.postComment({
           issueId: issue.id,
           key: `cancel-stalled:${issue.id}:${intent.requestId}`,
-          body: stalledStopComment(uncanceled, stalledForMinutes),
+          body: stalledStopComment(uncanceled, stalledForMinutes, intent.handoff !== undefined),
         });
         intent.unreadableStatusSurfaced = true;
         await writeIntent(dir, intent);
@@ -229,10 +229,11 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open, unless
   // this is a handoff, which keeps them for whoever continues the work.
   const { issue } = await deps.linear.readConversation(ref);
-  const open = await openPullRequests(issue.linkedPullRequests, runs, enrolled, deps);
+  const prs = await taskPullRequests(issue.linkedPullRequests, runs, enrolled, deps);
+  const open = prs.filter((p) => p.state === "open");
   if (intent.handoff) {
     const done = await handOff(issue, intent.handoff, deps, log);
-    await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: handoffComment(intent.reason, issue, open, done, unreadablePastGrace) });
+    await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: handoffComment(intent.reason, issue, prs, done, unreadablePastGrace) });
   }
   for (const pr of intent.handoff ? [] : open.filter((p) => p.author === deps.workerLogin)) {
     const key = prCloseKey(pr);
@@ -257,16 +258,17 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
 const prCloseKey = (pr: Pick<PullRequestFacts, "repo" | "number" | "headSha">) => `close-pr:${pr.repo}#${pr.number}:${pr.headSha}`;
 
 /**
- * The task's PRs still open: those Linear links to the issue or its workers reported, in enrolled
- * repositories. Only those the worker App opened are Sergeant's to close; a human's never is.
+ * The task's PRs in any state: those Linear links to the issue or its workers reported, in enrolled
+ * repositories. Of those still open, only those the worker App opened are Sergeant's to close; a
+ * human's never is. A handoff links them all.
  */
-async function openPullRequests(linked: PullRequestRef[], runs: RunRecord[], enrolled: RepoSlug[], deps: Ports): Promise<PullRequestFacts[]> {
+async function taskPullRequests(linked: PullRequestRef[], runs: RunRecord[], enrolled: RepoSlug[], deps: Ports): Promise<PullRequestFacts[]> {
   const reported = runs.flatMap((run) => (run.role === "worker" ? (run.report?.pullRequests ?? []) : []));
   const refs = new Map(
     [...linked, ...reported].filter((p) => enrolled.includes(p.repo)).map((p) => [`${p.repo}#${p.number}`, { repo: p.repo, number: p.number }]),
   );
   const prs = await Promise.all([...refs.values()].map((r) => deps.github.readPullRequest(r.repo, r.number)));
-  return prs.filter((p) => p.state === "open");
+  return prs;
 }
 
 /**
@@ -299,11 +301,13 @@ async function handOff(issue: Conversation["issue"], handoff: Handoff, deps: Por
 function handoffComment(
   reason: string,
   issue: Conversation["issue"],
-  open: PullRequestFacts[],
+  prs: PullRequestFacts[],
   done: { completed: boolean; undelegated: boolean; newer: boolean; todo: boolean },
   unreadable: RunId[],
 ): string {
-  const kept = open.length > 0 ? `Its PRs and branches are kept: ${open.map((p) => `[${p.repo}#${p.number}](${p.url})`).join(", ")}.` : "Its branches are kept; it has no open PR.";
+  const kept = prs.length > 0
+    ? `Its PRs and branches are kept: ${prs.map((p) => `[${p.repo}#${p.number}](${p.url})${p.state === "open" ? "" : ` (${p.state})`}`).join(", ")}.`
+    : "Its branches are kept; it has no PR.";
   const missing = unreadable.length > 0 ? ` The final report for ${unreadable.map((id) => `run \`${id}\``).join(", ")} could not be read.` : "";
   const stopped = `Sergeant stopped working on this issue: ${reason}. Its runs are canceled, so they spend no more of the previous owner's model quota.${missing}`;
   if (done.completed) return `${stopped} Its work is already merged, so the issue is left as it is.`;
@@ -323,8 +327,11 @@ function stopComment(intent: CancelIntent, unreadable: RunId[]): string {
   return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled.${missing} ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
 }
 
-function stalledStopComment(runIds: RunId[], stalledForMinutes: number): string {
-  return `Sergeant has been trying to stop this task for over ${stalledForMinutes} minutes, but the runner has not confirmed the cancellation of ${runIds.map((id) => `run \`${id}\``).join(", ")}. Its PRs stay open and the stop remains pending until every run is confirmed stopped, so none can push to a PR after Sergeant closes it, and Sergeant will not restart this issue while it is pending. To clear it, make sure the runner can cancel those runs; Sergeant will keep retrying automatically.`;
+function stalledStopComment(runIds: RunId[], stalledForMinutes: number, handoff: boolean): string {
+  const prs = handoff
+    ? "The stop remains pending until every run is confirmed stopped; its PRs and branches are kept"
+    : "Its PRs stay open and the stop remains pending until every run is confirmed stopped, so none can push to a PR after Sergeant closes it";
+  return `Sergeant has been trying to stop this task for over ${stalledForMinutes} minutes, but the runner has not confirmed the cancellation of ${runIds.map((id) => `run \`${id}\``).join(", ")}. ${prs}, and Sergeant will not restart this issue while it is pending. To clear it, make sure the runner can cancel those runs; Sergeant will keep retrying automatically.`;
 }
 
 /**

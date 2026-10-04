@@ -66,6 +66,24 @@ test("a reassignment hands off: runs stop, PRs stay open, the issue is Todo and 
   expect(t.seen.closed).toEqual([]);
 });
 
+test("the handoff comment links every existing PR, merged and closed ones too, and never says there is none", async () => {
+  const t = await activeTask();
+  t.live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }, { repo, number: 9 }, { repo, number: 10 }];
+  const states: Record<number, "open" | "merged" | "closed"> = { 7: "merged", 9: "closed", 10: "merged" };
+  const read = t.deps.github.readPullRequest;
+  t.deps.github.readPullRequest = async (r, n) => ({ ...(await read(r, n)), state: states[n] ?? "open" });
+  t.live.conversation.issue.assignee = bob;
+  t.owns(() => ({ refused: "delegator_differs", assignee: bob, delegator: ann, delegatedAt: annDelegated }));
+  await t.loop();
+
+  const [comment] = t.seen.comments;
+  expect(comment?.body).toContain("[o/r#7](https://github.com/o/r/pull/7) (merged)");
+  expect(comment?.body).toContain("[o/r#9](https://github.com/o/r/pull/9) (closed)");
+  expect(comment?.body).toContain("[o/r#10](https://github.com/o/r/pull/10) (merged)");
+  expect(comment?.body).not.toMatch(/no (open )?PR/);
+  expect(t.seen.closed).toEqual([]);
+});
+
 test("a handoff driven after a newer human action leaves it: a newer delegation keeps its delegation, and a state a human chose stays", async () => {
   const t = await activeTask();
   // By the time the stop runs, Bob already delegated it himself and moved it to Todo.
