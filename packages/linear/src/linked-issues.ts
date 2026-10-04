@@ -1,13 +1,11 @@
 import type { Conversation, LinkedIssueBackground } from "@terros/sergeant-contracts";
 
 export const MAX_LINKED_ISSUES = 10;
-export const MAX_LINKED_ISSUE_DESCRIPTION = 8_000;
 
 type LinkedIssue = {
   identifier: string;
   url: string;
   title: string;
-  description: string | null;
   state: { name: string };
 };
 
@@ -43,7 +41,7 @@ export function explicitLinkedIssues(conversation: Pick<Conversation, "issue" | 
   return links;
 }
 
-/** Fetch the bounded explicit set. Linked descriptions are never scanned, enforcing one hop. */
+/** Fetch the bounded explicit set. Descriptions are never read, so no link inside one is followed. */
 export async function readLinkedIssueBackground(
   conversation: Pick<Conversation, "issue" | "humanComments">,
   read: (identifier: string) => Promise<LinkedIssue>,
@@ -56,17 +54,7 @@ export async function readLinkedIssueBackground(
         const issue = await read(link.identifier);
         const issueWorkspace = new URL(issue.url).pathname.split("/").filter(Boolean)[0];
         if (issue.identifier.toUpperCase() !== link.identifier || issueWorkspace !== workspace) throw new Error("linked issue did not match the explicit same-workspace link");
-        const description = issue.description ?? "";
-        const descriptionTruncated = description.length > MAX_LINKED_ISSUE_DESCRIPTION;
-        return {
-          status: "read",
-          identifier: issue.identifier,
-          url: issue.url,
-          title: issue.title,
-          state: issue.state.name,
-          description: description.slice(0, MAX_LINKED_ISSUE_DESCRIPTION),
-          descriptionTruncated,
-        };
+        return { status: "read", identifier: issue.identifier, url: issue.url, title: issue.title, state: issue.state.name };
       } catch (error) {
         log(`could not read linked Linear issue ${link.identifier}: ${error instanceof Error ? error.message : String(error)}`);
         return {
