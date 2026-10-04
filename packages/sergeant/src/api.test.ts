@@ -3,7 +3,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Conversation, RunRecord } from "@terros/sergeant-contracts";
+import { apiContract, type Conversation, type RunRecord } from "@terros/sergeant-contracts";
 import type { LinearUser } from "@terros/sergeant-linear";
 import { linearCallers } from "./auth.ts";
 import { startService, type Service, type ServiceDeps, type ServiceOptions } from "./service.ts";
@@ -104,6 +104,17 @@ test("a wake makes an unchanged task take a turn now, and a task without a deleg
   }, { timeout: 5_000 });
 
   expect(await call(port, "POST", "/v1/tasks/UNF-7/wake", {})).toMatchObject({ status: 409, json: { error: { code: "conflict" } } });
+}, 30_000);
+
+test("every /v1 answer, a refusal too, says Sergeant's version and API contract so a client can tell it differs (TECH-5155)", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
+  const port = await start(fakes().deps, {});
+  for (const path of ["/v1/whoami", "/v1/nothing"]) {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`);
+    expect(res.status).not.toBe(200);
+    expect(res.headers.get("Sergeant-Api-Contract")).toBe(apiContract());
+    expect(res.headers.get("Sergeant-Version")).toMatch(/^\d+\.\d+\.\d+\+/);
+  }
 }, 30_000);
 
 test("a run view includes its provider choice and credential-free account", async () => {

@@ -43,6 +43,22 @@ Every call that changes durable state or an external system is one action throug
 actions have ordered steps and are re-driven until complete (03 §10), so a failure can leave them
 pending, never half-forgotten. Drain and undrain are process-local controls, not actions.
 
+**Version skew (TECH-5155).** `sgt` and `sgt-mcp` run from people's own clones, so they are often
+older or newer than the hosted `serve`. One rule covers it, so a contract change needs no
+compatibility ticket of its own (`packages/contracts/src/skew.ts`):
+
+1. *Visible.* Every `/v1` answer carries `Sergeant-Version` (its git version) and
+   `Sergeant-Api-Contract` (a fingerprint of the `/v1` schemas). A client whose own fingerprint
+   differs, or whose server sends none, warns once per invocation (`sgt`) or in each tool result
+   (`sgt-mcp`). Unequal versions with equal contracts do not warn.
+2. *Additive.* A response may gain fields: an older client ignores them, and rule 1 warns it. Removing
+   or retyping a field, a new enum value an older client must parse, or a new required request field
+   is a breaking change, made deliberately and outside this rule.
+3. *Tolerant.* A client accepts a 2xx answer whose only fault is required fields it lacks, names them,
+   and shows the API's JSON instead of formatting it, so a mutation the server performed is never
+   reported as failed for a field the older server did not know. New response fields are therefore
+   added as required, not optional.
+
 ## 3. Webhooks
 
 | Endpoint | Verified by | Effect |

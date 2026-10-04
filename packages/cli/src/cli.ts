@@ -14,6 +14,8 @@ import {
   RunDetail,
   RunList,
   sergeantVersion,
+  type ServerVersion,
+  skewWarning,
   TaskDetail,
   TaskList,
   WakeResponse,
@@ -65,8 +67,12 @@ export type Io = {
 };
 
 type Flags = { reason?: string | undefined; task?: string | undefined };
-/** `token`: the Linear access token sent as the caller's bearer, when signed in. */
-type Context = { api: string; json: boolean; io: Io; flags: Flags; token?: string | undefined };
+/**
+ * `token`: the Linear access token sent as the caller's bearer, when signed in. `skew`: this
+ * invocation's version-skew state (contracts' skew.ts), shared by every copy of the context: whether
+ * it has warned, and whether an answer lacked fields, so it is printed as the API's JSON.
+ */
+type Context = { api: string; json: boolean; io: Io; flags: Flags; token?: string | undefined; skew: { warned: boolean; partial: boolean } };
 type Command = { args: number; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
 
 class Usage extends Error {}
@@ -254,7 +260,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");
-    const ctx: Context = { api, json, io, flags };
+    const ctx: Context = { api, json, io, flags, skew: { warned: false, partial: false } };
     if (name !== "login" && name !== "logout") {
       ctx.token = await currentToken(io.env, api, io.fetch ?? globalThis.fetch).catch((e: Error) => fail(ctx, "unauthorized", e.message));
     }
@@ -274,8 +280,15 @@ async function request(ctx: Context, method: Method, path: string, body?: object
   return settle(ctx, await client(ctx).request(method, path, body));
 }
 
+/** One call; an answer lacking only fields an older Sergeant never sent is still its answer (skew.ts). */
 async function call<T>(ctx: Context, method: Method, path: string, schema: z.ZodType<T>, body?: object): Promise<T> {
-  return settle(ctx, await client(ctx).call(method, path, schema, body));
+  const res = await client(ctx).call(method, path, schema, body);
+  if (res.ok && res.absent) {
+    ctx.skew.partial = true;
+    const done = method === "POST" ? "it did what was asked, but " : "";
+    ctx.io.err(`sgt: warning: Sergeant at ${ctx.api} answered ${method} ${path} without ${res.absent.join(", ")}: ${done}it is older than this sgt, so its answer is printed as JSON\n`);
+  }
+  return settle(ctx, res);
 }
 
 const client = (ctx: Context) =>
@@ -284,7 +297,15 @@ const client = (ctx: Context) =>
     fetch: ctx.io.fetch,
     token: ctx.token,
     unreachableHint: ". Is serve running there, and is SGT_API_URL the hosted HTTPS endpoint (README.md)?",
+    onSkew: (server) => warnSkew(ctx, server),
   });
+
+/** Once per invocation: the Sergeant answering serves a different API contract than this sgt. */
+function warnSkew(ctx: Context, server: ServerVersion): void {
+  if (ctx.skew.warned) return;
+  ctx.skew.warned = true;
+  ctx.io.err(`sgt: warning: ${skewWarning(ctx.api, server, sergeantVersion().version)}\n`);
+}
 
 const settle = <T>(ctx: Context, res: ApiResult<T>): T => (res.ok ? res.value : fail(ctx, res.error.code, res.error.message));
 
@@ -297,5 +318,5 @@ function fail(ctx: Context, code: ApiError["error"]["code"], message: string): n
 const path = (segment: string | undefined) => encodeURIComponent(segment ?? "");
 
 function print(ctx: Context, value: unknown, human: () => string): void {
-  ctx.io.out(`${ctx.json ? JSON.stringify(value) : human()}\n`);
+  ctx.io.out(`${ctx.json || ctx.skew.partial ? JSON.stringify(value) : human()}\n`);
 }
