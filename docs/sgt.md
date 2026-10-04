@@ -126,8 +126,10 @@ sgt account remove claudeWork                   # remove yours, then revoke it w
 - **Your credential is used inside Sergeant's worker and reviewer containers** while a run works on it,
   so a compromised or prompt-injected run could copy it. `sgt account remove` stops Sergeant using it
   (runs already on it finish on it) but does not revoke a copy, so it tells you where to revoke it: for
-  Claude, revoke the `claude setup-token` token in your claude.ai settings (the Claude Code section
-  lists them); for Codex, in ChatGPT open Settings → Security and choose Log out of all devices. Then
+  Claude, open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the
+  user:inference-scoped token `claude setup-token` made, matching it by its Connected time; for Codex, open
+  https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created
+  (Log out of all devices only if you cannot tell which it is). Then
   register a new one if you want. `register` warns about this each time. This risk is accepted on
   purpose until runs move to per-user isolation (design/09-security.md §3a).
 - You can only register or remove your own account. `sgt run show <run>` says which account a run used.

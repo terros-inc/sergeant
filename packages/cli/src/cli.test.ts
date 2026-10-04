@@ -325,11 +325,11 @@ test("account register asks first, refuses before any sign-in, and says what to 
   expect(failed.code).toBe(1);
   expect(failed.err).toContain("claudeWork was not registered.");
   expect(failed.err).toContain("`pbpaste | sgt account register claude --name claudeWork`");
-  expect(failed.err).toContain("revoke the token `claude setup-token` made");
+  expect(failed.err).toContain("open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference-scoped token `claude setup-token` made");
   expect(failed.out + failed.err).not.toContain("sk-ant-oat01-made");
   const codex = await sgtWith({ signIn }, api, "account", "register", "codex");
-  expect(codex.err).toContain("signs in again. The login itself stays valid with OpenAI until you revoke it: in ChatGPT, open Settings → Security");
-  expect(failed.err).toContain("Settings → Claude Code → Authorization tokens");
+  expect(codex.err).toContain("signs in again. The login itself stays valid with OpenAI until you revoke it: open https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created");
+  expect(failed.err).toContain("https://claude.ai/new#settings/claude-code and, under Authorization tokens");
   // A piped credential is the person's own copy: nothing is stranded.
   expect((await sgtWith({ stdin: async () => "sk-ant-oat01-mine", signIn }, api, "account", "register", "claude")).err).not.toContain("pbpaste");
   await new Promise<void>((resolve) => server?.close(() => resolve()));
@@ -349,12 +349,12 @@ test("account register asks first, refuses before any sign-in, and says what to 
   expect(unknown.err).toContain("`pbpaste | sgt account register claude --name claudeWork`");
   expect(unknown.err).not.toMatch(/sgt account list|was not registered/);
   const codexUnknown = await sgtWith({ signIn }, lost.api, "account", "register", "codex", "--name", "codexWork");
-  expect(codexUnknown.err).toMatch(/so revoke that login: in ChatGPT.*Then, once Sergeant answers, `sgt account register codex --name codexWork` signs in again/);
+  expect(codexUnknown.err).toMatch(/so revoke that login: open https:\/\/chatgpt\.com\/settings\/security\?view=sessions.*Then, once Sergeant answers, `sgt account register codex --name codexWork` signs in again/);
 });
 
 // TECH-5198: removing an account passes on where to revoke it, since removal does not revoke a copy.
 test("account remove prints the server's revoke reminder", async () => {
-  const notice = "A run could have copied it, and removing it here does not revoke that copy: revoke it with the provider now: in ChatGPT, open Settings → Security and choose Log out of all devices.";
+  const notice = "A run could have copied it, and removing it here does not revoke that copy: revoke it with the provider now: open https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created.";
   const { api, seen } = await fakeApi({ "POST /v1/accounts/remove": { json: { name: "codex", removed: true, notice } } });
   expect(await sgt(api, "account", "remove", "codex")).toMatchObject({ code: 0, out: expect.stringContaining(`removed your account codex. ${notice}`) });
   expect(seen.map((s) => [s.method, s.url, JSON.parse(s.body)])).toEqual([["POST", "/v1/accounts/remove", { name: "codex" }]]);
