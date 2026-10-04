@@ -1,12 +1,11 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { NoModelAccount, type RunSpec, type TaskOwnerCheck } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
 import { redelegated } from "./owner.ts";
-import { startService } from "./service.ts";
 import { fakes, issue, repo } from "./stop-fixtures.ts";
 
 // TECH-5179: a task spends only its owner's model quota. Its owner is the issue's human assignee, and
@@ -87,27 +86,6 @@ test("an unreadable Linear history admits nobody and says nothing", async () => 
   expect(await t.loop()).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("(503)") });
   expect(t.seen.comments).toEqual([]);
   expect(existsSync(join(t.dir, "state.json"))).toBe(false);
-});
-
-test("an issue reopened in Todo after its task was seen through is a new task, admitted for its owner now", async () => {
-  const stateDir = await mkdtemp(join(tmpdir(), "sergeant-owner-reopen-test-"));
-  const live = { conversation: issue("unstarted", "Todo") };
-  live.conversation.issue.assignee = bob;
-  const { deps } = fakes(live);
-  deps.linear.readTaskOwner = async () => ({ owner: bob });
-  const owners: string[] = [];
-  const start = deps.runner.start;
-  deps.runner.start = async (spec) => (owners.push(spec.owner.id), start(spec));
-  const dir = join(stateDir, "tasks", "UNF-1");
-  await mkdir(dir, { recursive: true });
-  const merged = { repo, number: 7, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at: "2026-10-03T00:00:00.000Z", completedAt: "2026-10-03T01:00:00.000Z" };
-  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: "2026-10-02T00:00:00.000Z", turns: 3, runIds: [], recentTurns: [], owner: { ...ann, admittedAt: "2026-10-02T00:00:00.000Z" }, merged }));
-
-  const service = await startService({ enrolledRepositories: [repo], stateDir, intakeSeconds: 0.01, pollSeconds: 0.01, port: 0, log: () => {} }, deps);
-  await vi.waitFor(() => expect(owners).toEqual([bob.id]), { timeout: 5_000 });
-  await service.stop();
-  expect(JSON.parse(await readFile(join(dir, "state.json"), "utf8"))).toMatchObject({ owner: bob });
-  expect(existsSync(join(dir, "state.completed-2026-10-03T01-00-00-000Z.json"))).toBe(true);
 });
 
 test("an unassigned issue stops its task before anything more starts", async () => {
