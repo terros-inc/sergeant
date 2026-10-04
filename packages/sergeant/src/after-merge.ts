@@ -1,6 +1,6 @@
 import { appendFile, stat } from "node:fs/promises";
 import { checkBudget, checkDelegation, NoModelAccount, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
-import { recordStop } from "./cancel.ts";
+import { cancelPending, recordStop } from "./cancel.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns } from "./poll.ts";
 import { accountRefusal, reassigned } from "./owner.ts";
@@ -53,18 +53,25 @@ export async function driveMerged(
     return undefined;
   }
   await deps.linear.readConversation(opts.issueId).then(ctx.resolveDue, (e: Error) => log(`could not read the conversation: ${e.message}`));
-  // TECH-5179: reassigned or unassigned after the merge, the task stops like before it (poll-checks.ts).
+  // TECH-5179: reassigned or unassigned after the merge, the task stops as a handoff, like before it
+  // (poll-checks.ts), checked again all through the completion wait and the reviews below. The loop
+  // drives the recorded stop at its next poll, canceling any audit still running; a completed issue
+  // keeps its status (cancel.ts).
+  const handOff = async (moved: string) => {
+    await recordStop(opts.dir, moved, { handoff: { delegatedAt: deps.owner?.delegatedAt, merged: true } });
+    log(`stopping after the merge: ${moved}`);
+    return undefined;
+  };
   const moved = await movedFromOwner(opts, deps, log);
-  if (moved) {
-    await recordStop(opts.dir, moved);
-    return { outcome: "stopped", detail: moved };
-  }
+  if (moved) return handOff(moved);
   const stopped = await postOutcome(merged, opts, deps, log, save);
   if (stopped) return stopped;
   // The audit sample is drawn after the merge, so it cannot hold it up.
   await drawAudit(merged, ctx.runIds, opts, deps, log, save, ctx.budgetOf);
   const result = await observeCompletion(merged, opts, deps, log);
+  if ("moved" in result) return handOff(result.moved);
   const finished = await finishReviews(merged, result, { runIds: ctx.runIds, recordReviews: ctx.recordReviews, stop: ctx.stop, opts, deps, log });
+  if (await cancelPending(opts.dir)) return undefined;
   // Seen through: the issue is Done and every review finished, so intake resumes it no more.
   if (finished.outcome === "done" && !opts.signal?.aborted && !(await exists(ctx.stop))) {
     merged.completedAt = new Date().toISOString();
@@ -206,7 +213,7 @@ export async function finishReviews(
     const moved = await movedFromOwner(ctx.opts, ctx.deps, ctx.log);
     if (moved) {
       await cancelRuns(running, ctx.deps, ctx.log);
-      await recordStop(ctx.opts.dir, moved);
+      await recordStop(ctx.opts.dir, moved, { handoff: { delegatedAt: ctx.deps.owner?.delegatedAt, merged: true } });
       return { outcome: "stopped", detail: `${moved}; review ${running.join(", ")} canceled` };
     }
     ctx.log(`waiting: review ${running.join(", ")} running (nonblocking: the merge is done)`);
@@ -232,23 +239,29 @@ export async function logFollowUp(f: ReviewFacts, run: RunRecord, file: string, 
   log(`AUDIT FOLLOW-UP ${f.issue}: ${where} has ${f.mustFix.length} must-fix finding(s) (${f.mustFix.map((m) => m.id).join(", ")}) from audit ${run.runId}; recorded in ${file}`);
 }
 
-/** Step 13: whether Linear reaches Done through the GitHub integration, observed, not assumed. */
+/**
+ * Step 13: whether Linear reaches Done through the GitHub integration, observed, not assumed. The
+ * issue reassigned or unassigned away from the task's owner meanwhile ends the wait as `moved`
+ * (TECH-5179), so an audit the owner pays for stops promptly.
+ */
 export async function observeCompletion(
   merged: Merged,
   opts: LoopOptions,
   deps: Ports,
   log: (line: string) => void,
-): Promise<LoopResult> {
+): Promise<LoopResult | { moved: string }> {
   const deadline = Date.parse(merged.at) + (opts.completionWaitMinutes ?? 10) * 60_000;
   let seen = "";
   for (;;) {
     const { issue } = await deps.linear.readConversation(opts.issueId);
+    const moved = deps.owner && reassigned(deps.owner, issue);
+    if (moved) return { moved };
     if (issue.state !== seen) log(`after merge: ${issue.identifier} is ${(seen = issue.state)}`);
     const detail = `${merged.repo}#${merged.number} merged as ${merged.mergedSha} at ${merged.at}; ${issue.identifier} is ${issue.state}`;
     if (issue.state === "Done") return { outcome: "done", detail };
     if (Date.now() > deadline) return { outcome: "merged_not_done", detail };
     if (opts.signal?.aborted) return { outcome: "stopped", detail };
-    await pause(15_000, opts.signal);
+    await pause(Math.min(15_000, (opts.pollSeconds ?? 60) * 1000), opts.signal);
   }
 }
 

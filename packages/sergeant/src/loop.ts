@@ -7,7 +7,7 @@ import { driveMerged, exists, mergedOf } from "./after-merge.ts";
 import { acceptedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
-import { cancelPending, driveCancel } from "./cancel.ts";
+import { cancelPending, driveCancel, recordStop } from "./cancel.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
@@ -71,9 +71,15 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // task has none, so an intake after a missed webhook or a restart checks it too. Refused, nothing is
   // saved, and the next intake reads Linear again. Every run of the task is then paid by its owner. A
   // task saved before TECH-5179 that already ended (merged, accepted) only finishes, and starts no run.
+  // A task already on disk that is refused (one saved before TECH-5179, with runs perhaps still going)
+  // is not left unsupervised: it takes the ordinary stop as a handoff below (cancel.ts), its runs
+  // canceled and its PRs kept. Only unreadable history ends this loop with nothing stopped, so the next
+  // intake reads Linear again.
   const owner = state.owner ?? (state.merged || state.accepted ? undefined : await admitOwner(opts.issueId, deps, log));
-  if (owner && "refused" in owner) return { outcome: "stopped", detail: owner.refused };
-  if (owner) deps = { ...deps, owner: (state.owner = owner) };
+  if (owner && "refused" in owner) {
+    if (owner.unreadable || !(await exists(files.state))) return { outcome: "stopped", detail: owner.refused };
+    await recordStop(opts.dir, `the task started before Sergeant recorded who pays for it, and Linear does not show its assignee delegated it (${owner.refused.replace(/^not started: /, "")})`, { handoff: {} });
+  } else if (owner) deps = { ...deps, owner: (state.owner = owner) };
   // The start time, the owner, and the budget window are on disk before anything else happens.
   await save();
   const requested = { ...state.budget.window, ...opts.budget };

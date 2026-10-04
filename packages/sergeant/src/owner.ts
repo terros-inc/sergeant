@@ -67,12 +67,12 @@ export function ownerRefusal(issueId: string, check: Exclude<TaskOwnerCheck, { o
  * The owner of a task being admitted, or why it is refused: then the refusal is said on the issue,
  * once per condition. Fails closed: Linear unreadable admits nobody.
  */
-export async function admitOwner(issueId: string, deps: { linear: LinearPort; agentUserId: string }, log: (line: string) => void): Promise<TaskOwner | { refused: string }> {
+export async function admitOwner(issueId: string, deps: { linear: LinearPort; agentUserId: string }, log: (line: string) => void): Promise<TaskOwner | { refused: string; unreadable?: true }> {
   let check: TaskOwnerCheck;
   try {
     check = await deps.linear.readTaskOwner(issueId, deps.agentUserId);
   } catch (e) {
-    return { refused: `not started: who delegated ${issueId} is unreadable: ${(e as Error).message}` };
+    return { refused: `not started: who delegated ${issueId} is unreadable: ${(e as Error).message}`, unreadable: true };
   }
   if ("owner" in check) {
     log(`owned by ${check.owner.name} (${check.owner.id}), who assigned and delegated it: its runs use only their model accounts`);

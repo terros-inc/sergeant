@@ -63,6 +63,13 @@ export interface LinearPort {
    * team has no `started` state, so it never moves an issue backward. Returns what it did, for a log.
    */
   moveIssueToStarted(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
+  /**
+   * A handoff (TECH-5179): moves the issue back to its team's first `unstarted` state (Todo) only when
+   * its current state type is `started`. Any other state, one a human chose included, is left as it is.
+   */
+  moveIssueToTodo?(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
+  /** Removes the issue's delegate. Idempotent. */
+  undelegate?(issueId: string): Promise<void>;
 }
 
 export interface GitHubPort {

@@ -13,7 +13,7 @@ import { fakes, issue, repo } from "./stop-fixtures.ts";
 // only when Linear shows that same person delegated it: nobody can assign an issue to someone else and
 // delegate it to spend their quota. Every refusal tells the humans what to do, once per condition,
 // however often intake polls. The owner, once admitted, is the task's until it ends: the issue
-// reassigned mid-task stops it, and the new assignee's own delegation starts a new task.
+// reassigned mid-task stops it as a handoff (owner-handoff.test.ts).
 
 const ann = { id: "user-ann", name: "Ann" };
 const bob = { id: "user-bob", name: "Bob" };
@@ -87,29 +87,6 @@ test("an unreadable Linear history admits nobody and says nothing", async () => 
   expect(await t.loop()).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("(503)") });
   expect(t.seen.comments).toEqual([]);
   expect(existsSync(join(t.dir, "state.json"))).toBe(false);
-});
-
-test("the admitted owner pays for every run; a reassignment stops the task, and the new assignee's delegation starts a new one", async () => {
-  let check: TaskOwnerCheck = { owner: ann };
-  const t = await task(() => check, async () => {});
-  expect(await t.loop()).toMatchObject({ outcome: "stopped" });
-  expect((await t.saved()).owner).toMatchObject(ann);
-  expect(t.starts.map((s) => s.owner)).toEqual([ann]);
-
-  // Bob is made the assignee while Ann's task is active (no webhook needed: the loop rereads Linear).
-  t.live.conversation.issue.assignee = bob;
-  expect(await t.loop()).toEqual({ outcome: "stopped", detail: "the Linear issue was reassigned from Ann to Bob, and a task's model usage never moves to another person mid-task" });
-  expect(t.starts).toHaveLength(1);
-  expect(t.seen.turns).toBe(1);
-  expect(t.seen.comments.map((c) => c.body)).toEqual([expect.stringContaining("Sergeant stopped working on this issue: the Linear issue was reassigned from Ann to Bob")]);
-  expect(existsSync(join(t.dir, "state.json"))).toBe(false);
-
-  // Bob delegates it himself: a new task, checked afresh, that only Bob pays for.
-  check = { owner: bob };
-  await t.loop();
-  expect(t.checks()).toBeGreaterThanOrEqual(2);
-  expect((await t.saved()).owner).toMatchObject(bob);
-  expect(t.starts.map((s) => s.owner)).toEqual([ann, bob]);
 });
 
 test("an issue reopened in Todo after its task was seen through is a new task, admitted for its owner now", async () => {

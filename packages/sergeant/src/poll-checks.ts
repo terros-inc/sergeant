@@ -44,9 +44,10 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
   }
   // TECH-5179 (owner.ts): the issue no longer assigned to the owner the task was admitted for stops it
   // the same way, so token ownership never moves mid-task.
+  // It is a handoff (cancel.ts): PRs and branches are kept for whoever continues.
   const moved = active.allowed && state.owner ? reassigned(state.owner, conversation.issue) : undefined;
   if (moved) {
-    await recordStop(opts.dir, moved);
+    await recordStop(opts.dir, moved, { handoff: { delegatedAt: state.owner?.delegatedAt } });
     return moved;
   }
   // Linear's durable history is reread too: a newer delegation, or someone else's, is a new episode.
@@ -60,7 +61,7 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
     return { hold: "delegation unreadable" };
   }
   if (changed) {
-    await recordStop(opts.dir, changed);
+    await recordStop(opts.dir, changed, { handoff: { delegatedAt: state.owner.delegatedAt } });
     return changed;
   }
   return undefined;

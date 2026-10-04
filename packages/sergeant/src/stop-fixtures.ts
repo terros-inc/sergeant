@@ -48,6 +48,14 @@ export function fakes(live: { conversation: Conversation }) {
       readConversation: async () => structuredClone(live.conversation),
       readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
+      moveIssueToTodo: async () => {
+        const { issue } = live.conversation;
+        if (issue.stateType !== "started") return { moved: false as const };
+        const from = issue.state;
+        Object.assign(issue, { state: "Todo", stateType: "unstarted" });
+        return { moved: true as const, from, to: "Todo" };
+      },
+      undelegate: async () => void (live.conversation.issue.delegate = null),
       postComment: async ({ key, body }) => {
         seen.commentAttempts.push(key);
         if (!seen.comments.some((comment) => comment.key === key)) seen.comments.push({ key, body });
