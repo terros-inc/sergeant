@@ -92,7 +92,6 @@ test("a person registers, replaces, and removes only their own account, and its 
   // The accepted exposure (09 §3a) is said at registration: where the credential goes, that it can leak, and the way out.
   const { notice } = registered.json;
   expect(notice).toContain("inside Sergeant's worker and reviewer containers");
-  expect(notice).toContain("Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription");
   expect(notice).toContain("could be exposed if a run is compromised");
   expect(notice).toContain("`sgt account remove claude`");
   expect(notice).toContain("`claude setup-token`");
@@ -111,7 +110,10 @@ test("a person registers, replaces, and removes only their own account, and its 
   expect(await call("POST", "/v1/accounts/register", "ada", { provider: "codex", name: "codex", credential: "{}" })).toMatchObject({ status: 400 });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([expect.objectContaining({ credential: "sk-ant-oat01-ada-new" })]);
 
-  expect(await call("POST", "/v1/accounts/remove", "ada", { name: "claude" })).toMatchObject({ status: 200, json: { removed: true } });
+  // Removal says again that it does not revoke a copy a run took, and where to revoke it with the provider (TECH-5198).
+  const removed = await call("POST", "/v1/accounts/remove", "ada", { name: "claude" });
+  expect(removed).toMatchObject({ status: 200, json: { removed: true, notice: expect.stringContaining("does not revoke that copy") } });
+  expect(removed.json.notice).toContain("in your claude.ai settings, revoke the token `claude setup-token` made");
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([]);
 
   for (const said of [registered.text, listed.text, refused.text, ...logs]) expect(said).not.toMatch(/sk-ant-oat01-(ada|expired)/);

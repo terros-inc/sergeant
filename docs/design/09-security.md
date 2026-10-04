@@ -7,10 +7,11 @@ human credentials, and Sergeant's own control plane. That boundary is enforced s
 credentials exist in which zone, never by prompt instructions. Everything inside the development trust
 zone (all enrolled repositories granted to runs, and dev/stage systems) is within the accepted blast
 radius (§9). One kind of credential deliberately crosses into that zone: the **model credential** a run
-works on: a Claude or Codex account its task's owner registered (TECH-5179). It is in the run's
-container for the run's duration, an accepted risk (§3a). Sergeant's own system model account (the
-installation's model token) is control plane only: it runs reasoning, retros, and system-health work,
-and never a worker or reviewer, the post-merge audit reviewer included.
+works on: a Claude or Codex subscription token its task's owner registered (TECH-5179), personal or
+company-paid. It is in the run's container for the run's duration, an accepted risk until runs move to
+per-user isolation (§3a). Sergeant's own system model account (the installation's model token) is
+control plane only: it runs reasoning, retros, and system-health work, and never a worker or reviewer,
+the post-merge audit reviewer included.
 
 ## 1. What changed from Sergeant 1
 
@@ -37,13 +38,15 @@ and never a worker or reviewer, the post-merge audit reviewer included.
 | **No production authority** | The runner dev role exists only in dev/stage accounts and has no trust relationship into production accounts. No production secret is in any zone Sergeant runs. Enrolled repositories must not expose production secrets to PR or branch workflows (§5). Repositories whose merge deploys to production use `mergePolicy: human` (§5) |
 | **No IAM/org/billing administration** | The dev role carries a permission boundary (and, where the account is in an organization, an SCP) denying `iam:*` except narrowly scoped service-role passing, `organizations:*`, `account:*`, billing, and changes to its own boundary |
 | **No Sergeant control-plane credentials** | Workers run in a separate OS user (or container or remote host, §4) that cannot read the daemon's files, environment, or `/proc`; the instance metadata endpoint is blocked for that user; the worker's environment is an explicit allow-list (UNF-650); credentials arrive only through the run-scoped vending endpoint |
-| **No personal human credentials** | No zone holds them, with one accepted exception: a model subscription a person registers for runs (§3a). Installation tooling that needs a human login (S1's `sgt tool configure`) is not carried over; if a tool genuinely needs a human-scoped login later, that is a new decision |
+| **No personal human credentials** | No zone holds them, with one accepted exception: a model subscription token a person registers, handed only into their own tasks' runs (§3a). Installation tooling that needs a human login (S1's `sgt tool configure`) is not carried over; if a tool genuinely needs a human-scoped login later, that is a new decision |
 | **Default-branch protection** | Rulesets require a PR, required checks, and one approving review; the worker App is not a bypass actor and cannot approve the PRs it authors, so only the control-plane App's approval of the exact gated head, given immediately before its merge, lets a PR land (08 §2, §7). This is what makes M5/M6 meaningful |
 
 ## 3a. Model credentials are exposed to runs (accepted)
 
 Settled (owner, 2026-10-03, TECH-5156), after an independent review of the model-account pool (TECH-5113):
-accept the risk instead of building a credential broker.
+accept the risk instead of building a credential broker. Confirmed (owner, 2026-10-04, TECH-5198) as the
+deliberate exception to "no personal human credentials" (§3), for now: any registration is allowed,
+personal or company-paid.
 
 **What is exposed.** Every worker and reviewer run works on one model account (04 §10): a Claude or
 Codex subscription its task's owner registered through `/v1/accounts` (11), and only for a task that
@@ -56,6 +59,20 @@ out. Sergeant does not see such a copy, and it does not end with the run: removi
 (`sgt account remove`) or the person only stops Sergeant from using it for new runs; a copied token
 keeps working until its holder revokes or rotates it with the provider.
 
+**Guardrails that remain.**
+
+- The token is stored only in the installation's Secrets Manager, never in a log, run record, brief,
+  transcript, or API response.
+- A person registers and removes only their own accounts (`/v1/accounts`, 11). The one exception is
+  offboarding: an approver removes all of a person's accounts (`sgt admin account remove-person`).
+- A token is used only for runs of tasks its owner was assigned and delegated themselves (TECH-5179),
+  so a compromised run exposes the token of the person whose work it is, never a colleague's.
+- Removal means revocation: `sgt account remove` tells the person that removal does not revoke a copy,
+  and where to revoke the token with the provider (for Claude, the `claude setup-token` token in their
+  claude.ai settings; for Codex, ChatGPT's Settings → Security, Log out of all devices). Neither
+  provider documents a revoke Sergeant could call with the stored credential, so Sergeant reminds and
+  does not revoke it itself.
+
 **Why it is accepted.** The installation serves a small team of known teammates who register their own
 subscriptions knowingly, and a leaked model credential costs subscription quota or a provider account's
 standing, not production, admin, or control-plane authority. A broker that keeps credentials outside the
@@ -63,8 +80,11 @@ container (a proxy that holds the token and forwards model calls) is disproporti
 both agent CLIs expect to hold their own login, and the broker would be new deterministic machinery to
 build, secure, and keep working as the CLIs change. Instead, registration says plainly that the
 credential is used inside worker containers, can be exposed if a run is compromised, and how to remove
-it and rotate the token (11, `sgt account register`). The other controls still apply: the credential
-is kept only in Secrets Manager and never in a log, run record, or API response.
+it and rotate the token (11, `sgt account register`), and removal says again where to revoke it.
+
+**End state.** The exception ends when a run no longer shares a container with a token it could copy:
+isolated containers per user, so only the token's owner's own runs could ever reach it, or a broker that
+holds the token outside the container so workers never see the bearer. Either retires this section.
 
 **What would change the decision.** Revisit it, with a broker or per-account isolation as the likely
 answer, when any of these holds:
@@ -82,8 +102,9 @@ answer, when any of these holds:
 must not flag that a run's selected model credential enters its container, nor recommend a broker solely
 because of that exposure. Raise a finding only when a change widens the exposure (more credentials per
 run, the credential reaching logs, records, other runs, or longer-lived storage), breaks a control or
-rotation assumption above (Secrets Manager only, the registration notice, removal and provider
-revocation), brings concrete evidence of misuse, or meets one of the revisit triggers listed above.
+rotation assumption above (Secrets Manager only, own accounts only, own tasks only, the registration
+and removal notices, provider revocation), brings concrete evidence of misuse, or meets one of the
+revisit triggers listed above.
 
 ## 4. Separating zones on a host
 
@@ -163,7 +184,7 @@ misled:
 
 | Compromised | Can | Cannot |
 |---|---|---|
-| **Any run in the runner zone** (worker or reviewer) | read and write non-default branches and PRs in **every enrolled repository granted to any concurrent run** (it can read sibling runs' tokens); read that code; use dev/stage AWS within the permission boundary: create, change, or delete dev resources, read dev data, run up dev/stage cost; trigger CI and call paid engineering tools whose cost is outside Sergeant's model budget; keep using a token it already holds until it expires (up to an hour); copy the model credential it runs on, the owner's or a registered person's, and use it outside Sergeant until its holder revokes it (§3a); run arbitrary code on the runner host as `sergeant-runner`; mislead reasoning through its report (including a false "review not required") | touch production; administer IAM, org, or billing; push or merge to a protected default branch; change workflow files; read control-plane credentials or the ledger; post to Linear; use any human's personal credentials other than the registered model credential it runs on (§3a) |
+| **Any run in the runner zone** (worker or reviewer) | read and write non-default branches and PRs in **every enrolled repository granted to any concurrent run** (it can read sibling runs' tokens); read that code; use dev/stage AWS within the permission boundary: create, change, or delete dev resources, read dev data, run up dev/stage cost; trigger CI and call paid engineering tools whose cost is outside Sergeant's model budget; keep using a token it already holds until it expires (up to an hour); copy the model credential it runs on, its task owner's, and use it outside Sergeant until its holder revokes it with the provider (§3a); run arbitrary code on the runner host as `sergeant-runner`; mislead reasoning through its report (including a false "review not required") | touch production; administer IAM, org, or billing; push or merge to a protected default branch; change workflow files; read control-plane credentials or the ledger; post to Linear; use any human's personal credentials other than the registered model credential it runs on (§3a) |
 | **Sergeant's reasoning** (prompt-injected) | start and cancel runs within the time and concurrency limits; post comments within rate limits; ask questions; create follow-ups within limits; record dispositions the Gate's evidence rules accept, including `not_required` on a worker's word; merge PRs in `mergePolicy: sergeant` repositories whose required checks are green; release tasks | merge red heads or heads with no recorded disposition; overtake a human comment or edit no turn has seen; exceed the wall-clock or concurrency limits; grant itself budget or waive review; touch production or change enrollment |
 | **A team member's Linear account** | delegate work, answer questions, steer tasks; if an approver, grant budget and waive review | anything a run cannot do |
 
@@ -182,7 +203,7 @@ column.
   (and at once, for tokens Sergeant revokes).
 - Rotate the control-plane App key, worker App key, or Linear OAuth secret in Secrets Manager; the
   daemon re-reads references.
-- A model credential a compromised run may have copied: remove it from Sergeant (`sgt account remove`
-  for a registered one; the owner's in Secrets Manager), then revoke or rotate it with the provider
-  and, if wanted, register the new one. Removal alone does not invalidate a copy (§3a).
+- A model credential a compromised run may have copied: remove it from Sergeant (`sgt account remove`,
+  which says where to revoke it), then revoke it with the provider and, if wanted, register a new one.
+  Removal alone does not invalidate a copy (§3a).
 - The audit trail (`actions`, `turns`, run briefs and reports in S3) says who decided what and why.

@@ -177,13 +177,18 @@ export const RegisterAccountResponse = z.object({
   replaced: z.boolean(),
   /** The quota read with it at registration, which proved it works. */
   quota: QuotaReading,
-  /** What the person accepts by registering (09 §3a): their credential is exposed to worker containers, and how to remove and rotate it. */
+  /** What the person accepts by registering (09 §3a): their credential is exposed to worker containers, and how to remove and revoke it. */
   notice: z.string(),
 });
 export type RegisterAccountResponse = z.infer<typeof RegisterAccountResponse>;
 
 export const RemoveAccountRequest = z.strictObject({ name: AccountName });
-export const RemoveAccountResponse = z.object({ name: z.string(), removed: z.boolean() });
+export const RemoveAccountResponse = z.object({
+  name: z.string(),
+  removed: z.boolean(),
+  /** When removed: removal does not revoke a copy a run took (09 §3a), so where to revoke it with the provider. */
+  notice: z.string().optional(),
+});
 export type RemoveAccountResponse = z.infer<typeof RemoveAccountResponse>;
 
 /**

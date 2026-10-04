@@ -195,8 +195,8 @@ are kept, and the issue goes back to Todo, undelegated, for the new assignee to 
 Sergeant's system account: it runs reasoning, retros, and system-health work only, never a worker or
 reviewer (not even the post-merge audit), so Sergeant can still tell an owner what is wrong when their
 accounts are spent. The config's `modelAccounts` (TECH-5113) is ignored, with a warning at startup:
-remove it, and have each person register their own Terros company seat (for example Claude Team or
-ChatGPT Team), not a personal subscription (TECH-5129). Each launch runs on the owner's usable account
+remove it, and have each person register their own subscription, personal or company-paid
+(TECH-5198). Each launch runs on the owner's usable account
 with the most weekly capacity left, skipping one whose 5-hour window is under 20% while another is
 usable (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
 what each one paid for. An owner with no registered account, or none usable, gets a comment on the
