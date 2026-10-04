@@ -46,6 +46,8 @@ const RunMeta = z.object({
   /** The task owner's model account it runs on and why (TECH-5179); every record of the run carries them. */
   account: RunAccount.optional(),
   accountReason: z.string().optional(),
+  /** The task owner's Linear user id, whose accounts the run's is among (TECH-5213). */
+  ownerId: z.string().optional(),
 });
 type RunMeta = z.infer<typeof RunMeta>;
 const recorded = ({ issueRevision, providerChoice, account, accountReason }: RunMeta) => ({
@@ -123,16 +125,23 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       ...(agent.tokens && { tokens: agent.tokens }),
       ...(agent.failureReason && { failureReason: agent.failureReason }),
     } as const;
-    // The next launch takes the next account (TECH-5113); a quota failure's account is back when its window resets, if within the hour.
+    // The next launch takes the next account (TECH-5113); this one is back when the window it ran out of resets, if within the hour.
     if (agent.failureReason && meta.account) {
-      const reading = meta.providerChoice?.readings.find((r) => r.account === meta.account?.id);
-      asides.add(meta.account.id, agent.failureReason === "quota" ? failingReset(reading) : undefined);
+      const atLaunch = meta.providerChoice?.readings.find((r) => r.account === meta.account?.id);
+      asides.add(meta.account.id, failingReset(await readNow(meta), atLaunch, Date.now()));
     }
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
     const written = await agentReport(meta);
     return finish(meta, RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: `no report written; ${why}` }) }), facts);
+  }
+
+  /** The run's account's quota read again as it fails, to see which window ran out; undefined when it cannot be read. */
+  async function readNow(meta: RunMeta) {
+    if (!opts.quota || !meta.ownerId) return undefined;
+    const account = (await opts.accounts(meta.ownerId).catch(() => [])).find((a) => a.id === meta.account?.id);
+    return account && opts.quota(account).catch(() => undefined);
   }
 
   /** The report the agent wrote in its workspace, if any: copied out as `report.md` and parsed for its role. */
@@ -249,6 +258,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         ...(providerChoice && { providerChoice }),
         account: runAccount(account),
         accountReason,
+        ownerId: spec.owner.id,
       };
       await writeFile(p.meta, JSON.stringify(meta, null, 2));
       // `--env NAME` copies the value from the docker CLI's own environment, so no token is ever on

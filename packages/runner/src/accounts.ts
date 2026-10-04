@@ -6,8 +6,8 @@ import type { QuotaAccount, ReadQuota } from "./quota.ts";
 
 // Which model account a launch runs on (TECH-5179): only the task owner's own registered accounts,
 // never the installation's or anyone else's. Each launch picks among them from live quota (choose.ts).
-// A run that fails on quota or authentication sets its account aside for an hour, or until the failing
-// window resets if that is sooner (TECH-5213), so the next launch takes another of the owner's; the
+// A run that fails on quota or authentication sets its account aside for an hour, or until the window it
+// ran out of resets if that is sooner (TECH-5213), so the next launch takes another of the owner's; the
 // set-aside lives in memory only, and losing it on a restart costs at most one more failed run.
 
 /** A model account a run may use: its credential, and whose it is. */
@@ -15,26 +15,32 @@ export type ModelAccount = QuotaAccount & { holder: string };
 
 export const SET_ASIDE_MS = 60 * 60_000;
 
-/** Accounts whose last run failed on quota or authentication, until when: `SET_ASIDE_MS`, or `resetsAt` if sooner. */
+/** Accounts whose last run failed on quota or authentication, until when: `SET_ASIDE_MS`, or `resetsAt` (epoch ms) if sooner. */
 export function setAside(now: () => number = Date.now) {
   const until = new Map<string, number>();
   return {
-    add(accountId: string, resetsAt?: string) {
-      const reset = resetsAt ? Date.parse(resetsAt) : Number.NaN;
-      until.set(accountId, Math.min(now() + SET_ASIDE_MS, Number.isNaN(reset) ? Infinity : reset));
+    add(accountId: string, resetsAt?: number) {
+      until.set(accountId, Math.min(now() + SET_ASIDE_MS, resetsAt ?? Infinity));
     },
     has: (accountId: string) => (until.get(accountId) ?? 0) > now(),
   };
 }
 
+const windowsOf = (r: QuotaReading | undefined) => [r?.weekly, r?.fiveHour].flatMap((w) => (w ? [w] : []));
+const resetOf = (w: { resetsAt?: string | undefined }) => (w.resetsAt ? Date.parse(w.resetsAt) : Number.NaN);
+
 /**
- * When the window an account ran out of resets, from its reading at launch: the window with less left.
- * Undefined when that window's reset is unknown.
+ * When a failed account may be usable again (epoch ms), for its set-aside after a quota or
+ * authentication failure. From `fresh`, read at the failure: the windows now at 0% are the ones it ran
+ * out of, and it is usable once the last of them resets. With none at 0% (a reading still cached from
+ * launch, an unreadable one, or a failure the windows do not show), the soonest reset still ahead in
+ * `fresh` or `atLaunch`, when its quota next changes. Undefined when that reset is unknown: the hour applies.
  */
-export function failingReset(reading: QuotaReading | undefined): string | undefined {
-  const { weekly, fiveHour } = reading ?? {};
-  const failing = weekly && fiveHour ? (weekly.remainingPercent <= fiveHour.remainingPercent ? weekly : fiveHour) : (weekly ?? fiveHour);
-  return failing?.resetsAt;
+export function failingReset(fresh: QuotaReading | undefined, atLaunch: QuotaReading | undefined, now: number): number | undefined {
+  const out = windowsOf(fresh).filter((w) => w.remainingPercent <= 0).map(resetOf);
+  if (out.length > 0) return out.some(Number.isNaN) ? undefined : Math.max(...out);
+  const ahead = [...windowsOf(fresh), ...windowsOf(atLaunch)].map(resetOf).filter((t) => t > now);
+  return ahead.length > 0 ? Math.min(...ahead) : undefined;
 }
 
 export type AccountPick = {

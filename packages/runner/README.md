@@ -107,7 +107,8 @@ Terros now has its own Codex Team account, and nothing personal is ever used.
   Quota readings are cached for 4 minutes. There is no low-quota warning. Only the chosen account's
   credential enters the container. A run whose agent reports a quota or authentication failure (`failureReason`,
   from Claude Code's result text or Codex's failed turn) sets its account aside for an hour, or until the
-  failing window resets if sooner, so the next launch takes another of the owner's. With no account, or none usable, `start` throws
+  window it ran out of resets if sooner: the one at 0% when its quota is read again as the run fails
+  (`failingReset`), else the soonest reset ahead in that or the launch reading. The next launch takes another of the owner's. With no account, or none usable, `start` throws
   `NoModelAccount` before cloning anything, and nothing starts. The record's `account` and
   `accountReason` say whose subscription paid and why.
 - **Resume (V6).** Codex can resume a thread (`codex exec resume <id>`), but its session lives in the

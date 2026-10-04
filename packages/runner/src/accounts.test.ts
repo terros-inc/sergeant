@@ -80,18 +80,24 @@ test("an owner with no account, or none usable, gets NoModelAccount", async () =
   await expect(pick([], {})).rejects.toMatchObject({ kind: "none_registered", accountIds: [] });
 });
 
-test("a quota set-aside ends at the failing window's reset when that comes before the hour", async () => {
+test("a set-aside ends at the reset of the window the account ran out of, when that comes before the hour", async () => {
   let now = NOW;
   const asides = setAside(() => now);
-  // The 5-hour window ran out; it resets in 20 minutes.
-  const reset = failingReset({ adapter: "claude-code-local", readAt, weekly: { remainingPercent: 40, resetsAt: WEEKLY_RESET }, fiveHour: { remainingPercent: 2, resetsAt: new Date(NOW + 20 * 60_000).toISOString() } });
-  asides.add(claude.id, reset);
-  asides.add(codex.id, WEEKLY_RESET);
+  const inMinutes = (m: number) => new Date(NOW + m * 60_000).toISOString();
+  const reading = (weekly: number, fiveHour: number, fiveHourReset = inMinutes(20)) => ({ adapter: "claude-code-local", readAt, weekly: { remainingPercent: weekly, resetsAt: WEEKLY_RESET }, fiveHour: { remainingPercent: fiveHour, resetsAt: fiveHourReset } });
+  // The 5-hour window is the one at 0%, though the week showed less left at launch.
+  asides.add(claude.id, failingReset(reading(40, 0), reading(5, 30), NOW));
+  // The week ran out: the 5-hour window's sooner reset does not bring it back.
+  asides.add(codex.id, failingReset(reading(0, 50), reading(5, 50), NOW));
   now += 20 * 60_000 - 1;
   expect([asides.has(claude.id), asides.has(codex.id)]).toEqual([true, true]);
   now += 1;
   expect([asides.has(claude.id), asides.has(codex.id)]).toEqual([false, true]);
-  // A reset further off than the hour, or none known, keeps the hour.
   now = NOW + SET_ASIDE_MS;
   expect(asides.has(codex.id)).toBe(false);
+
+  // Nothing at 0% (unreadable, or still cached from launch): the soonest reset still ahead, from either reading.
+  expect(failingReset({ adapter: "claude-code-local", readAt, error: "usage endpoint answered 401" }, reading(5, 30), NOW)).toBe(NOW + 20 * 60_000);
+  expect(failingReset(undefined, reading(5, 30, inMinutes(-1)), NOW)).toBe(Date.parse(WEEKLY_RESET));
+  expect(failingReset(undefined, undefined, NOW)).toBeUndefined();
 });

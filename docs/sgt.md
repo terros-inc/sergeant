@@ -120,7 +120,7 @@ sgt account remove claudeWork                   # remove yours, then revoke it w
 - **Names.** A name defaults to the provider (`claude` or `codex`) and is up to 40 letters, digits, `-`
   and `_`. Registering a name you already have replaces that account only. Your accounts are
   interchangeable to Sergeant: each run takes the best-paced one as above, and one that fails on quota
-  or authentication is set aside for an hour (or until its window resets, if sooner) so the next run
+  or authentication is set aside for an hour (or until the window it ran out of resets, if sooner) so the next run
   takes another.
 
 - Any of your subscriptions may be registered, personal or company-paid (TECH-5198).

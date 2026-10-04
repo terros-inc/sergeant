@@ -260,8 +260,9 @@ or has a window without a reset time, ranks after every scored one. A reviewer t
 another provider than its worker's when that provider's best scores within 20% of the best (the
 provider choice above), else the best overall. Nothing is remembered between launches: no burn
 history, stickiness, or round-robin. No low-quota warning is posted. A run that fails
-on the account's quota or authentication (`failureReason`) sets the account aside for an hour, or until the failing window resets if sooner, in
-memory, so the next launch takes another of the owner's. An owner with no account, or none usable, gets `NoModelAccount` from `start`, which
+on the account's quota or authentication (`failureReason`) sets the account aside for an hour, or until the window it ran out of resets if sooner, in
+memory. That window is the one at 0% in the account's quota read again as the run fails; with none
+there (an unreadable or still-cached reading), the soonest reset ahead in that or the launch reading. Meanwhile the next launch takes another of the owner's. An owner with no account, or none usable, gets `NoModelAccount` from `start`, which
 starts nothing; the core then tells the owner on the issue. The run record's `account` says whose
 subscription paid, never the credential.
 
