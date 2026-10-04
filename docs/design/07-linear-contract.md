@@ -111,8 +111,9 @@ A guardrail admits an issue when **all** of these hold (deterministic):
 8. it has a human assignee, and Linear's issue history shows that same person most recently
    delegated it to Sergeant (TECH-5179). That person is the task's **owner**, recorded with the task:
    every run of it uses only their registered model accounts (04 §10). Reassigning or unassigning
-   the issue while the task runs stops it like an undelegation (§8), so token ownership never moves
-   mid-task; the new assignee delegates it again to start a new episode (§9), checked afresh. The history is read in
+   the issue while the task runs is a **handoff** (§8): token ownership never moves mid-task, nothing
+   resumes on its own, and the new assignee's own delegation starts a new episode (§9), checked
+   afresh, with the earlier PRs and branches there to continue. The history is read in
    full on every admission attempt, so a missed webhook or downtime cannot skip the check; anything it
    cannot prove refuses. Each refusal (no human assignee; someone else delegated it; the delegation is
    not attributable) is one comment saying what to do, keyed by what Linear showed, so a poll never
@@ -202,7 +203,7 @@ fresh budget.
 |---|---|
 | Removes Sergeant as delegate | cancel active runs; close the task `canceled (undelegated)`; one-line note with open PRs |
 | Moves the issue to a canceled state | same, `canceled (issue canceled)` |
-| Reassigns or unassigns the issue away from the task's owner (TECH-5179) | same: the note says it was reassigned; the new assignee delegates it again for a new episode |
+| Reassigns or unassigns the issue away from the task's owner (TECH-5179) | **handoff**: cancel active runs; keep PRs and branches; once the runs are stopped, reread the issue, move it back to Todo (only from a started state) and remove Sergeant's delegation (unless a newer valid delegation is in place by then); one note linking the open PRs, saying the new assignee may continue personally or delegate it to Sergeant. A task whose work already merged only has its audit stopped, and the issue keeps its status. A task from before TECH-5179 that its owner cannot be proven for is handed off the same way |
 | `sgt task cancel UNF-123` | same, plus removes Sergeant's delegation so the issue is not re-admitted |
 | Comments "stop" / "pause this" / "never mind" | Sergeant's reasoning interprets it: `release_task`, or cancel the worker and wait |
 

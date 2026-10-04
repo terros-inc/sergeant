@@ -189,7 +189,9 @@ To go back, remove `runners` (or set the role to `claude-code-local`) and update
 
 Workers and reviewers run only on model accounts people register with `sgt`, and each task only on its
 owner's: the issue's human assignee, who must also be the one who delegated it to Sergeant
-(`packages/sergeant/src/owner.ts`); reassigning the issue stops the task. The model token is
+(`packages/sergeant/src/owner.ts`); reassigning the issue hands it off: the runs stop, PRs and branches
+are kept, and the issue goes back to Todo, undelegated, for the new assignee to continue or delegate
+(`cancel.ts`). The model token is
 Sergeant's system account: it runs reasoning, retros, and system-health work only, never a worker or
 reviewer (not even the post-merge audit), so Sergeant can still tell an owner what is wrong when their
 accounts are spent. The config's `modelAccounts` (TECH-5113) is ignored, with a warning at startup:
