@@ -4,8 +4,8 @@ import type { Conversation, LinearPerson, LinearPort, NoModelAccount, TaskOwnerC
 // admitted only when Linear's history shows that same person most recently delegated it to Sergeant,
 // so nobody can assign an issue to someone else and delegate it to spend that person's quota. The
 // owner is recorded in the task's `state.json` on admission and never changes for that task: the
-// issue reassigned while it is active stops it like an undelegation, so no quota moves mid-task, and
-// the new assignee delegates it again to start a new task, checked afresh like any other. Every worker
+// issue reassigned while it is active is handed off (cancel.ts): its runs stop, so no quota moves
+// mid-task, its PRs stay, and the new assignee delegates it again to start a new task, checked afresh. Every worker
 // and reviewer runs only on the owner's registered accounts (runner `accounts.ts`). Each refusal is
 // said once on the issue per condition, keyed by what Linear showed, so a poll never repeats it.
 
