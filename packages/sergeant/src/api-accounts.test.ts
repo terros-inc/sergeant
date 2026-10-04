@@ -206,12 +206,12 @@ test("an approver removes every account a person registered, and only theirs", a
   expect(stored()).toEqual([]);
 });
 
-// TECH-5200: OpenAI documents no revoke for a copied Codex auth.json, so the Codex notice must not
-// promise one (an earlier text said a ChatGPT session logout revoked it). This checks wording, not revocation.
-test("the Codex notice says no documented revoke exists rather than promising one", () => {
+// TECH-5200: the Codex notice gives the sessions page as the revoke step, with Log out of all devices as
+// the fallback. This checks wording only; it is not evidence that the logout revokes anything.
+test("the Codex notice says to log out the sign-in's session, with Log out of all devices as the fallback", () => {
   const notice = exposureNotice("codex-local", "codex");
-  expect(notice).toContain("OpenAI documents no way to revoke a copied Codex login");
-  expect(notice).toContain("which OpenAI does not say ends a copy");
-  expect(notice).not.toMatch(/revoke it with the provider|log out the session/);
+  expect(notice).toContain("To revoke a Codex login, open https://chatgpt.com/settings/security?view=sessions and log out the session its sign-in created");
+  expect(notice).toContain("If you cannot tell which it is, use Log out of all devices on that page.");
+  expect(notice).not.toMatch(/documents no way|does not manage/);
   expect(notice).toContain("`sgt account register codex --name codex` registers a new one in its place.");
 });

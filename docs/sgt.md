@@ -105,7 +105,7 @@ sgt account register claude                     # your Claude subscription, name
 sgt account register codex                      # your ChatGPT login for Codex, named "codex"
 sgt account register claude --name claudeWork   # another one, under a name of yours
 sgt account list                                # every account: name, provider, whose, the runs it paid for
-sgt account remove claudeWork                   # remove yours, then do what it says about a copy
+sgt account remove claudeWork                   # remove yours, then revoke it where it says
 ```
 
 - **Signing in.** `register` runs the provider's own sign-in on your terminal: for `claude`,
@@ -128,10 +128,9 @@ sgt account remove claudeWork                   # remove yours, then do what it 
   (runs already on it finish on it) but does not revoke a copy, so it tells you how to revoke it. For
   Claude, open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the
   user:inference-scoped token `claude setup-token` made, matching it by its Connected time. For Codex,
-  OpenAI documents no way to revoke a copied login (its `auth.json`, refresh token included): its Active
-  sessions page, https://chatgpt.com/settings/security?view=sessions, does not manage Codex CLI sessions.
-  The best available step is Log out of all devices on that page, which OpenAI does not say ends a copy;
-  if you think it was copied, also report it to OpenAI support. Then register a new one if you want.
+  open https://chatgpt.com/settings/security?view=sessions, where each Codex CLI login is its own
+  session, and log out the one sgt's sign-in created, matching it by its time (Log out of all devices
+  if you cannot tell which it is). Then register a new one if you want.
   `register` warns about this each time. This risk is accepted on purpose (design/09-security.md §3a):
   per-user isolation would keep it from colleagues' runs, but your own runs still hold it until the
   token is kept outside the run.
@@ -143,8 +142,7 @@ sgt account remove claudeWork                   # remove yours, then do what it 
 - **Offboarding.** An approver removes every account a person registered with
   `sgt admin account remove-person <linear-user-id>` (`sgt account list --json` shows each account's
   id, `person:<linear-user-id>:<name>`). Runs already on them finish on them, and it does not revoke
-  a copy: the person, or their workspace admin, revokes the credential as above where the provider
-  documents a way.
+  a copy: the person, or their workspace admin, revokes the credential as above.
 - The installation must be configured for registration (`registeredAccountsSecret`, deploy/README.md);
   otherwise `register` says so.
 

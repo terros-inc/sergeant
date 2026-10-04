@@ -353,12 +353,12 @@ test("account register asks first, refuses before any sign-in, and says what to 
   expect(unknown.err).toContain("`pbpaste | sgt account register claude --name claudeWork`");
   expect(unknown.err).not.toMatch(/sgt account list|was not registered/);
   const codexUnknown = await sgtWith({ signIn }, lost.api, "account", "register", "codex", "--name", "codexWork");
-  expect(codexUnknown.err).toContain("Once Sergeant answers, `sgt account register codex --name codexWork` signs in again and replaces whatever codexWork holds; to not use it at all, `sgt account remove codexWork`.");
+  expect(codexUnknown.err).toContain("Once Sergeant answers, `sgt account register codex --name codexWork` signs in again and replaces whatever codexWork holds. To not use it at all, `sgt account remove codexWork` and revoke it. To revoke a Codex login, open https://chatgpt.com/settings/security?view=sessions and log out the session its sign-in created");
 });
 
 // TECH-5198: removing an account passes on where to revoke it, since removal does not revoke a copy.
 test("account remove prints the server's revoke reminder", async () => {
-  const notice = "A run could have copied it, and removing it here does not revoke that copy. OpenAI documents no way to revoke a copied Codex login (its auth.json, refresh token included).";
+  const notice = "A run could have copied it, and removing it here does not revoke that copy. To revoke a Codex login, open https://chatgpt.com/settings/security?view=sessions and log out the session its sign-in created.";
   const { api, seen } = await fakeApi({ "POST /v1/accounts/remove": { json: { name: "codex", removed: true, notice } } });
   expect(await sgt(api, "account", "remove", "codex")).toMatchObject({ code: 0, out: expect.stringContaining(`removed your account codex. ${notice}`) });
   expect(seen.map((s) => [s.method, s.url, JSON.parse(s.body)])).toEqual([["POST", "/v1/accounts/remove", { name: "codex" }]]);

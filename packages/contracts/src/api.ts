@@ -134,17 +134,17 @@ export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "c
 
 /**
  * How a person revokes a credential with its provider, as a sentence (TECH-5198, TECH-5200). Neither
- * documents a revoke Sergeant could call. Anthropic documents deleting a `claude setup-token` token;
- * OpenAI documents no revoke of a copied Codex `auth.json`, and its Active sessions page says it does
- * not manage Codex CLI sessions, so the Codex sentence promises nothing. Told at registration and
- * removal, and by `sgt` when a sign-in's credential was not registered (TECH-5202).
+ * offers a revoke Sergeant could call. Claude: delete the `claude setup-token` token. Codex: each Codex
+ * CLI login is its own session on ChatGPT's sessions page, and logging one out there revokes it (the
+ * issue owner checked this on 2026-10-04; OpenAI's help article says otherwise). Told at registration
+ * and removal, and by `sgt` when a sign-in's credential was not registered (TECH-5202).
  */
 export const REVOKE: Record<Provider, string> = {
   claude:
     "To revoke a Claude token, open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference-scoped token `claude setup-token` made (match it by its Connected time).",
   codex:
-    "OpenAI documents no way to revoke a copied Codex login (its auth.json, refresh token included), and its Active sessions page at https://chatgpt.com/settings/security?view=sessions does not manage Codex CLI sessions. " +
-    "The best available step is Log out of all devices on that page, which OpenAI does not say ends a copy; if you think it was copied, also report it to OpenAI support at https://help.openai.com.",
+    "To revoke a Codex login, open https://chatgpt.com/settings/security?view=sessions and log out the session its sign-in created (each Codex CLI login is its own session there; match it by its time). " +
+    "If you cannot tell which it is, use Log out of all devices on that page.",
 };
 
 export const WhoAmI = z.object({

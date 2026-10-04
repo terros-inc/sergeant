@@ -20,9 +20,9 @@ export function registrationRefusal(me: WhoAmI, provider: Provider): { code: Api
 }
 
 /**
- * After a sign-in made a credential that registering failed to keep: how to reuse or revoke it. A Codex
- * login has no copy left here to revoke: sgt deleted its own, and `sgt account remove` removes one
- * Sergeant stored and says what that leaves.
+ * After a sign-in made a credential that registering failed to keep: how to reuse or revoke it. A refused
+ * Codex login has no copy left to revoke: sgt deleted its own and Sergeant stored none. One that may
+ * have been stored can be revoked by logging out its session (REVOKE).
  * `refused`: the server refused it, before storing anything. Otherwise (unreachable, an unreadable
  * answer, the store failing) it may have been registered after all, and an account listed under the
  * name cannot say whether it is this one or the one it would have replaced. Registering under the
@@ -35,7 +35,7 @@ export function strandedNotice(provider: Provider, name: string, refused: boolea
     return refused
       ? `${name} was not registered. sgt deleted its copy of the Codex login and Sergeant stored none, so no copy of it is left: ${relogin}.`
       : `sgt cannot tell whether ${name} was registered, and it deleted its copy of the Codex login. ` +
-          `Once Sergeant answers, ${relogin} and replaces whatever ${name} holds; to not use it at all, \`sgt account remove ${name}\`.`;
+          `Once Sergeant answers, ${relogin} and replaces whatever ${name} holds. To not use it at all, \`sgt account remove ${name}\` and revoke it. ${REVOKE.codex}`;
   }
   const pipe = `copy it from above and pipe it in, on a Mac: \`pbpaste | ${again}\``;
   return refused

@@ -65,8 +65,7 @@ export async function accountsRoute(
 // The accepted risk (09 §3a), told at registration and again at removal: a run's model credential is in
 // its container, so a compromised run can copy it, and removing it from Sergeant does not revoke a copy.
 // Neither provider documents a revoke Sergeant could call with the stored credential (TECH-5198), so
-// the notices say how the person revokes it themselves, or, for Codex, that OpenAI documents no way to
-// (contracts' REVOKE, TECH-5200).
+// the notices say how the person revokes it themselves (contracts' REVOKE, TECH-5200).
 export const exposureNotice = (adapter: AccountAdapter, name: string): string =>
   `Your credential is used inside Sergeant's worker and reviewer containers while runs work on it, so it could be exposed if a run is compromised, for example by prompt injection. ` +
   `To stop Sergeant using it, run \`sgt account remove ${name}\`. That does not revoke a copy a run took. ${REVOKE[providerOf(adapter)]} ` +
