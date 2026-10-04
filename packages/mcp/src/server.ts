@@ -69,7 +69,7 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
     "run_show",
     {
       description:
-        "One run and its parsed report: a worker's outcome, summary, PRs (URL, head SHA, review call), known gaps, follow-ups; a reviewer's verdict and findings. Like `sgt run show`.",
+        "One run and its parsed report: a worker's outcome, summary, PRs (URL, head SHA, review call), known gaps, follow-ups, feedback; a reviewer's verdict and findings. Like `sgt run show`.",
       // No outputSchema: the report's review call is a transform (fails toward review), which JSON
       // Schema cannot express. The answer is still validated against `RunDetail` before it is returned.
       inputSchema: z.object({ run: RunId.describe("run id, e.g. run_…") }),

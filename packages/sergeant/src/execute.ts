@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
   checkBudget,
-  checkFollowup,
   checkLive,
   checkMayMerge,
   checkSend,
@@ -11,6 +10,7 @@ import {
   conversationRevision,
   issueRevision,
   type FiledFollowup,
+  type FollowupCategory,
   type GitHubPort,
   type LinearPort,
   type ProposedAction,
@@ -58,6 +58,14 @@ export type Ports = {
    * (TECH-5179); the loop's stop path then cancels its runs and keeps its PRs.
    */
   handoff?: (reason: string) => Promise<void>;
+};
+
+/** How a follow-up's category reads on the filed issue (TECH-5186). */
+const categoryLabel: Record<FollowupCategory, string> = {
+  concrete_bug: "a concrete bug",
+  required_unfinished_work: "required unfinished work",
+  real_blocker: "a real blocker",
+  operational_or_security: "a current operational or security problem",
 };
 
 export type ActionOutcome =
@@ -274,8 +282,6 @@ export async function execute(action: ProposedAction, situation: SituationReport
       case "create_followup": {
         const filed = situation.followups.find((f) => f.key === action.key);
         if (filed) return { action, status: "done", result: { identifier: filed.identifier, alreadyFiled: true }, followup: filed };
-        const verdict = checkFollowup({ filed: situation.followups });
-        if (!verdict.allowed) return denied(verdict);
         const active = checkLive((await ports.linear.readConversation(conversation.issue.id)).issue, ports.agentUserId);
         if (!active.allowed) return denied(active);
         const late = inBudget();
@@ -284,7 +290,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
         const issue = await ports.linear.createFollowupIssue({
           originIssueId: conversation.issue.id,
           title: action.title,
-          description: `${action.description}\n\n---\nFollow-up from [${identifier}](${url}), filed by Sergeant. Not delegated: move it to Todo and delegate it when it should start.`,
+          description: `**Why a follow-up (${categoryLabel[action.category]}):** ${action.why}\n\n${action.description}\n\n---\nFollow-up from [${identifier}](${url}), filed by Sergeant. Not delegated: move it to Todo and delegate it when it should start.`,
           relation: action.relation,
           // Per task and reasoning's key, never per turn or run: a re-proposal, a retry, or a
           // restarted loop files nothing new, even when state.json never recorded the first one.

@@ -6,8 +6,8 @@ export { describeOutcome, execute, type ActionOutcome, type Ports } from "./exec
 
 /**
  * One turn: fresh reasoning over the snapshot, then each proposal through the Gate, in order. A run
- * started earlier in the turn is visible to the Gate for later proposals (R1, R2), and so is a
- * follow-up filed earlier (F1, and no second issue for a repeated key). A turn that asks a human does
+ * started earlier in the turn is visible to the Gate for later proposals (R1, R2), and a follow-up
+ * filed earlier is visible too, so a repeated key files no second issue. A turn that asks a human does
  * nothing else, before or after the question and whether or not it posts (Q1). The turn's own reported
  * cost counts against the budget before any proposal runs (B1). Once a start reaches the runner, no
  * other start runs in the turn, whether it succeeded or failed: a start whose response was lost may be

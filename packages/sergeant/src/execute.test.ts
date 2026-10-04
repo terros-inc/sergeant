@@ -161,7 +161,7 @@ test("a wall deadline that passes during the merge's live reads stops the merge"
   }
 });
 
-const followup = (key: string): ProposedAction => ({ kind: "create_followup", key, title: `Do ${key}`, description: `Why ${key}.`, relation: "related" });
+const followup = (key: string): ProposedAction => ({ kind: "create_followup", key, title: `Do ${key}`, category: "concrete_bug", why: `${key} fails.`, description: `Why ${key}.`, relation: "related" });
 
 test("an issue reassigned or undelegated after the turn's snapshot gets no new start and no merge", async () => {
   const start: ProposedAction = { kind: "start_worker", objective: "Do UNF-1.", repositories: [pr.repo] };
@@ -241,23 +241,23 @@ test("send_run to a run outside this task is refused before the runner", async (
   expect(sent).toEqual([]);
 });
 
-// UNF-729: a non-blocking finding becomes at most one follow-up issue. A key reasoning repeats, in the
-// same turn or a later one, files nothing new, and a confused turn cannot flood Linear (F1).
-test("a repeated follow-up key files one issue, and the per-task limit stops the rest", async () => {
-  const actions = [followup("a"), followup("a"), followup("b"), followup("c"), followup("d")];
+// UNF-729: a key reasoning repeats, in the same turn or a later one, files nothing new. There is no
+// per-task count (TECH-5186). The filed issue opens with the follow-up's category and why.
+test("a repeated follow-up key files one issue", async () => {
+  const actions = [followup("a"), followup("a"), followup("b")];
   const reasoner = { turn: async () => ({ output: { summary: "s", actions }, model: "m", promptVersion: "p" }) };
   const { p, filed } = ports();
   const { outcomes } = await takeTurn(situation, { ...p, reasoner });
-  expect(filed.map((f) => f.key)).toEqual(["followup:tsk_1:a", "followup:tsk_1:b", "followup:tsk_1:c"]);
+  expect(filed.map((f) => f.key)).toEqual(["followup:tsk_1:a", "followup:tsk_1:b"]);
   expect(filed[0]).toMatchObject({ originIssueId: "i1", relation: "related", description: expect.stringContaining(conversation.issue.url) });
-  expect(outcomes.map((o) => o.status)).toEqual(["done", "done", "done", "done", "denied"]);
+  expect(filed[0]?.description).toMatch(/^\*\*Why a follow-up \(a concrete bug\):\*\* a fails\.\n\nWhy a\./);
+  expect(outcomes.map((o) => o.status)).toEqual(["done", "done", "done"]);
   expect(outcomes[1]).toMatchObject({ followup: { key: "a", identifier: "UNF-101" } });
-  expect(outcomes[4]).toMatchObject({ rule: "F1" });
 
   // A later turn shown the filed follow-up gets it back without a second issue.
   const later = await execute(followup("a"), { ...situation, followups: [{ key: "a", title: "Do a", identifier: "UNF-101", url: "https://linear.app/x/issue/UNF-101" }] }, p);
   expect(later).toMatchObject({ status: "done", followup: { identifier: "UNF-101" } });
-  expect(filed).toHaveLength(3);
+  expect(filed).toHaveLength(2);
 });
 
 // UNF-733: a merge ends the task. A turn that also starts work, before or after the merge, must not

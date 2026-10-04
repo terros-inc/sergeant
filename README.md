@@ -137,14 +137,34 @@ and the conversation revision it was asked from, and the loop then takes no turn
 until a human comments or edits the issue. No timeout decides for the human; `STOP` or undelegation
 still ends the loop. The wait is never stored locally: a restart finds the question on the issue.
 
-Workers suggest out-of-scope work in their report's `followups`; reviewers' `non_blocking` findings
-are in theirs. Reasoning decides which deserve an issue and proposes `create_followup` with a short
-key naming the idea. The V2 agent files it in the task issue's team and project, related to the issue
+A follow-up issue is only for a concrete bug, required unfinished work from the task's own scope, a
+real blocker, or a current operational or security problem (TECH-5186). There is no per-task quota,
+but more than one from a task is exceptional. Workers suggest them in their report's `followups`, each
+with its `category` and why it meets it; everything else they noticed (what made the task harder or
+slower, what could be better, whether it will recur) goes in the report's `feedback` and its short
+Feedback section, and is never filed. Reviewers' `non_blocking` findings and nits never become
+follow-ups, nor do theoretical edge cases, future robustness, generalized cleanup, speculative rollback
+hazards, or abstraction improvements. Reasoning decides whether a suggestion deserves an issue and
+proposes `create_followup` with its category, why, and a short key naming the idea; the filed issue
+opens with the category and why. The V2 agent files it in the task issue's team and project, related to the issue
 (or blocked by it), with no delegate or assignee, so humans triage it. Linear's client-supplied ids,
 derived from `followup:<task>:<key>`, make it at most one issue and one relation per key, even across
 a crash or a rerun; filed follow-ups are kept in `state.json`, shown to every later turn, and listed
-in the outcome comment. The Gate allows at most 3 per task (F1). The Linear token needs permission
-to create issues and issue relations.
+in the outcome comment. The category and why are the only limit: no count caps them. The Linear token
+needs permission to create issues and issue relations.
+
+With the closing PR's merge, reasoning may give up to three short feedback lines worth keeping, from
+the workers' feedback and any non-blocking review notes worth keeping. After the outcome comment,
+Sergeant posts them once as a **Sergeant feedback** comment on the issue, keyed by the merge like the
+outcome, and adds the `sergeant-feedback` label. A merge reasoning did not make (a human's) uses only
+the closing worker's explicit feedback. An issue completed in Linear without a recognized closing merge
+gets the same from the latest worker, posted once as its stop finishes (keyed by the stop) while the
+issue is still delegated to Sergeant. Delivery is the comment and the label: until both succeed, the
+feedback is not marked posted and the task is neither seen through nor its stop finished, so a later
+pass retries, and the key keeps the comment to one. A task with nothing worth keeping ("Nothing
+notable") gets neither. A retro across tasks (TECH-5187) reads these comments; no other store holds
+them. The `sergeant-feedback` label must already exist (a workspace label, or one in the issue's team);
+Sergeant never creates it. The Linear token also needs permission to edit issue labels.
 
 Review quality is telemetry, never a gate (UNF-730, design 06 §8–9). Every reviewer run that
 finishes, whether or not the task ever merges, is written as a line of `<dir>/reviews.jsonl`: trigger

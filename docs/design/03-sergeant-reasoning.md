@@ -160,9 +160,11 @@ Rule ids refer to §7, `06` §6, and `08` §7.
 - Clears the human wait when the question no longer matters; posts a one-line note.
 - Gate: G3. Key: `withdraw:<questionId>`.
 
-**`create_followup_task(key, title, description, relation: blocks | blocked_by | related, delegate)`**
+**`create_followup_task(key, title, category, why, description, relation: blocks | blocked_by | related, delegate)`**
 → `{ issueId, identifier, url }`
-- Gate: G1–G3, F1–F3. Key: `followup:<taskId>:<key>`.
+- Only for a concrete bug, required unfinished work, a real blocker, or a current operational or
+  security problem (`category`), with `why` it meets it (07 §11, TECH-5186).
+- Gate: G1–G3, F2–F3. Key: `followup:<taskId>:<key>`.
 
 **`link_pr(repo, number)`** / **`unlink_pr(repo, number, reason)`** → `{ ref }`
 - Adds or removes the Linear attachment. Worker-reported PRs are linked by a guardrail (08 §4).
@@ -173,7 +175,9 @@ Rule ids refer to §7, `06` §6, and `08` §7.
   nonblocking audit review (06 §8).
 - Gate: D1–D6. Key: `disposition:<taskId>:<repo>#<n>:<headSha>`.
 
-**`merge_pr(repo, number, expectedHeadSha)`** → `{ mergedSha }`
+**`merge_pr(repo, number, expectedHeadSha, feedback?)`** → `{ mergedSha }`
+- `feedback`: for the closing PR, up to three lines posted after the merge as the Sergeant feedback
+  comment, with the `sergeant-feedback` label (07 §11, TECH-5186).
 - The core attaches this turn's `conversationRevision` to the action (reasoning does not supply it); M10
   re-reads Linear and refuses the merge if the conversation changed, so a fresh turn decides (§5). Gate:
   G1–G3, M1–M11 (08 §7). Key: `merge:<taskId>:<repo>#<n>:<expectedHeadSha>`.
@@ -283,7 +287,6 @@ nothing is left for reasoning to notice and correct in another turn.
 | C1 | bound | comment_task, ask_human | ≤ 6 Sergeant comments per task per rolling hour |
 | Q1 | L4 | ask_human (blocking) | no human wait is already open: one question at a time |
 | Q2 | bound | ask_human | ≤ 3 unanswered questions in total |
-| F1 | L3 | create_followup_task | follow-ups created by this task < `followups.maxPerTask` |
 | F2 | L3 | create_followup_task | follow-up depth (derived from `actions`) < `followups.maxDepth` |
 | F3 | L3, auth | create_followup_task | `delegate` requires `followups.autoDelegate`; team ∈ `allowedTeamIds` |
 | P1 | L2 | link_pr, merge_pr, start_reviewer | repo is in the task's repository set |
@@ -469,5 +472,5 @@ Product content, versioned and iterated with evals. Required content:
 | Two implementation workers on one task | R1 (an unreachable worker may be replaced only after its cancellation was requested) |
 | A worker reaching production, admin, personal, or control-plane authority | the runner zone holds none of it (09 §3), except the run's selected model credential, an accepted exception to the personal-credential boundary (09 §3a) |
 | A stopped task coming back with fresh authority | closing steps (§10) |
-| Runaway comments, follow-ups, escalations | C1, Q2, F1–F3, E1 |
+| Runaway comments, follow-ups, escalations | C1, Q2, F2–F3, E1 |
 | Good judgment about what to do next | only the prompt, the facts, and evals; nothing deterministic |

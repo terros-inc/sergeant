@@ -2,7 +2,6 @@ import type { Conversation, PullRequestRef, RepoSlug } from "./conversation.ts";
 import type { PullRequestFacts } from "./github.ts";
 import type { ProposedAction } from "./actions.ts";
 import type { RunRecord } from "./runs.ts";
-import type { FiledFollowup } from "./situation.ts";
 
 export type GateVerdict = { allowed: true } | { allowed: false; rule: string; reason: string };
 
@@ -80,15 +79,5 @@ export function checkSend(action: Extract<ProposedAction, { kind: "send_run" }>,
   const run = facts.runs.find((r) => r.runId === action.runId);
   if (run?.role !== "worker") return deny("S1", `${action.runId} is not a worker run of this task`);
   if (run.status !== "running") return deny("S1", `${run.runId} is ${run.status}`);
-  return allow;
-}
-
-/** F1: follow-up issues one task may file (14: at most 3), so a confused turn cannot flood Linear. */
-export const MAX_FOLLOWUPS_PER_TASK = 3;
-
-export function checkFollowup(facts: { filed: FiledFollowup[] }): GateVerdict {
-  if (facts.filed.length >= MAX_FOLLOWUPS_PER_TASK) {
-    return deny("F1", `this task already filed ${facts.filed.length} follow-ups: ${facts.filed.map((f) => f.identifier).join(", ")}`);
-  }
   return allow;
 }

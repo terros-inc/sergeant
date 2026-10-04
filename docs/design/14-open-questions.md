@@ -16,7 +16,7 @@ captain's review of draft 3 and what changed.
 | Sergeant does not write code; it manages | 00 P5, 03 §1 |
 | One primary worker per task; parallel engineering via the worker's own subagents | 03 R1, 04 §8 |
 | Sergeant chooses each task's repository set; the worker may change all of it and open several PRs; no per-repo lifecycle | 01 `RepositorySet`, 03 RS1, 04 §9, 08 §4 |
-| Only Sergeant creates Linear issues; workers suggest follow-ups | 03 F1–F3, 05 rule 12, 07 §11 |
+| Only Sergeant creates Linear issues; workers suggest follow-ups | 03 F2–F3, 05 rule 12, 07 §11 |
 | The required review is a separately launched fresh-context reviewer run; review and CI run in parallel; tiny fixes may skip re-review, material changes get a fresh one | 06 §1–7 |
 | Worker-launched subagent reviews are measurement-only; no preset threshold; Firstmate brings the comparison to the captain later | 06 §5, §9 |
 | Review-need policy: no hard thresholds; if in doubt, review ("80/20, not 99/1"); an occasional wrong skip is an accepted cost; track over- and under-review | 05 §5, 06 §1, §9 |
@@ -50,7 +50,7 @@ Captain Question.
 | Who may delegate, answer, grant budget, waive review | Anyone in the allowed Linear teams delegates and answers; configured approvers grant budget, waive review, and receive escalations | Budget and waivers are the human authorities the Gate relies on; everything else follows "Linear is the human surface" |
 | Reasoning runtime | A plain model tool-use loop with Sergeant-defined tools and Sergeant-managed sessions, behind a thin interface so the model is swappable; a provider agent SDK only if it honors 03 §8's contract | Small auditable tool surface; provider neutrality (P12) |
 | Separating runners from the control plane | One shared runner zone: a separate OS user with the metadata endpoint blocked on the host, a container on the laptop; no per-run isolation | The captain's posture: per-task isolation is not a requirement; the control-plane boundary is |
-| Auto-delegating follow-ups | Per-installation setting: on for Personal (depth 1, at most 3 per task), off for Terros at first | The captain's UNF-625 direction ("don't make a human do bookkeeping"), bounded for fan-out |
+| Auto-delegating follow-ups | Per-installation setting: on for Personal (depth 1), off for Terros at first | The captain's UNF-625 direction ("don't make a human do bookkeeping"), bounded for fan-out |
 | Workflow-file changes | The worker App has no `workflows` permission; a needed CI change ends `blocked_by_environment` for a human | Editing a PR workflow could expose repository secrets, a production-boundary risk |
 | Paid evals (S1's persona-eval executor) | No executor; an eval-only credential, if needed, is ordinary runner-zone authority, with evidence integrity as a reviewer check | The posture: no capability mediation without a concrete material failure |
 | The laptop trial's identity | Its own installation identity (second region or account), its own Linear agent user and GitHub Apps, runs in a container | Consequences of ADR-0040 and the personal-credential boundary, not a product choice |
@@ -130,7 +130,8 @@ mechanisms, both small.
 - Linear: at most 6 Sergeant comments per task per hour; one blocking question at a time, at most 3 open
   in all; reminder after 24 h.
 - Review: audit sample 0.2.
-- Follow-ups: at most 3 per task, depth at most 1.
+- Follow-ups: only for real bugs, unfinished work, blockers, and ops/security problems, no quota
+  (TECH-5186), each with its category and why; depth at most 1.
 - Enrollment in SSM configuration; PR association in Linear attachments.
 - One daemon per ledger; SQLite (no backups); S3 for artifacts; CloudWatch for logs; a missing ledger
   starts paused.

@@ -25,6 +25,13 @@ test("addressed findings are read by review run and finding id, and a malformed 
   expect(malformed.ok && malformed.report.addressedFindings).toBeUndefined();
 });
 
+test("feedback is kept on the record for a later retro, and a malformed list never fails the report", () => {
+  const parsed = parseReport(report({ ...worker(undefined), feedback: ["CI took 20 minutes to start"] }), WorkerReport);
+  expect(parsed.ok && parsed.report.feedback).toEqual(["CI took 20 minutes to start"]);
+  const malformed = parseReport(report({ ...worker(undefined), feedback: "one string" }), WorkerReport);
+  expect(malformed.ok && malformed.report.feedback).toBeUndefined();
+});
+
 test("a PR without closesIssue rejects the report rather than reading it as Part of", () => {
   const { closesIssue: _, ...unsaid } = pr;
   const ok = worker({ required: true, reason: "" });

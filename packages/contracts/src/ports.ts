@@ -43,6 +43,11 @@ export interface LinearPort {
    */
   resolveThread?(commentId: string): Promise<"resolved" | "already_resolved" | "not_sergeants">;
   /**
+   * Adds the existing label named `name` (the workspace's, else the issue team's) to the issue; throws
+   * when there is none. A label the issue already has is left as it is.
+   */
+  addLabel?(issueId: string, name: string): Promise<void>;
+  /**
    * Creates an issue in the origin issue's team and project, in the team's first `backlog` state
    * (never Triage), related to it as `relation` says, with no delegate. It is assigned to the origin's
    * assignee unless that is Sergeant, else to the human who delegated the origin to Sergeant, else to

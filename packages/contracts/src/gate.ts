@@ -8,12 +8,10 @@ import { checkLive, isOwned, type GateVerdict, type Ownership } from "./action-g
 
 export {
   checkDelegation,
-  checkFollowup,
   checkIssueState,
   checkLive,
   checkSend,
   checkStart,
-  MAX_FOLLOWUPS_PER_TASK,
   STOP_STATE_TYPES,
   type GateVerdict,
   type Ownership,

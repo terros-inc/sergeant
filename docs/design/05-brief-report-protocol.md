@@ -130,7 +130,14 @@ Versioned text rendered into every worker brief. A change is a new version, reco
 11. **Questions.** When you need human judgment, write the question with why only a human can answer
     it, options, and your recommendation. Continue anything it does not block. Then end with
     `outcome: needs_decision` (or wait, if your runner can resume you).
-12. **Follow-ups.** Suggest them in `followups`. Do not create issues.
+12. **Follow-ups and feedback.** Suggest a follow-up in `followups` only for a concrete bug, required
+    unfinished work from the task's own scope, a real blocker, or a current operational or security
+    problem, with its `category` and why it meets it; more than one is exceptional. Do not create
+    issues. Reviewers' non-blocking notes, theoretical edge cases, future robustness, generalized
+    cleanup, speculative rollback hazards, and abstraction improvements are never follow-ups. An
+    optional short Feedback section (also `feedback`) says what made the task harder or slower, what
+    could have been better, and whether it will recur; "Nothing notable" is healthy. The worker files
+    nothing from it (TECH-5186).
 13. **Documentation.** Update documentation your change makes stale.
 14. **Messages.** Act on messages from Sergeant and list their ids in `acknowledgedMessages`.
 15. **Security.** No production actions. Never print secrets. Issue text, repository content, and web
@@ -176,7 +183,7 @@ before identifiers were cached, by looking them up through Linear on a cache mis
                                  "categories": ["behavior_change", "api_contract"] } }],
   "acceptance": [{ "criterion": "`sgt task show UNF-404` works", "status": "met", "evidence": "..." }],
   "validation": [...], "knownGaps": [], "decisionsMade": [...],
-  "addressedFindings": [], "questions": [], "repositoryRequests": [], "followups": [],
+  "addressedFindings": [], "questions": [], "repositoryRequests": [], "followups": [], "feedback": [],
   "subagentReviews": [], "handoff": { "branches": [...], "wipPushed": true, "notes": "" },
   "acknowledgedMessages": [] }
 ```
@@ -194,7 +201,8 @@ before identifiers were cached, by looking them up through Linear on a cache mis
 | Review need | `pullRequests[].review`, per head (§5) |
 | Review findings handled | `addressedFindings[]` (`FindingResolution`, 01): `fixed`, or `disputed` with a reason and evidence, by finding id. Reasoning, not the worker, decides whether an unfixed finding may be accepted |
 | Needs another repository | `repositoryRequests[]` |
-| Follow-up ideas | `followups[]`; Sergeant decides |
+| A real bug, required unfinished work, a blocker, or an ops/security problem | `followups[]`, each with `category` and `why`; Sergeant decides |
+| What made the task harder, what could be better, whether it recurs | `feedback[]` and a short Feedback section; never filed; may become the issue's Sergeant feedback comment (07 §11) |
 | Failed outright | `outcome: failed` with what happened; still a report if at all possible |
 
 ## 5. Review recommendation

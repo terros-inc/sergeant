@@ -1,7 +1,7 @@
 import { appendFile, stat } from "node:fs/promises";
 import { checkBudget, checkDelegation, NoModelAccount, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { cancelPending, recordStop } from "./cancel.ts";
-import { outcomeComment } from "./outcome.ts";
+import { feedbackComment, outcomeComment, workerFeedback } from "./outcome.ts";
 import { cancelRuns } from "./poll.ts";
 import { accountRefusal, reassigned } from "./owner.ts";
 import type { Ports } from "./execute.ts";
@@ -14,7 +14,10 @@ import { pause } from "./wake.ts";
 
 type Merged = NonNullable<TaskState["merged"]>;
 
-/** The task's record of a closing merge, with its outcome comment built from the live facts. */
+/**
+ * The task's record of a closing merge no reasoning turn made, with its outcome comment built from the
+ * live facts. With no reasoning to pick feedback, its feedback comment is the closing worker's own.
+ */
 export function mergedOf(
   pr: PullRequestFacts,
   mergedSha: string,
@@ -23,7 +26,8 @@ export function mergedOf(
   issue: Pick<Conversation["issue"], "title" | "description">,
 ): Merged {
   const outcome = outcomeComment(pr, mergedSha, runs, followups, issue);
-  return { repo: pr.repo, number: pr.number, headSha: pr.headSha, mergedSha, at: new Date().toISOString(), outcome };
+  const feedback = feedbackComment(workerFeedback(runs, pr));
+  return { repo: pr.repo, number: pr.number, headSha: pr.headSha, mergedSha, at: new Date().toISOString(), outcome, ...(feedback && { feedback }) };
 }
 
 /**
@@ -47,7 +51,7 @@ export async function driveMerged(
   },
 ): Promise<LoopResult | undefined> {
   const { opts, deps, log, save } = ctx;
-  const effects = (merged.outcome && !merged.outcomePostedAt) || !merged.auditDrawnAt;
+  const effects = (merged.outcome && !merged.outcomePostedAt) || (merged.feedback && !merged.feedbackPostedAt) || !merged.auditDrawnAt;
   if (effects && opts.slot && !opts.slot.work()) {
     log("queued: waiting for a free task slot");
     return undefined;
@@ -64,7 +68,7 @@ export async function driveMerged(
   };
   const moved = await movedFromOwner(opts, deps, log);
   if (moved) return handOff(moved);
-  const stopped = await postOutcome(merged, opts, deps, log, save);
+  const stopped = (await postOutcome(merged, opts, deps, log, save)) ?? (await postFeedback(merged, opts, deps, log, save));
   if (stopped) return stopped;
   // The audit sample is drawn after the merge, so it cannot hold it up.
   if (!(await drawAudit(merged, ctx.runIds, opts, deps, log, save, ctx.budgetOf))) return undefined;
@@ -107,6 +111,53 @@ export async function postOutcome(
   log(`posted the outcome comment on ${issue.identifier}`);
   return undefined;
 }
+
+/**
+ * TECH-5186: posts the Sergeant feedback comment once, after the outcome comment, and labels the issue
+ * `sergeant-feedback` so a retro across tasks finds it. Keyed by issue and merge like the outcome, and
+ * only while the issue is still delegated. It is posted only once both the comment and the label
+ * succeed: a failure throws, so the task is neither marked posted nor seen through, and a retry posts
+ * the comment under the same key.
+ */
+export async function postFeedback(
+  merged: Merged,
+  opts: LoopOptions,
+  deps: Ports,
+  log: (line: string) => void,
+  save: () => Promise<void>,
+): Promise<LoopResult | undefined> {
+  if (!merged.feedback || merged.feedbackPostedAt) return undefined;
+  const { issue } = await deps.linear.readConversation(opts.issueId);
+  const delegation = checkDelegation(issue, deps.agentUserId);
+  if (!delegation.allowed) {
+    return { outcome: "stopped", detail: `${merged.repo}#${merged.number} merged; feedback not posted: ${delegation.reason}` };
+  }
+  await postFeedbackComment(issue, merged.feedback, `feedback:${issue.id}:${merged.repo}#${merged.number}:${merged.mergedSha}`, deps, log);
+  merged.feedbackPostedAt = new Date().toISOString();
+  await save();
+  return undefined;
+}
+
+/**
+ * Posts a Sergeant feedback comment under `key`, so a retry posts nothing more, then adds the label.
+ * Either failing, or a port without `addLabel`, throws: delivery is both, so the caller retries.
+ */
+export async function postFeedbackComment(
+  issue: Pick<Conversation["issue"], "id" | "identifier">,
+  body: string,
+  key: string,
+  deps: Pick<Ports, "linear">,
+  log: (line: string) => void,
+): Promise<void> {
+  const addLabel = deps.linear.addLabel?.bind(deps.linear);
+  if (!addLabel) throw new Error(`cannot add the ${FEEDBACK_LABEL} label: the Linear port has no addLabel`);
+  await deps.linear.postComment({ issueId: issue.id, body, key });
+  await addLabel(issue.id, FEEDBACK_LABEL);
+  log(`posted the Sergeant feedback comment on ${issue.identifier}`);
+}
+
+/** The label on every issue with a Sergeant feedback comment (TECH-5186, read by TECH-5187's retro). */
+export const FEEDBACK_LABEL = "sergeant-feedback";
 
 export const mergedHead = (m: Merged) => ({ repo: m.repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha });
 

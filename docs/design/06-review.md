@@ -111,7 +111,8 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 6. **Size and simplification claims** need `git diff --numstat` evidence.
 7. **Run only targeted probes** a specific finding needs. CI is the test gate.
 8. **Severity.** `blocking`: a defect, an unmet requirement, or a risk the change should not merge with.
-   `non_blocking`: worth fixing, not worth holding the merge. `nit`: style.
+   `non_blocking`: worth fixing, not worth holding the merge. `nit`: style. Non-blocking findings and
+   nits are notes kept with the review record; they never become follow-up issues (TECH-5186).
 9. **Do not modify the repository** and do not contact anyone.
 10. **Verdict**: `approve`, `changes_requested`, or `needs_human`.
 11. **Unreadable inputs.** An input the issue depends on that the reviewer cannot read (an auth-gated

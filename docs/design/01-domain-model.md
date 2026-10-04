@@ -113,7 +113,7 @@ InstallationConfig {            // ADR-0042 mechanism; Sergeant 2 keys only
     auditSampleRate             // fraction of skipped reviews that get a nonblocking audit review
     qualityBudgetUsdPerDay      // pays for audit reviews; not charged to tasks
   }
-  followups: { maxPerTask, maxDepth, autoDelegate }
+  followups: { maxDepth, autoDelegate }
   humanWait: { remindAfterHours }
   approvers: LinearUserId[]     // grant budget, waive review, receive escalations
   aws: { runnerDevRoleArn, artifactBucket, logGroup }
@@ -433,7 +433,8 @@ WorkerReport {
   addressedFindings: FindingResolution[]           // resolution: fixed | disputed
   questions: [{ id, question, whyHumanNeeded, options?: string[], recommendation?, blocking }]
   repositoryRequests: [{ slug, why }]
-  followups: [{ title, why, repo? }]
+  followups: [{ title, category, why, repo? }]     // a real bug, unfinished work, blocker, or ops/security problem
+  feedback: string[]                               // the Feedback section; never filed (TECH-5186)
   subagentReviews: SubagentReview[]                // measurement only (06 §5)
   handoff?: { branches: [{ repo, branch, pushedSha }], wipPushed, notes }
   acknowledgedMessages: MessageId[]

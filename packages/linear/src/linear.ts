@@ -2,6 +2,7 @@ import { commentIdFor, Conversation, type LinearPort } from "@terros/sergeant-co
 import { z } from "zod";
 import { taskOwnerReader } from "./delegation.ts";
 import { followupFiler } from "./followup.ts";
+import { labeler } from "./label.ts";
 import { readLinkedIssueBackground } from "./linked-issues.ts";
 import {
   actor,
@@ -77,6 +78,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   /** Removes the issue's delegate: a human's cancel (`sgt task cancel`) or a handoff. Idempotent. */
   undelegate(issueId: string): Promise<void>;
   moveIssueToTodo(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
+  addLabel: NonNullable<LinearPort["addLabel"]>;
 } {
   if (!options.apiKey) throw new Error("Linear API key is required");
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -212,6 +214,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     readTaskOwner: taskOwnerReader(request, sergeantUsers),
 
     createFollowupIssue: followupFiler({ request, createOnce, sergeantUsers, log }),
+
+    addLabel: labeler({ request }),
 
     async moveIssueToStarted(issueId) {
       const { issue } = await request(issueWorkflow, { id: issueId }, issueWorkflowShape);

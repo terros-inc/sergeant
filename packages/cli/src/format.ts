@@ -79,6 +79,7 @@ export function showRun({ task, run }: RunDetail): string {
       lines.push(`  ${pr.repo}#${pr.number} @${pr.headSha.slice(0, 12)} ${pr.closesIssue ? "closes the issue" : "part of it"}, ${review}`);
     }
     for (const gap of r.knownGaps) lines.push(`  gap: ${gap}`);
+    for (const note of r.feedback ?? []) lines.push(`  feedback: ${note}`);
   } else {
     const r = run.report;
     lines.push(`${r.verdict}: ${r.summary}`);

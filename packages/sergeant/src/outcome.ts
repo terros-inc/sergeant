@@ -60,3 +60,27 @@ function acceptanceGaps(pr: PullRequestFacts, runs: RunRecord[], current: string
     ...unmet.map((f) => `unmet per review: ${f.description.split("\n")[0]?.slice(0, 200)}`),
   ];
 }
+
+/**
+ * TECH-5186: the one short Sergeant feedback comment posted on the issue after the closing merge, three
+ * lines at most, for a retro across tasks (TECH-5187) to read. Nothing to post without a line worth
+ * keeping: "Nothing notable" is a healthy answer, not feedback.
+ */
+export function feedbackComment(lines: readonly string[] | undefined): string | undefined {
+  const kept = (lines ?? [])
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter((l) => l !== "" && !/^nothing notable\.?$/i.test(l))
+    .slice(0, 3);
+  return kept.length > 0 ? kept.map((l, i) => (i === 0 ? `**Sergeant feedback:** ${l}` : l)).join("\n") : undefined;
+}
+
+/**
+ * A task's feedback when no reasoning turn picked it (a human's merge, or the issue completed in Linear
+ * without a recognized closing merge): only the explicit feedback of the worker that last reported `pr`
+ * (the last worker report when none is given). `feedbackComment` keeps the first three lines.
+ */
+export function workerFeedback(runs: RunRecord[], pr?: { repo: string; number: number }): string[] {
+  const covers = (prs: { repo: string; number: number }[]) => !pr || prs.some((r) => r.repo === pr.repo && r.number === pr.number);
+  const worker = runs.findLast((r) => r.role === "worker" && r.report && covers(r.report.pullRequests));
+  return worker?.role === "worker" ? (worker.report?.feedback ?? []) : [];
+}
