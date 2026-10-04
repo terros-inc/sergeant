@@ -96,7 +96,7 @@ test("a request naming no client version, a malformed one, or one older than the
   // Malformed values with a current numeric prefix must not pass as current.
   const malformed = [`${MIN_CLI_VERSION}garbage`, `${MIN_CLI_VERSION}.9`, `${MIN_CLI_VERSION}+`, `${MIN_CLI_VERSION}+abc def`, `v${MIN_CLI_VERSION}`, "99.0"];
   for (const version of [null, "", "2.1.0+abcdef0", "garbage", ...malformed]) {
-    for (const [method, path] of [["GET", "/v1/auth/config"], ...authenticatedPaths, ["POST", "/v1/accounts/claude-code-local/register"]] as const) {
+    for (const [method, path] of [["GET", "/v1/auth/config"], ...authenticatedPaths, ["POST", "/v1/accounts/register"]] as const) {
       expect(await call(port, method, path, undefined, version), `${method} ${path} from ${version}`).toMatchObject(tooOld);
       expect(await call(port, method, path, "t-1", version), `${method} ${path} from ${version} with a login`).toMatchObject(tooOld);
     }

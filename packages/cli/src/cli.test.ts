@@ -249,28 +249,34 @@ test("-v and --version print Sergeant's git version and exit 0 without touching 
 });
 
 // TECH-5113: a credential is read from stdin, never an argument a shell history or process list keeps,
-// and only the API's answer, which never holds it, is printed.
-test("account register posts the credential read from stdin and prints the account without it", async () => {
-  const notice = "Your credential is used inside Sergeant's worker and reviewer containers … run `sgt account remove codex-local` … `codex login` again.";
-  const account = { id: "person:u1:codex-local", group: "registered", holder: "Ada Example <ada@example.com>", adapter: "codex-local", mine: true };
+// and only the API's answer, which never holds it, is printed. TECH-5196: with nothing piped it comes
+// from the provider's own sign-in, and a name defaults to the provider.
+test("account register sends the piped or signed-in credential under its name and prints the account without it", async () => {
+  const notice = "Your credential is used inside Sergeant's worker and reviewer containers … run `sgt account remove codex` … `codex login` again.";
+  const account = { id: "person:u1:codex", group: "registered", holder: "Ada Example <ada@example.com>", adapter: "codex-local", name: "codex", mine: true };
   const { api, seen } = await fakeApi({
-    "POST /v1/accounts/codex-local/register": { json: { account, replaced: false, quota: { adapter: "codex-local", readAt: "t", weekly: { remainingPercent: 82 }, fiveHour: { remainingPercent: 99 } }, notice } },
+    "POST /v1/accounts/register": { json: { account, replaced: false, quota: { adapter: "codex-local", readAt: "t", weekly: { remainingPercent: 82 }, fiveHour: { remainingPercent: 99 } }, notice } },
     "GET /v1/accounts": { json: { accounts: [{ ...account, usage: { runs: 3, costUsd: 0, unknownCostRuns: 3 } }] } },
   });
   const credential = '{"tokens":{"access_token":"secret-access"}}';
+  const signIns: string[] = [];
+  const signIn = async (provider: string) => (signIns.push(provider), `${credential}\n`);
 
-  const empty = await sgtWith({ stdin: async () => "\n" }, api, "account", "register", "codex-local");
-  expect(empty.code).toBe(2);
-  expect(seen).toEqual([]);
+  for (const bad of [["codex", "--name", "my work"], ["codex-local"]]) expect((await sgtWith({ signIn }, api, "account", "register", ...bad)).code).toBe(2);
+  expect((await sgtWith({ stdin: async () => "\n", signIn }, api, "account", "register", "codex")).code).toBe(2);
+  expect([seen, signIns]).toEqual([[], []]);
 
-  const done = await sgtWith({ stdin: async () => `${credential}\n` }, api, "account", "register", "codex-local");
-  expect(done).toMatchObject({ code: 0, out: expect.stringContaining("registered person:u1:codex-local for Ada Example <ada@example.com>: 82% weekly, 99% 5-hour left") });
-  expect(done.out).toContain(notice);
-  expect(JSON.parse(seen[0]?.body ?? "")).toEqual({ credential });
-  expect(done.out + done.err).not.toContain("secret-access");
+  const piped = await sgtWith({ stdin: async () => `${credential}\n`, signIn }, api, "account", "register", "codex");
+  expect(piped).toMatchObject({ code: 0, out: expect.stringContaining("registered codex account codex for Ada Example <ada@example.com>: 82% weekly, 99% 5-hour left") });
+  expect(piped.out).toContain(notice);
+  const signedIn = await sgtWith({ signIn }, api, "account", "register", "codex", "--name", "codexWork");
+  expect(signedIn.code).toBe(0);
+  expect(signIns).toEqual(["codex"]);
+  expect(seen.map((s) => JSON.parse(s.body))).toEqual([{ provider: "codex", name: "codex", credential }, { provider: "codex", name: "codexWork", credential }]);
+  for (const r of [piped, signedIn]) expect(r.out + r.err).not.toContain("secret-access");
 
   const list = await sgt(api, "account", "list");
-  expect(list.out).toMatch(/person:u1:codex-local\s+registered\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
+  expect(list.out).toMatch(/codex\s+codex\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
 });
 
 // TECH-5130: a three-word command, sending the person's Linear user id in the body.

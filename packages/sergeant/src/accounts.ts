@@ -1,20 +1,22 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { safeJson, type AccountAdapter, type QuotaReading } from "@terros/sergeant-contracts";
+import { AccountAdapter, safeJson, type QuotaReading } from "@terros/sergeant-contracts";
 import { accountQuota, type ModelAccount, type QuotaAccount } from "@terros/sergeant-runner";
 import { z } from "zod";
 import { run, secretResolver, type InstallationConfig } from "./config.ts";
 
 // The model accounts people register (TECH-5113): each person's own Claude or Codex subscription
-// login, at most one per agent CLI, kept with everyone else's in one Secrets Manager secret that only
-// this host reads and writes. A person registers and removes only their own: an entry is found by
+// login, as many as they like under names of their own (TECH-5196), kept with everyone else's in one
+// Secrets Manager secret that only this host reads and writes. A person registers and removes only their own: an entry is found by
 // their Linear user id, which the API takes from their login, never from the request. They are the
 // only accounts runs use, and a task's runs use only its owner's (TECH-5179, owner.ts): the human
 // assignee who delegated it. No credential is ever returned, logged, or put in an error.
 
+// `name` and `email` are the person's; `accountName` is the account's, unique among theirs.
 const Entry = z.object({
-  adapter: z.enum(["claude-code-local", "codex-local"]),
+  adapter: AccountAdapter,
+  accountName: z.string(),
   userId: z.string(),
   name: z.string(),
   email: z.string(),
@@ -26,7 +28,7 @@ const Registered = z.object({ accounts: z.array(Entry) });
 
 export type Person = { id: string; name: string; email: string };
 /** An account as the API shows it: never its credential. */
-export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registered"; userId: string; registeredAt: string };
+export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registered"; name: string; userId: string; registeredAt: string };
 
 /** Registration refused for a reason the caller can act on; its message never quotes the credential. */
 export class AccountRefused extends Error {}
@@ -44,7 +46,7 @@ export function accountRegistry(opts: {
   readQuota: (account: QuotaAccount) => Promise<QuotaReading>;
   log: (line: string) => void;
 }) {
-  const id = (e: Pick<Entry, "userId" | "adapter">) => `person:${e.userId}:${e.adapter}`;
+  const id = (e: Pick<Entry, "userId" | "accountName">) => `person:${e.userId}:${e.accountName}`;
   const holder = (e: Pick<Entry, "name" | "email">) => `${e.name} <${e.email}>`;
   // One write at a time, so two registrations cannot overwrite each other's read-modify-write.
   let writes: Promise<unknown> = Promise.resolve();
@@ -73,7 +75,7 @@ export function accountRegistry(opts: {
   const account = (e: Entry): ModelAccount => ({ id: id(e), adapter: e.adapter, holder: holder(e), credential: e.credential });
   const listed = (e: Entry): ListedAccount => {
     const { credential: _, ...a } = account(e);
-    return { ...a, group: "registered", userId: e.userId, registeredAt: e.registeredAt };
+    return { ...a, group: "registered", name: e.accountName, userId: e.userId, registeredAt: e.registeredAt };
   };
 
   return {
@@ -87,32 +89,32 @@ export function accountRegistry(opts: {
       return (await entries()).map(listed);
     },
 
-    /** Registers, or replaces, the person's own account for `adapter`, once its quota reads with it. */
-    async register(person: Person, adapter: AccountAdapter, credential: string) {
+    /** Registers, or replaces, the person's own account named `accountName`, once its quota reads with it. */
+    async register(person: Person, adapter: AccountAdapter, accountName: string, credential: string) {
       if (!opts.adapters.includes(adapter)) throw new AccountRefused(`this Sergeant runs no ${adapter}`);
       if (adapter === "codex-local" && !credential.startsWith("{")) {
         throw new AccountRefused("a Codex account is the JSON of the auth.json a `codex login` with your ChatGPT account writes, not an API key");
       }
-      const entry: Entry = { adapter, userId: person.id, name: person.name, email: person.email, credential, registeredAt: new Date().toISOString() };
+      const entry: Entry = { adapter, accountName, userId: person.id, name: person.name, email: person.email, credential, registeredAt: new Date().toISOString() };
       const quota = await opts.readQuota({ id: id(entry), adapter, credential });
       if (!quota.weekly || !quota.fiveHour) {
         throw new AccountRefused(`its subscription quota cannot be read with this credential (${quota.error ?? "a quota window is missing"}), so Sergeant could not choose it`);
       }
       const replaced = await change(async (current) => {
-        const mine = (e: Entry) => e.userId === person.id && e.adapter === adapter;
+        const mine = (e: Entry) => e.userId === person.id && e.accountName === accountName;
         return { next: [...current.filter((e) => !mine(e)), entry], result: current.some(mine) };
       });
-      opts.log(`${person.name} ${replaced ? "replaced" : "registered"} their ${adapter} model account`);
+      opts.log(`${person.name} ${replaced ? "replaced" : "registered"} their ${adapter} model account ${accountName}`);
       return { account: listed(entry), replaced, quota };
     },
 
-    /** Removes the person's own account for `adapter`; false when they had none. */
-    async remove(person: Pick<Person, "id" | "name">, adapter: AccountAdapter): Promise<boolean> {
+    /** Removes the person's own account named `accountName`; false when they had none. */
+    async remove(person: Pick<Person, "id" | "name">, accountName: string): Promise<boolean> {
       const removed = await change(async (current) => {
-        const next = current.filter((e) => !(e.userId === person.id && e.adapter === adapter));
+        const next = current.filter((e) => !(e.userId === person.id && e.accountName === accountName));
         return { next, result: next.length < current.length };
       });
-      if (removed) opts.log(`${person.name} removed their ${adapter} model account`);
+      if (removed) opts.log(`${person.name} removed their model account ${accountName}`);
       return removed;
     },
 

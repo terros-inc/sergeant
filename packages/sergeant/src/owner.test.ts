@@ -109,7 +109,7 @@ test("an owner with no usable account starts nothing and is told what to fix, on
   expect(await t.loop(0)).toMatchObject({ outcome: "idle" });
   expect(failures).toBeLessThan(0);
   expect(t.seen.comments.map((c) => c.body)).toEqual([
-    "Sergeant needs one of Ann's model accounts before it can start. Ann: register one with `sgt account register claude-code-local` (or `codex-local`), then comment here, or run `sgt task wake`, so Sergeant tries again.",
+    "Sergeant needs one of Ann's model accounts before it can start. Ann: register one with `sgt account register claude` (or `codex`), then comment here, or run `sgt task wake`, so Sergeant tries again.",
   ]);
   const { runIds } = JSON.parse(await readFile(join(t.dir, "state.json"), "utf8")) as { runIds: string[] };
   expect(runIds).toEqual([]);

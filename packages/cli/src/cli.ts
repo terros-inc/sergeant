@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import {
   AccountList,
+  AccountName,
   type ApiError,
   type ApiResult,
   apiClient,
@@ -15,6 +16,7 @@ import {
   RunDetail,
   RunList,
   MIN_CLI_VERSION,
+  Provider,
   sergeantVersion,
   TaskDetail,
   TaskList,
@@ -50,11 +52,12 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   run show <run>
   run report <run>                   the run's raw Markdown report
   run cancel <run> [--reason …]
-  account list                       model accounts runs may use, whose they are, and what each paid for
-  account register <adapter>         register your own subscription for claude-code-local or codex-local,
-                                     read from stdin: \`claude setup-token\`'s token, or the JSON of
-                                     ~/.codex/auth.json after \`codex login\`; it replaces one you had
-  account remove <adapter>           remove your own registered account
+  account list                       model accounts runs may use: name, provider, whose, what each paid for
+  account register <claude|codex> [--name <name>]
+                                     register your own subscription: signs in with \`claude setup-token\`
+                                     or \`codex login\`, or reads the credential piped to stdin. The name
+                                     defaults to the provider; registering a name you have replaces it
+  account remove <name>              remove your own registered account of that name
   admin account remove-person <linear-user-id>
                                      an approver's offboarding: remove every model account that
                                      person registered (\`sgt account list\` shows whose each is)
@@ -70,13 +73,15 @@ export type Io = {
   fetch?: typeof globalThis.fetch;
   /** Shows the human a URL in their browser (`sgt login`); it is printed either way. */
   openUrl?: (url: string) => void;
-  /** All of standard input: a credential to register, never an argument a shell history would keep. */
+  /** All of standard input when it is piped: a credential to register, never an argument a shell history would keep. */
   stdin?: () => Promise<string>;
+  /** With nothing piped, the credential from the provider's own sign-in on this terminal (signin.ts). */
+  signIn?: (provider: Provider) => Promise<string>;
   /** This sgt's version (tests); sergeantVersion's otherwise. */
   version?: string;
 };
 
-type Flags = { reason?: string | undefined; task?: string | undefined };
+type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined };
 /**
  * `token`: the Linear access token sent as the caller's bearer, when signed in. `warned`: whether this
  * invocation has said its server is older than it, shared by every copy of the context.
@@ -172,19 +177,33 @@ const commands: Record<string, Command> = {
   },
   "account register": {
     args: 1,
-    run: async (ctx, [adapter]) => {
-      const credential = (await ctx.io.stdin?.())?.trim();
-      if (!credential) throw new Usage("account register reads your credential from stdin, for example `sgt account register codex-local < ~/.codex/auth.json`");
-      const res = await call(ctx, "POST", `/v1/accounts/${path(adapter)}/register`, RegisterAccountResponse, { credential });
+    flags: ["name"],
+    run: async (ctx, [named]) => {
+      const provider = Provider.safeParse(named).data;
+      if (!provider) throw new Usage("account register takes claude or codex");
+      const name = ctx.flags.name ?? provider;
+      const valid = AccountName.safeParse(name);
+      if (!valid.success) throw new Usage(`--name: ${valid.error.issues[0]?.message}`);
+      let credential: string;
+      if (ctx.io.stdin) {
+        credential = (await ctx.io.stdin()).trim();
+        if (!credential) throw new Usage("account register read an empty stdin: pipe the credential, or run it with nothing piped to sign in");
+      } else {
+        if (!ctx.io.signIn) throw new Usage("account register needs the credential on stdin here");
+        ctx.io.err(`Signing in with ${provider === "claude" ? "`claude setup-token`" : "`codex login` (in a temporary CODEX_HOME; your ~/.codex is not touched)"} to register ${name}.\n`);
+        credential = (await ctx.io.signIn(provider).catch((e: Error) => fail(ctx, "bad_request", e.message))).trim();
+        if (!credential) fail(ctx, "bad_request", "the sign-in gave no credential; nothing was registered");
+      }
+      const res = await call(ctx, "POST", "/v1/accounts/register", RegisterAccountResponse, { provider, name, credential });
       const left = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
-      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${res.account.id} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
+      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${provider} account ${res.account.name} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
     },
   },
   "account remove": {
     args: 1,
-    run: async (ctx, [adapter]) => {
-      const res = await call(ctx, "POST", `/v1/accounts/${path(adapter)}/remove`, RemoveAccountResponse, {});
-      print(ctx, res, () => (res.removed ? `removed your ${res.adapter} account; runs already on it finish on it` : `you have no registered ${res.adapter} account`));
+    run: async (ctx, [name]) => {
+      const res = await call(ctx, "POST", "/v1/accounts/remove", RemoveAccountResponse, { name });
+      print(ctx, res, () => (res.removed ? `removed your account ${res.name}; runs already on it finish on it` : `you have no registered account named ${res.name}`));
     },
   },
   "admin account remove-person": {
@@ -260,6 +279,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       options: {
         api: { type: "string" },
         json: { type: "boolean" },
+        name: { type: "string" },
         reason: { type: "string" },
         task: { type: "string" },
         version: { type: "boolean", short: "v" },
@@ -283,7 +303,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
     if (name === undefined || !command) throw new Usage(`unknown command: ${positionals.join(" ")}`);
     const args = positionals.slice(name.split(" ").length);
     if (args.length !== command.args) throw new Usage(`${name} takes ${command.args || "no"} argument${command.args === 1 ? "" : "s"}`);
-    const flags = { reason: values.reason, task: values.task };
+    const flags = { name: values.name, reason: values.reason, task: values.task };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

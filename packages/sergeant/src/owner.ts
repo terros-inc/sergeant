@@ -101,11 +101,11 @@ export function accountRefusal(issueId: string, owner: TaskOwner, e: NoModelAcco
   if (e.kind === "none_registered") {
     return {
       key,
-      body: `Sergeant needs one of ${owner.name}'s model accounts before it can start. ${owner.name}: register one with \`sgt account register claude-code-local\` (or \`codex-local\`), ${wake}.`,
+      body: `Sergeant needs one of ${owner.name}'s model accounts before it can start. ${owner.name}: register one with \`sgt account register claude\` (or \`codex\`), ${wake}.`,
     };
   }
   return {
     key,
-    body: `Sergeant starts no new runs: ${e.message}. ${owner.name}: register or fix another model account with \`sgt account register <claude-code-local|codex-local>\`, ${wake}.`,
+    body: `Sergeant starts no new runs: ${e.message}. ${owner.name}: register or fix another model account with \`sgt account register <claude|codex>\`, ${wake}.`,
   };
 }
