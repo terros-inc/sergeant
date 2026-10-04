@@ -273,14 +273,22 @@ test("account register sends the piped or signed-in credential under its name an
   expect((await sgtWith({ stdin: async () => "\n", signIn }, api, "account", "register", "codex")).code).toBe(2);
   expect([seen, signIns]).toEqual([[], []]);
 
+  // TECH-5215: whose Sergeant account it is comes first; the result names the provider login, never the Linear email.
   const piped = await sgtWith({ stdin: async () => `${credential}\n`, signIn }, api, "account", "register", "codex");
-  expect(piped).toMatchObject({ code: 0, out: expect.stringContaining("registered codex account codex for Ada Example <ada@example.com>: 82% weekly left, 99% 5-hour left") });
+  expect(piped).toMatchObject({ code: 0, out: expect.stringContaining("registered codex: ChatGPT account, 82% weekly left, 99% 5-hour left. Sergeant uses it") });
+  expect(piped.err).toBe("Signed in to Sergeant as Ada Example (ada@example.com, via Linear). Registering a Codex account for you as codex.\n");
   expect(piped.out).toContain(notice);
+  expect(piped.out).not.toContain("ada@example.com");
   const signedIn = await sgtWith({ signIn }, api, "account", "register", "codex", "--name", "codexWork");
   expect(signedIn.code).toBe(0);
+  expect(signedIn.err.indexOf("Registering a Codex account for you as codexWork.")).toBeLessThan(signedIn.err.indexOf("Signing in with `codex login`"));
+  const idToken = `h.${Buffer.from(JSON.stringify({ email: "ada.personal@example.org" })).toString("base64url")}.sig`;
+  const withEmail = await sgtWith({ stdin: async () => JSON.stringify({ tokens: { id_token: idToken, access_token: "secret-access" } }), signIn }, api, "account", "register", "codex");
+  expect(withEmail.out).toContain("registered codex: ChatGPT account ada.personal@example.org, 82% weekly left, 99% 5-hour left.");
+  expect(withEmail.out + withEmail.err).not.toMatch(/secret-access|h\.ey/);
   expect(signIns).toEqual(["codex"]);
   const posted = seen.filter((s) => s.method === "POST").map((s) => JSON.parse(s.body));
-  expect(posted).toEqual([{ provider: "codex", name: "codex", credential }, { provider: "codex", name: "codexWork", credential }]);
+  expect(posted.slice(0, 2)).toEqual([{ provider: "codex", name: "codex", credential }, { provider: "codex", name: "codexWork", credential }]);
   for (const r of [piped, signedIn]) expect(r.out + r.err).not.toContain("secret-access");
 
   const list = await sgt(api, "account", "list");

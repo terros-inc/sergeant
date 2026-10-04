@@ -5,6 +5,42 @@ import { type ApiError, type Provider, REVOKE, type WhoAmI } from "@terros/serge
 // registration once one was made, what to do with that credential. Plain English, naming no config.
 
 const NAME: Record<Provider, string> = { claude: "Claude", codex: "Codex" };
+/** What the person signs in to with each provider. */
+const LOGIN: Record<Provider, string> = { claude: "Claude", codex: "ChatGPT" };
+
+/**
+ * TECH-5215: before any sign-in, whose Sergeant account the new one is registered under, so a
+ * provider login under a different email is not mistaken for the wrong account.
+ */
+export function registeringFor(me: WhoAmI, provider: Provider, name: string): string {
+  const who = me.user ? `${me.user.name} (${me.user.email}, via Linear)` : "a host operator";
+  return `Signed in to Sergeant as ${who}. Registering a ${NAME[provider]} account for you as ${name}.`;
+}
+
+/** TECH-5215: the provider account just registered, by its own email when the credential carries one, never the Linear one. */
+export function registeredLine(verb: "registered" | "replaced", name: string, provider: Provider, email: string | undefined, quota: string): string {
+  return `${verb} ${name}: ${LOGIN[provider]} account${email ? ` ${email}` : ""}, ${quota}.`;
+}
+
+/**
+ * The email of the login a credential belongs to, read locally, or undefined. A Codex auth.json's
+ * `tokens.id_token` is a JWT whose payload names it; only the payload is decoded, the signature is not
+ * checked, and nothing else of the credential is returned. A Claude setup token carries none.
+ */
+export function providerEmail(provider: Provider, credential: string): string | undefined {
+  if (provider !== "codex") return undefined;
+  try {
+    const idToken: unknown = JSON.parse(credential)?.tokens?.id_token;
+    if (typeof idToken !== "string") return undefined;
+    const payload = idToken.split(".")[1];
+    if (!payload) return undefined;
+    const email: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))?.email;
+    // Printed to a terminal: only a plain address, nothing that could carry control characters.
+    return typeof email === "string" && email.length <= 254 && /^[!-~]+@[!-~]+$/.test(email) ? email : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Why the server would refuse `provider` from this caller, or undefined when it takes it. */
 export function registrationRefusal(me: WhoAmI, provider: Provider): { code: ApiError["error"]["code"]; message: string } | undefined {
