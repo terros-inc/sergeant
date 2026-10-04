@@ -137,13 +137,11 @@ export type WhoAmI = z.infer<typeof WhoAmI>;
 export const AccountAdapter = z.enum(["claude-code-local", "codex-local"]);
 export type AccountAdapter = z.infer<typeof AccountAdapter>;
 
-/** The provider names people type and see for the adapters (TECH-5196); an adapter's own name is an alias. */
-export const PROVIDERS = { claude: "claude-code-local", codex: "codex-local" } as const satisfies Record<string, AccountAdapter>;
-export type Provider = keyof typeof PROVIDERS;
+/** The provider names people type and see for the adapters (TECH-5196). */
+export const Provider = z.enum(["claude", "codex"]);
+export type Provider = z.infer<typeof Provider>;
+export const PROVIDER_ADAPTER: Record<Provider, AccountAdapter> = { claude: "claude-code-local", codex: "codex-local" };
 export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "codex-local" ? "codex" : "claude");
-/** The adapter a provider name or an adapter's own name names; undefined for anything else. */
-export const adapterNamed = (name: string): AccountAdapter | undefined =>
-  Object.hasOwn(PROVIDERS, name) ? PROVIDERS[name as Provider] : AccountAdapter.safeParse(name).data;
 
 /** A model account's name, unique among one person's accounts (TECH-5196); it defaults to the provider's name. */
 export const AccountName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/, "an account name is up to 40 letters, digits, - and _, starting with a letter or digit");
@@ -164,12 +162,12 @@ export const AccountList = z.object({ accounts: z.array(AccountSummary) });
 export type AccountList = z.infer<typeof AccountList>;
 
 /**
- * A person's own subscription login for the adapter, under a name of theirs: the token
+ * A person's own subscription login for the provider, under a name of theirs: the token
  * `claude setup-token` prints, or the JSON of the `auth.json` a `codex login` writes. Stored in the
  * installation's Secrets Manager; never echoed, logged, or returned.
  */
 export const RegisterAccountRequest = z.strictObject({
-  adapter: AccountAdapter,
+  provider: Provider,
   name: AccountName,
   credential: z.string().trim().min(1, "a credential is required").max(32_000, "credential too long"),
 });

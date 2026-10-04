@@ -1,10 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import {
-  AccountAdapter,
   AccountList,
   AccountName,
-  adapterNamed,
   type ApiError,
   type ApiResult,
   apiClient,
@@ -18,8 +16,7 @@ import {
   RunDetail,
   RunList,
   MIN_CLI_VERSION,
-  type Provider,
-  providerOf,
+  Provider,
   sergeantVersion,
   TaskDetail,
   TaskList,
@@ -182,10 +179,8 @@ const commands: Record<string, Command> = {
     args: 1,
     flags: ["name"],
     run: async (ctx, [named]) => {
-      // `claude-code-local` and `codex-local` still name their provider (TECH-5196).
-      const adapter = adapterNamed(named ?? "");
-      if (!adapter) throw new Usage("account register takes claude or codex");
-      const provider = providerOf(adapter);
+      const provider = Provider.safeParse(named).data;
+      if (!provider) throw new Usage("account register takes claude or codex");
       const name = ctx.flags.name ?? provider;
       const valid = AccountName.safeParse(name);
       if (!valid.success) throw new Usage(`--name: ${valid.error.issues[0]?.message}`);
@@ -199,17 +194,14 @@ const commands: Record<string, Command> = {
         credential = (await ctx.io.signIn(provider).catch((e: Error) => fail(ctx, "bad_request", e.message))).trim();
         if (!credential) fail(ctx, "bad_request", "the sign-in gave no credential; nothing was registered");
       }
-      const res = await call(ctx, "POST", "/v1/accounts/register", RegisterAccountResponse, { adapter, name, credential });
+      const res = await call(ctx, "POST", "/v1/accounts/register", RegisterAccountResponse, { provider, name, credential });
       const left = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
       print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${provider} account ${res.account.name} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
     },
   },
   "account remove": {
     args: 1,
-    run: async (ctx, [named = ""]) => {
-      // An adapter's own name stands for the account named for its provider, as before TECH-5196.
-      const adapter = AccountAdapter.safeParse(named).data;
-      const name = adapter ? providerOf(adapter) : named;
+    run: async (ctx, [name]) => {
       const res = await call(ctx, "POST", "/v1/accounts/remove", RemoveAccountResponse, { name });
       print(ctx, res, () => (res.removed ? `removed your account ${res.name}; runs already on it finish on it` : `you have no registered account named ${res.name}`));
     },

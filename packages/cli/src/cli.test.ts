@@ -250,7 +250,7 @@ test("-v and --version print Sergeant's git version and exit 0 without touching 
 
 // TECH-5113: a credential is read from stdin, never an argument a shell history or process list keeps,
 // and only the API's answer, which never holds it, is printed. TECH-5196: with nothing piped it comes
-// from the provider's own sign-in; `codex-local` is an alias of `codex`; a name defaults to the provider.
+// from the provider's own sign-in, and a name defaults to the provider.
 test("account register sends the piped or signed-in credential under its name and prints the account without it", async () => {
   const notice = "Your credential is used inside Sergeant's worker and reviewer containers … run `sgt account remove codex` … `codex login` again.";
   const account = { id: "person:u1:codex", group: "registered", holder: "Ada Example <ada@example.com>", adapter: "codex-local", name: "codex", mine: true };
@@ -262,17 +262,17 @@ test("account register sends the piped or signed-in credential under its name an
   const signIns: string[] = [];
   const signIn = async (provider: string) => (signIns.push(provider), `${credential}\n`);
 
-  for (const bad of [["codex-local", "--name", "my work"], ["gemini"]]) expect((await sgtWith({ signIn }, api, "account", "register", ...bad)).code).toBe(2);
-  expect((await sgtWith({ stdin: async () => "\n", signIn }, api, "account", "register", "codex-local")).code).toBe(2);
+  for (const bad of [["codex", "--name", "my work"], ["codex-local"]]) expect((await sgtWith({ signIn }, api, "account", "register", ...bad)).code).toBe(2);
+  expect((await sgtWith({ stdin: async () => "\n", signIn }, api, "account", "register", "codex")).code).toBe(2);
   expect([seen, signIns]).toEqual([[], []]);
 
-  const piped = await sgtWith({ stdin: async () => `${credential}\n`, signIn }, api, "account", "register", "codex-local");
+  const piped = await sgtWith({ stdin: async () => `${credential}\n`, signIn }, api, "account", "register", "codex");
   expect(piped).toMatchObject({ code: 0, out: expect.stringContaining("registered codex account codex for Ada Example <ada@example.com>: 82% weekly, 99% 5-hour left") });
   expect(piped.out).toContain(notice);
   const signedIn = await sgtWith({ signIn }, api, "account", "register", "codex", "--name", "codexWork");
   expect(signedIn.code).toBe(0);
   expect(signIns).toEqual(["codex"]);
-  expect(seen.map((s) => JSON.parse(s.body))).toEqual([{ adapter: "codex-local", name: "codex", credential }, { adapter: "codex-local", name: "codexWork", credential }]);
+  expect(seen.map((s) => JSON.parse(s.body))).toEqual([{ provider: "codex", name: "codex", credential }, { provider: "codex", name: "codexWork", credential }]);
   for (const r of [piped, signedIn]) expect(r.out + r.err).not.toContain("secret-access");
 
   const list = await sgt(api, "account", "list");

@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AccountAdapter, providerOf, safeJson, type QuotaReading } from "@terros/sergeant-contracts";
+import { AccountAdapter, safeJson, type QuotaReading } from "@terros/sergeant-contracts";
 import { accountQuota, type ModelAccount, type QuotaAccount } from "@terros/sergeant-runner";
 import { z } from "zod";
 import { run, secretResolver, type InstallationConfig } from "./config.ts";
@@ -13,19 +13,16 @@ import { run, secretResolver, type InstallationConfig } from "./config.ts";
 // only accounts runs use, and a task's runs use only its owner's (TECH-5179, owner.ts): the human
 // assignee who delegated it. No credential is ever returned, logged, or put in an error.
 
-// `name` and `email` are the person's; `accountName` is the account's, unique among theirs. An entry
-// from before TECH-5196 has none and is named for its provider, kept so at its next write.
-const Entry = z
-  .object({
-    adapter: AccountAdapter,
-    accountName: z.string().optional(),
-    userId: z.string(),
-    name: z.string(),
-    email: z.string(),
-    credential: z.string(),
-    registeredAt: z.string(),
-  })
-  .transform((e) => ({ ...e, accountName: e.accountName ?? providerOf(e.adapter) }));
+// `name` and `email` are the person's; `accountName` is the account's, unique among theirs.
+const Entry = z.object({
+  adapter: AccountAdapter,
+  accountName: z.string(),
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  credential: z.string(),
+  registeredAt: z.string(),
+});
 type Entry = z.infer<typeof Entry>;
 const Registered = z.object({ accounts: z.array(Entry) });
 

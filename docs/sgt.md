@@ -117,7 +117,6 @@ sgt account remove claudeWork                   # remove yours; runs already on 
   and `_`. Registering a name you already have replaces that account only. Your accounts are
   interchangeable to Sergeant: each run takes the one with the most weekly capacity left as above, and
   one that fails on quota or authentication is set aside for an hour so the next run takes another.
-  The old names `claude-code-local` and `codex-local` still work in `register` and `remove`.
 
 - **Register your Terros company seat** (for example Claude Team or ChatGPT Team), not a personal
   subscription: whether personal plans may run Terros work is not settled (TECH-5129). `register`

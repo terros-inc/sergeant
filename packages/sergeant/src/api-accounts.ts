@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import {
   type AccountAdapter,
+  PROVIDER_ADAPTER,
   RegisterAccountRequest,
   RemoveAccountRequest,
   type AccountList,
@@ -21,7 +22,7 @@ import { callerName, type Caller } from "./auth.ts";
 // accounts (TECH-5179).
 //
 //   GET  /v1/accounts
-//   POST /v1/accounts/register   { "adapter": "claude-code-local|codex-local", "name": "…", "credential": "…" }
+//   POST /v1/accounts/register   { "provider": "claude|codex", "name": "…", "credential": "…" }
 //   POST /v1/accounts/remove     { "name": "…" }
 //   POST /v1/accounts/remove-person   { "userId": "<Linear user id>" }
 //
@@ -49,7 +50,8 @@ export async function accountsRoute(
   if (at.id !== "register" && at.id !== "remove") throw notFound(at.pathname);
   if (!me) throw new Refusal(403, "forbidden", "an account is registered or removed by its own person: sign in with `sgt login`");
   if (at.id === "register") {
-    const { adapter, name, credential } = parse(RegisterAccountRequest, await body(req));
+    const { provider, name, credential } = parse(RegisterAccountRequest, await body(req));
+    const adapter = PROVIDER_ADAPTER[provider];
     const res = await refusing(registry.register(me, adapter, name, credential));
     return ok({ account: { ...res.account, mine: true }, replaced: res.replaced, quota: res.quota, notice: exposureNotice(adapter, name) } satisfies RegisterAccountResponse);
   }
