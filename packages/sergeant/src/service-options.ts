@@ -5,10 +5,12 @@ import type { AccountRegistry } from "./accounts.ts";
 import type { HostAdmin } from "./api-admin.ts";
 import type { Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
+import type { Enrollment } from "./enrollment.ts";
 import type { Ports } from "./execute.ts";
 import type { FeedbackDeps } from "./feedback.ts";
 
 export type ServiceOptions = {
+  /** Every holder reads this same array, so `enrollment` changes it in place. */
   enrolledRepositories: RepoSlug[];
   /** Holds `tasks/<issue identifier>/`, one task loop's directory each. */
   stateDir: string;
@@ -42,6 +44,8 @@ export type ServiceOptions = {
   accounts?: AccountRegistry;
   /** On the Sergeant host: approvers restart and update it through `/v1/admin` (TECH-5195). */
   admin?: HostAdmin;
+  /** Lists and changes `enrolledRepositories` in place, for `/v1/repositories` (TECH-5193). */
+  enrollment?: Enrollment;
   /** Trusts a loopback caller with no login as an operator: for development on one machine, refused unless `host` is 127.0.0.1 or ::1. */
   trustLoopback?: boolean;
   log?: (line: string) => void;

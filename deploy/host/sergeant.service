@@ -9,6 +9,8 @@ RequiresMountsFor=/var/lib/sergeant
 [Service]
 User=sergeant
 WorkingDirectory=/opt/sergeant/src/packages/sergeant
+# SERGEANT_CONFIG_PARAMETER: the parameter an approver's `sgt admin repo add|remove` rewrites (TECH-5193).
+EnvironmentFile=/etc/sergeant/host.env
 ExecStart=/usr/bin/node src/serve.ts --config /etc/sergeant/installation.json --state-dir /var/lib/sergeant/state --host 127.0.0.1 --port 8080
 # SIGTERM only to serve: it stops intake and ends each task at its next poll, never mid-turn, so a
 # reasoning turn's `claude` child must not get the signal too. Whatever is left at the timeout is killed.

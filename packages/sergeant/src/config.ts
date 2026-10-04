@@ -234,9 +234,14 @@ export type Installation = {
   codexCredential?: string;
   /** Webhook signing secrets, for the sources the config gives one. */
   webhookSecrets: { linear?: string; github?: string };
+  /** The enrolled repositories' settings `github` reads at each call: changed in place with `repositories` (enrollment.ts). */
+  repositoryConfigs: Record<RepoSlug, InstallationConfig["repositories"][string]>;
 };
 
-/** Resolves every secret reference and builds the direct effectors for `repositories`. */
+/**
+ * Resolves every secret reference and builds the direct effectors for `repositories`. The effectors read
+ * `repositories` and the returned `repositoryConfigs` live, so enrollment.ts can change them in place.
+ */
 export async function connect(config: InstallationConfig, repositories: RepoSlug[]): Promise<Installation> {
   const enrolled = repositories.map((r) => [r, config.repositories[r]] as const);
   const unknown = enrolled.filter(([, c]) => !c).map(([r]) => r);
@@ -267,21 +272,27 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
   if (viewer.id !== agentUserId) throw new Error(`the Linear token acts as ${viewer.name} (${viewer.id}), not the configured V2 agent`);
 
   const workerLogin = await workerApp.login();
+  const repositoryConfigs = Object.fromEntries(enrolled.flatMap(([r, c]) => (c ? [[r, c]] : [])));
+  // The control plane's token covers exactly the enrolled repositories, so a change mints a new one.
+  let scoped: { key: string; token: () => Promise<string> } | undefined;
+  const controlPlaneToken = () => {
+    const key = repositories.join(" ");
+    if (scoped?.key !== key) scoped = { key, token: cachedToken(() => controlPlaneApp.mint({ repositories: [...repositories] })) };
+    return scoped.token();
+  };
 
   return {
     linear,
     agentUserId,
     linearOrganizationId: viewer.organizationId,
     workerLogin,
-    github: createGitHubPort({
-      token: cachedToken(() => controlPlaneApp.mint({ repositories })),
-      repositories: Object.fromEntries(enrolled.flatMap(([r, c]) => (c ? [[r, c]] : []))),
-    }),
+    github: createGitHubPort({ token: controlPlaneToken, repositories: repositoryConfigs }),
     controlPlaneApp,
     workerApp,
     githubTokens: runTokens(workerApp),
     modelToken,
     ...(codexCredential !== undefined && { codexCredential }),
     webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },
+    repositoryConfigs,
   };
 }

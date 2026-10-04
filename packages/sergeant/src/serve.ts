@@ -3,9 +3,12 @@
 // and writes live Linear and GitHub, launches real model sessions, and costs money. From
 // packages/sergeant, after building the runner image (`docker build -t sergeant-runner:local ../runner/container`):
 //
-//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2] [--waiting-grace-minutes 15] [--trust-loopback]
+//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2] [--waiting-grace-minutes 15] [--config-parameter <SSM name>] [--trust-loopback]
 //
-// Every repository in the installation config is enrolled. Credentials come from the config's secret
+// Every repository in the installation config is enrolled. With `--config-parameter` (else the host's
+// `SERGEANT_CONFIG_PARAMETER`), the installation-config SSM parameter `--config` was installed from, the
+// enrolled repositories are that parameter's, read at startup, and an approver can change them with
+// `sgt admin repo add|remove`, which serve takes in place (enrollment.ts). Credentials come from the config's secret
 // references exactly as for the canary (canary.ts). `--max-tasks` and `--waiting-grace-minutes`, when
 // given, win over the config's `maxTasks` and `waitingGraceMinutes` (TECH-5008). SIGINT or SIGTERM
 // stops intake and lets each task loop end at its next poll; a second signal exits at once. `GET /health` reports only
@@ -23,6 +26,7 @@ import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
 import { linearCallers } from "./auth.ts";
 import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { appsReach, configParameter, enrolledIn, enrollment } from "./enrollment.ts";
 import { startService } from "./service.ts";
 
 const { values } = parseArgs({
@@ -38,17 +42,23 @@ const { values } = parseArgs({
     "reasoning-model": { type: "string", default: "opus" },
     "worker-model": { type: "string" },
     "reviewer-model": { type: "string" },
+    "config-parameter": { type: "string" },
     "trust-loopback": { type: "boolean", default: false },
   },
 });
 
 const config = await loadConfig(values.config ?? fail("--config is required"));
+const configParameterName = values["config-parameter"] ?? process.env.SERGEANT_CONFIG_PARAMETER;
+const parameter = configParameterName ? configParameter(config, configParameterName) : undefined;
+const log = (line: string) => console.log(`[${new Date().toISOString()}] ${line}`);
+// The parameter is the only record of an approver's change: a restart before the next update keeps it.
+if (parameter) config.repositories = await enrolledIn(parameter, log);
 const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"));
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
 
 const installation = await connect(config, repositories);
 // People's registered model accounts: a task's runs use only its owner's (TECH-5179).
-const accounts = modelAccounts(config, (line) => console.log(`[${new Date().toISOString()}] ${line}`));
+const accounts = modelAccounts(config, log);
 // The reasoning CLI inherits this process's environment: with the token set it authenticates as
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;
@@ -82,6 +92,13 @@ const service = await startService(
     trustLoopback: values["trust-loopback"],
     accounts: accounts.registry,
     ...(admin && { admin }),
+    enrollment: enrollment({
+      repositories,
+      configs: installation.repositoryConfigs,
+      parameter,
+      reach: appsReach({ "control-plane": installation.controlPlaneApp, worker: installation.workerApp }),
+      log,
+    }),
     ...(config.humans && {
       humans: {
         linearClientId: config.humans.linearClientId,

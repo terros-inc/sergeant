@@ -11,7 +11,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 
 | Path | What it is |
 |---|---|
-| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` on the config parameter (and an explicit deny on every other parameter, which SSM core would otherwise allow), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to twelve with the webhook signing secrets, the Codex credential, and model accounts), and `secretsmanager:PutSecretValue` on only the registered-accounts secret, when one is configured. |
+| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to twelve with the webhook signing secrets, the Codex credential, and model accounts), and `secretsmanager:PutSecretValue` on only the registered-accounts secret, when one is configured. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
@@ -44,8 +44,9 @@ How it fits together:
 - **The config lives in AWS.** Every install reads the SSM parameter (default
   `/sergeant/v2/installation-config`) and replaces `/etc/sergeant/installation.json` only if it parses
   as an `InstallationConfig`; a config that does not parse stops the update before `serve` restarts.
-  Enrolling a repository, changing the per-task budget, or changing the task slots (`maxTasks`,
-  `waitingGraceMinutes`), is: edit the parameter, then update (or `sgt admin restart`).
+  Changing the per-task budget or the task slots (`maxTasks`, `waitingGraceMinutes`) is: edit the
+  parameter, then update (or `sgt admin restart`). Enrolling or removing a repository needs neither
+  (Enrolled repositories below).
 - **Logs** go to `/var/log/sergeant/serve.log` and `autoupdate.log` on the host and to CloudWatch Logs
   group `/sergeant/v2` (streams `<instance id>/serve`, `<instance id>/autoupdate`, and
   `<instance id>/first-boot`).
@@ -374,6 +375,23 @@ the commits since it, plus the short SHA (`v2.0.0` and 37 commits later at `aad6
 gets a higher number by itself; minor and major bumps are deliberate: a human tags `v2.1.0` (or
 `v3.0.0`) on `main`, and counting restarts there. Without a tag or the history to count (a shallow
 clone, no git), the version is `0.0.0+<sha>` and the update log says why; that never fails an update.
+
+### Enrolled repositories (TECH-5193)
+
+An approver runs `sgt admin repo add <owner/name> [--merge-method …]` or `sgt admin repo remove
+<owner/name>` with their own Linear login; anyone signed in runs `sgt repo list`. `serve` refuses
+a repository either GitHub App cannot reach, then rewrites the installation-config parameter (only its
+`repositories`; the new version's description names the approver: `aws ssm get-parameter-history`)
+and takes the list in place, without a restart; `serve.log` names the approver too. A repeated change
+the parameter already has writes nothing and only brings the running list up to it. `serve` reads its
+enrolled repositories from the parameter at every start, so no restart brings back an older list; it
+does not start if it cannot read the parameter. Every other setting stays AWS-only, applied by an
+update as before, and never appears in an answer or a log. The host's role may write that one
+parameter and no other. Editing `repositories` in the parameter by hand still works.
+
+A host gets this from an apply of the instance role's `WriteInstallationConfig` statement and one
+Update to a commit that has it (the unit then reads `SERGEANT_CONFIG_PARAMETER` from
+`/etc/sergeant/host.env`). Until both, `add` and `remove` answer with why they cannot.
 
 ### Change the per-task budget
 

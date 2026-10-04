@@ -162,3 +162,18 @@ sgt admin status           # its release, when it last restarted, and the last r
   its latest outcome, so if an automatic update starts before `sgt` reads yours, `sgt` says so (exit 1)
   instead of waiting. Every request, and
   who made it, is logged on the host. An update that fails to install puts back the previous release.
+
+## 8. Enrolled repositories
+
+Sergeant works only in the repositories its installation enrolls (TECH-5193). Anyone signed in can
+list them; an approver enrolls or removes one with their own Linear login, no AWS access needed:
+
+```sh
+sgt repo list                                     # each repository and how Sergeant merges in it
+sgt admin repo add terros-inc/example --merge-method rebase   # squash unless you say otherwise
+sgt admin repo remove terros-inc/example
+```
+
+A repository is enrolled only once both of Sergeant's GitHub Apps can reach it. The change is written
+to the installation's configuration in AWS, naming who made it, and the running Sergeant takes it at
+once. After a removal Sergeant stops working in that repository, tasks already started there included.
