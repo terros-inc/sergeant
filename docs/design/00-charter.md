@@ -95,7 +95,7 @@ challenged.
 | Material harm | What prevents it | Where |
 |---|---|---|
 | L1. Unreviewed or red code merged | Merge requires green required checks on the exact head and a recorded fresh-review disposition for that head; default-branch rulesets keep workers from merging around it | 08 §7, 06 §6 |
-| L2. Production, admin, personal, or control-plane authority crossed | No run holds such credentials; the runner zone is separate from the control plane | 09 |
+| L2. Production, admin, personal, or control-plane authority crossed | No run holds such credentials, except the run's selected model credential, an accepted exception to the personal-credential boundary (09 §3a); the runner zone is separate from the control plane | 09 |
 | L3. Runaway time or concurrency (and spend, best-effort) | Wall-clock, concurrency, and cancellation are hard; cost is enforced where usage is observable | BudgetMeter, 03 §7 |
 | L4. A human decision silently abandoned | Every Linear change wakes a turn that sees every human comment; one open question is durable until answered; merges and completion carry the conversation revision their turn saw and are refused if Linear changed since | 03 §5, 07 §4, M10, X5 |
 
