@@ -52,7 +52,8 @@ Don't make up your own.
 
 - **Low** — the work is not affecting developer experience today.
 - **Medium** — the work is affecting developer experience today, or it is blocking Low-priority tasks.
-- **High** — it is a bug, or it is blocking Medium-priority tasks.
+- **High** — it is a bug that affects current use, or it is blocking Medium-priority tasks. A
+  cosmetic or wording bug is Low; a bug that affects use but blocks nothing is Medium.
 - **Urgent** — it is a feature blocking virtually all other work, or it is a widespread or
   high-impact bug.
 
@@ -62,8 +63,11 @@ stay separate:
 - **Todo + delegated** to Sergeant means the work is approved and available to Sergeant.
 - **Blocked-by relations** in Linear express dependencies. Blocked Todo work stays enabled, and
   Sergeant waits for the dependency.
-- **Backlog** means "do not start" because the work itself is not yet approved or ready. It does
-  not mean low priority.
+- **Backlog** means "do not start" because the work is still under debate or its requirements are
+  unclear. Work whose requirements are clear goes in Todo even when it is blocked: set its "blocked
+  by" relation, and the queue rules keep it from starting early. Backlog does not mean low priority:
+  low value alone is not a reason for Backlog; that is what Low priority is for. Sergeant files its
+  own follow-ups in Backlog because they are proposals its owner has not yet agreed to.
 
 Admission and ordering are in `docs/design/07-linear-contract.md` (§5, §12) and
 `packages/sergeant/src/service.ts` and `slots.ts` (TECH-4989, TECH-5008, TECH-5015).
