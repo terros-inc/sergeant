@@ -6,7 +6,9 @@ import {
   CancelTaskRequest,
   checkBudget,
   RunId,
+  sergeantVersion,
   TaskRef,
+  versionHeaders,
   WakeRequest,
   type ApiError,
   type CancelRunResponse,
@@ -74,7 +76,10 @@ export type ApiControl = {
 
 /** Handles `/v1/*`; anything else is a 404. */
 export function apiHandler(ctl: ApiControl): (req: IncomingMessage, res: ServerResponse) => void {
+  // On every answer, refusals included, so a client can tell it differs (contracts' skew.ts).
+  const headers = versionHeaders(sergeantVersion().version);
   return (req, res) => {
+    for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
     route(req, ctl).then(
       (reply) => send(res, reply),
       (e: Error) => {

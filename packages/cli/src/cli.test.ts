@@ -3,6 +3,7 @@ import { chmod, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/pro
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { versionHeaders } from "@terros/sergeant-contracts";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { main, type Io } from "./cli.ts";
 import { TOKEN_URL } from "./login.ts";
@@ -22,7 +23,8 @@ afterEach(async () => {
   await rm(config, { recursive: true, force: true });
 });
 
-async function fakeApi(routes: Record<string, { status?: number; json?: unknown; text?: string }>) {
+// A route's `headers` replace the version headers of a Sergeant at this client's own contract.
+async function fakeApi(routes: Record<string, { status?: number; json?: unknown; text?: string; headers?: Record<string, string> }>) {
   const seen: Seen[] = [];
   server = createServer((req, res) => {
     let body = "";
@@ -30,7 +32,7 @@ async function fakeApi(routes: Record<string, { status?: number; json?: unknown;
     req.on("end", () => {
       seen.push({ method: req.method ?? "", url: req.url ?? "", body, contentType: req.headers["content-type"], authorization: req.headers.authorization });
       const route = routes[`${req.method} ${req.url}`] ?? { status: 404, json: { error: { code: "not_found", message: `no ${req.url}` } } };
-      res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown" });
+      res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...(route.headers ?? versionHeaders("test")) });
       res.end(route.text ?? JSON.stringify(route.json));
     });
   });
@@ -276,4 +278,40 @@ test("account register posts the credential read from stdin and prints the accou
 
   const list = await sgt(api, "account", "list");
   expect(list.out).toMatch(/person:u1:codex-local\s+registered\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
+});
+
+// TECH-5155: version skew between this sgt and the Sergeant it calls (contracts' skew.ts).
+test("an older Sergeant's answer without newer fields is still a success, printed as JSON after one warning", async () => {
+  const account = { id: "person:u1:codex-local", group: "registered", holder: "Ada", adapter: "codex-local", mine: true };
+  const registered = { account, replaced: false, quota: { adapter: "codex-local", readAt: "t" } };
+  const { taskStart: _, ...budget } = detail.budget;
+  // An older server: no version headers, no `notice` (TECH-5159), no `budget.taskStart` (TECH-5161).
+  const { api } = await fakeApi({
+    "POST /v1/accounts/codex-local/register": { json: registered, headers: {} },
+    "GET /v1/tasks/UNF-12": { json: { ...detail, budget }, headers: {} },
+  });
+
+  const done = await sgtWith({ stdin: async () => "secret\n" }, api, "account", "register", "codex-local");
+  expect(done.code).toBe(0);
+  expect(JSON.parse(done.out)).toEqual(registered);
+  const warnings = done.err.split("\n").filter(Boolean);
+  expect(warnings).toEqual([
+    expect.stringMatching(/^sgt: warning: Sergeant at .* predates API contract reporting, so it is older than this client/),
+    expect.stringMatching(/answered POST \/v1\/accounts\/codex-local\/register without notice: it did what was asked, but it is older than this sgt/),
+  ]);
+
+  const shown = await sgt(api, "task", "show", "UNF-12");
+  expect(shown.code).toBe(0);
+  expect(JSON.parse(shown.out)).toEqual({ ...detail, budget });
+  expect(shown.err).toContain("without budget.taskStart");
+});
+
+test("a newer Sergeant's contract is warned of once, and its extra fields do not stop the command", async () => {
+  const newer = { ...versionHeaders("2.9.0+bbbbbbb"), "Sergeant-Api-Contract": "0123456789ab" };
+  const { api } = await fakeApi({ "GET /v1/tasks/UNF-12": { json: { ...detail, addedLater: { by: "a newer server" } }, headers: newer } });
+
+  const shown = await sgt(api, "task", "show", "UNF-12");
+  expect(shown.code).toBe(0);
+  expect(shown.out).toContain("UNF-12  active  Fix the login");
+  expect(shown.err).toMatch(/^sgt: warning: Sergeant at .* \(2\.9\.0\+bbbbbbb\) serves a different API contract than this client \(.*\): fields one side added are missing or ignored on the other\. Update this client \(git pull\) or redeploy Sergeant so they match\.\n$/);
 });

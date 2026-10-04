@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
-import { TaskList, WakeResponse } from "./api.ts";
+import { RegisterAccountResponse, TaskDetail, TaskList, WakeResponse } from "./api.ts";
 import { apiClient } from "./client.ts";
+import { type ServerVersion, versionHeaders } from "./skew.ts";
 
 // The client `sgt` and `sgt-mcp` share: what it sends, that a login never leaves the host in the clear,
 // and that every way a call can fail becomes an `ApiError`'s error rather than a guess.
@@ -89,4 +90,48 @@ test("a refusal, a non-contract error, an off-contract answer, and an unreachabl
     ok: false,
     error: { code: "unavailable", message: `cannot reach the Sergeant API at ${api} (connect ECONNREFUSED); is serve running?` },
   });
+});
+
+// Version skew (skew.ts): a Sergeant whose contract differs is reported, and an older Sergeant's answer
+// that lacks only fields it never knew is still its answer, so a command it performed is not a failure.
+
+test("a server whose contract differs, or that reports none, is reported; a proxy's error is not", async () => {
+  const api = "http://127.0.0.1:8080";
+  const reported = async (res: () => Response) => {
+    const seen: ServerVersion[] = [];
+    await apiClient({ api, fetch: fakeFetch(res).fetch, onSkew: (s) => seen.push(s) }).request("GET", "/v1/tasks");
+    return seen;
+  };
+  const same = versionHeaders("2.0.40+aaaaaaa");
+
+  expect(await reported(() => Response.json({ tasks: [] }, { headers: same }))).toEqual([]);
+  expect(await reported(() => Response.json({ error: { code: "not_found", message: "no" } }, { status: 404, headers: same }))).toEqual([]);
+  const newer = { ...same, "Sergeant-Api-Contract": "0123456789ab" };
+  expect(await reported(() => Response.json({ tasks: [] }, { headers: newer }))).toEqual([{ version: "2.0.40+aaaaaaa", contract: "0123456789ab" }]);
+  expect(await reported(() => Response.json({ tasks: [] }))).toEqual([{ version: undefined, contract: undefined }]);
+  expect(await reported(() => new Response("Bad Gateway", { status: 502 }))).toEqual([]);
+});
+
+test("an older server's answer lacking only newer required fields is accepted and names them; any other mismatch is not", async () => {
+  const api = "http://127.0.0.1:8080";
+  const answering = (json: unknown) => apiClient({ api, fetch: fakeFetch(() => Response.json(json)).fetch });
+
+  // TECH-5159: the server stored the credential before it answered without `notice`.
+  const account = { id: "person:u1:codex-local", group: "registered", holder: "Ada", adapter: "codex-local", mine: true };
+  const registered = { account, replaced: false, quota: { adapter: "codex-local", readAt: "t" } };
+  expect(await answering(registered).call("POST", "/v1/accounts/codex-local/register", RegisterAccountResponse, { credential: "c" })).toEqual({
+    ok: true,
+    value: registered,
+    absent: ["notice"],
+  });
+
+  // TECH-5161: a budget from before `taskStart`, nested in a task's detail.
+  const budget = { window: { wallMinutes: 120, costUsd: 25 }, windowStart: "2026-10-02T10:00:00.000Z", wallDeadline: "2026-10-02T12:00:00.000Z", spentUsd: 1, costLimitUsd: 25, unknownCostRuns: 0 };
+  const detail = { task: { ref: "UNF-1", status: "active", turns: 1, runs: 0 }, issue: { error: "x" }, budget, runs: [], recentTurns: [], followups: [] };
+  expect(await answering(detail).call("GET", "/v1/tasks/UNF-1", TaskDetail)).toEqual({ ok: true, value: detail, absent: ["budget.taskStart"] });
+
+  // A present field of the wrong type, or a value the contract does not have, is still outside it.
+  const wrong = await answering({ ...registered, notice: 7 }).call("POST", "/v1/accounts/codex-local/register", RegisterAccountResponse, { credential: "c" });
+  expect(wrong).toMatchObject({ ok: false, error: { code: "unavailable" } });
+  expect(await answering({ ref: "UNF-1", woke: "later" }).call("POST", "/v1/tasks/UNF-1/wake", WakeResponse, {})).toMatchObject({ ok: false });
 });
