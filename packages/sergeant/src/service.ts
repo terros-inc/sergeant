@@ -266,6 +266,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         return { undelegated, ...(await drive(ref)) };
       }),
     ...(opts.humans && { callerOf: opts.humans.callerOf, linearClientId: opts.humans.linearClientId }),
+    ...(opts.humans?.approverNames && { approverNames: opts.humans.approverNames }),
     trustLoopback: opts.trustLoopback ?? false,
     ...(opts.accounts && { accounts: opts.accounts }),
     ...(opts.admin && { admin: opts.admin }),

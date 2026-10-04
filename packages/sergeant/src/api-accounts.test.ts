@@ -116,7 +116,7 @@ test("a person registers, replaces, and removes only their own account, and its 
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toHaveLength(1);
   const removed = await call("POST", "/v1/accounts/remove", "ada", { name: "claude" });
   expect(removed).toMatchObject({ status: 200, json: { removed: true, notice: expect.stringContaining("does not revoke that copy") } });
-  expect(removed.json.notice).toContain("in your claude.ai settings, revoke the token `claude setup-token` made");
+  expect(removed.json.notice).toContain("Settings → Claude Code → Authorization tokens and revoke the token `claude setup-token` made");
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([]);
 
   for (const said of [registered.text, listed.text, refused.text, ...logs]) expect(said).not.toMatch(/sk-ant-oat01-(ada|expired)/);

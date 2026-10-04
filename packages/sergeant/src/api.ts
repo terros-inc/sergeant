@@ -79,6 +79,8 @@ export type ApiControl = {
   callerOf?: (accessToken: string) => Promise<Caller>;
   /** The Linear OAuth app's public client id, served to `sgt login`. */
   linearClientId?: string;
+  /** The installation's approvers by name (TECH-5202); throws when Linear cannot say. */
+  approverNames?: () => Promise<string[]>;
   /** A loopback caller with no token is an operator (`serve --trust-loopback`). */
   trustLoopback?: boolean;
   /** The model accounts runs may use, and people's own (TECH-5113, api-accounts.ts). */
@@ -130,7 +132,10 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   const caller = await callerOf(req, ctl);
   if (noun === "whoami" && get && id === undefined) {
     const user = caller.kind === "linear" ? caller.user : null;
-    return ok({ auth: caller.kind, user, approver: caller.approver, enrolledRepositories: ctl.enrolledRepositories } satisfies WhoAmI);
+    // Only names for a refusal to cite: Linear unable to give them fails nothing.
+    const approvers = await (ctl.approverNames?.() ?? Promise.resolve([])).catch((e: Error) => (ctl.log(`approvers' names unavailable: ${e.message}`), []));
+    const registration = { providers: ctl.accounts?.providers() ?? [] };
+    return ok({ auth: caller.kind, user, approver: caller.approver, enrolledRepositories: ctl.enrolledRepositories, registration, approvers } satisfies WhoAmI);
   }
   if (noun === "tasks") {
     if (id === undefined && get) return ok(await listTasks(ctl));

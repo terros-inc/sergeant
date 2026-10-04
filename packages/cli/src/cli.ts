@@ -31,6 +31,7 @@ import type { z } from "zod";
 import { showOutcome, showStatus, waitForOutcome } from "./admin.ts";
 import { accountRow, runRow, showRun, showTask, table, taskRow } from "./format.ts";
 import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
+import { registrationRefusal, strandedNotice } from "./register.ts";
 import { CHECKOUT, update } from "./update.ts";
 
 // `sgt`, a thin client of the Sergeant 2 API (11 §7, UNF-714): it sends one request per command and
@@ -202,17 +203,29 @@ const commands: Record<string, Command> = {
       const name = ctx.flags.name ?? provider;
       const valid = AccountName.safeParse(name);
       if (!valid.success) throw new Usage(`--name: ${valid.error.issues[0]?.message}`);
-      let credential: string;
-      if (ctx.io.stdin) {
-        credential = (await ctx.io.stdin()).trim();
-        if (!credential) throw new Usage("account register read an empty stdin: pipe the credential, or run it with nothing piped to sign in");
-      } else {
-        if (!ctx.io.signIn) throw new Usage("account register needs the credential on stdin here");
+      const piped = ctx.io.stdin && (await ctx.io.stdin()).trim();
+      if (piped === "") throw new Usage("account register read an empty stdin: pipe the credential, or run it with nothing piped to sign in");
+      if (!piped && !ctx.io.signIn) throw new Usage("account register needs the credential on stdin here");
+      // TECH-5202: the login and whether this Sergeant takes the account, before anything makes a credential.
+      const refused = registrationRefusal(await call(ctx, "GET", "/v1/whoami", WhoAmI), provider);
+      if (refused) fail(ctx, refused.code, refused.message);
+      let credential = piped;
+      if (!credential && ctx.io.signIn) {
         ctx.io.err(`Signing in with ${provider === "claude" ? "`claude setup-token`" : "`codex login` (in a temporary CODEX_HOME; your ~/.codex is not touched)"} to register ${name}.\n`);
         credential = (await ctx.io.signIn(provider).catch((e: Error) => fail(ctx, "bad_request", e.message))).trim();
         if (!credential) fail(ctx, "bad_request", "the sign-in gave no credential; nothing was registered");
       }
-      const res = await call(ctx, "POST", "/v1/accounts/register", RegisterAccountResponse, { provider, name, credential });
+      const signedIn = !piped;
+      const posted = await client(ctx).call("POST", "/v1/accounts/register", RegisterAccountResponse, { provider, name, credential });
+      if (!posted.ok && signedIn) {
+        // `unavailable` is the one failure that may come after the store: unreachable, an unreadable answer, a failed write.
+        try {
+          settle(ctx, posted);
+        } finally {
+          ctx.io.err(`${strandedNotice(provider, name, posted.error.code !== "unavailable")}\n`);
+        }
+      }
+      const res = settle(ctx, posted);
       const left = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
       print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${provider} account ${res.account.name} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
     },
