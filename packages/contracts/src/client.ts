@@ -1,13 +1,13 @@
 import type { z } from "zod";
 import { ApiError } from "./api.ts";
-import { CLI_TOO_OLD, MIN_CLI_HEADER, MIN_CLI_VERSION, olderThan } from "./min-cli.ts";
+import { CLI_VERSION_HEADER, MIN_CLI_HEADER, MIN_CLI_VERSION, olderThan } from "./min-cli.ts";
 
 // The one typed client of the Sergeant API (`/v1`, api.ts) that `sgt` and `sgt-mcp` share (TECH-4950):
 // one request, and its answer validated against the contract. A refusal, an unreachable API, or an
 // answer outside the contract comes back as an `ApiError`'s error, never as a guess; each client
-// decides how to show it. It lives here because client packages may depend only on contracts. It
-// applies the minimum CLI version (min-cli.ts): it refuses a server that needs a newer client, and
-// reports one older than this client.
+// decides how to show it. It lives here because client packages may depend only on contracts. Every
+// request names this client's version, so a Sergeant that needs a newer client refuses it before acting
+// (min-cli.ts); an answer from a Sergeant older than this client is reported.
 
 export type ApiFailure = ApiError["error"];
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: ApiFailure };
@@ -21,8 +21,8 @@ export type ApiClientOptions = {
   token?: string | undefined;
   /** Appended to the message when the API cannot be reached: where the human should look. */
   unreachableHint?: string | undefined;
-  /** This client's own version (sergeantVersion): an answer from a Sergeant that supports only newer clients is refused. */
-  version?: string | undefined;
+  /** This client's own version (sergeantVersion), sent on every request: a Sergeant that supports only newer clients refuses it. */
+  version: string;
   /** Called for each answer from a Sergeant older than this client's minimum (min-cli.ts), or that reports none. */
   onOlderServer?: ((serverMin: string | undefined) => void) | undefined;
 };
@@ -51,7 +51,11 @@ export function apiClient(opts: ApiClientOptions): ApiClient {
         return failure("bad_request", `refusing to send your Linear login to ${parsed.host} without HTTPS`);
       }
     }
-    const headers = { ...(body && { "Content-Type": "application/json" }), ...(opts.token && { Authorization: `Bearer ${opts.token}` }) };
+    const headers = {
+      [CLI_VERSION_HEADER]: opts.version,
+      ...(body && { "Content-Type": "application/json" }),
+      ...(opts.token && { Authorization: `Bearer ${opts.token}` }),
+    };
     let res: Response;
     try {
       res = await fetchFn(url, { method, headers, ...(body && { body: JSON.stringify(body) }) });
@@ -64,7 +68,6 @@ export function apiClient(opts: ApiClientOptions): ApiClient {
     // Only Sergeant's own answers say which clients it supports: a proxy's 502 does not.
     if (res.ok || refused?.success) {
       const serverMin = res.headers.get(MIN_CLI_HEADER) ?? undefined;
-      if (opts.version !== undefined && serverMin !== undefined && olderThan(opts.version, serverMin)) return failure("bad_request", CLI_TOO_OLD);
       if (serverMin === undefined || olderThan(serverMin, MIN_CLI_VERSION)) opts.onOlderServer?.(serverMin);
     }
     if (res.ok) return { ok: true, value: text };

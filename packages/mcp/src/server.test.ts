@@ -11,6 +11,8 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 type Route = { status?: number; json?: unknown; text?: string; drop?: boolean; headers?: Record<string, string> };
 let routes: Record<string, Route> = {};
 const seen: string[] = [];
+/** Each request's `Sergeant-Cli-Version`: the version sgt-mcp names so a Sergeant can refuse it (TECH-5188). */
+const versions: (string | string[] | undefined)[] = [];
 let server: Server;
 let api: string;
 let client: Client;
@@ -18,6 +20,7 @@ let client: Client;
 beforeAll(async () => {
   server = createServer((req, res) => {
     seen.push(`${req.method} ${req.url}`);
+    versions.push(req.headers["sergeant-cli-version"]);
     const route = routes[`${req.method} ${req.url}`] ?? { status: 404, json: { error: { code: "not_found", message: `no ${req.url}` } } };
     if (route.drop) return req.socket.destroy();
     res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...route.headers });
@@ -38,6 +41,7 @@ beforeAll(async () => {
 beforeEach(() => {
   routes = {};
   seen.length = 0;
+  versions.length = 0;
 });
 
 afterAll(async () => {
@@ -101,13 +105,14 @@ test("an MCP client reads a task and its runs as the API answers them, through r
   expect((await client.callTool({ name: "health", arguments: {} })).structuredContent).toEqual({ ok: false, api });
 
   expect(seen.every((s) => s.startsWith("GET "))).toBe(true);
+  expect(versions.filter((v) => typeof v !== "string" || !/^\d+\.\d+\.\d+/.test(v))).toEqual([]);
 });
 
 test("refusals, an unreachable API, answers outside the contract, and bad refs are tool errors, not guesses", async () => {
   routes = {
     "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: 7, role: "worker" } } },
-    // TECH-5185: a Sergeant that supports only a newer sgt-mcp than this one.
-    "GET /v1/tasks": { json: { tasks: [] }, headers: { "Sergeant-Min-Cli-Version": "999.0.0" } },
+    // TECH-5188: a Sergeant that supports only a newer sgt-mcp than this one refuses it.
+    "GET /v1/tasks": { status: 426, json: { error: { code: "bad_request", message: "Your sgt is older than this Sergeant server supports. Run `sgt update`." } } },
   };
   const errorOf = async (name: string, args: Record<string, unknown>) => {
     const res = await client.callTool({ name, arguments: args });

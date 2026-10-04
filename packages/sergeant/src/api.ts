@@ -5,9 +5,12 @@ import {
   CancelRunRequest,
   CancelTaskRequest,
   checkBudget,
+  CLI_TOO_OLD,
+  CLI_VERSION_HEADER,
   RunId,
   MIN_CLI_HEADER,
   MIN_CLI_VERSION,
+  olderThan,
   TaskRef,
   WakeRequest,
   type ApiError,
@@ -44,6 +47,8 @@ import type { ServiceDeps } from "./service.ts";
 // restart; a run cancel is the runner's own confirmed cancel. Nothing here reasons, merges, or starts
 // work.
 //
+// Every call first names the client's version (contracts' min-cli.ts): one that names none, or one older
+// than this server supports, is refused before anything else, so a too-old `sgt` changes nothing.
 // Every call but `GET /v1/auth/config` (what `sgt login` needs to start) names its caller (auth.ts)
 // and fails closed without one: a Linear user's own access token as a bearer, checked against Linear
 // on every call, or, only under `serve --trust-loopback`, an operator on this host: a loopback peer
@@ -79,7 +84,15 @@ export type ApiControl = {
 export function apiHandler(ctl: ApiControl): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     // On every /v1 answer, refusals and `sgt login`'s included: the oldest sgt this server supports (contracts' min-cli.ts).
-    if (req.url?.startsWith("/v1")) res.setHeader(MIN_CLI_HEADER, MIN_CLI_VERSION);
+    if (req.url?.startsWith("/v1")) {
+      res.setHeader(MIN_CLI_HEADER, MIN_CLI_VERSION);
+      // TECH-5188: before authentication, the body, or routing, so nothing is done for a too-old client.
+      const cli = req.headers[CLI_VERSION_HEADER.toLowerCase()];
+      if (typeof cli !== "string" || olderThan(cli, MIN_CLI_VERSION)) {
+        send(res, { status: 426, json: { error: { code: "bad_request", message: CLI_TOO_OLD } } satisfies ApiError });
+        return;
+      }
+    }
     route(req, ctl).then(
       (reply) => send(res, reply),
       (e: Error) => {

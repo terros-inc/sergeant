@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { type ApiError, type ApiFailure, apiClient, RunDetail, RunId, RunList, safeJson, sergeantVersion, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
+import { type ApiError, type ApiFailure, apiClient, CLI_VERSION_HEADER, RunDetail, RunId, RunList, safeJson, sergeantVersion, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 // `sgt-mcp` (TECH-4940): Sergeant for MCP clients such as ChatGPT and Firstmate, the read-only half
@@ -102,7 +102,7 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
       // `/health` answers 503 with `{ ok: false }` when unhealthy: that is an answer, not a failure.
       let res: Response;
       try {
-        res = await fetchFn(`${api}/health`);
+        res = await fetchFn(`${api}/health`, { headers: { [CLI_VERSION_HEADER]: version } });
       } catch (e) {
         return error({ code: "unavailable", message: `cannot reach Sergeant at ${api} (${((e as Error).cause as Error | undefined)?.message ?? (e as Error).message})` });
       }

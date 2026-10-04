@@ -11,7 +11,7 @@ import { TOKEN_URL } from "./login.ts";
 // `sgt` against a fake Sergeant API: what it sends, what it prints for a human, and that `--json` is
 // the API's own answer, errors included, so Firstmate tooling can parse every outcome.
 
-type Seen = { method: string; url: string; body: string; contentType: string | undefined; authorization: string | undefined };
+type Seen = { method: string; url: string; body: string; contentType: string | undefined; authorization: string | undefined; version?: string | string[] | undefined };
 let server: Server | undefined;
 // Each test's own config directory, so no test reads or writes this machine's real login.
 let config = "";
@@ -30,7 +30,7 @@ async function fakeApi(routes: Record<string, { status?: number; json?: unknown;
     let body = "";
     req.on("data", (d: Buffer) => (body += d.toString()));
     req.on("end", () => {
-      seen.push({ method: req.method ?? "", url: req.url ?? "", body, contentType: req.headers["content-type"], authorization: req.headers.authorization });
+      seen.push({ method: req.method ?? "", url: req.url ?? "", body, contentType: req.headers["content-type"], authorization: req.headers.authorization, version: req.headers["sergeant-cli-version"] });
       const route = routes[`${req.method} ${req.url}`] ?? { status: 404, json: { error: { code: "not_found", message: `no ${req.url}` } } };
       res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...(route.headers ?? { [MIN_CLI_HEADER]: MIN_CLI_VERSION }) });
       res.end(route.text ?? JSON.stringify(route.json));
@@ -285,22 +285,20 @@ test("admin account remove-person posts the user id and says what it removed", a
   expect((await sgt(api, "admin", "account")).code).toBe(2);
 });
 
-// TECH-5185: no compatibility between sgt and the API, only the oldest sgt the server supports.
+// TECH-5185: no compatibility between sgt and the API, only the oldest sgt the server supports. Each
+// request names this sgt's version, so a Sergeant that no longer supports it refuses before acting (TECH-5188).
 test("an sgt older than its Sergeant supports stops and says to update; one newer than it warns", async () => {
-  const { api } = await fakeApi({
-    "GET /v1/tasks/UNF-12": { json: detail },
-    "GET /v1/whoami": { json: { error: { code: "unauthorized", message: "no login" } }, status: 401 },
+  const tooOld = "Your sgt is older than this Sergeant server supports. Run `sgt update`.";
+  const { api, seen } = await fakeApi({
+    "POST /v1/tasks/UNF-12/wake": { json: { error: { code: "bad_request", message: tooOld } }, status: 426 },
     "GET /v1/tasks": { json: { tasks: [] }, headers: { [MIN_CLI_HEADER]: "2.0.5" } },
     "GET /v1/runs": { json: { runs: [] }, headers: {} },
   });
-  const tooOld = "Your sgt is older than this Sergeant server supports. Run `sgt update`.";
 
-  // Whatever the API answered, a refusal too: it no longer supports this sgt, and an unknown version is no exception.
-  for (const [version, command] of [["2.0.4+aaaaaaa", ["task", "list"]], ["0.0.0+unknown", ["task", "show", "UNF-12"]], ["0.0.0+unknown", ["whoami"]]] as const) {
-    expect(await sgtWith({ version }, api, ...command)).toEqual({ code: 1, out: "", err: `sgt: bad_request: ${tooOld}\n` });
-  }
-  const json = await sgtWith({ version: "0.0.0+unknown" }, api, "--json", "task", "show", "UNF-12");
+  expect(await sgtWith({ version: "2.0.4+aaaaaaa" }, api, "task", "wake", "UNF-12")).toEqual({ code: 1, out: "", err: `sgt: bad_request: ${tooOld}\n` });
+  const json = await sgtWith({ version: "0.0.0+unknown" }, api, "--json", "task", "wake", "UNF-12");
   expect(JSON.parse(json.out)).toEqual({ error: { code: "bad_request", message: tooOld } });
+  expect(seen.map((s) => s.version)).toEqual(["2.0.4+aaaaaaa", "0.0.0+unknown"]);
 
   // A Sergeant whose minimum is below this sgt's, or that predates saying one, lacks a change this sgt needs.
   const newer = await sgtWith({ version: "2.0.5+aaaaaaa" }, api, "task", "list");

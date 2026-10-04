@@ -30,8 +30,9 @@ import { CHECKOUT, update } from "./update.ts";
 // prints the answer, concise by default and the API's own JSON with `--json`. Every decision is the
 // server's. `sgt login` signs the human in with their own Linear login (login.ts), kept per API URL and
 // sent as a bearer on every call; the server checks it against Linear and refuses anything else.
-// There is no compatibility between versions of sgt and the API (contracts' min-cli.ts): an sgt older
-// than its server supports stops and says to run `sgt update`, and one newer than its server warns once.
+// There is no compatibility between versions of sgt and the API (contracts' min-cli.ts): every call
+// names this sgt's version, the server refuses one older than it supports before acting and says to run
+// `sgt update`, and an sgt newer than its server warns once.
 
 export const DEFAULT_API = "http://127.0.0.1:8080";
 

@@ -3,7 +3,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { type Conversation, MIN_CLI_VERSION, type RunRecord } from "@terros/sergeant-contracts";
+import { CLI_VERSION_HEADER, type Conversation, MIN_CLI_VERSION, type RunRecord } from "@terros/sergeant-contracts";
 import type { LinearUser } from "@terros/sergeant-linear";
 import { linearCallers } from "./auth.ts";
 import { startService, type Service, type ServiceDeps, type ServiceOptions } from "./service.ts";
@@ -80,7 +80,7 @@ const start = async (deps: ServiceDeps, opts: Partial<ServiceOptions> = { trustL
 
 function call(port: number, method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
   return new Promise<{ status: number; json: any }>((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, method, path, headers: { ...(body !== undefined && { "Content-Type": "application/json" }), ...headers } }, (res) => {
+    const req = request({ host: "127.0.0.1", port, method, path, headers: { [CLI_VERSION_HEADER]: MIN_CLI_VERSION, ...(body !== undefined && { "Content-Type": "application/json" }), ...headers } }, (res) => {
       let text = "";
       res.on("data", (d: Buffer) => (text += d.toString()));
       res.on("end", () => resolve({ status: res.statusCode ?? 0, json: text ? JSON.parse(text) : undefined }));
@@ -110,7 +110,7 @@ test("every /v1 answer, a refusal too, says the oldest sgt it supports (TECH-518
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
   const port = await start(fakes().deps, {});
   for (const path of ["/v1/whoami", "/v1/nothing"]) {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`);
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers: { [CLI_VERSION_HEADER]: MIN_CLI_VERSION } });
     expect([res.status, res.headers.get("Sergeant-Min-Cli-Version")]).toEqual([401, MIN_CLI_VERSION]);
   }
   expect((await fetch(`http://127.0.0.1:${port}/elsewhere`)).headers.get("Sergeant-Min-Cli-Version")).toBeNull();

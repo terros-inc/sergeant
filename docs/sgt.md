@@ -31,8 +31,9 @@ the line it prints to your shell profile (`~/.zshrc` or `~/.bashrc`) and open a 
 
 **Update** with `sgt update`: it fast-forwards the checkout to `main` and runs `pnpm install`, and the
 wrapper picks up the new code by itself. Keep `sgt` current: there is no compatibility with older
-versions, so when the installation needs a newer `sgt`, every command stops with "Your sgt is older
-than this Sergeant server supports. Run `sgt update`." `sgt update` only fast-forwards `main`: if the
+versions, so when the installation needs a newer `sgt`, it refuses every command before acting on it
+with "Your sgt is older than this Sergeant server supports. Run `sgt update`." (`sgt update` itself
+never calls the API.) `sgt update` only fast-forwards `main`: if the
 checkout is on another branch or has commits `main` lacks, it says so and changes nothing.
 
 ## 3. Point it at your installation

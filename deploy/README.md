@@ -118,15 +118,17 @@ mutation:
 
 5. From a logged-out shell, check every published operational route. Each must return `401`; the
    three POSTs must not change a task or run. Placeholder ids are sufficient because authentication
-   happens before resource lookup or body parsing:
+   happens before resource lookup or body parsing. Each call names a current `sgt` version, since
+   `serve` refuses one that names none with `426` before it checks the login (TECH-5188):
 
    ```sh
    api=https://<hostname>
+   v="Sergeant-Cli-Version: $(sgt --version | cut -d' ' -f2)"
    for path in /v1/whoami /v1/tasks /v1/tasks/NOT-A-TASK /v1/runs /v1/runs/not-a-run /v1/runs/not-a-run/report; do
-     test "$(curl -sS -o /dev/null -w '%{http_code}' "$api$path")" = 401 || exit 1
+     test "$(curl -sS -o /dev/null -w '%{http_code}' -H "$v" "$api$path")" = 401 || exit 1
    done
    for path in /v1/tasks/NOT-A-TASK/wake /v1/tasks/NOT-A-TASK/cancel /v1/runs/not-a-run/cancel; do
-     test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$api$path")" = 401 || exit 1
+     test "$(curl -sS -o /dev/null -w '%{http_code}' -H "$v" -X POST "$api$path")" = 401 || exit 1
    done
    ```
 
