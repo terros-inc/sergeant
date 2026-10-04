@@ -324,17 +324,27 @@ test("account register asks first, refuses before any sign-in, and says what to 
   expect(failed.out + failed.err).not.toContain("sk-ant-oat01-made");
   const codex = await sgtWith({ signIn }, api, "account", "register", "codex");
   expect(codex.err).toContain("signs in again. The login itself stays valid with OpenAI until you revoke it: in ChatGPT, open Settings → Security");
+  expect(failed.err).toContain("Settings → Claude Code → Authorization tokens");
   // A piped credential is the person's own copy: nothing is stranded.
   expect((await sgtWith({ stdin: async () => "sk-ant-oat01-mine", signIn }, api, "account", "register", "claude")).err).not.toContain("pbpaste");
   await new Promise<void>((resolve) => server?.close(() => resolve()));
 
-  // The server stored it, but its answer did not arrive whole: sgt cannot say it was not registered, so revoking is not its first advice.
-  const lost = await fakeApi({ "GET /v1/whoami": { json: whoami() }, "POST /v1/accounts/register": { json: { account: {} } } });
+  // The person already has a claudeWork; the server stored the new token over it, but its answer did not
+  // arrive whole. A listed claudeWork proves nothing, so sgt says to send the same token again, which
+  // replaces whichever claudeWork is there, never to look at the list or to revoke first.
+  const lost = await fakeApi({
+    "GET /v1/whoami": { json: whoami() },
+    "GET /v1/accounts": { json: { accounts: [{ id: "person:u1:claudeWork", group: "registered", holder: "Ada Example <ada@example.com>", adapter: "claude-code-local", name: "claudeWork", mine: true, usage: { runs: 0, costUsd: 0, unknownCostRuns: 0 } }] } },
+    "POST /v1/accounts/register": { json: { account: {} } },
+  });
   const unknown = await sgtWith({ signIn }, lost.api, "account", "register", "claude", "--name", "claudeWork");
   expect(unknown.code).toBe(1);
   expect(unknown.err).toContain("sgt: unavailable: POST /v1/accounts/register answered outside the API contract");
-  expect(unknown.err).toContain("sgt cannot tell whether claudeWork was registered. Once Sergeant answers, run `sgt account list`: if claudeWork is listed as yours, it is registered");
-  expect(unknown.err).not.toContain("was not registered");
+  expect(unknown.err).toContain("sgt cannot tell whether claudeWork was registered. Once Sergeant answers, register the same token again");
+  expect(unknown.err).toContain("`pbpaste | sgt account register claude --name claudeWork`");
+  expect(unknown.err).not.toMatch(/sgt account list|was not registered/);
+  const codexUnknown = await sgtWith({ signIn }, lost.api, "account", "register", "codex", "--name", "codexWork");
+  expect(codexUnknown.err).toMatch(/so revoke that login: in ChatGPT.*Then, once Sergeant answers, `sgt account register codex --name codexWork` signs in again/);
 });
 
 // TECH-5198: removing an account passes on where to revoke it, since removal does not revoke a copy.

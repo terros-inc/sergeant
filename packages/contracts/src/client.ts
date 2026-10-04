@@ -57,13 +57,15 @@ export function apiClient(opts: ApiClientOptions): ApiClient {
       ...(opts.token && { Authorization: `Bearer ${opts.token}` }),
     };
     let res: Response;
+    let text: string;
+    // A connection lost while the answer is read is as unknown an outcome as one never made.
     try {
       res = await fetchFn(url, { method, headers, ...(body && { body: JSON.stringify(body) }) });
+      text = await res.text();
     } catch (e) {
       const cause = ((e as Error).cause as Error | undefined)?.message ?? (e as Error).message;
       return failure("unavailable", `cannot reach the Sergeant API at ${opts.api} (${cause})${opts.unreachableHint ?? ""}`);
     }
-    const text = await res.text();
     const refused = res.ok ? undefined : ApiError.safeParse(safeJson(text));
     // Only Sergeant's own answers say which clients it supports: a proxy's 502 does not.
     if (res.ok || refused?.success) {

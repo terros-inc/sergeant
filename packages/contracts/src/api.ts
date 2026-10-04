@@ -138,7 +138,7 @@ export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "c
  * was not registered (TECH-5202).
  */
 export const REVOKE: Record<Provider, string> = {
-  claude: "in your claude.ai settings, revoke the token `claude setup-token` made (the Claude Code section lists them)",
+  claude: "on claude.ai, open Settings → Claude Code → Authorization tokens and revoke the token `claude setup-token` made",
   codex: "in ChatGPT, open Settings → Security and choose Log out of all devices",
 };
 

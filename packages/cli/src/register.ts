@@ -22,15 +22,23 @@ export function registrationRefusal(me: WhoAmI, provider: Provider): { code: Api
 /**
  * After a sign-in made a credential that registering failed to keep: how to reuse or revoke it.
  * `refused`: the server refused it, before storing anything. Otherwise (unreachable, an unreadable
- * answer, the store failing) it may have been registered after all, so look before revoking it.
+ * answer, the store failing) it may have been registered after all, and an account listed under the
+ * name cannot say whether it is this one or the one it would have replaced. Registering under the
+ * same name replaces it, so registering again is safe either way.
  */
 export function strandedNotice(provider: Provider, name: string, refused: boolean): string {
   const again = `sgt account register ${provider} --name ${name}`;
-  const unknown = `sgt cannot tell whether ${name} was registered. Once Sergeant answers, run \`sgt account list\`: if ${name} is listed as yours, it is registered and there is nothing to do. If not: `;
-  const reuse =
-    provider === "claude"
-      ? "The token `claude setup-token` just made stays valid for a year and sgt kept no copy. " +
-        `To register it without making another, copy it from above and pipe it in, on a Mac: \`pbpaste | ${again}\`. Otherwise revoke it: ${REVOKE.claude}.`
-      : `sgt deleted its copy of the Codex login, so it cannot be reused: \`${again}\` signs in again. The login itself stays valid with OpenAI until you revoke it: ${REVOKE.codex}.`;
-  return refused ? `${name} was not registered. ${reuse}` : `${unknown}${reuse}`;
+  if (provider === "codex") {
+    const relogin = `\`${again}\` signs in again`;
+    return refused
+      ? `${name} was not registered. sgt deleted its copy of the Codex login, so it cannot be reused: ${relogin}. The login itself stays valid with OpenAI until you revoke it: ${REVOKE.codex}.`
+      : `sgt cannot tell whether ${name} was registered, and it deleted its copy of the Codex login, so revoke that login: ${REVOKE.codex}. ` +
+          `Then, once Sergeant answers, ${relogin} and replaces whatever ${name} holds.`;
+  }
+  const pipe = `copy it from above and pipe it in, on a Mac: \`pbpaste | ${again}\``;
+  return refused
+    ? `${name} was not registered. The token \`claude setup-token\` just made stays valid for a year and sgt kept no copy. ` +
+        `To register it without making another, ${pipe}. Otherwise revoke it: ${REVOKE.claude}.`
+    : `sgt cannot tell whether ${name} was registered. Once Sergeant answers, register the same token again: ${pipe}. ` +
+        `Registering under ${name} replaces whatever it holds, so that is safe either way. To not use it at all, revoke it: ${REVOKE.claude}.`;
 }

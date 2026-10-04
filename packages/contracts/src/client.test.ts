@@ -93,6 +93,10 @@ test("a refusal, a non-contract error, an off-contract answer, and an unreachabl
     ok: false,
     error: { code: "unavailable", message: `cannot reach the Sergeant API at ${api} (connect ECONNREFUSED); is serve running?` },
   });
+  // TECH-5202: the answer cut off mid-body is unavailable too, not a throw, so `sgt` still says what to do.
+  const cut = new ReadableStream({ start: (c) => c.error(new Error("socket hang up")) });
+  const dropped = apiClient({ version, api, fetch: async () => new Response(cut, { status: 200 }) });
+  expect(await dropped.call("POST", "/v1/tasks/UNF-1/wake", WakeResponse, {})).toMatchObject({ ok: false, error: { code: "unavailable", message: expect.stringContaining("socket hang up") } });
 });
 
 // TECH-5185: the oldest client a Sergeant supports, from its answer's header (min-cli.ts). Refusing a
