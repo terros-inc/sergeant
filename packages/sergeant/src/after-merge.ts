@@ -1,5 +1,6 @@
 import { appendFile, stat } from "node:fs/promises";
-import { checkBudget, checkDelegation, RunId, type BudgetStatus, type RunRecord } from "@terros/sergeant-contracts";
+import { checkBudget, checkDelegation, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { outcomeComment } from "./outcome.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions, LoopResult, TaskState } from "./loop.ts";
 import { approvedHead, auditDrawn, implementerOf, type ReviewFacts, reviewFacts } from "./review-quality.ts";
@@ -9,6 +10,59 @@ import { pause } from "./wake.ts";
 // for reviews still running, and watching Linear for the issue reaching Done.
 
 type Merged = NonNullable<TaskState["merged"]>;
+
+/** The task's record of a closing merge, with its outcome comment built from the live facts. */
+export function mergedOf(
+  pr: PullRequestFacts,
+  mergedSha: string,
+  runs: RunRecord[],
+  followups: FiledFollowup[],
+  issue: Pick<Conversation["issue"], "title" | "description">,
+): Merged {
+  const outcome = outcomeComment(pr, mergedSha, runs, followups, issue);
+  return { repo: pr.repo, number: pr.number, headSha: pr.headSha, mergedSha, at: new Date().toISOString(), outcome };
+}
+
+/**
+ * One pass of the loop once the closing PR merged. Post-merge effects and an audit reviewer are task
+ * work too. A resumed task that gave up its slot while waiting must be readmitted before it can post,
+ * draw, or start that reviewer; until then this returns nothing and the loop waits a poll. Once both
+ * are done, observing completion and waiting on a running audit need no slot (TECH-5127).
+ */
+export async function driveMerged(
+  merged: Merged,
+  ctx: {
+    runIds: RunId[];
+    stop: string;
+    opts: LoopOptions;
+    deps: Ports;
+    log: (line: string) => void;
+    save: () => Promise<void>;
+    resolveDue: (conversation: Conversation) => Promise<boolean>;
+    recordReviews: (runs: RunRecord[]) => Promise<void>;
+    budgetOf: (runs: RunRecord[], unknownRuns: number) => BudgetStatus;
+  },
+): Promise<LoopResult | undefined> {
+  const { opts, deps, log, save } = ctx;
+  const effects = (merged.outcome && !merged.outcomePostedAt) || !merged.auditDrawnAt;
+  if (effects && opts.slot && !opts.slot.work()) {
+    log("queued: waiting for a free task slot");
+    return undefined;
+  }
+  await deps.linear.readConversation(opts.issueId).then(ctx.resolveDue, (e: Error) => log(`could not read the conversation: ${e.message}`));
+  const stopped = await postOutcome(merged, opts, deps, log, save);
+  if (stopped) return stopped;
+  // The audit sample is drawn after the merge, so it cannot hold it up.
+  await drawAudit(merged, ctx.runIds, opts, deps, log, save, ctx.budgetOf);
+  const result = await observeCompletion(merged, opts, deps, log);
+  const finished = await finishReviews(merged, result, { runIds: ctx.runIds, recordReviews: ctx.recordReviews, stop: ctx.stop, opts, deps, log });
+  // Seen through: the issue is Done and every review finished, so intake resumes it no more.
+  if (finished.outcome === "done" && !opts.signal?.aborted && !(await exists(ctx.stop))) {
+    merged.completedAt = new Date().toISOString();
+    await save();
+  }
+  return finished;
+}
 
 /**
  * Posts the merge's outcome comment once, as the V2 agent, and only while the issue is still

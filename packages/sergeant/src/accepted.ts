@@ -1,7 +1,9 @@
-import { readdir, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { LinearPort, PullRequestFacts } from "@terros/sergeant-contracts";
+import type { Conversation, LinearPort, PullRequestFacts } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
+import type { LoopResult } from "./loop-options.ts";
+import type { TaskState } from "./task-state.ts";
 
 // TECH-5118: a task a human accepted as it is stays ended. Its loop sets `state.json` aside, so intake
 // resumes it no more, and leaves `accepted.json` beside it, since the issue stays delegated: in Todo,
@@ -35,6 +37,31 @@ export async function postAccepted(issueId: string, replyId: string, body: strin
 
 /** Records that a human accepted the task in `dir` as it is; written before `state.json` is set aside. */
 export const markAccepted = (dir: string, at: string) => writeFile(markerFile(dir), JSON.stringify({ at }));
+
+/**
+ * The accepted ending (loop.ts), replayed from the saved accepting turn, never decided again by a fresh
+ * turn (TECH-5136): its question thread is resolved first (TECH-5138), then one keyed line says
+ * Sergeant has stopped (TECH-5120), then `state.json` is set aside like a stop's, so intake resumes it
+ * no more; its PRs and the issue are left for a human. The marker keeps intake from starting it afresh
+ * while the issue stays in Todo. A failed resolve returns nothing, so the loop waits for the next pass;
+ * a failed post throws, so the loop fails and the resumed task replays the ending under the same key.
+ * Either way the acknowledgment appears only on a task that is ending.
+ */
+export async function endAccepted(
+  accepted: NonNullable<TaskState["accepted"]>,
+  dir: string,
+  issueId: string,
+  linear: Pick<LinearPort, "readConversation" | "postComment">,
+  resolveDue: (conversation: Conversation) => Promise<boolean>,
+): Promise<LoopResult | undefined> {
+  const { at, replyId, comment } = accepted;
+  const conversation = await linear.readConversation(issueId);
+  if (!(await resolveDue(conversation))) return undefined;
+  if (replyId) await postAccepted(conversation.issue.id, replyId, comment, linear);
+  await markAccepted(dir, at);
+  await rename(join(dir, "state.json"), join(dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
+  return { outcome: "accepted", detail: "a human accepted the work as it is" };
+}
 
 /**
  * The tasks a human accepted whose issue is still delegated and in Todo, so intake starts none of them.
