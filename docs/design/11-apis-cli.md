@@ -44,10 +44,14 @@ actions have ordered steps and are re-driven until complete (03 §10), so a fail
 pending, never half-forgotten. Drain and undrain are process-local controls, not actions.
 
 **Client versions (TECH-5185).** There is no compatibility between versions of `sgt` (or `sgt-mcp`)
-and the hosted `serve`: people keep their CLI current. Every `/v1` answer carries
-`Sergeant-Min-Cli-Version`, the oldest client this server supports (`packages/contracts/src/min-cli.ts`).
-A client older than that stops with "Your sgt is older than this Sergeant server supports. Run `sgt
-update`."; `sgt update` fast-forwards its checkout to `main` and runs `pnpm install`. A client whose own
+and the hosted `serve`: people keep their CLI current. Every client request names the client's own
+version in `Sergeant-Cli-Version`, and `serve` refuses a `/v1` request that names none, one that is
+not exactly `MAJOR.MINOR.PATCH` (optionally `+<sha>`), or one older than the oldest client it
+supports (`MIN_CLI_VERSION`, `packages/contracts/src/min-cli.ts`), with
+`400` and "Your sgt is older than this Sergeant server supports. Run `sgt update`." before
+authentication, body parsing, or routing (TECH-5188), so a too-old client changes nothing. `sgt
+update` needs no API: it fast-forwards its checkout to `main` and runs `pnpm install`. Every `/v1`
+answer also carries `Sergeant-Min-Cli-Version`, that oldest supported client. A client whose own
 minimum is above the server's, or whose server sends none, is newer than the server across a breaking
 change, and `sgt` warns once. A change an older client cannot work with (a removed, retyped, or newly
 required field, a new enum value) raises the minimum in the same change; response schemas are not

@@ -275,8 +275,10 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   cancel removes the V2 agent's delegation and then takes the task's one stop (above); it answers with
   any run the runner has not yet confirmed, and `serve` keeps driving the recorded stop at each intake,
   across a restart, until it has. A run cancel is the
-  runner's confirmed cancel, noted on the issue so the next turn does not just restart it. Every
-  `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
+  runner's confirmed cancel, noted on the issue so the next turn does not just restart it. Before
+  anything else, every `/v1` call must name a client version (`Sergeant-Cli-Version`) no older than
+  the oldest `sgt` this `serve` supports, or it is refused with `400` and "Run `sgt update`" (TECH-5188),
+  so a too-old `sgt` changes nothing. Every `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
   from `sgt login`, which `serve` reads back from Linear on every call and admits only for an active
   user of the agent's own Linear workspace, not an agent, in one of `humans.teams`; those listed
   in `humans.approvers` are approvers too. `/v1/whoami` says whether the caller is an approver; only an approver (or the loopback operator) may `POST /v1/accounts/remove-person` to remove everything one person registered (TECH-5130). Wakes and cancels are logged
@@ -301,8 +303,9 @@ This section is the reference.
 `sgt` (UNF-714) only calls the client API and prints the answer: concise lines by default, the API's
 own JSON with `--json` (errors too, as `{"error":{"code","message"}}`; exit 1 for an API error, 2 for
 usage). It needs no AWS credentials. Run `sgt --help` for the commands: `login`, `logout`, `whoami`,
-`task list | show | wake | cancel`, `run list | show | report | cancel`, `update`. Keep it current: an
-`sgt` older than its installation supports stops and says to run `sgt update`.
+`task list | show | wake | cancel`, `run list | show | report | cancel`, `update`. Keep it current: the
+installation refuses every request from an `sgt` older than it supports, before acting on it, and says
+to run `sgt update`, which needs no API.
 
 ```sh
 alias sgt="node $PWD/packages/cli/src/sgt.ts"   # from the repository root

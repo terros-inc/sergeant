@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import type { QuotaReading, RunRecord } from "@terros/sergeant-contracts";
+import { CLI_VERSION_HEADER, MIN_CLI_VERSION, type QuotaReading, type RunRecord } from "@terros/sergeant-contracts";
 import type { QuotaAccount } from "@terros/sergeant-runner";
 import { accountRegistry } from "./accounts.ts";
 import { apiHandler, type ApiControl } from "./api.ts";
@@ -71,7 +71,7 @@ async function serve(runs: RunRecord[] = []) {
   const port = (server.address() as AddressInfo).port;
   const call = (method: string, path: string, as?: string, body?: unknown) =>
     new Promise<{ status: number; json: any; text: string }>((resolve, reject) => {
-      const headers = { ...(body !== undefined && { "Content-Type": "application/json" }), ...(as && { Authorization: `Bearer ${as}` }) };
+      const headers = { [CLI_VERSION_HEADER]: MIN_CLI_VERSION, ...(body !== undefined && { "Content-Type": "application/json" }), ...(as && { Authorization: `Bearer ${as}` }) };
       const req = request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
         let text = "";
         res.on("data", (d: Buffer) => (text += d.toString()));

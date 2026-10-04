@@ -3,6 +3,8 @@ import { TaskList, WakeResponse } from "./api.ts";
 import { apiClient } from "./client.ts";
 import { MIN_CLI_HEADER, MIN_CLI_VERSION } from "./min-cli.ts";
 
+const version = "2.1.70+abcdef0";
+
 // The client `sgt` and `sgt-mcp` share: what it sends, that a login never leaves the host in the clear,
 // and that every way a call can fail becomes an `ApiError`'s error rather than a guess.
 
@@ -19,14 +21,14 @@ function fakeFetch(answer: () => Response) {
 
 test("a call sends its JSON body and the caller's bearer, and returns the answer parsed by the contract", async () => {
   const { fetch, seen } = fakeFetch(() => Response.json({ ref: "UNF-1", woke: "queued" }));
-  const res = await apiClient({ api: "http://127.0.0.1:8080", fetch, token: "t-1" }).call("POST", "/v1/tasks/UNF-1/wake", WakeResponse, { reason: "go" });
+  const res = await apiClient({ version, api: "http://127.0.0.1:8080", fetch, token: "t-1" }).call("POST", "/v1/tasks/UNF-1/wake", WakeResponse, { reason: "go" });
 
   expect(res).toEqual({ ok: true, value: { ref: "UNF-1", woke: "queued" } });
   expect(seen).toEqual([
     {
       url: "http://127.0.0.1:8080/v1/tasks/UNF-1/wake",
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer t-1" },
+      headers: { "Sergeant-Cli-Version": version, "Content-Type": "application/json", Authorization: "Bearer t-1" },
       body: JSON.stringify({ reason: "go" }),
     },
   ]);
@@ -34,23 +36,23 @@ test("a call sends its JSON body and the caller's bearer, and returns the answer
 
 test("a login is never sent over plain HTTP off this host", async () => {
   const { fetch, seen } = fakeFetch(() => Response.json({ tasks: [] }));
-  const res = await apiClient({ api: "http://sergeant.example.com", fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList);
+  const res = await apiClient({ version, api: "http://sergeant.example.com", fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList);
   expect(res).toEqual({ ok: false, error: { code: "bad_request", message: "refusing to send your Linear login to sergeant.example.com without HTTPS" } });
   expect(seen).toEqual([]);
 
-  expect(await apiClient({ api: "https://sergeant.example.com", fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
-  expect(await apiClient({ api: "http://sergeant.example.com", fetch }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
+  expect(await apiClient({ version, api: "https://sergeant.example.com", fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
+  expect(await apiClient({ version, api: "http://sergeant.example.com", fetch }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
 });
 
 test.each(["http://localhost:8080", "http://[::1]:8080"])("a login may be sent over plain HTTP to the loopback API at %s", async (api) => {
   const { fetch, seen } = fakeFetch(() => Response.json({ tasks: [] }));
 
-  expect(await apiClient({ api, fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
+  expect(await apiClient({ version, api, fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({ ok: true, value: { tasks: [] } });
   expect(seen).toEqual([
     {
       url: `${api}/v1/tasks`,
       method: "GET",
-      headers: { Authorization: "Bearer t-1" },
+      headers: { "Sergeant-Cli-Version": version, Authorization: "Bearer t-1" },
       body: undefined,
     },
   ]);
@@ -59,7 +61,7 @@ test.each(["http://localhost:8080", "http://[::1]:8080"])("a login may be sent o
 test("an invalid API URL is rejected before sending a login", async () => {
   const { fetch, seen } = fakeFetch(() => Response.json({ tasks: [] }));
 
-  expect(await apiClient({ api: "https://[invalid", fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({
+  expect(await apiClient({ version, api: "https://[invalid", fetch, token: "t-1" }).call("GET", "/v1/tasks", TaskList)).toEqual({
     ok: false,
     error: { code: "bad_request", message: "invalid Sergeant API URL: https://[invalid" },
   });
@@ -69,7 +71,7 @@ test("an invalid API URL is rejected before sending a login", async () => {
 test("a refusal, a non-contract error, an off-contract answer, and an unreachable API are each an ApiError", async () => {
   const api = "http://127.0.0.1:8080";
   const refusal = { error: { code: "conflict", message: "UNF-7 is not delegated" } };
-  const answering = (res: () => Response) => apiClient({ api, fetch: fakeFetch(res).fetch });
+  const answering = (res: () => Response) => apiClient({ version, api, fetch: fakeFetch(res).fetch });
 
   expect(await answering(() => Response.json(refusal, { status: 409 })).request("POST", "/v1/tasks/UNF-7/wake")).toEqual({ ok: false, ...refusal });
   expect(await answering(() => new Response("Bad Gateway", { status: 502 })).request("GET", "/v1/tasks")).toEqual({
@@ -80,6 +82,7 @@ test("a refusal, a non-contract error, an off-contract answer, and an unreachabl
   expect(drift).toMatchObject({ ok: false, error: { code: "unavailable", message: expect.stringContaining("GET /v1/tasks answered outside the API contract") } });
 
   const down = apiClient({
+    version,
     api,
     unreachableHint: "; is serve running?",
     fetch: async () => {
@@ -92,21 +95,19 @@ test("a refusal, a non-contract error, an off-contract answer, and an unreachabl
   });
 });
 
-// TECH-5185: the oldest client a Sergeant supports, from its answer's header (min-cli.ts).
-test("a Sergeant that supports only newer clients is refused; one below this client's minimum is reported; a proxy's error is neither", async () => {
+// TECH-5185: the oldest client a Sergeant supports, from its answer's header (min-cli.ts). Refusing a
+// client too old for it is the server's, before it acts (TECH-5188).
+test("an answer from a Sergeant below this client's minimum is reported; a proxy's error is not", async () => {
   const api = "http://127.0.0.1:8080";
-  const answer = async (version: string, res: () => Response) => {
+  const answer = async (res: () => Response) => {
     const older: (string | undefined)[] = [];
     const result = await apiClient({ api, fetch: fakeFetch(res).fetch, version, onOlderServer: (min) => older.push(min) }).call("GET", "/v1/tasks", TaskList);
     return { result, older };
   };
   const supporting = (min: string) => ({ headers: { [MIN_CLI_HEADER]: min } });
-  const tooOld = { ok: false, error: { code: "bad_request", message: "Your sgt is older than this Sergeant server supports. Run `sgt update`." } };
 
-  expect(await answer(MIN_CLI_VERSION, () => Response.json({ tasks: [] }, supporting(MIN_CLI_VERSION)))).toEqual({ result: { ok: true, value: { tasks: [] } }, older: [] });
-  expect(await answer("2.1.9+aaaaaaa", () => Response.json({ tasks: [] }, supporting("2.1.10")))).toEqual({ result: tooOld, older: [] });
-  expect((await answer("2.1.9", () => Response.json({ error: { code: "not_found", message: "no" } }, { status: 404, ...supporting("2.1.10") }))).result).toEqual(tooOld);
-  expect(await answer("99.0.0", () => Response.json({ tasks: [] }, supporting("2.0.0")))).toMatchObject({ result: { ok: true }, older: ["2.0.0"] });
-  expect(await answer("99.0.0", () => Response.json({ tasks: [] }))).toMatchObject({ result: { ok: true }, older: [undefined] });
-  expect(await answer("0.0.0", () => new Response("Bad Gateway", { status: 502, ...supporting("99.0.0") }))).toMatchObject({ result: { error: { code: "unavailable" } }, older: [] });
+  expect(await answer(() => Response.json({ tasks: [] }, supporting(MIN_CLI_VERSION)))).toEqual({ result: { ok: true, value: { tasks: [] } }, older: [] });
+  expect(await answer(() => Response.json({ tasks: [] }, supporting("2.0.0")))).toMatchObject({ result: { ok: true }, older: ["2.0.0"] });
+  expect(await answer(() => Response.json({ tasks: [] }))).toMatchObject({ result: { ok: true }, older: [undefined] });
+  expect(await answer(() => new Response("Bad Gateway", { status: 502, ...supporting("0.0.1") }))).toMatchObject({ result: { error: { code: "unavailable" } }, older: [] });
 });
