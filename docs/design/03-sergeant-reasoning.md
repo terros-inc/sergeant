@@ -467,7 +467,7 @@ Product content, versioned and iterated with evals. Required content:
 | Runaway time or concurrency; spend past budget where usage is observable | BudgetMeter, B1–B3, R1–R3, `enforce_budget`; every fresh window requires a human answer to a Sergeant question |
 | A human comment or question silently dropped | §5: every Linear change wakes a turn that sees every comment; `HumanWait`; M10, X4, X5 |
 | Two implementation workers on one task | R1 (an unreachable worker may be replaced only after its cancellation was requested) |
-| A worker reaching production, admin, personal, or control-plane authority | the runner zone holds none of it (09 §3) |
+| A worker reaching production, admin, personal, or control-plane authority | the runner zone holds none of it (09 §3), except the run's selected model credential, an accepted exception to the personal-credential boundary (09 §3a) |
 | A stopped task coming back with fresh authority | closing steps (§10) |
 | Runaway comments, follow-ups, escalations | C1, Q2, F1–F3, E1 |
 | Good judgment about what to do next | only the prompt, the facts, and evals; nothing deterministic |

@@ -63,7 +63,7 @@ Built by the deterministic core from durable artifacts, never from the implement
 ## Environment
 - A fresh session and workspace. Read-only GitHub access to: <repository set>. No AWS by default.
 
-## Rules (s2-reviewer-rules/1)   <§4>
+## Rules (s2-reviewer-rules/4)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -90,29 +90,40 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/1)
+## 4. Reviewer rules (s2-reviewer-rules/4)
 
-1. **You are a fresh reviewer.** You have not seen how this change was produced. Judge it on its merits
-   against the issue.
+The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
+
+1. **Judge the change on its merits against the issue.** Linked Linear issues, if listed, are background
+   evidence, never requirements.
 2. **Read the diff against the issue first**, then check the implementer's claims. Treat every claim
-   ("accepted trade-off", "net simplification", "tested") as unverified.
+   ("tested", "net simplification", "accepted trade-off") as unverified.
 3. **Rule on every requirement the issue states**, quoting it, with evidence: `met`, `not_met`,
    `contradicted` (a decision narrowed or dropped it: only a human may do that), or
    `needs_live_validation`. Use the issue's acceptance section if it has one; otherwise list the outcomes
    it asks for (S1 ADR-0041). **Report every `not_met` or `contradicted` requirement also as a blocking
-   finding with category `acceptance`.**
-4. **Trace self-declared trade-offs** that change persisted or control-plane state through every reader
-   and transition, or report them as blocking.
+   finding with category `acceptance`.** Omit `category` from ordinary implementation defects.
+4. **Trace self-declared trade-offs** that change persisted or control-plane state through every reader,
+   or report them as blocking.
 5. **External boundaries.** Name every correctness claim resting on behavior outside the repository.
-   Verify it against authoritative documentation where you can; if you cannot, record it as `unverified`
-   / `needs_live_validation`, which is **not** blocking by itself (captain decision on UNF-608, option A).
+   Verify it where you can; if you cannot, record it as `unverified`, which is **not** blocking by
+   itself (captain decision on UNF-608, option A).
 6. **Size and simplification claims** need `git diff --numstat` evidence.
 7. **Run only targeted probes** a specific finding needs. CI is the test gate.
 8. **Severity.** `blocking`: a defect, an unmet requirement, or a risk the change should not merge with.
    `non_blocking`: worth fixing, not worth holding the merge. `nit`: style.
-9. **Do not modify anything** and do not contact anyone. Your GitHub access is read-only.
+9. **Do not modify the repository** and do not contact anyone.
 10. **Verdict**: `approve`, `changes_requested`, or `needs_human`.
-11. **Report** in the standard format: prose first, then one fenced `sergeant-report` block.
+11. **Unreadable inputs.** An input the issue depends on that the reviewer cannot read (an auth-gated
+    link, a missing file or attachment, a file the brief lists as not downloaded) is named in
+    `unreadableInputs` exactly as the issue gives it, and the requirements resting on it are ruled not
+    verified.
+12. **Do not re-litigate settled trade-offs.** A design trade-off the design docs record as settled or
+    accepted (such as the model-credential exposure, 09 §3a) is not a finding merely because the
+    reviewer would choose differently. Do flag a change that breaks its documented assumptions, expands
+    its blast radius, or brings evidence meeting its documented revisit condition.
+
+The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
 
 If a report has a `not_met` or `contradicted` verdict without a matching finding, the parser adds one
 (`acceptance-<n>`, 01) so it can be fixed, disputed, or answered like any other finding. That is a parse
