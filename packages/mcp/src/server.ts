@@ -1,5 +1,18 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { type ApiError, type ApiFailure, apiClient, RunDetail, RunId, RunList, safeJson, sergeantVersion, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
+import {
+  type ApiError,
+  type ApiFailure,
+  apiClient,
+  RunDetail,
+  RunId,
+  RunList,
+  safeJson,
+  sergeantVersion,
+  skewWarning,
+  TaskDetail,
+  TaskList,
+  TaskRef,
+} from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 // `sgt-mcp` (TECH-4940): Sergeant for MCP clients such as ChatGPT and Firstmate, the read-only half
@@ -8,7 +21,9 @@ import { z } from "zod";
 // carries exactly what `sgt task show` and `sgt run show` print, with ids and URLs, and no
 // transcripts. Every decision and lookup stays the server's, and it sends no POST, so it has no
 // mutation authority. It sends no Linear login yet (TECH-4938), so only a `serve --trust-loopback`
-// on its own host answers it; it runs there, over stdio.
+// on its own host answers it; it runs there, over stdio. Version skew (contracts' skew.ts) is told to
+// the agent: a differing contract adds a warning to each result, and an older Sergeant's answer that
+// lacks fields comes back as text, since it cannot pass the tool's output schema.
 
 export const DEFAULT_API = "http://127.0.0.1:8080";
 
@@ -18,16 +33,32 @@ type Result = { content: { type: "text"; text: string }[]; structuredContent?: R
 
 /** An MCP server whose tools read the Sergeant API at `api`; connect it to a transport to serve. */
 export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = globalThis.fetch): McpServer {
-  const server = new McpServer({ name: "sergeant", version: sergeantVersion().version });
+  const { version } = sergeantVersion();
+  const server = new McpServer({ name: "sergeant", version });
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
-  const client = apiClient({ api, fetch: fetchFn, unreachableHint: "; is serve running on this host?" });
+  let skew: string | undefined;
+  const client = apiClient({
+    api,
+    fetch: fetchFn,
+    unreachableHint: "; is serve running on this host?",
+    onSkew: (theirs) => (skew = `warning: ${skewWarning(api, theirs, version)}`),
+  });
 
   /** One GET, its answer validated against `schema`; a refusal, an unreachable API, or an answer outside the contract is a tool error. */
   async function read<T extends Record<string, unknown>>(path: string, schema: z.ZodType<T>): Promise<Result> {
+    skew = undefined;
     const res = await client.call("GET", path, schema);
-    if (!res.ok) return error(res.error);
-    return { content: [{ type: "text", text: JSON.stringify(res.value) }], structuredContent: res.value };
+    const warning = skew === undefined ? [] : [{ type: "text" as const, text: skew }];
+    if (!res.ok) return withWarning(error(res.error), warning);
+    const text = JSON.stringify(res.value);
+    // isError, because a result with an outputSchema must carry structuredContent that matches it,
+    // and this answer does not; the data is still in the text.
+    if (res.absent) {
+      const why = `Sergeant at ${api} is older than this sgt-mcp: its answer lacks ${res.absent.join(", ")}, so it is returned as text, not structured content.`;
+      return { content: [{ type: "text", text: why }, { type: "text", text }, ...warning], isError: true };
+    }
+    return { content: [{ type: "text", text }, ...warning], structuredContent: res.value };
   }
 
   server.registerTool(
@@ -113,6 +144,8 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
 
   return server;
 }
+
+const withWarning = (result: Result, warning: Result["content"]): Result => ({ ...result, content: [...result.content, ...warning] });
 
 function error(failure: ApiFailure): Result {
   return { content: [{ type: "text", text: JSON.stringify({ error: failure } satisfies ApiError) }], isError: true };
