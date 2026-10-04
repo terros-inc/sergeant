@@ -37,6 +37,11 @@ export const TaskSummary = z.object({
   lastSummary: z.string().optional(),
   runs: z.number().int(),
   merged: z.object({ repo: RepoSlug, number: z.number().int(), mergedSha: z.string(), at: z.string() }).optional(),
+  /**
+   * A human accepted the work as it is and the task's ending is still pending: its loop replays it every
+   * pass until it finishes (TECH-5136), then sets the task aside. `since` is the accepting turn's time.
+   */
+  acceptedEnding: z.object({ since: z.string() }).optional(),
 });
 export type TaskSummary = z.infer<typeof TaskSummary>;
 

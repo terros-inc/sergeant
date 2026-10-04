@@ -33,7 +33,7 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
   server.registerTool(
     "task_list",
     {
-      description: "Every task Sergeant knows (a Linear issue delegated to it): status, turn and run counts, last turn summary, merged PR. Like `sgt task list`.",
+      description: "Every task Sergeant knows (a Linear issue delegated to it): status, turn and run counts, last turn summary, merged PR, a pending accepted ending. Like `sgt task list`.",
       outputSchema: TaskList,
       annotations: readOnly,
     },

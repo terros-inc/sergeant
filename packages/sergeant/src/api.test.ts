@@ -131,6 +131,34 @@ test("a run view includes its provider choice and credential-free account", asyn
   });
 }, 30_000);
 
+// TECH-5164: a task stuck replaying its accepted ending (a resolve that keeps failing, say) used to list
+// only by its loop status or as inactive. Once the ending finishes, its state is set aside and the
+// marker alone remains, so the summary no longer says the ending is pending.
+test("a task summary shows a pending accepted ending and when it was accepted, and only while it is pending", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
+  const f = fakes();
+  f.conversation.issue.delegate = null;
+  const acceptedAt = "2026-10-03T12:00:00.000Z";
+  const state = (extra: object) => ({ issueId: "i1", startedAt: "2026-10-03T10:00:00.000Z", turns: 3, runIds: [], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 } }, ...extra });
+  const write = async (ref: string, files: Record<string, unknown>) => {
+    await mkdir(join(dir, "tasks", ref), { recursive: true });
+    for (const [name, content] of Object.entries(files)) await writeFile(join(dir, "tasks", ref, name), JSON.stringify(content));
+  };
+  await write("UNF-1", { "state.json": state({ accepted: { at: acceptedAt, replyId: "c1", comment: "Sergeant has stopped." } }) });
+  await write("UNF-2", { "state.json": state({}) });
+  await write("UNF-3", { [`state.accepted-${acceptedAt.replace(/[:.]/g, "-")}.json`]: state({ accepted: { at: acceptedAt, comment: "x" } }), "accepted.json": { at: acceptedAt } });
+  const port = await start(f.deps);
+
+  const { json } = await call(port, "GET", "/v1/tasks");
+  expect(json.tasks).toEqual([
+    expect.objectContaining({ ref: "UNF-1", status: "inactive", acceptedEnding: { since: acceptedAt } }),
+    expect.not.objectContaining({ acceptedEnding: expect.anything() }),
+    expect.not.objectContaining({ acceptedEnding: expect.anything() }),
+  ]);
+  expect(json.tasks.map((t: { ref: string }) => t.ref)).toEqual(["UNF-1", "UNF-2", "UNF-3"]);
+  expect((await call(port, "GET", "/v1/tasks/UNF-1")).json.task.acceptedEnding).toEqual({ since: acceptedAt });
+}, 30_000);
+
 test("a run cancel notes it on the issue and cancels through the runner; a task cancel undelegates and cancels the rest", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
   const running = (runId: string, role: "worker" | "reviewer"): RunRecord => ({ runId, role, status: "running", provider: "p", model: "m", report: null });

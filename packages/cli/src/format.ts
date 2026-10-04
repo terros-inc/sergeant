@@ -15,7 +15,7 @@ const minute = (iso: string | undefined) => (iso ? `${iso.slice(0, 16).replace("
 const usd = (n: number | undefined) => (n === undefined ? "-" : `$${n.toFixed(2)}`);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-export const taskRow = (t: TaskSummary) => [t.ref, t.status, plural(t.turns, "turn"), plural(t.runs, "run"), minute(t.lastTurnAt), clip(t.lastSummary, 60)];
+export const taskRow = (t: TaskSummary) => [t.ref, `${t.status}${t.acceptedEnding ? ", ending accepted" : ""}`, plural(t.turns, "turn"), plural(t.runs, "run"), minute(t.lastTurnAt), clip(t.lastSummary, 60)];
 
 export const runRow = (r: RunSummary) => [r.runId, r.task, r.role ?? "-", r.status, usd(r.costUsd), clip(r.account, 30) || "-", clip(r.summary ?? r.error, 60)];
 
@@ -40,6 +40,7 @@ export function showTask(d: TaskDetail): string {
     const spent = `${usd(budget.spentUsd)} of ${usd(budget.costLimitUsd)}${budget.unknownCostRuns ? ` (+${plural(budget.unknownCostRuns, "run")} of unknown cost)` : ""}`;
     lines.push(`budget: ${spent}, wall time until ${minute(budget.wallDeadline)}${budget.exhausted ? `  EXHAUSTED: ${budget.exhausted}` : ""}`);
   }
+  if (task.acceptedEnding) lines.push(`accepted as it is at ${minute(task.acceptedEnding.since)}; the ending is not finished yet`);
   if (task.merged) lines.push(`merged: ${task.merged.repo}#${task.merged.number} as ${task.merged.mergedSha.slice(0, 12)} at ${minute(task.merged.at)}`);
   if (d.runs.length) lines.push("runs:", indent(table(d.runs.map((r) => runRow(r).filter((_, i) => i !== 1)))));
   if (d.recentTurns.length) {
