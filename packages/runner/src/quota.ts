@@ -9,17 +9,18 @@ import type { Adapter } from "./agents.ts";
 
 /** A model account to read: its id, the agent CLI it serves, and its credential. */
 export type QuotaAccount = { id: string; adapter: Adapter; credential: string };
-export type ReadQuota = (account: QuotaAccount) => Promise<QuotaReading>;
+/** `fresh` reads past the cache, and the cache keeps that reading. */
+export type ReadQuota = (account: QuotaAccount, opts?: { fresh?: boolean }) => Promise<QuotaReading>;
 
 const READ_TIMEOUT_MS = 5_000;
 /** A burst of launches shares one reading. */
-export const QUOTA_CACHE_MS = 5 * 60_000;
+export const QUOTA_CACHE_MS = 4 * 60_000;
 
 /** A failure whose message is safe to record: a status, never a response body or a credential. */
 class Unreadable extends Error {}
 
 type Window = NonNullable<QuotaReading["weekly"]>;
-// Exact, not rounded: 80.4% used is 19.6% left, below the floor. Only float noise is dropped, so a
+// Exact, not rounded: 80.4% used is 19.6% left, never 20%. Only float noise is dropped, so a
 // header's 0.57 reads as 43% left rather than 43.00000000000001%.
 const left = (usedPercent: number) => Math.max(0, Math.min(100, Number((100 - usedPercent).toFixed(6))));
 const unixTime = (seconds: number | null | undefined) => (seconds ? { resetsAt: new Date(seconds * 1000).toISOString() } : {});
@@ -62,7 +63,7 @@ export type QuotaOptions = {
   now?: () => number;
 };
 
-/** Reads each account's quota with its own credential, cached for `QUOTA_CACHE_MS`. */
+/** Reads each account's quota with its own credential, cached for `QUOTA_CACHE_MS` unless read `fresh`. */
 export function accountQuota(opts: QuotaOptions = {}): ReadQuota {
   const fetchFn = opts.fetch ?? globalThis.fetch;
   const now = opts.now ?? Date.now;
@@ -114,10 +115,10 @@ export function accountQuota(opts: QuotaOptions = {}): ReadQuota {
 
   // Keyed by the credential, so a replaced one is read afresh; the key is a hash, never the credential.
   const cache = new Map<string, { at: number; reading: Promise<QuotaReading> }>();
-  return ({ id, adapter, credential }) => {
+  return ({ id, adapter, credential }, { fresh = false } = {}) => {
     const key = `${id}:${createHash("sha256").update(credential).digest("hex")}`;
     const hit = cache.get(key);
-    if (hit && now() - hit.at < QUOTA_CACHE_MS) return hit.reading;
+    if (hit && !fresh && now() - hit.at < QUOTA_CACHE_MS) return hit.reading;
     const readAt = new Date(now()).toISOString();
     // A JSON or schema error can quote what it read, credential included, so only its kind is kept.
     const reading = (adapter === "codex-local" ? codex(credential) : claude(credential)).then(

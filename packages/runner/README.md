@@ -97,14 +97,18 @@ Terros now has its own Codex Team account, and nothing personal is ever used.
 - **Model accounts (TECH-5179).** Each run uses only its task owner's accounts (`RunSpec.owner`, the
   human assignee who delegated the issue), read at each launch from `accounts(ownerId)`, the ones that
   person registered; never the installation's credentials or anyone else's. `accounts.ts` and
-  `choose.ts` apply one rule: among the owner's usable accounts (not set aside, not spent), the one
-  with the most weekly capacity left, skipping those whose 5-hour window is under 20% while another
-  usable one exists. An account whose quota could not be read is usable and ranks after every known
-  one, the `runners` default's first. A reviewer prefers an account of another provider than its
-  worker's when the owner has a usable one. There is no low-quota warning. Only the chosen account's
+  `choose.ts` apply one rule (TECH-5213): among the owner's usable accounts (not set aside, not spent),
+  the one with the highest pace, the lower of its weekly and 5-hour windows' percent left over percent
+  of the window's time left. Time left counts as at least an hour's share of the window (20% of the
+  5-hour window, about 0.6% of the week), so a sliver just before its reset does not start a run it
+  cannot finish. An account whose quota could not be read, or has a window without a reset time, is
+  usable and ranks after every scored one, the `runners` default's first. A reviewer takes an account
+  of another provider than its worker's when that provider's best scores within 20% of the best.
+  Quota readings are cached for 4 minutes. There is no low-quota warning. Only the chosen account's
   credential enters the container. A run whose agent reports a quota or authentication failure (`failureReason`,
-  from Claude Code's result text or Codex's failed turn) sets its account aside for an hour, so the
-  next launch takes another of the owner's. With no account, or none usable, `start` throws
+  from Claude Code's result text or Codex's failed turn) sets its account aside for an hour, or until the
+  window it ran out of resets if sooner: the one at 0% when its quota is read again as the run fails
+  past the 4-minute cache (`failingReset`); with no window known to be at 0%, the hour. The next launch takes another of the owner's. With no account, or none usable, `start` throws
   `NoModelAccount` before cloning anything, and nothing starts. The record's `account` and
   `accountReason` say whose subscription paid and why.
 - **Resume (V6).** Codex can resume a thread (`codex exec resume <id>`), but its session lives in the
