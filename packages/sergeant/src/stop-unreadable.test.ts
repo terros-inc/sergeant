@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { driveCancel, recordCancel, taskDir } from "./cancel.ts";
 import { startService } from "./service.ts";
-import { fakes, head, issue, pr, repo, state } from "./stop-fixtures.ts";
+import { fakes, head, issue, pr, repo, state, worker } from "./stop-fixtures.ts";
 
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
 // TECH-5070: a worker's PR Linear has not linked yet is known only from its run's report, so a stop
 // whose run status read failed must not finish without it, or that PR stays open.
-async function stopWithFlakyStatus(failures: number) {
+async function stopWithFlakyStatus(failures: number, runIds = ["run_w1"]) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
   const live = { conversation: issue("started", "In Progress") };
   live.conversation.issue.linkedPullRequests = [];
@@ -22,9 +22,9 @@ async function stopWithFlakyStatus(failures: number) {
   deps.runner.status = async (id) => (failures-- > 0 ? Promise.reject(new Error("runner unreachable")) : structuredClone(await status(id)));
   const task = taskDir(dir, "UNF-1");
   await mkdir(task, { recursive: true });
-  await writeFile(join(task, "state.json"), state(["run_w1"]));
+  await writeFile(join(task, "state.json"), state(runIds));
   await recordCancel(dir, "UNF-1", { reason: "wrong approach", by: "Ada" }, deps);
-  return { deps, seen, live, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}) };
+  return { deps, seen, live, task, drive: () => driveCancel(task, "UNF-1", deps, [repo], () => {}), readsAgain: () => void (failures = 0) };
 }
 
 // Ages the stop's record by 16 minutes, and its runs' first unreadable reads unless `at` only.
@@ -108,8 +108,8 @@ test.each(["unreadable status and failed cancel", "readable running status and f
 
 // TECH-5107: the grace counts from the first failed status read, not from when the stop was
 // recorded, so a cancel that kept failing past it still gets its report reread on later drives.
-test("a cancel that fails past the grace then succeeds does not finish on its first unreadable read", async () => {
-  const { deps, seen, live, task, drive } = await stopWithFlakyStatus(99);
+test.each(["stays unreadable past the grace", "reads again"])("a cancel that fails past the grace then succeeds does not finish on its first unreadable read, and its status %s", async (ending) => {
+  const { deps, seen, live, task, drive, readsAgain } = await stopWithFlakyStatus(99);
   live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }];
   const cancel = deps.runner.cancel;
   deps.runner.cancel = async () => Promise.reject(new Error("Docker unavailable"));
@@ -122,6 +122,13 @@ test("a cancel that fails past the grace then succeeds does not finish on its fi
   expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
   expect(seen.closed).toEqual([]);
   expect(seen.comments).toHaveLength(1);
+  if (ending === "reads again") {
+    // The report reread succeeds, so the worker's PR Linear has not linked is closed too, without a note.
+    readsAgain();
+    expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }, { repo, number: 9, url: pr(9).url }] });
+    expect(seen.comments[1]).toEqual({ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("could not be read") });
+    return;
+  }
   // Once the grace has passed since that first failed read, it finishes with its note.
   await ageStop(task, "reads");
   expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }] });
@@ -203,4 +210,39 @@ test("an unconfirmed start read running before its cancel holds the stop when it
   await ageStop(task);
   expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }] });
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining("run `run_w1` could not be read") }]);
+});
+
+// TECH-5146: a run's status that reads again clears its first failed read, so a later unreadable spell
+// gets its own grace and its report reread, rather than finishing on the old spell's timestamp.
+test("a run whose status reads between two unreadable spells gets a fresh grace in the second", async () => {
+  const { deps, seen, live, task, drive } = await stopWithFlakyStatus(0, ["run_w1", "run_w2"]);
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }];
+  const w2 = { ...worker("running"), runId: "run_w2" };
+  let w1Unreadable = true;
+  let w2CancelFails = true;
+  const { status, cancel } = deps.runner;
+  deps.runner.status = async (id) => (id === "run_w2" ? structuredClone(w2) : w1Unreadable ? Promise.reject(new Error("runner unreachable")) : status(id));
+  deps.runner.cancel = async (id) => {
+    if (id !== "run_w2") return cancel(id);
+    if (w2CancelFails) throw new Error("Docker unavailable");
+    w2.status = "canceled";
+  };
+  // T0: run_w1 is canceled but its status cannot be read; run_w2's cancel fails.
+  expect(await drive()).toEqual({ stopping: ["run_w1", "run_w2"], closedPullRequests: [] });
+  // run_w1's status reads, while run_w2's failed cancel keeps the stop pending.
+  w1Unreadable = false;
+  expect(await drive()).toEqual({ stopping: ["run_w2"], closedPullRequests: [] });
+  // Past T0 + 15 minutes, run_w1 is unreadable again on the drive where run_w2's cancel succeeds.
+  await ageStop(task, "reads");
+  w1Unreadable = true;
+  w2CancelFails = false;
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.closed).toEqual([]);
+  expect(seen.comments).toEqual([]);
+  // Its report rereads, so the worker's PR Linear has not linked is closed too.
+  w1Unreadable = false;
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }, { repo, number: 9, url: pr(9).url }] });
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("could not be read") }]);
+  expect(await readdir(task)).not.toContain("cancel.json");
 });

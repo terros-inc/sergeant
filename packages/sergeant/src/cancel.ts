@@ -166,8 +166,14 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
       // A start never confirmed that the runner still does not know never started (loop.ts): no report.
       if (!run && intent.unconfirmedStarts.includes(runId)) continue;
     }
-    if (run) runs.push(run);
-    else {
+    if (run) {
+      runs.push(run);
+      // A later unreadable spell counts its grace from its own first failed read, not this one's.
+      if (intent.unreadableSince[runId]) {
+        delete intent.unreadableSince[runId];
+        await writeIntent(dir, intent);
+      }
+    } else {
       stopping.push(runId);
       log(`${ref}: status of ${runId} unreadable after its cancel, retrying`);
       // The grace counts from the run's first unreadable read, not from `at`, so a cancel that kept
