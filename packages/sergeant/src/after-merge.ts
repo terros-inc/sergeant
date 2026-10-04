@@ -1,6 +1,8 @@
 import { appendFile, stat } from "node:fs/promises";
 import { checkBudget, checkDelegation, NoModelAccount, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { recordStop } from "./cancel.ts";
 import { outcomeComment } from "./outcome.ts";
+import { cancelRuns } from "./poll.ts";
 import { accountRefusal, reassigned } from "./owner.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions, LoopResult, TaskState } from "./loop.ts";
@@ -51,6 +53,12 @@ export async function driveMerged(
     return undefined;
   }
   await deps.linear.readConversation(opts.issueId).then(ctx.resolveDue, (e: Error) => log(`could not read the conversation: ${e.message}`));
+  // TECH-5179: reassigned or unassigned after the merge, the task stops like before it (poll-checks.ts).
+  const moved = await movedFromOwner(opts, deps, log);
+  if (moved) {
+    await recordStop(opts.dir, moved);
+    return { outcome: "stopped", detail: moved };
+  }
   const stopped = await postOutcome(merged, opts, deps, log, save);
   if (stopped) return stopped;
   // The audit sample is drawn after the merge, so it cannot hold it up.
@@ -193,9 +201,27 @@ export async function finishReviews(
       return { ...result, detail: `${result.detail}; audit ${audit.runId}: ${verdict}, ${f.mustFix.length} must-fix${f.followUp ? " (follow-up logged)" : ""}` };
     }
     if ((await exists(ctx.stop)) || ctx.opts.signal?.aborted) return { ...result, detail: `${result.detail}; review ${running.join(", ")} still running` };
+    // TECH-5179: a review after the merge is still paid by the task's owner, so the issue reassigned or
+    // unassigned meanwhile stops the task and cancels the review, as before the merge.
+    const moved = await movedFromOwner(ctx.opts, ctx.deps, ctx.log);
+    if (moved) {
+      await cancelRuns(running, ctx.deps, ctx.log);
+      await recordStop(ctx.opts.dir, moved);
+      return { outcome: "stopped", detail: `${moved}; review ${running.join(", ")} canceled` };
+    }
     ctx.log(`waiting: review ${running.join(", ")} running (nonblocking: the merge is done)`);
     await pause((ctx.opts.pollSeconds ?? 60) * 1000, ctx.opts.signal);
   }
+}
+
+/** Why the merged task's issue is no longer its owner's (owner.ts), read live; undefined while it is or unreadable. */
+async function movedFromOwner(opts: LoopOptions, deps: Ports, log: (line: string) => void): Promise<string | undefined> {
+  if (!deps.owner) return undefined;
+  const owner = deps.owner;
+  return deps.linear.readConversation(opts.issueId).then(
+    (c) => reassigned(owner, c.issue),
+    (e: Error) => (log(`could not read the conversation: ${e.message}`), undefined),
+  );
 }
 
 /** An audit's must-fix findings on merged code, kept for a human to act on. */

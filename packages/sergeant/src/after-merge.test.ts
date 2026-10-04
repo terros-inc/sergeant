@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
-import { NoModelAccount, type BudgetStatus, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
-import { drawAudit } from "./after-merge.ts";
+import { NoModelAccount, RunId, type BudgetStatus, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
+import { drawAudit, finishReviews } from "./after-merge.ts";
 import type { Ports } from "./execute.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -118,4 +118,25 @@ test("a sampled audit the owner has no usable account for tells the owner on the
   expect(posted).toHaveLength(2);
   expect(posted[0]?.body).toMatch(/register or fix another model account/);
   expect(posted[1]?.key).toBe(posted[0]?.key);
+});
+
+test("a review still running after the merge is canceled, and the task stopped, once the issue is reassigned away from its owner", async () => {
+  const canceled: string[] = [];
+  const reviewer = { runId: "run_rev", role: "reviewer" as const, status: "running" as const, provider: "p", model: "m", report: null };
+  const reassignedTo = { ...conversation, issue: { ...conversation.issue, assignee: { id: "user-bob", name: "Bob" } } };
+  const d = {
+    ...deps(async () => pr, vi.fn()),
+    linear: { readConversation: async () => reassignedTo },
+    runner: { status: async () => reviewer, cancel: async (id: string) => void canceled.push(id) },
+  } as unknown as Ports;
+  const result = await finishReviews(merged(), { outcome: "done", detail: "merged" }, {
+    runIds: [RunId.parse("run_rev")],
+    recordReviews: async () => {},
+    stop: "/nonexistent/stop",
+    opts: { issueId: "TECH-5179", enrolledRepositories: [repo], dir: "/nonexistent", pollSeconds: 0.01 },
+    deps: d,
+    log: () => {},
+  });
+  expect(canceled).toEqual(["run_rev"]);
+  expect(result).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("reassigned from Ann to Bob") });
 });
