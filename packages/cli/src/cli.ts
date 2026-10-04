@@ -29,7 +29,7 @@ import {
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
 import { showOutcome, showStatus, staleConfig, waitForOutcome } from "./admin.ts";
-import { accountRow, runRow, showRun, showTask, table, taskRow } from "./format.ts";
+import { accountRow, quotaLeft, runRow, showRun, showTask, table, taskRow } from "./format.ts";
 import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
 import { registrationRefusal, strandedNotice } from "./register.ts";
 import { CHECKOUT, update } from "./update.ts";
@@ -237,8 +237,7 @@ const commands: Record<string, Command> = {
         }
       }
       const res = settle(ctx, posted);
-      const left = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
-      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${provider} account ${res.account.name} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
+      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${provider} account ${res.account.name} for ${res.account.holder}: ${quotaLeft(res.quota)}. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
     },
   },
   "account remove": {

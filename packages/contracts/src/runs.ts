@@ -89,6 +89,9 @@ export type ReviewReport = z.infer<typeof ReviewReport>;
 
 /** One quota window as its provider reports it: the percent left and, when known, when it resets. */
 const QuotaWindow = z.object({ remainingPercent: z.number(), resetsAt: z.string().optional() });
+/** A quota window as a person names it. */
+export const QuotaWindowName = z.enum(["weekly", "5-hour"]);
+export type QuotaWindowName = z.infer<typeof QuotaWindowName>;
 
 /**
  * A provider's quota as read just before a launch (TECH-5117): its weekly and 5-hour windows, or why

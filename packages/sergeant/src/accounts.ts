@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AccountAdapter, type Provider, providerOf, safeJson, type QuotaReading } from "@terros/sergeant-contracts";
+import { AccountAdapter, type Provider, providerOf, QuotaWindowName, safeJson, type QuotaReading } from "@terros/sergeant-contracts";
 import { accountQuota, type ModelAccount, type QuotaAccount } from "@terros/sergeant-runner";
 import { z } from "zod";
 import { run, secretResolver, type InstallationConfig } from "./config.ts";
@@ -22,13 +22,15 @@ const Entry = z.object({
   email: z.string(),
   credential: z.string(),
   registeredAt: z.string(),
+  /** The quota windows its provider did not report at registration (TECH-5211). */
+  quotaUnknown: z.array(QuotaWindowName).optional(),
 });
 type Entry = z.infer<typeof Entry>;
 const Registered = z.object({ accounts: z.array(Entry) });
 
 export type Person = { id: string; name: string; email: string };
 /** An account as the API shows it: never its credential. */
-export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registered"; name: string; userId: string; registeredAt: string };
+export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registered"; name: string; userId: string; registeredAt: string; quotaUnknown?: QuotaWindowName[] };
 
 /** Registration refused for a reason the caller can act on; its message never quotes the credential. */
 export class AccountRefused extends Error {}
@@ -46,7 +48,7 @@ export function accountRegistry(opts: {
   writeSecret: (ref: string, value: string) => Promise<void>;
   /** Adapters this installation can run: Codex only with its `codex` config, which names the model. */
   adapters: AccountAdapter[];
-  /** Reads a credential's quota: registration keeps only one whose weekly and 5-hour windows read. */
+  /** Reads a credential's quota: registration keeps one with at least one window read (TECH-5211). */
   readQuota: (account: QuotaAccount) => Promise<QuotaReading>;
   log: (line: string) => void;
 }) {
@@ -79,7 +81,7 @@ export function accountRegistry(opts: {
   const account = (e: Entry): ModelAccount => ({ id: id(e), adapter: e.adapter, holder: holder(e), credential: e.credential });
   const listed = (e: Entry): ListedAccount => {
     const { credential: _, ...a } = account(e);
-    return { ...a, group: "registered", name: e.accountName, userId: e.userId, registeredAt: e.registeredAt };
+    return { ...a, group: "registered", name: e.accountName, userId: e.userId, registeredAt: e.registeredAt, ...(e.quotaUnknown && { quotaUnknown: e.quotaUnknown }) };
   };
 
   return {
@@ -98,17 +100,24 @@ export function accountRegistry(opts: {
       return (await entries()).map(listed);
     },
 
-    /** Registers, or replaces, the person's own account named `accountName`, once its quota reads with it. */
+    /** Registers, or replaces, the person's own account named `accountName`, once some of its quota reads with it. */
     async register(person: Person, adapter: AccountAdapter, accountName: string, credential: string) {
       if (!opts.adapters.includes(adapter)) throw new AccountRefused(`This Sergeant doesn't run ${PROVIDER_NAME[providerOf(adapter)]} accounts. Ask an approver if you need it.`);
       if (adapter === "codex-local" && !credential.startsWith("{")) {
         throw new AccountRefused("a Codex account is the JSON of the auth.json a `codex login` with your ChatGPT account writes, not an API key");
       }
-      const entry: Entry = { adapter, accountName, userId: person.id, name: person.name, email: person.email, credential, registeredAt: new Date().toISOString() };
-      const quota = await opts.readQuota({ id: id(entry), adapter, credential });
-      if (!quota.weekly || !quota.fiveHour) {
-        throw new AccountRefused(`its subscription quota cannot be read with this credential (${quota.error ?? "a quota window is missing"}), so Sergeant could not choose it`);
+      const at = { userId: person.id, accountName };
+      const quota = await opts.readQuota({ id: id(at), adapter, credential });
+      // A rejected credential (401/403) reads no window. A plan that reports only one still registers
+      // (TECH-5211): chooseAccount ranks a partial reading after fully read ones.
+      if (!quota.weekly && !quota.fiveHour) {
+        throw new AccountRefused(`its subscription quota cannot be read with this credential (${quota.error ?? "no quota window was reported"}), so Sergeant could not choose it`);
       }
+      const unknown: QuotaWindowName[] = [...(quota.weekly ? [] : ["weekly" as const]), ...(quota.fiveHour ? [] : ["5-hour" as const])];
+      const entry: Entry = {
+        adapter, ...at, name: person.name, email: person.email, credential, registeredAt: new Date().toISOString(),
+        ...(unknown.length > 0 && { quotaUnknown: unknown }),
+      };
       const replaced = await change(async (current) => {
         const mine = (e: Entry) => e.userId === person.id && e.accountName === accountName;
         return { next: [...current.filter((e) => !mine(e)), entry], result: current.some(mine) };

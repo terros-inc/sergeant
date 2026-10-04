@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { MIN_CLI_HEADER, MIN_CLI_VERSION, type WhoAmI } from "@terros/sergeant-contracts";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { main, type Io } from "./cli.ts";
+import { quotaLeft } from "./format.ts";
 import { TOKEN_URL } from "./login.ts";
 
 // `sgt` against a fake Sergeant API: what it sends, what it prints for a human, and that `--json` is
@@ -257,7 +258,7 @@ test("account register sends the piped or signed-in credential under its name an
   const { api, seen } = await fakeApi({
     "GET /v1/whoami": { json: whoami() },
     "POST /v1/accounts/register": { json: { account, replaced: false, quota: { adapter: "codex-local", readAt: "t", weekly: { remainingPercent: 82 }, fiveHour: { remainingPercent: 99 } }, notice } },
-    "GET /v1/accounts": { json: { accounts: [{ ...account, usage: { runs: 3, costUsd: 0, unknownCostRuns: 3 } }] } },
+    "GET /v1/accounts": { json: { accounts: [{ ...account, usage: { runs: 3, costUsd: 0, unknownCostRuns: 3 } }, { ...account, name: "codexPersonal", quotaUnknown: ["5-hour"], usage: { runs: 0, costUsd: 0, unknownCostRuns: 0 } }] } },
   });
   const credential = '{"tokens":{"access_token":"secret-access"}}';
   const signIns: string[] = [];
@@ -273,7 +274,7 @@ test("account register sends the piped or signed-in credential under its name an
   expect([seen, signIns]).toEqual([[], []]);
 
   const piped = await sgtWith({ stdin: async () => `${credential}\n`, signIn }, api, "account", "register", "codex");
-  expect(piped).toMatchObject({ code: 0, out: expect.stringContaining("registered codex account codex for Ada Example <ada@example.com>: 82% weekly, 99% 5-hour left") });
+  expect(piped).toMatchObject({ code: 0, out: expect.stringContaining("registered codex account codex for Ada Example <ada@example.com>: 82% weekly left, 99% 5-hour left") });
   expect(piped.out).toContain(notice);
   const signedIn = await sgtWith({ signIn }, api, "account", "register", "codex", "--name", "codexWork");
   expect(signedIn.code).toBe(0);
@@ -284,6 +285,9 @@ test("account register sends the piped or signed-in credential under its name an
 
   const list = await sgt(api, "account", "list");
   expect(list.out).toMatch(/codex\s+codex\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
+  // TECH-5211: a plan that reports one window registers, and both lines say which one is unknown.
+  expect(list.out).toMatch(/codexPersonal\s+codex\s+.*\$0.00\s+quota: 5-hour unknown/);
+  expect(quotaLeft({ adapter: "codex-local", readAt: "t", weekly: { remainingPercent: 60.4 } })).toBe("60% weekly left, 5-hour unknown");
 });
 
 const whoami = (over: Partial<WhoAmI> = {}): WhoAmI => ({
