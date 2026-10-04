@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BudgetStatus } from "./budget.ts";
 import { RepoSlug } from "./conversation.ts";
-import { QuotaReading, RunAccount, RunId, RunRecord } from "./runs.ts";
+import { QuotaReading, QuotaWindowName, RunAccount, RunId, RunRecord } from "./runs.ts";
 import { FiledFollowup } from "./situation.ts";
 
 // The client API (11 §2, UNF-713): what `serve` answers on `/v1` and `sgt` and `sgt-mcp` read. The
@@ -169,6 +169,8 @@ export const AccountSummary = RunAccount.extend({
   /** The caller registered it, so may remove it. */
   mine: z.boolean(),
   registeredAt: z.string().optional(),
+  /** The quota windows its provider did not report when it was registered (TECH-5211). */
+  quotaUnknown: z.array(QuotaWindowName).optional(),
   /** Runs of the tasks Sergeant knows that used it: dollars where the CLI reported them, else counted as unknown. */
   usage: z.object({ runs: z.number().int(), costUsd: z.number(), unknownCostRuns: z.number().int() }),
 });

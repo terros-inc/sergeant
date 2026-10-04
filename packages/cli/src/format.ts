@@ -1,4 +1,4 @@
-import { providerOf, type AccountSummary, type RunDetail, type RunSummary, type TaskDetail, type TaskSummary } from "@terros/sergeant-contracts";
+import { providerOf, type AccountSummary, type QuotaReading, type RunDetail, type RunSummary, type TaskDetail, type TaskSummary } from "@terros/sergeant-contracts";
 
 // --- human output: one line per item, aligned; detail only in `show`
 
@@ -25,7 +25,14 @@ export const accountRow = (a: AccountSummary) => [
   `${a.holder}${a.mine ? " (yours)" : ""}`,
   plural(a.usage.runs, "run"),
   `${usd(a.usage.costUsd)}${a.usage.unknownCostRuns ? ` +${a.usage.unknownCostRuns} of unknown cost` : ""}`,
+  a.quotaUnknown?.length ? `quota: ${a.quotaUnknown.map((w) => `${w} unknown`).join(", ")}` : "",
 ];
+
+/** A registration's quota reading (TECH-5211): each window's percentage left, or that it is unknown. */
+export function quotaLeft(q: QuotaReading): string {
+  const each = (name: string, w: QuotaReading["weekly"]) => (w ? `${Math.round(w.remainingPercent)}% ${name} left` : `${name} unknown`);
+  return `${each("weekly", q.weekly)}, ${each("5-hour", q.fiveHour)}`;
+}
 
 export function showTask(d: TaskDetail): string {
   const { task, issue, budget } = d;
