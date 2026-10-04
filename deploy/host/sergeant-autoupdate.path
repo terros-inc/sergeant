@@ -1,0 +1,11 @@
+# Starts sergeant-autoupdate.service as soon as serve leaves an approver's `sgt admin` request
+# (TECH-5195), rather than at the next tick. Installed and enabled by install.sh.
+[Unit]
+Description=Sergeant 2 restart or update an approver requested
+RequiresMountsFor=/var/lib/sergeant
+
+[Path]
+PathExists=/var/lib/sergeant/state/admin-request.json
+
+[Install]
+WantedBy=paths.target

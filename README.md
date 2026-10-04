@@ -282,7 +282,7 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   so a too-old `sgt` changes nothing. Every `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
   from `sgt login`, which `serve` reads back from Linear on every call and admits only for an active
   user of the agent's own Linear workspace, not an agent, in one of `humans.teams`; those listed
-  in `humans.approvers` are approvers too. `/v1/whoami` says whether the caller is an approver; only an approver (or the loopback operator) may `POST /v1/accounts/remove-person` to remove everything one person registered (TECH-5130). Wakes and cancels are logged
+  in `humans.approvers` are approvers too. `/v1/whoami` says whether the caller is an approver; only an approver (or the loopback operator) may `POST /v1/accounts/remove-person` to remove everything one person registered (TECH-5130), or restart or update the Sergeant host through `/v1/admin` (TECH-5195, deploy/README.md). Wakes and cancels are logged
   with the caller's name, and a cancel's note on the issue names them. Only `GET /v1/auth/config`, the
   public client id `sgt login` starts with, needs no caller. For development on one machine,
   `--trust-loopback` also admits a caller on the host with no login, as an operator; it is refused

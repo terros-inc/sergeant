@@ -1,4 +1,5 @@
 export * from "./actions.ts";
+export * from "./admin.ts";
 export * from "./api.ts";
 export * from "./budget.ts";
 export * from "./client.ts";

@@ -1,6 +1,6 @@
-# One automatic-update tick (sergeant-autoupdate.sh), started by sergeant-autoupdate.timer and installed
-# by install.sh. Root, like sergeant-update. Never runs twice at once: the timer does not start an
-# active unit.
+# One automatic-update tick or approver's request (sergeant-autoupdate.sh), started by
+# sergeant-autoupdate.timer or .path and installed by install.sh. Root, like sergeant-update. Never runs
+# twice at once: neither trigger starts an active unit.
 [Unit]
 Description=Sergeant 2 automatic update
 Wants=network-online.target

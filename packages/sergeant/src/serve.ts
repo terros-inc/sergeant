@@ -13,6 +13,7 @@
 // config's webhook secrets, `POST /webhooks/linear` and `/webhooks/github` wake tasks early. The client
 // API admits the Linear users the config's `humans` names (auth.ts); `--trust-loopback` also admits an
 // operator on this host with no login, for development, and is refused unless `--host` is 127.0.0.1 or ::1.
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
@@ -57,6 +58,14 @@ const maxTasks = values["max-tasks"] !== undefined ? count(values["max-tasks"], 
 const waitingGraceMinutes =
   values["waiting-grace-minutes"] !== undefined ? amount(values["waiting-grace-minutes"], "--waiting-grace-minutes", 0) : config.waitingGraceMinutes;
 
+const { version, fallback } = sergeantVersion();
+// On the Sergeant host, where sergeant-update records its release, approvers restart and update it
+// through `/v1/admin` (TECH-5195): its automatic-update service takes their requests (deploy/README.md).
+const release = "/etc/sergeant/release";
+const admin = existsSync(release)
+  ? { requestFile: join(stateDir, "admin-request.json"), resultFile: "/etc/sergeant/admin-result.json", releaseFile: release, serve: { version, startedAt: new Date().toISOString() } }
+  : undefined;
+
 const service = await startService(
   {
     enrolledRepositories: repositories,
@@ -72,6 +81,7 @@ const service = await startService(
     webhookSecrets: installation.webhookSecrets,
     trustLoopback: values["trust-loopback"],
     accounts: accounts.registry,
+    ...(admin && { admin }),
     ...(config.humans && {
       humans: {
         linearClientId: config.humans.linearClientId,
@@ -111,7 +121,6 @@ const service = await startService(
     undelegate: (issueId) => installation.linear.undelegate(issueId),
   },
 );
-const { version, fallback } = sergeantVersion();
 console.log(`Sergeant ${version}${fallback ? ` (${fallback})` : ""} serving ${repositories.join(", ")}; GET http://${values.host}:${service.port}/health`);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

@@ -3,6 +3,8 @@ import { parseArgs } from "node:util";
 import {
   AccountList,
   AccountName,
+  AdminRequestResponse,
+  AdminStatus,
   type ApiError,
   type ApiResult,
   apiClient,
@@ -24,6 +26,7 @@ import {
   WhoAmI,
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
+import { showOutcome, showStatus, waitForOutcome } from "./admin.ts";
 import { accountRow, runRow, showRun, showTask, table, taskRow } from "./format.ts";
 import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
 import { CHECKOUT, update } from "./update.ts";
@@ -61,6 +64,11 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   admin account remove-person <linear-user-id>
                                      an approver's offboarding: remove every model account that
                                      person registered (\`sgt account list\` shows whose each is)
+  admin restart                      an approver's: reread the installation config and restart serve on
+                                     the release it runs, then wait for the outcome
+  admin update [<ref>]               an approver's: move the host to <ref>, a commit on main whose check
+                                     passed, else to what its release channel would choose; then wait
+  admin status                       the host's release, when serve started, and the last restart or update
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
 one through an SSM port-forward). Each API URL has its own login. --json prints the API's JSON
@@ -79,6 +87,8 @@ export type Io = {
   signIn?: (provider: Provider) => Promise<string>;
   /** This sgt's version (tests); sergeantVersion's otherwise. */
   version?: string;
+  /** Waits between reads while `sgt admin` waits for the host (tests); a timer otherwise. */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined };
@@ -87,7 +97,8 @@ type Flags = { name?: string | undefined; reason?: string | undefined; task?: st
  * invocation has said its server is older than it, shared by every copy of the context.
  */
 type Context = { api: string; json: boolean; io: Io; flags: Flags; token?: string | undefined; warned: { olderServer: boolean } };
-type Command = { args: number; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
+/** `args` arguments, and up to `optional` more. */
+type Command = { args: number; optional?: number; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
 
 class Usage extends Error {}
 class Failure extends Error {}
@@ -217,6 +228,22 @@ const commands: Record<string, Command> = {
       );
     },
   },
+  "admin status": {
+    args: 0,
+    run: async (ctx) => {
+      const status = await call(ctx, "GET", "/v1/admin/status", AdminStatus);
+      print(ctx, status, () => showStatus(status));
+    },
+  },
+  "admin restart": {
+    args: 0,
+    run: (ctx) => adminRequest(ctx, "restart", {}),
+  },
+  "admin update": {
+    args: 0,
+    optional: 1,
+    run: (ctx, [ref]) => adminRequest(ctx, "update", ref === undefined ? {} : { ref }),
+  },
   login: {
     args: 0,
     run: async (ctx) => {
@@ -265,6 +292,17 @@ const commands: Record<string, Command> = {
   },
 };
 
+/** Hands the host the request, then waits for and prints its outcome: exit 1 when it failed. */
+async function adminRequest(ctx: Context, action: "restart" | "update", body: { ref?: string }): Promise<void> {
+  const { request, last } = await call(ctx, "POST", `/v1/admin/${action}`, AdminRequestResponse, body);
+  ctx.io.err(`${action}${request.ref ? ` to ${request.ref}` : ""} requested (${request.id}); waiting for the host\n`);
+  const sleep = ctx.io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const read = () => client(ctx).call("GET", "/v1/admin/status", AdminStatus);
+  const outcome = settle(ctx, await waitForOutcome(request, last, read, { sleep, say: (line) => ctx.io.err(`${line}\n`), now: Date.now }));
+  print(ctx, { request, outcome }, () => showOutcome(outcome));
+  if (outcome.outcome === "failed") throw new Failure(outcome.message);
+}
+
 const caller = (me: WhoAmI) =>
   me.user ? `${me.user.name} <${me.user.email}>${me.approver ? ", an approver" : ""}` : "an operator on the Sergeant host (serve --trust-loopback)";
 
@@ -302,7 +340,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
     const command = name === undefined ? undefined : commands[name];
     if (name === undefined || !command) throw new Usage(`unknown command: ${positionals.join(" ")}`);
     const args = positionals.slice(name.split(" ").length);
-    if (args.length !== command.args) throw new Usage(`${name} takes ${command.args || "no"} argument${command.args === 1 ? "" : "s"}`);
+    const most = command.args + (command.optional ?? 0);
+    if (args.length < command.args || args.length > most) {
+      const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
+      throw new Usage(`${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
+    }
     const flags = { name: values.name, reason: values.reason, task: values.task };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
