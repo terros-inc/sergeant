@@ -132,6 +132,16 @@ export type Provider = z.infer<typeof Provider>;
 export const PROVIDER_ADAPTER: Record<Provider, AccountAdapter> = { claude: "claude-code-local", codex: "codex-local" };
 export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "codex-local" ? "codex" : "claude");
 
+/**
+ * Where a person revokes a credential with its provider (TECH-5198): neither documents a revoke
+ * Sergeant could call. Told at registration and removal, and by `sgt` when a sign-in's credential
+ * was not registered (TECH-5202).
+ */
+export const REVOKE: Record<Provider, string> = {
+  claude: "in your claude.ai settings, revoke the token `claude setup-token` made (the Claude Code section lists them)",
+  codex: "in ChatGPT, open Settings → Security and choose Log out of all devices",
+};
+
 export const WhoAmI = z.object({
   /** `linear`: the caller's own Linear OAuth token. `loopback`: an operator on the host (`serve --trust-loopback`). */
   auth: z.enum(["linear", "loopback"]),

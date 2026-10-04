@@ -216,10 +216,16 @@ const commands: Record<string, Command> = {
         if (!credential) fail(ctx, "bad_request", "the sign-in gave no credential; nothing was registered");
       }
       const signedIn = !piped;
-      const res = await call(ctx, "POST", "/v1/accounts/register", RegisterAccountResponse, { provider, name, credential }).catch((e: Error) => {
-        if (signedIn) ctx.io.err(`${strandedNotice(provider, name)}\n`);
-        throw e;
-      });
+      const posted = await client(ctx).call("POST", "/v1/accounts/register", RegisterAccountResponse, { provider, name, credential });
+      if (!posted.ok && signedIn) {
+        // `unavailable` is the one failure that may come after the store: unreachable, an unreadable answer, a failed write.
+        try {
+          settle(ctx, posted);
+        } finally {
+          ctx.io.err(`${strandedNotice(provider, name, posted.error.code !== "unavailable")}\n`);
+        }
+      }
+      const res = settle(ctx, posted);
       const left = (w: { remainingPercent: number } | undefined) => (w ? `${Math.round(w.remainingPercent)}%` : "?");
       print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${provider} account ${res.account.name} for ${res.account.holder}: ${left(res.quota.weekly)} weekly, ${left(res.quota.fiveHour)} 5-hour left. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
     },

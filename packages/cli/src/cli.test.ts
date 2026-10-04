@@ -318,11 +318,23 @@ test("account register asks first, refuses before any sign-in, and says what to 
   const { api } = await fakeApi({ "GET /v1/whoami": { json: whoami() }, "POST /v1/accounts/register": refusal });
   const failed = await sgtWith({ signIn }, api, "account", "register", "claude", "--name", "claudeWork");
   expect(failed.code).toBe(1);
+  expect(failed.err).toContain("claudeWork was not registered.");
   expect(failed.err).toContain("`pbpaste | sgt account register claude --name claudeWork`");
   expect(failed.err).toContain("revoke the token `claude setup-token` made");
   expect(failed.out + failed.err).not.toContain("sk-ant-oat01-made");
+  const codex = await sgtWith({ signIn }, api, "account", "register", "codex");
+  expect(codex.err).toContain("signs in again. The login itself stays valid with OpenAI until you revoke it: in ChatGPT, open Settings → Security");
   // A piped credential is the person's own copy: nothing is stranded.
   expect((await sgtWith({ stdin: async () => "sk-ant-oat01-mine", signIn }, api, "account", "register", "claude")).err).not.toContain("pbpaste");
+  await new Promise<void>((resolve) => server?.close(() => resolve()));
+
+  // The server stored it, but its answer did not arrive whole: sgt cannot say it was not registered, so revoking is not its first advice.
+  const lost = await fakeApi({ "GET /v1/whoami": { json: whoami() }, "POST /v1/accounts/register": { json: { account: {} } } });
+  const unknown = await sgtWith({ signIn }, lost.api, "account", "register", "claude", "--name", "claudeWork");
+  expect(unknown.code).toBe(1);
+  expect(unknown.err).toContain("sgt: unavailable: POST /v1/accounts/register answered outside the API contract");
+  expect(unknown.err).toContain("sgt cannot tell whether claudeWork was registered. Once Sergeant answers, run `sgt account list`: if claudeWork is listed as yours, it is registered");
+  expect(unknown.err).not.toContain("was not registered");
 });
 
 // TECH-5198: removing an account passes on where to revoke it, since removal does not revoke a copy.

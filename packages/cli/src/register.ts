@@ -1,8 +1,8 @@
-import type { ApiError, Provider, WhoAmI } from "@terros/sergeant-contracts";
+import { type ApiError, type Provider, REVOKE, type WhoAmI } from "@terros/sergeant-contracts";
 
 // What `sgt account register` tells a person around the provider's sign-in (TECH-5202): before it,
-// why this Sergeant would refuse the account, so no credential is made for nothing; after a refusal
-// that came once one was made, what to do with that credential. Plain English, naming no config.
+// why this Sergeant would refuse the account, so no credential is made for nothing; after a failed
+// registration once one was made, what to do with that credential. Plain English, naming no config.
 
 const NAME: Record<Provider, string> = { claude: "Claude", codex: "Codex" };
 
@@ -19,13 +19,18 @@ export function registrationRefusal(me: WhoAmI, provider: Provider): { code: Api
   return undefined;
 }
 
-/** After a sign-in made a credential that registering then failed to keep: where it is, and how to reuse or revoke it. */
-export function strandedNotice(provider: Provider, name: string): string {
-  if (provider === "codex") return "The Codex login sgt made was not registered and is kept nowhere (sgt deleted it), so there is nothing to reuse or revoke.";
-  const command = `sgt account register claude --name ${name}`;
-  return (
-    "The token `claude setup-token` just made was not registered, and sgt kept no copy; it stays valid for a year. " +
-    `To register it without making another, copy it from above and pipe it in, on a Mac: \`pbpaste | ${command}\`. ` +
-    "Otherwise revoke it: in your claude.ai settings, revoke the token `claude setup-token` made (the Claude Code section lists them)."
-  );
+/**
+ * After a sign-in made a credential that registering failed to keep: how to reuse or revoke it.
+ * `refused`: the server refused it, before storing anything. Otherwise (unreachable, an unreadable
+ * answer, the store failing) it may have been registered after all, so look before revoking it.
+ */
+export function strandedNotice(provider: Provider, name: string, refused: boolean): string {
+  const again = `sgt account register ${provider} --name ${name}`;
+  const unknown = `sgt cannot tell whether ${name} was registered. Once Sergeant answers, run \`sgt account list\`: if ${name} is listed as yours, it is registered and there is nothing to do. If not: `;
+  const reuse =
+    provider === "claude"
+      ? "The token `claude setup-token` just made stays valid for a year and sgt kept no copy. " +
+        `To register it without making another, copy it from above and pipe it in, on a Mac: \`pbpaste | ${again}\`. Otherwise revoke it: ${REVOKE.claude}.`
+      : `sgt deleted its copy of the Codex login, so it cannot be reused: \`${again}\` signs in again. The login itself stays valid with OpenAI until you revoke it: ${REVOKE.codex}.`;
+  return refused ? `${name} was not registered. ${reuse}` : `${unknown}${reuse}`;
 }
