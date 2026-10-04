@@ -10,7 +10,7 @@ import type { Conversation, LinearPerson, LinearPort, NoModelAccount, TaskOwnerC
 // said once on the issue per condition, keyed by what Linear showed, so a poll never repeats it.
 
 /** The task's owner as `state.json` records it: who, and when the task was admitted for them. */
-export type TaskOwner = LinearPerson & { admittedAt: string };
+export type TaskOwner = LinearPerson & { admittedAt: string; delegatedAt?: string | undefined };
 
 /**
  * Why a task stops because its issue is no longer assigned to its owner (poll-checks.ts), as the end
@@ -22,6 +22,20 @@ export function reassigned(owner: LinearPerson, issue: Conversation["issue"]): s
   if (now?.id === owner.id) return undefined;
   const to = now ? `reassigned from ${owner.name} to ${now.name}` : `unassigned from ${owner.name}`;
   return `the Linear issue was ${to}, and a task's model usage never moves to another person mid-task`;
+}
+
+/**
+ * Why an active task stops because Linear's history no longer proves its owner delegated this
+ * episode (TECH-5179): someone else delegated it last, or it was undelegated and delegated again,
+ * even by the same person. Reread every poll, so it holds after missed webhooks and downtime too.
+ * Throws when the history is unreadable: the caller then starts nothing new.
+ */
+export async function redelegated(owner: TaskOwner, issueId: string, deps: { linear: LinearPort; agentUserId: string }): Promise<string | undefined> {
+  const check = await deps.linear.readTaskOwner(issueId, deps.agentUserId);
+  if (!("owner" in check)) return `Linear no longer shows ${owner.name} delegated this task (${check.refused}), so it stops; delegating it again starts a new task`;
+  if (check.owner.id !== owner.id) return `${check.owner.name}, not ${owner.name}, now owns the issue, so this task stops; delegating it again starts a new task`;
+  if (owner.delegatedAt && check.delegatedAt !== owner.delegatedAt) return `the Linear issue was delegated to Sergeant again, so this task stops; the new delegation starts a new task`;
+  return undefined;
 }
 
 /** What a refusal tells the humans on the issue, and the key that keeps it to one comment per condition. */
@@ -62,7 +76,7 @@ export async function admitOwner(issueId: string, deps: { linear: LinearPort; ag
   }
   if ("owner" in check) {
     log(`owned by ${check.owner.name} (${check.owner.id}), who assigned and delegated it: its runs use only their model accounts`);
-    return { ...check.owner, admittedAt: new Date().toISOString() };
+    return { ...check.owner, admittedAt: new Date().toISOString(), ...(check.delegatedAt && { delegatedAt: check.delegatedAt }) };
   }
   const refusal = ownerRefusal(issueId, check);
   if (refusal) {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { NoModelAccount, type RunSpec, type TaskOwnerCheck } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
+import { redelegated } from "./owner.ts";
 import { startService } from "./service.ts";
 import { fakes, issue, repo } from "./stop-fixtures.ts";
 
@@ -106,7 +107,7 @@ test("the admitted owner pays for every run; a reassignment stops the task, and 
   // Bob delegates it himself: a new task, checked afresh, that only Bob pays for.
   check = { owner: bob };
   await t.loop();
-  expect(t.checks()).toBe(2);
+  expect(t.checks()).toBeGreaterThanOrEqual(2);
   expect((await t.saved()).owner).toMatchObject(bob);
   expect(t.starts.map((s) => s.owner)).toEqual([ann, bob]);
 });
@@ -153,4 +154,25 @@ test("an owner with no usable account starts nothing and is told what to fix, on
   ]);
   const { runIds } = JSON.parse(await readFile(join(t.dir, "state.json"), "utf8")) as { runIds: string[] };
   expect(runIds).toEqual([]);
+});
+
+test("an undelegation and redelegation missed between polls, even by the owner, stops the task: a new episode is checked afresh", async () => {
+  let check: TaskOwnerCheck = { owner: ann, delegatedAt: "2026-10-04T06:01:00.000Z" };
+  const t = await task(() => check, async () => {});
+  await t.loop();
+  expect(t.starts.map((s) => s.owner)).toEqual([ann]);
+
+  // No webhook seen: the assignee is unchanged, but Linear's history shows a newer delegation.
+  check = { owner: ann, delegatedAt: "2026-10-04T06:09:00.000Z" };
+  expect(await t.loop()).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("delegated to Sergeant again") });
+  expect(t.starts).toHaveLength(1);
+  expect(existsSync(join(t.dir, "state.json"))).toBe(false);
+});
+
+test("an active task's owner proof is reread: someone else delegating stops it, and unreadable history throws so nothing starts", async () => {
+  const owner = { ...ann, admittedAt: "2026-10-04T06:00:00.000Z", delegatedAt: "2026-10-04T06:01:00.000Z" };
+  const deps = (check: () => Promise<TaskOwnerCheck>) => ({ agentUserId: "agent-v2", linear: { readTaskOwner: check } }) as unknown as Parameters<typeof redelegated>[2];
+  expect(await redelegated(owner, "UNF-1", deps(async () => ({ owner: ann, delegatedAt: owner.delegatedAt })))).toBeUndefined();
+  expect(await redelegated(owner, "UNF-1", deps(async () => ({ refused: "delegator_differs", assignee: ann, delegator: bob })))).toMatch(/delegator_differs/);
+  await expect(redelegated(owner, "UNF-1", deps(async () => Promise.reject(new Error("Linear API request failed (503)"))))).rejects.toThrow(/503/);
 });

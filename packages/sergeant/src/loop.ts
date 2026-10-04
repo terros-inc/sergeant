@@ -192,6 +192,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     };
     watch(conversation.issue.linkedPullRequests);
     const stop = await checkStop(conversation, runs, ctx);
+    if (typeof stop === "object") {
+      await wait(pollMs);
+      continue;
+    }
     if (stop) {
       stopping = stop;
       continue;

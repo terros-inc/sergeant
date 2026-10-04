@@ -72,6 +72,6 @@ export function taskOwnerReader(request: Request, sergeantUsers: ReadonlySet<str
     if (!assignee) return { refused: "no_assignee", ...facts };
     if (!delegator) return { refused: "delegator_unknown", ...facts };
     if (delegator.id !== assignee.id) return { refused: "delegator_differs", ...facts };
-    return { owner: assignee };
+    return { owner: assignee, ...(delegation && { delegatedAt: delegation.at }) };
   };
 }

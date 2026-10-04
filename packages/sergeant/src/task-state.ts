@@ -30,7 +30,7 @@ const TaskState = z.looseObject({
    * TECH-5179: who pays for this task's runs, recorded on admission and never changed for this task.
    * Absent on a task saved before it, which is admitted afresh on its next start (loop.ts).
    */
-  owner: z.object({ id: z.string().min(1), name: z.string(), admittedAt: z.iso.datetime() }).optional(),
+  owner: z.object({ id: z.string().min(1), name: z.string(), admittedAt: z.iso.datetime(), delegatedAt: z.string().optional() }).optional(),
   turns: z.number().int(),
   lastTurnAt: z.iso.datetime().optional(),
   /** What the last turn saw; an unchanged situation gets no new turn. */

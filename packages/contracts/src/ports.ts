@@ -15,7 +15,7 @@ export type LinearPerson = { id: string; name: string };
  * else is a refusal, with what Linear showed: `delegatedAt` is the latest delegation to Sergeant.
  */
 export type TaskOwnerCheck =
-  | { owner: LinearPerson }
+  | { owner: LinearPerson; delegatedAt?: string }
   | {
       refused: "not_delegated" | "no_assignee" | "delegator_unknown" | "delegator_differs";
       assignee?: LinearPerson;
