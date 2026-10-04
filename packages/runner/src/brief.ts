@@ -7,7 +7,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 // (the 48 KB inline bound with `sergeant-thread.md` is not built yet). Linked issues (TECH-5149) get
 // their own background section outside it, never part of what was asked.
 export const WORKER_RULES_VERSION = "s2-worker-rules/5";
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/3";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/4";
 
 export function renderTask(c: Conversation): string {
   const comments = c.humanComments.length
@@ -266,6 +266,9 @@ produced. You have no GitHub, AWS, or Linear credentials; everything you need is
 11. An input the issue depends on that you cannot read (an auth-gated link, a missing file or
     attachment, a file the brief lists as not downloaded): name it in \`unreadableInputs\` exactly
     as the issue gives it, and rule the requirements that rest on it as not verified.
+12. Do not re-litigate a design trade-off the repository's design docs record as settled or accepted
+    merely because you would choose differently. Do flag a change that breaks its documented
+    assumptions, expands its blast radius, or brings evidence meeting its documented revisit condition.
 
 ## Report
 

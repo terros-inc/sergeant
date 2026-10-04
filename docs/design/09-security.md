@@ -75,6 +75,13 @@ answer, when any of these holds:
   occasional (for example, public repositories or issues from outside the team);
 - a model credential gains authority beyond model usage (an organization admin key, billing access).
 
+**Review disposition.** This is a settled, accepted risk, not an open finding (TECH-5165). A reviewer
+must not flag that a run's selected model credential enters its container, nor recommend a broker solely
+because of that exposure. Raise a finding only when a change widens the exposure (more credentials per
+run, the credential reaching logs, records, other runs, or longer-lived storage), breaks a control or
+rotation assumption above (Secrets Manager only, the registration notice, removal and provider
+revocation), brings concrete evidence of misuse, or meets one of the revisit triggers listed above.
+
 ## 4. Separating zones on a host
 
 Settled for v1 (captain, 2026-10-02: no per-task OS or container isolation):
