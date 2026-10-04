@@ -277,7 +277,7 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   across a restart, until it has. A run cancel is the
   runner's confirmed cancel, noted on the issue so the next turn does not just restart it. Before
   anything else, every `/v1` call must name a client version (`Sergeant-Cli-Version`) no older than
-  the oldest `sgt` this `serve` supports, or it is refused with `426` and "Run `sgt update`" (TECH-5188),
+  the oldest `sgt` this `serve` supports, or it is refused with `400` and "Run `sgt update`" (TECH-5188),
   so a too-old `sgt` changes nothing. Every `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
   from `sgt login`, which `serve` reads back from Linear on every call and admits only for an active
   user of the agent's own Linear workspace, not an agent, in one of `humans.teams`; those listed

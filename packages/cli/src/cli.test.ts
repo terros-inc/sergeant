@@ -290,7 +290,7 @@ test("admin account remove-person posts the user id and says what it removed", a
 test("an sgt older than its Sergeant supports stops and says to update; one newer than it warns", async () => {
   const tooOld = "Your sgt is older than this Sergeant server supports. Run `sgt update`.";
   const { api, seen } = await fakeApi({
-    "POST /v1/tasks/UNF-12/wake": { json: { error: { code: "bad_request", message: tooOld } }, status: 426 },
+    "POST /v1/tasks/UNF-12/wake": { json: { error: { code: "bad_request", message: tooOld } }, status: 400 },
     "GET /v1/tasks": { json: { tasks: [] }, headers: { [MIN_CLI_HEADER]: "2.0.5" } },
     "GET /v1/runs": { json: { runs: [] }, headers: {} },
   });

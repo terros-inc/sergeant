@@ -112,7 +112,7 @@ test("refusals, an unreachable API, answers outside the contract, and bad refs a
   routes = {
     "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: 7, role: "worker" } } },
     // TECH-5188: a Sergeant that supports only a newer sgt-mcp than this one refuses it.
-    "GET /v1/tasks": { status: 426, json: { error: { code: "bad_request", message: "Your sgt is older than this Sergeant server supports. Run `sgt update`." } } },
+    "GET /v1/tasks": { status: 400, json: { error: { code: "bad_request", message: "Your sgt is older than this Sergeant server supports. Run `sgt update`." } } },
   };
   const errorOf = async (name: string, args: Record<string, unknown>) => {
     const res = await client.callTool({ name, arguments: args });

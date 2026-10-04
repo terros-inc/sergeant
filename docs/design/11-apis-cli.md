@@ -45,9 +45,10 @@ pending, never half-forgotten. Drain and undrain are process-local controls, not
 
 **Client versions (TECH-5185).** There is no compatibility between versions of `sgt` (or `sgt-mcp`)
 and the hosted `serve`: people keep their CLI current. Every client request names the client's own
-version in `Sergeant-Cli-Version`, and `serve` refuses a `/v1` request that names none, or one older
-than the oldest client it supports (`MIN_CLI_VERSION`, `packages/contracts/src/min-cli.ts`), with
-`426` and "Your sgt is older than this Sergeant server supports. Run `sgt update`." before
+version in `Sergeant-Cli-Version`, and `serve` refuses a `/v1` request that names none, one that is
+not exactly `MAJOR.MINOR.PATCH` (optionally `+<sha>`), or one older than the oldest client it
+supports (`MIN_CLI_VERSION`, `packages/contracts/src/min-cli.ts`), with
+`400` and "Your sgt is older than this Sergeant server supports. Run `sgt update`." before
 authentication, body parsing, or routing (TECH-5188), so a too-old client changes nothing. `sgt
 update` needs no API: it fast-forwards its checkout to `main` and runs `pnpm install`. Every `/v1`
 answer also carries `Sergeant-Min-Cli-Version`, that oldest supported client. A client whose own

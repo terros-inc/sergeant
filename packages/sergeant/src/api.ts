@@ -84,12 +84,14 @@ export type ApiControl = {
 export function apiHandler(ctl: ApiControl): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     // On every /v1 answer, refusals and `sgt login`'s included: the oldest sgt this server supports (contracts' min-cli.ts).
-    if (req.url?.startsWith("/v1")) {
+    // `/v1` and paths under it, as route() reads them; `/v10` and the like keep their plain 404.
+    const { pathname } = new URL(req.url ?? "/", "http://localhost");
+    if (pathname === "/v1" || pathname.startsWith("/v1/")) {
       res.setHeader(MIN_CLI_HEADER, MIN_CLI_VERSION);
       // TECH-5188: before authentication, the body, or routing, so nothing is done for a too-old client.
       const cli = req.headers[CLI_VERSION_HEADER.toLowerCase()];
       if (typeof cli !== "string" || olderThan(cli, MIN_CLI_VERSION)) {
-        send(res, { status: 426, json: { error: { code: "bad_request", message: CLI_TOO_OLD } } satisfies ApiError });
+        send(res, { status: 400, json: { error: { code: "bad_request", message: CLI_TOO_OLD } } satisfies ApiError });
         return;
       }
     }

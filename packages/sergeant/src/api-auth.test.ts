@@ -86,14 +86,16 @@ test("with humans configured every published operational /v1 route still refuses
 
 // TECH-5188: a too-old `sgt` must change nothing, so its version is checked before the caller, the
 // body, or the route: even a caller every other check would admit cannot reach a mutating handler.
-test("a request naming no client version, or one older than the minimum, is refused before any handler runs", async () => {
+test("a request naming no client version, a malformed one, or one older than the minimum, is refused before any handler runs", async () => {
   const wake = vi.fn(async () => "active" as const);
   const cancelTask = vi.fn(async () => ({ undelegated: true, stopping: [], closedPullRequests: [] }));
   const callerOf = vi.fn(async (): Promise<Caller> => ({ kind: "loopback", approver: true }));
   const port = await start(control({ linearClientId: "client-1", callerOf, trustLoopback: true, wake, cancelTask }));
-  const tooOld = { status: 426, json: { error: { code: "bad_request", message: expect.stringContaining("Run `sgt update`") } } };
+  const tooOld = { status: 400, json: { error: { code: "bad_request", message: expect.stringContaining("Run `sgt update`") } } };
 
-  for (const version of [null, "2.1.0+abcdef0", "garbage"]) {
+  // Malformed values with a current numeric prefix must not pass as current.
+  const malformed = [`${MIN_CLI_VERSION}garbage`, `${MIN_CLI_VERSION}.9`, `${MIN_CLI_VERSION}+`, `${MIN_CLI_VERSION}+abc def`, `v${MIN_CLI_VERSION}`, "99.0"];
+  for (const version of [null, "", "2.1.0+abcdef0", "garbage", ...malformed]) {
     for (const [method, path] of [["GET", "/v1/auth/config"], ...authenticatedPaths, ["POST", "/v1/accounts/claude-code-local/register"]] as const) {
       expect(await call(port, method, path, undefined, version), `${method} ${path} from ${version}`).toMatchObject(tooOld);
       expect(await call(port, method, path, "t-1", version), `${method} ${path} from ${version} with a login`).toMatchObject(tooOld);
@@ -104,4 +106,14 @@ test("a request naming no client version, or one older than the minimum, is refu
   // The same wake from a current client reaches its handler.
   expect(await call(port, "POST", "/v1/tasks/UNF-1/wake", undefined, `${MIN_CLI_VERSION}+abcdef0`)).toEqual({ status: 200, json: { ref: "UNF-1", woke: "active" } });
   expect(wake).toHaveBeenCalledOnce();
+});
+
+test("only /v1 and paths under it are gated: /v10 and the like keep their plain 404", async () => {
+  const port = await start(control());
+  for (const path of ["/v10", "/v1x/tasks", "/v1-old"]) {
+    const req = await fetch(`http://127.0.0.1:${port}${path}`);
+    expect([req.status, req.headers.has("sergeant-min-cli-version")], path).toEqual([404, false]);
+  }
+  expect((await call(port, "GET", "/v1", undefined, null)).status).toBe(400);
+  expect((await call(port, "GET", "/v1?x=1", undefined, null)).status).toBe(400);
 });

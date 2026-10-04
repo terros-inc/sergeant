@@ -119,7 +119,7 @@ mutation:
 5. From a logged-out shell, check every published operational route. Each must return `401`; the
    three POSTs must not change a task or run. Placeholder ids are sufficient because authentication
    happens before resource lookup or body parsing. Each call names a current `sgt` version, since
-   `serve` refuses one that names none with `426` before it checks the login (TECH-5188):
+   `serve` refuses one that names none with `400` before it checks the login (TECH-5188):
 
    ```sh
    api=https://<hostname>

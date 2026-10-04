@@ -15,9 +15,10 @@ export const MIN_CLI_HEADER = "Sergeant-Min-Cli-Version";
 export const CLI_VERSION_HEADER = "Sergeant-Cli-Version";
 export const CLI_TOO_OLD = "Your sgt is older than this Sergeant server supports. Run `sgt update`.";
 
-/** Whether version `a` is older than `b`, by MAJOR.MINOR.PATCH (sergeantVersion's form, its `+sha` ignored); unparsable is 0.0.0. */
+/** Whether version `a` is older than `b`, by MAJOR.MINOR.PATCH (sergeantVersion's form, its `+sha` ignored). Anything
+ * else, even with a valid prefix (`2.1.63garbage`, `2.1.63.9`), is unparsable and counts as 0.0.0, so serve refuses it. */
 export function olderThan(a: string, b: string): boolean {
-  const parse = (v: string) => (/^(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1) ?? []).map(Number);
+  const parse = (v: string) => (/^(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z-]+)?$/.exec(v)?.slice(1) ?? []).map(Number);
   const [x, y] = [parse(a), parse(b)];
   for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
   return false;
