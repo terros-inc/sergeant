@@ -151,11 +151,14 @@ without AWS access (TECH-5195):
 sgt admin restart          # reread the installation config and restart Sergeant on its current release
 sgt admin update           # move to the newest green main commit its release channel would choose
 sgt admin update v2.1.0    # or to a branch, tag, or commit, which must be on main with a green check
-sgt admin status           # its release, when it last restarted, and the last restart or update
+sgt admin status           # its release, when it last restarted, the last restart or update, and
+                           # whether the installation config changed since (then: sgt admin restart)
 ```
 
 - `restart` and `update` wait for the outcome and print it, with the reason when it failed (exit 1).
   Sergeant is unreachable for part of it; that is expected and waited out.
+- An `update` with nothing newer to install changes nothing, not even the config: if the installation
+  config changed in AWS since Sergeant started, it says so, and `sgt admin restart` rereads it.
 - The restart is graceful: Sergeant stops taking new work, ends each task at its next poll (up to 15
   minutes), and leaves running workers and reviewers running; the new process picks them up.
 - One action at a time: another is refused until the host has finished the first. The host keeps only

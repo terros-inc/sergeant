@@ -52,7 +52,8 @@ const configParameterName = values["config-parameter"] ?? process.env.SERGEANT_C
 const parameter = configParameterName ? configParameter(config, configParameterName) : undefined;
 const log = (line: string) => console.log(`[${new Date().toISOString()}] ${line}`);
 // The parameter is the only record of an approver's change: a restart before the next update keeps it.
-if (parameter) config.repositories = await enrolledIn(parameter, log);
+const started = parameter && (await enrolledIn(parameter, log));
+if (started) config.repositories = started.repositories;
 const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"));
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
 
@@ -72,8 +73,22 @@ const { version, fallback } = sergeantVersion();
 // On the Sergeant host, where sergeant-update records its release, approvers restart and update it
 // through `/v1/admin` (TECH-5195): its automatic-update service takes their requests (deploy/README.md).
 const release = "/etc/sergeant/release";
+const enrolled = enrollment({
+  repositories,
+  configs: installation.repositoryConfigs,
+  parameter,
+  version: started?.version,
+  reach: appsReach({ "control-plane": installation.controlPlaneApp, worker: installation.workerApp }),
+  log,
+});
 const admin = existsSync(release)
-  ? { requestFile: join(stateDir, "admin-request.json"), resultFile: "/etc/sergeant/admin-result.json", releaseFile: release, serve: { version, startedAt: new Date().toISOString() } }
+  ? {
+      requestFile: join(stateDir, "admin-request.json"),
+      resultFile: "/etc/sergeant/admin-result.json",
+      releaseFile: release,
+      serve: { version, startedAt: new Date().toISOString() },
+      config: enrolled.versions,
+    }
   : undefined;
 
 const service = await startService(
@@ -92,13 +107,7 @@ const service = await startService(
     trustLoopback: values["trust-loopback"],
     accounts: accounts.registry,
     ...(admin && { admin }),
-    enrollment: enrollment({
-      repositories,
-      configs: installation.repositoryConfigs,
-      parameter,
-      reach: appsReach({ "control-plane": installation.controlPlaneApp, worker: installation.workerApp }),
-      log,
-    }),
+    enrollment: enrolled,
     ...(config.humans && {
       humans: {
         linearClientId: config.humans.linearClientId,

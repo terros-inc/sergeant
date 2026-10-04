@@ -60,6 +60,13 @@ export const AdminStatus = z.object({
   /** A request the host has not taken yet. */
   pending: AdminRequest.nullable(),
   last: AdminResult.nullable(),
+  /**
+   * The installation-config SSM parameter's version this `serve` has (TECH-5205): the one it started with,
+   * moved on by its own `sgt admin repo` changes, which it takes in place. `current`: the parameter's
+   * version now, null when serve cannot read it. Different, the parameter changed since serve started
+   * and only a restart rereads it. Null when serve runs without the parameter.
+   */
+  config: z.object({ loaded: z.number().int(), current: z.number().int().nullable() }).nullable(),
 });
 export type AdminStatus = z.infer<typeof AdminStatus>;
 

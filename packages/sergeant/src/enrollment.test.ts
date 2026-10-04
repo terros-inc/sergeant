@@ -43,15 +43,17 @@ type Write = "ok" | "fails" | "lost";
 async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
   const parameter = {
     value: JSON.stringify(CONFIG),
+    version: 1,
     descriptions: [] as string[],
-    read: async () => parameter.value,
+    read: async () => ({ value: parameter.value, version: parameter.version }),
     write: async (value: string, description: string) => {
       const outcome = opts.write?.() ?? "ok";
       if (outcome !== "fails") {
         parameter.value = value;
+        parameter.version += 1;
         parameter.descriptions.push(description);
       }
-      if (outcome === "ok") return;
+      if (outcome === "ok") return parameter.version;
       // As execFile rejects: its message quotes the command line, which must never be shown.
       throw Object.assign(new Error(`Command failed: aws ssm put-parameter --value ${value}`), {
         stderr: outcome === "fails" ? "\nAn error occurred (AccessDeniedException) when calling the PutParameter operation\n" : "Read timeout on endpoint URL",
@@ -67,6 +69,7 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
     repositories,
     configs,
     parameter: opts.writable === false ? undefined : parameter,
+    version: parameter.version,
     // GitHub's own name for the repository; `unreachable` is on no installation.
     reach: async (repo) => (repo.includes("unreachable") ? Promise.reject(new EnrollmentRefused(`the worker GitHub App cannot reach ${repo}`)) : (repo.toLowerCase() as RepoSlug)),
     log: (line) => logs.push(line),
@@ -94,7 +97,7 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
       req.on("error", reject);
       req.end(body === undefined ? undefined : JSON.stringify(body));
     });
-  return { call, parameter, repositories, configs, logs };
+  return { call, parameter, repositories, configs, logs, enrolled };
 }
 
 test("an approver's add and remove change only the parameter's repositories, then the live list", async () => {
@@ -144,7 +147,7 @@ test("a retry after a write whose answer was lost brings the running list up to 
   expect(await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two" })).toMatchObject({ status: 503 });
   expect(repositories).toEqual(["terros-inc/one"]);
   // A restart now starts with the parameter's list, not the host's older copy.
-  expect(Object.keys(await enrolledIn(parameter, () => {}))).toEqual(["terros-inc/one", "terros-inc/two"]);
+  expect(Object.keys((await enrolledIn(parameter, () => {})).repositories)).toEqual(["terros-inc/one", "terros-inc/two"]);
 
   write = "ok";
   expect(await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two" })).toMatchObject({ status: 200, json: { changed: false, repositories: ["terros-inc/one", "terros-inc/two"] } });
@@ -170,4 +173,24 @@ test("a repository is reachable only when both Apps' installations hold it under
   await expect(appsReach({ "control-plane": app("Terros-Inc"), worker: app("Terros-Inc") })("terros-inc/two")).resolves.toBe("Terros-Inc/two");
   await expect(appsReach({ "control-plane": app("Terros-Inc"), worker: app("Terros-Inc") })("elsewhere/two")).rejects.toThrow("its installation is on another owner");
   await expect(appsReach({ "control-plane": app("Terros-Inc"), worker: app(undefined) })("terros-inc/two")).rejects.toThrow("the worker GitHub App cannot reach terros-inc/two");
+});
+
+// TECH-5205: `sgt admin status` says the config changed since serve started only when someone else changed
+// the parameter: serve's own changes, which it takes in place, keep it current, and never hide another's.
+test("serve's own changes keep the version it has; a change made in AWS stays one serve lacks", async () => {
+  const { call, parameter, enrolled } = await serve();
+  expect(await enrolled.versions()).toEqual({ loaded: 1, current: 1 });
+  await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two" });
+  expect(await enrolled.versions()).toEqual({ loaded: 2, current: 2 });
+
+  // Someone changes the budget in AWS; serve's next change writes over that version and still lacks it.
+  parameter.value = JSON.stringify({ ...JSON.parse(parameter.value), budget: { usd: 20 } });
+  parameter.version += 1;
+  expect(await enrolled.versions()).toEqual({ loaded: 2, current: 3 });
+  await call("POST", "/v1/repositories/remove", "grace", { repo: "terros-inc/two" });
+  expect(await enrolled.versions()).toEqual({ loaded: 2, current: 4 });
+
+  parameter.read = () => Promise.reject(Object.assign(new Error("Command failed"), { stderr: "Read timeout" }));
+  expect(await enrolled.versions()).toEqual({ loaded: 2, current: null });
+  expect(await enrollment({ repositories: [], configs: {}, parameter: undefined, reach: async (r) => r, log: () => {} }).versions()).toBeNull();
 });

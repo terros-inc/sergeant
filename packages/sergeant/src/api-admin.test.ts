@@ -32,6 +32,7 @@ async function serve(onHost = true) {
     resultFile: join(dir, "admin-result.json"),
     releaseFile: join(dir, "release"),
     serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T10:00:00.000Z" },
+    config: async () => ({ loaded: 3, current: 4 }),
   };
   const logs: string[] = [];
   const ctl = {
@@ -93,7 +94,7 @@ test("a ref that could be an option or escape the ref namespace is refused befor
 
 test("status reads the release, the request not yet taken, and the host's last outcome", async () => {
   const { call, admin } = await serve();
-  expect((await call("GET", "/v1/admin/status", "grace")).json).toEqual({ serve: admin.serve, release: null, pending: null, last: null });
+  expect((await call("GET", "/v1/admin/status", "grace")).json).toEqual({ serve: admin.serve, release: null, pending: null, last: null, config: { loaded: 3, current: 4 } });
 
   await writeFile(admin.releaseFile, "ref=main\nsha=0123abc\nat=2026-10-04T09:58:00Z\n");
   const last = { action: "automatic", by: "the release channel (main)", outcome: "succeeded", message: "updated a to b", startedAt: "2026-10-04T09:50:00Z", finishedAt: "2026-10-04T09:58:00Z", sha: "0123abc" };
@@ -105,6 +106,7 @@ test("status reads the release, the request not yet taken, and the host's last o
     release: { ref: "main", sha: "0123abc", at: "2026-10-04T09:58:00Z" },
     pending: request.request,
     last,
+    config: { loaded: 3, current: 4 },
   });
 });
 
