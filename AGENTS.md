@@ -45,6 +45,29 @@ Sergeant 2 is deliberately the smallest system that can supervise AI engineering
 - Make ordinary implementation decisions autonomously. Escalate only genuine product or architecture
   choices that the ticket and design do not settle, and continue any work they do not block.
 
+## Linear priority
+
+When you set, review, or reason about a Linear issue's priority, use this rubric for Todo work.
+Don't make up your own.
+
+- **Low** — the work is not affecting developer experience today.
+- **Medium** — the work is affecting developer experience today, or it is blocking Low-priority tasks.
+- **High** — it is a bug, or it is blocking Medium-priority tasks.
+- **Urgent** — it is a feature blocking virtually all other work, or it is a widespread or
+  high-impact bug.
+
+Priority orders work that may start; it never decides whether work may start. These queue rules
+stay separate:
+
+- **Todo + delegated** to Sergeant means the work is approved and available to Sergeant.
+- **Blocked-by relations** in Linear express dependencies. Blocked Todo work stays enabled, and
+  Sergeant waits for the dependency.
+- **Backlog** means "do not start" because the work itself is not yet approved or ready. It does
+  not mean low priority.
+
+Admission and ordering are in `docs/design/07-linear-contract.md` (§5, §12) and
+`packages/sergeant/src/service.ts` and `slots.ts` (TECH-4989, TECH-5008, TECH-5015).
+
 ## Testing
 
 - Validate in proportion to the change and its risks. There is no blanket requirement that every
