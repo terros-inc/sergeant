@@ -133,15 +133,18 @@ export const PROVIDER_ADAPTER: Record<Provider, AccountAdapter> = { claude: "cla
 export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "codex-local" ? "codex" : "claude");
 
 /**
- * Where a person revokes a credential with its provider (TECH-5198): neither documents a revoke
- * Sergeant could call. Told at registration and removal, and by `sgt` when a sign-in's credential
- * was not registered (TECH-5202).
+ * How a person revokes a credential with its provider, as a sentence (TECH-5198, TECH-5200). Neither
+ * documents a revoke Sergeant could call. Anthropic documents deleting a `claude setup-token` token;
+ * OpenAI documents no revoke of a copied Codex `auth.json`, and its Active sessions page says it does
+ * not manage Codex CLI sessions, so the Codex sentence promises nothing. Told at registration and
+ * removal, and by `sgt` when a sign-in's credential was not registered (TECH-5202).
  */
 export const REVOKE: Record<Provider, string> = {
   claude:
-    "open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference-scoped token `claude setup-token` made (match it by its Connected time)",
+    "To revoke a Claude token, open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the user:inference-scoped token `claude setup-token` made (match it by its Connected time).",
   codex:
-    "open https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created (match it by its time; use Log out of all devices only if you cannot tell which it is)",
+    "OpenAI documents no way to revoke a copied Codex login (its auth.json, refresh token included), and its Active sessions page at https://chatgpt.com/settings/security?view=sessions does not manage Codex CLI sessions. " +
+    "The best available step is Log out of all devices on that page, which OpenAI does not say ends a copy; if you think it was copied, also report it to OpenAI support at https://help.openai.com.",
 };
 
 export const WhoAmI = z.object({
@@ -195,7 +198,7 @@ export const RegisterAccountResponse = z.object({
   replaced: z.boolean(),
   /** The quota read with it at registration, which proved it works. */
   quota: QuotaReading,
-  /** What the person accepts by registering (09 §3a): their credential is exposed to worker containers, and how to remove and revoke it. */
+  /** What the person accepts by registering (09 §3a): their credential is exposed to worker containers, how to remove it, and what revokes a copy (REVOKE). */
   notice: z.string(),
 });
 export type RegisterAccountResponse = z.infer<typeof RegisterAccountResponse>;
@@ -204,7 +207,7 @@ export const RemoveAccountRequest = z.strictObject({ name: AccountName });
 export const RemoveAccountResponse = z.object({
   name: z.string(),
   removed: z.boolean(),
-  /** When removed: removal does not revoke a copy a run took (09 §3a), so where to revoke it with the provider. */
+  /** When removed: removal does not revoke a copy a run took (09 §3a), and what revokes one (REVOKE). */
   notice: z.string().optional(),
 });
 export type RemoveAccountResponse = z.infer<typeof RemoveAccountResponse>;

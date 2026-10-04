@@ -7,6 +7,7 @@ import { afterEach, expect, test } from "vitest";
 import { CLI_VERSION_HEADER, MIN_CLI_VERSION, type QuotaReading, type RunRecord } from "@terros/sergeant-contracts";
 import type { QuotaAccount } from "@terros/sergeant-runner";
 import { accountRegistry } from "./accounts.ts";
+import { exposureNotice } from "./api-accounts.ts";
 import { apiHandler, type ApiControl } from "./api.ts";
 import type { Caller } from "./auth.ts";
 
@@ -203,4 +204,14 @@ test("an approver removes every account a person registered, and only theirs", a
   expect(await call("POST", "/v1/accounts/remove-person", "grace", { userId: "u-ada" })).toMatchObject({ status: 200, json: { removed: [] } });
   expect(await call("POST", "/v1/accounts/remove-person", undefined, { userId: "u-bob" })).toMatchObject({ status: 200, json: { removed: [{ id: "person:u-bob:claude" }] } });
   expect(stored()).toEqual([]);
+});
+
+// TECH-5200: OpenAI documents no revoke for a copied Codex auth.json, so the Codex notice must not
+// promise one (an earlier text said a ChatGPT session logout revoked it). This checks wording, not revocation.
+test("the Codex notice says no documented revoke exists rather than promising one", () => {
+  const notice = exposureNotice("codex-local", "codex");
+  expect(notice).toContain("OpenAI documents no way to revoke a copied Codex login");
+  expect(notice).toContain("which OpenAI does not say ends a copy");
+  expect(notice).not.toMatch(/revoke it with the provider|log out the session/);
+  expect(notice).toContain("`sgt account register codex --name codex` registers a new one in its place.");
 });

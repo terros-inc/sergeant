@@ -20,7 +20,9 @@ export function registrationRefusal(me: WhoAmI, provider: Provider): { code: Api
 }
 
 /**
- * After a sign-in made a credential that registering failed to keep: how to reuse or revoke it.
+ * After a sign-in made a credential that registering failed to keep: how to reuse or revoke it. A Codex
+ * login has no copy left here to revoke: sgt deleted its own, and `sgt account remove` removes one
+ * Sergeant stored and says what that leaves.
  * `refused`: the server refused it, before storing anything. Otherwise (unreachable, an unreadable
  * answer, the store failing) it may have been registered after all, and an account listed under the
  * name cannot say whether it is this one or the one it would have replaced. Registering under the
@@ -31,14 +33,14 @@ export function strandedNotice(provider: Provider, name: string, refused: boolea
   if (provider === "codex") {
     const relogin = `\`${again}\` signs in again`;
     return refused
-      ? `${name} was not registered. sgt deleted its copy of the Codex login, so it cannot be reused: ${relogin}. The login itself stays valid with OpenAI until you revoke it: ${REVOKE.codex}.`
-      : `sgt cannot tell whether ${name} was registered, and it deleted its copy of the Codex login, so revoke that login: ${REVOKE.codex}. ` +
-          `Then, once Sergeant answers, ${relogin} and replaces whatever ${name} holds.`;
+      ? `${name} was not registered. sgt deleted its copy of the Codex login and Sergeant stored none, so no copy of it is left: ${relogin}.`
+      : `sgt cannot tell whether ${name} was registered, and it deleted its copy of the Codex login. ` +
+          `Once Sergeant answers, ${relogin} and replaces whatever ${name} holds; to not use it at all, \`sgt account remove ${name}\`.`;
   }
   const pipe = `copy it from above and pipe it in, on a Mac: \`pbpaste | ${again}\``;
   return refused
     ? `${name} was not registered. The token \`claude setup-token\` just made stays valid for a year and sgt kept no copy. ` +
-        `To register it without making another, ${pipe}. Otherwise revoke it: ${REVOKE.claude}.`
+        `To register it without making another, ${pipe}; otherwise revoke it. ${REVOKE.claude}`
     : `sgt cannot tell whether ${name} was registered. Once Sergeant answers, register the same token again: ${pipe}. ` +
-        `Registering under ${name} replaces whatever it holds, so that is safe either way. To not use it at all, revoke it: ${REVOKE.claude}.`;
+        `Registering under ${name} replaces whatever it holds, so that is safe either way. To not use it at all, revoke it. ${REVOKE.claude}`;
 }
