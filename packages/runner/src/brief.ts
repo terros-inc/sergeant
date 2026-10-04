@@ -6,7 +6,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 // The Task section is the issue and every human comment verbatim; no comment is ever dropped
 // (the 48 KB inline bound with `sergeant-thread.md` is not built yet). Linked issues (TECH-5149) get
 // their own background section outside it, never part of what was asked.
-export const WORKER_RULES_VERSION = "s2-worker-rules/6";
+export const WORKER_RULES_VERSION = "s2-worker-rules/5";
 export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/4";
 
 export function renderTask(c: Conversation): string {
@@ -54,21 +54,6 @@ ${existingBranches.length ? existingBranches.map((b) => `  - ${b}`).join("\n") :
   update PRs, and read CI. It cannot push to or merge into the default branch or change workflow
   files.
 - Not available, by design: AWS, production, IAM/org/billing, Linear, Sergeant's control plane.
-
-## Understand existing work before you start
-
-This issue may already have work on it: from earlier runs, from another person's task before the
-issue was handed to its current assignee, or by hand. Before changing anything:
-
-- Read the issue description and every comment above, handoff notes and decisions included.
-- Find the existing PRs linked to the issue or identifiable from \`${id}\` (\`gh pr list --state all --search ${id}\`),
-  and the existing branches (\`git ls-remote --heads origin\`).
-- Read the relevant PRs' descriptions, discussion, review feedback, and diffs.
-- Decide what is finished, what remains, and whether earlier feedback was addressed.
-- Continue a suitable existing PR and branch when that fits. Open a replacement only for a concrete
-  reason, and say it in your report and the new PR's body.
-- History you need but cannot read (a PR, branch, or link you have no access to): name it in your
-  report rather than assuming you start from scratch.
 
 ## Rules (${WORKER_RULES_VERSION})
 

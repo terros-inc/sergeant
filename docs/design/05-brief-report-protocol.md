@@ -49,14 +49,6 @@ stored beside it so it can be replayed.
 - Human decisions already made: <question → answer, with comment link>
 - Notes from Sergeant: <anything else>
 
-## Understand existing work before you start   (TECH-5179: every worker, also after a handoff)
-- Read the description and every comment, handoff notes and decisions included
-- Find existing PRs linked to the issue or naming its identifier, and existing branches
-- Read their descriptions, discussion, review feedback, and diffs; decide what is finished, what
-  remains, and whether earlier feedback was addressed
-- Continue a suitable PR/branch; open a replacement only for a concrete reason, and explain it
-- Name history you need but cannot read instead of assuming a fresh start
-
 ## Environment
 - Repositories you may use (read and write): <slug — purpose — merge policy>
 - Other enrolled repositories (names only; ask if you need one): <slug — purpose>
