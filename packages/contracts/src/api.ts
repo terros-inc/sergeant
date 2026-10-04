@@ -171,3 +171,14 @@ export type RegisterAccountResponse = z.infer<typeof RegisterAccountResponse>;
 
 export const RemoveAccountResponse = z.object({ adapter: AccountAdapter, removed: z.boolean() });
 export type RemoveAccountResponse = z.infer<typeof RemoveAccountResponse>;
+
+/**
+ * Offboarding (TECH-5130): an approver removes every model account a person registered, by their
+ * Linear user id. Runs already on one finish on it; removing it does not revoke a copy.
+ */
+export const RemovePersonAccountsRequest = z.strictObject({ userId: z.string().trim().min(1, "a Linear user id is required").max(200) });
+export const RemovePersonAccountsResponse = z.object({
+  userId: z.string(),
+  removed: z.array(RunAccount.pick({ id: true, holder: true }).extend({ adapter: AccountAdapter })),
+});
+export type RemovePersonAccountsResponse = z.infer<typeof RemovePersonAccountsResponse>;

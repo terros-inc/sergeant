@@ -280,6 +280,18 @@ test("account register posts the credential read from stdin and prints the accou
   expect(list.out).toMatch(/person:u1:codex-local\s+registered\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
 });
 
+// TECH-5130: a three-word command, sending the person's Linear user id in the body.
+test("admin account remove-person posts the user id and says what it removed", async () => {
+  const { api, seen } = await fakeApi({
+    "POST /v1/accounts/remove-person": { json: { userId: "u1", removed: [{ id: "person:u1:codex-local", adapter: "codex-local", holder: "Ada Example <ada@example.com>" }] } },
+  });
+  const done = await sgt(api, "admin", "account", "remove-person", "u1");
+  expect(done).toMatchObject({ code: 0, out: expect.stringContaining("removed person:u1:codex-local (Ada Example <ada@example.com>)") });
+  expect(seen.map((s) => [s.method, s.url, JSON.parse(s.body)])).toEqual([["POST", "/v1/accounts/remove-person", { userId: "u1" }]]);
+  expect((await sgt(api, "admin", "account", "remove-person")).code).toBe(2);
+  expect((await sgt(api, "admin", "account")).code).toBe(2);
+});
+
 // TECH-5155: version skew between this sgt and the Sergeant it calls (contracts' skew.ts).
 test("an older Sergeant's answer without newer fields is still a success, printed as JSON after one warning", async () => {
   const account = { id: "person:u1:codex-local", group: "registered", holder: "Ada", adapter: "codex-local", mine: true };
