@@ -71,3 +71,8 @@ test("an unreadable history throws instead of admitting", async () => {
   await expect(linear({ assignee: ann, delegate: agent }, Response.json({ errors: [{ message: "Cannot query field 'toDelegate'" }] })).check()).rejects.toThrow(/toDelegate/);
   await expect(linear({ assignee: ann, delegate: agent }, new Response("unavailable", { status: 503 })).check()).rejects.toThrow(/503/);
 });
+
+test("a history page that claims more but gives no cursor fails closed instead of admitting from part of it", async () => {
+  const page = { data: { issue: { history: { nodes: [delegated(ann, 1)], pageInfo: { hasNextPage: true, endCursor: null } } } } };
+  await expect(linear({ assignee: ann, delegate: agent }, Response.json(page)).check()).rejects.toThrow(/no cursor/);
+});

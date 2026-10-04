@@ -44,6 +44,7 @@ export async function latestDelegation(request: Request, issueId: string, delega
   for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
     const { history }: z.infer<typeof delegationHistoryShape>["issue"] = (await request(delegationHistory, { id: issueId, after }, delegationHistoryShape)).issue;
     delegations.push(...history.nodes.filter((h) => h.toDelegate?.id === delegateId));
+    if (history.pageInfo.hasNextPage && !history.pageInfo.endCursor) throw new Error(`the history of ${issueId} has a next page but no cursor`);
     after = history.pageInfo.hasNextPage ? history.pageInfo.endCursor : null;
     if (!after) {
       const latest = delegations.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
