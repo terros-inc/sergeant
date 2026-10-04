@@ -35,7 +35,7 @@ test("the assignee who most recently delegated the issue owns it, read across ev
   // Bob delegated first; Ann undelegated it and delegated it again later, on the second page.
   const pages = [[delegated(ann, 9), delegated(bob, 2)], [{ createdAt: at(5), actor: ann, toDelegate: null }, delegated(bob, 1)]];
   const read = linear({ assignee: ann, delegate: agent }, pages);
-  expect(await read.check()).toEqual({ owner: ann });
+  expect(await read.check()).toEqual({ owner: ann, delegatedAt: at(9) });
   expect(read.reads).toEqual([null, "1"]);
 });
 
