@@ -8,8 +8,8 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 
 | Surface | Who calls it | Authentication | Where it listens |
 |---|---|---|---|
-| Internal API | `sgt admin` (over SSM, ADR-0027), operators on the host | host access | loopback |
-| Public API | `sgt` for humans | Linear OAuth bearer (ADR-0024/0028) | optional public listener; routes are a subset of the internal API |
+| Internal API | operator `sgt admin` commands (over SSM, ADR-0027), operators on the host | host access | loopback |
+| Public API | `sgt` for humans, including approvers' `sgt admin restart`, `update`, and `status` (TECH-5195) | Linear OAuth bearer (ADR-0024/0028) | optional public listener; routes are a subset of the internal API |
 | Webhooks | Linear, GitHub | provider signatures | public listener |
 | Runner API | runner adapters and the agents inside runs | run token | loopback (local adapters); not exposed for cloud adapters (§4) |
 | Sergeant's tools | Sergeant's reasoning | in-process | — (03 §4) |
@@ -34,6 +34,9 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | `GET /v1/accounts` | → model accounts (never credentials), whose, and the runs each paid for | — | yes | TECH-5113 |
 | `POST /v1/accounts/register` | `provider` (`claude` or `codex`), `name`, `credential` → account, quota read with it, and a `notice` that the account should be the person's Terros company seat, not a personal subscription (TECH-5129), that the credential is exposed to worker containers, and how to remove and rotate it (09 §3a) | stores the caller's own account in the registered-accounts secret, replacing theirs of that name | team members, as themselves | one per person and name (TECH-5196) |
 | `POST /v1/accounts/remove` | `name` → `removed` | removes the caller's own account of that name | team members, as themselves | idempotent |
+| `GET /v1/admin/status` | → this `serve`'s version and start time, the release `sergeant-update` last checked out, a request the host has not taken, and the host's latest restart or update outcome | — | approvers | TECH-5195; 404 off the Sergeant host |
+| `POST /v1/admin/restart` | → the request (`id`, `by`, `at`) | leaves one request file for the host (below); the host reruns `sergeant-update` on its current release, rereading the installation config, and restarts `serve` gracefully | approvers | one action at a time: `409` while a request waits or the latest outcome is running |
+| `POST /v1/admin/update` | `ref?` → the request | as restart, to `ref` (a commit on `main` whose `v2` check passed) or, without one, what the release channel would choose; a failed install reinstalls the previous release | approvers | as restart |
 | `POST /v1/pause` / `POST /v1/resume` | `reason` → state | writes `system_state.pause`; audit action | approvers | resume of a pause is idempotent |
 | `POST /v1/drain`, `POST /v1/drain/cancel` | owned drain token (ADR-0040, kept) | stop starting turns and runs; ready when no start or turn is mid-flight | no | deploys quiesce in seconds; runs survive restarts |
 | `GET /v1/review-quality` | `since?, by?` → metrics (06 §9) | — | yes | |
@@ -42,6 +45,16 @@ Failures return a typed error (`not_found`, `forbidden`, `gate_denied{rule, reas
 Every call that changes durable state or an external system is one action through the Gate; closing
 actions have ordered steps and are re-driven until complete (03 §10), so a failure can leave them
 pending, never half-forgotten. Drain and undrain are process-local controls, not actions.
+
+**Restart and update (TECH-5195).** `serve` runs nothing privileged for `/v1/admin`: it checks the
+caller is an approver, logs who asked, and creates one request file in its state directory
+atomically. The host's root automatic-update service (`deploy/host/sergeant-autoupdate.sh`, started by
+a systemd path unit and by its timer, never both at once) takes the request, validates it again,
+resolves and checks the ref against GitHub, and runs the same `sergeant-update` an automatic update
+does, with the same rollback and `autoupdate-failed` handling. It writes the outcome (who asked, the
+reason, and on failure the update's last output) to a root-owned result file that `GET
+/v1/admin/status` reads back; `sgt admin restart` and `update` wait on it. No person needs AWS
+access, and the instance role is unchanged. These are host operations, not Gate actions.
 
 **Client versions (TECH-5185).** There is no compatibility between versions of `sgt` (or `sgt-mcp`)
 and the hosted `serve`: people keep their CLI current. Every client request names the client's own
@@ -118,7 +131,8 @@ budget fallback comment      if no turn produced the ask within 10 min of exhaus
 
 ## 7. CLI
 
-Human commands use the human's Linear login; admin commands use AWS credentials for the
+Human commands use the human's Linear login, and so do approvers' `sgt admin restart`, `update`,
+and `status` (TECH-5195). The other installation admin commands use AWS credentials for the
 installation (unchanged from S1).
 
 ```
@@ -136,6 +150,7 @@ sgt account list | register <claude|codex> [--name <name>] | remove <name>
 sgt review quality [--since 30d] [--by category|provider|mode]
 
 sgt pause --reason "…" | sgt resume                  # approvers
+sgt admin restart | update [<ref>] | status          # approvers: restart or update the host, wait for the outcome
 
 # installation administration (AWS credentials), unchanged mechanisms
 sgt init <installation> [--bootstrap | --check]
@@ -143,10 +158,11 @@ sgt config show | diff | set <installation> …
 sgt config repo add | set | enable | disable | remove | list <installation> …
 sgt config claude-profile <installation> <name>      # token on stdin
 sgt doctor [repo <slug>]
-sgt admin status | health | logs | exec | restart | drain | undrain <installation>
+sgt admin health | logs | exec | drain | undrain <installation>
 ```
 
-Hosts update themselves from green commits of `main` (10 §6), so there is no `sgt admin upgrade`.
+Hosts update themselves from green commits of `main` (10 §6); `sgt admin update` moves one sooner,
+or pins it, through the same `sergeant-update` (§2).
 
 Removed from S1: `sgt tool …` (capability/tool authorization), phase, wait, all grant commands,
 repo-scope, fresh-run, retry, rethink, decision-answer commands, and safety governor views. Budget

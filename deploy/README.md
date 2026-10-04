@@ -308,8 +308,11 @@ sgt admin status           # the release, when serve started, and the last resta
 
 `restart` and `update` each print the outcome when the host has one, including why it failed, waiting
 out serve's restart (up to 45 minutes). `serve` runs nothing privileged: it logs who asked and leaves
-one request, `/var/lib/sergeant/state/admin-request.json`, which a second request cannot replace
-until the host takes it (409). `sergeant-autoupdate.path` starts the same `sergeant-autoupdate`
+one request, `/var/lib/sergeant/state/admin-request.json`. One action at a time: another request is
+refused (409) while that one waits or the host's latest outcome is still running (an outcome left
+running by a host that stopped mid-update is marked interrupted by the next tick, within 10 minutes).
+The host keeps only its latest outcome, so if an automatic update replaces yours before `sgt` reads
+it, `sgt` says so and exits 1. `sergeant-autoupdate.path` starts the same `sergeant-autoupdate`
 service the timer does, as root, so a request never overlaps a tick. It removes the request, checks it
 again, and runs `sergeant-update`: on the release the host is on for `restart`, so `install.sh`
 rereads the config and restarts `serve`, or on the commit for `update`, resolved and checked against

@@ -347,4 +347,11 @@ test("admin update waits through serve's restart for the host's outcome, and a f
   expect(failed.code).toBe(1);
   expect(failed.out).toBe("failed: update to bbb failed; reinstalled aaa\n\nlast lines of the update's output:\nserve is not healthy at /health\n");
   expect((await sgt(api, "admin", "update", "a", "b")).code).toBe(2);
+
+  // A later action, or an automatic update, replaced the outcome before sgt read it: say so, never wait it out.
+  statuses = [status(running), status({ action: "automatic", by: "the release channel (main)", outcome: "running", message: "updating bbb to ccc", startedAt: "2026-10-04T10:20:00Z" })];
+  const replaced = await sgtWith(noWait, api, "admin", "update", "v2.1.0");
+  expect(replaced.code).toBe(1);
+  expect(replaced.err).toContain("sgt: conflict: the host took your update (req-1), but automatic by the release channel (main) replaced its outcome before sgt read it");
+  expect(statuses).toEqual([]);
 });

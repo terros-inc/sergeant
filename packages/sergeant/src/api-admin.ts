@@ -14,8 +14,9 @@ import { callerName, type Caller } from "./auth.ts";
 
 // `/v1/admin` (TECH-5195, contracts' admin.ts): an approver restarts or updates the Sergeant host. serve
 // runs nothing privileged and changes nothing itself: it records who asked in its log and leaves one
-// request file in its state directory, created atomically and never replaced, so a second request
-// waits for the first to be taken. The host's automatic-update service (sergeant-autoupdate.path and
+// request file in its state directory, created atomically and never replaced. One action at a time: a
+// request is refused while another waits to be taken or the host's latest outcome is still running,
+// so the outcome a waiting `sgt` reads is not replaced by a request it never saw coming. The host's automatic-update service (sergeant-autoupdate.path and
 // .sh, deploy/README.md) takes it as root, checks it again, runs `sergeant-update`, and writes the
 // outcome to a root-owned file this route reads back. The restart is serve's ordinary graceful stop.
 
@@ -52,6 +53,10 @@ export async function adminRoute(
 }
 
 async function hand(admin: HostAdmin, what: Pick<AdminRequest, "action" | "ref">, caller: Caller, log: (line: string) => void): Promise<AdminRequestResponse> {
+  const busy = await readJson(admin.resultFile, AdminResult);
+  if (busy?.outcome === "running") {
+    throw new Refusal(409, "conflict", `the host is still running ${busy.action} by ${busy.by}, since ${busy.startedAt}: see \`sgt admin status\``);
+  }
   const by = caller.kind === "linear" ? `${caller.user.name} <${caller.user.email}>` : callerName(caller);
   const request: AdminRequest = { id: randomUUID(), ...what, by, at: new Date().toISOString() };
   // Written whole, then linked into place: the host never reads half a request, and link refuses to replace one.

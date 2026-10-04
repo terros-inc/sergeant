@@ -112,3 +112,16 @@ test("off the Sergeant host there is nothing to restart or update", async () => 
   expect((await call("POST", "/v1/admin/restart", "grace", {})).status).toBe(404);
   expect(await readdir(dir)).toEqual([]);
 });
+
+// The host keeps one outcome: while A runs, B is refused, so A's waiting `sgt` reads A's outcome, not B's.
+test("while the host still runs one action, another is refused and nothing is left for the host", async () => {
+  const { call, admin } = await serve();
+  const a = (await call("POST", "/v1/admin/restart", "grace", {})).json.request;
+  // The host takes A: it removes the request and records A running.
+  await rm(admin.requestFile);
+  await writeFile(admin.resultFile, JSON.stringify({ id: a.id, action: "restart", by: a.by, outcome: "running", message: "taken by the host", startedAt: "2026-10-04T10:00:01Z" }));
+  const b = await call("POST", "/v1/admin/update", "grace", {});
+  expect(b.status).toBe(409);
+  expect(b.json.error.message).toBe("the host is still running restart by Grace Example <grace@example.com>, since 2026-10-04T10:00:01Z: see `sgt admin status`");
+  expect(await readdir(dir)).toEqual(["admin-result.json"]);
+});

@@ -158,5 +158,7 @@ sgt admin status           # its release, when it last restarted, and the last r
   Sergeant is unreachable for part of it; that is expected and waited out.
 - The restart is graceful: Sergeant stops taking new work, ends each task at its next poll (up to 15
   minutes), and leaves running workers and reviewers running; the new process picks them up.
-- One request at a time: a second one is refused until the host takes the first. Every request, and
+- One action at a time: another is refused until the host has finished the first. The host keeps only
+  its latest outcome, so if an automatic update starts before `sgt` reads yours, `sgt` says so (exit 1)
+  instead of waiting. Every request, and
   who made it, is logged on the host. An update that fails to install puts back the previous release.

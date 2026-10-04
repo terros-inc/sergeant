@@ -298,7 +298,7 @@ async function adminRequest(ctx: Context, action: "restart" | "update", body: { 
   ctx.io.err(`${action}${request.ref ? ` to ${request.ref}` : ""} requested (${request.id}); waiting for the host\n`);
   const sleep = ctx.io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const read = () => client(ctx).call("GET", "/v1/admin/status", AdminStatus);
-  const outcome = settle(ctx, await waitForOutcome(request.id, read, { sleep, say: (line) => ctx.io.err(`${line}\n`), now: Date.now }));
+  const outcome = settle(ctx, await waitForOutcome(request, read, { sleep, say: (line) => ctx.io.err(`${line}\n`), now: Date.now }));
   print(ctx, { request, outcome }, () => showOutcome(outcome));
   if (outcome.outcome === "failed") throw new Failure(outcome.message);
 }
