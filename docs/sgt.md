@@ -29,11 +29,11 @@ symlink is already there, it stops and says so. If it says the directory is not 
 the line it prints to your shell profile (`~/.zshrc` or `~/.bashrc`) and open a new terminal. Then
 `sgt --version` should print a version.
 
-**Update** from the same checkout; the wrapper picks up the new code by itself:
-
-```sh
-git pull && pnpm install
-```
+**Update** with `sgt update`: it fast-forwards the checkout to `main` and runs `pnpm install`, and the
+wrapper picks up the new code by itself. Keep `sgt` current: there is no compatibility with older
+versions, so when the installation needs a newer `sgt`, every command stops with "Your sgt is older
+than this Sergeant server supports. Run `sgt update`." `sgt update` only fast-forwards `main`: if the
+checkout is on another branch or has commits `main` lacks, it says so and changes nothing.
 
 ## 3. Point it at your installation
 
@@ -83,7 +83,7 @@ sgt run report <run>                           # the run's Markdown report
 
 - `--json` prints JSON for scripts and `jq`: the API's own JSON for most commands, `{"report": "…"}`
   for `run report`, `{"api","signedOut"}` for `logout`, and errors as `{"error":{"code","message"}}`.
-- `sgt --help` lists every command, including `run cancel <run> [--reason …]`.
+- `sgt --help` lists every command, including `run cancel <run> [--reason …]` and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
 - MCP: `node <repo>/packages/mcp/src/sgt-mcp.ts` is a read-only MCP server over stdio, but it sends
   no login yet, so it only works on the Sergeant host itself ([README](../README.md#the-mcp-server)).

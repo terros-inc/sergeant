@@ -3,7 +3,7 @@ import { chmod, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/pro
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { versionHeaders } from "@terros/sergeant-contracts";
+import { MIN_CLI_HEADER, MIN_CLI_VERSION } from "@terros/sergeant-contracts";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { main, type Io } from "./cli.ts";
 import { TOKEN_URL } from "./login.ts";
@@ -23,7 +23,7 @@ afterEach(async () => {
   await rm(config, { recursive: true, force: true });
 });
 
-// A route's `headers` replace the version headers of a Sergeant at this client's own contract.
+// A route's `headers` replace those of a Sergeant that supports this sgt and no newer minimum.
 async function fakeApi(routes: Record<string, { status?: number; json?: unknown; text?: string; headers?: Record<string, string> }>) {
   const seen: Seen[] = [];
   server = createServer((req, res) => {
@@ -32,7 +32,7 @@ async function fakeApi(routes: Record<string, { status?: number; json?: unknown;
     req.on("end", () => {
       seen.push({ method: req.method ?? "", url: req.url ?? "", body, contentType: req.headers["content-type"], authorization: req.headers.authorization });
       const route = routes[`${req.method} ${req.url}`] ?? { status: 404, json: { error: { code: "not_found", message: `no ${req.url}` } } };
-      res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...(route.headers ?? versionHeaders("test")) });
+      res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...(route.headers ?? { [MIN_CLI_HEADER]: MIN_CLI_VERSION }) });
       res.end(route.text ?? JSON.stringify(route.json));
     });
   });
@@ -49,7 +49,8 @@ async function sgt(api: string, ...argv: string[]) {
 async function sgtWith(io: Partial<Io>, api: string, ...argv: string[]) {
   let out = "";
   let err = "";
-  const code = await main(argv, { env: { SGT_API_URL: api, XDG_CONFIG_HOME: config, SGT_LOGIN_PORT: "0" }, out: (t) => (out += t), err: (t) => (err += t), ...io });
+  const env = { SGT_API_URL: api, XDG_CONFIG_HOME: config, SGT_LOGIN_PORT: "0" };
+  const code = await main(argv, { env, version: `${MIN_CLI_VERSION}+test`, out: (t) => (out += t), err: (t) => (err += t), ...io });
   return { code, out, err };
 }
 
@@ -110,7 +111,7 @@ test("run show prints the run's account, provider and quota, and --json keeps th
 });
 
 test("task cancel requires a reason before calling the API, then posts it as JSON with a request id", async () => {
-  const { api, seen } = await fakeApi({ "POST /v1/tasks/UNF-12/cancel": { json: { ref: "UNF-12", undelegated: true, stopping: [] } } });
+  const { api, seen } = await fakeApi({ "POST /v1/tasks/UNF-12/cancel": { json: { ref: "UNF-12", undelegated: true, stopping: [], closedPullRequests: [] } } });
 
   const missing = await sgt(api, "task", "cancel", "UNF-12");
   expect(missing.code).toBe(2);
@@ -124,13 +125,11 @@ test("task cancel requires a reason before calling the API, then posts it as JSO
   expect(JSON.parse(seen[0]?.body ?? "")).toEqual({ reason: "wrong approach", requestId: expect.stringMatching(/^[\w-]+$/) });
 });
 
-// An operator must see which worker PRs a cancel closed without opening Linear, and a Sergeant that
-// predates the field must still answer in contract.
-test("task cancel lists the PRs the cancel closed, and reads an answer without them", async () => {
+// An operator must see which worker PRs a cancel closed without opening Linear.
+test("task cancel lists the PRs the cancel closed", async () => {
   const pr = { repo: "terros-inc/sergeant", number: 7, url: "https://github.com/terros-inc/sergeant/pull/7" };
   const { api } = await fakeApi({
     "POST /v1/tasks/UNF-12/cancel": { json: { ref: "UNF-12", undelegated: true, stopping: [], closedPullRequests: [pr] } },
-    "POST /v1/tasks/UNF-13/cancel": { json: { ref: "UNF-13", undelegated: false, stopping: [] } },
     "POST /v1/tasks/UNF-15/cancel": { json: { ref: "UNF-15", undelegated: true, stopping: [], closedPullRequests: [] } },
     "POST /v1/tasks/UNF-14/cancel": { json: { ref: "UNF-14", undelegated: true, stopping: ["run_w1"], closedPullRequests: [] } },
   });
@@ -146,12 +145,6 @@ test("task cancel lists the PRs the cancel closed, and reads an answer without t
 
   const none = await sgt(api, "task", "cancel", "UNF-15", "--reason", "wrong approach");
   expect(none.out).toBe("UNF-15 canceled: Sergeant's delegation is removed and no run of it is running\nno open worker PR to close\n");
-
-  // An older answer says nothing of PRs: the CLI cannot know none was closed, and --json adds nothing.
-  const old = await sgt(api, "task", "cancel", "UNF-13", "--reason", "wrong approach");
-  expect(old).toMatchObject({ code: 0, out: "UNF-13 canceled: Sergeant was already not delegated and no run of it is running\n" });
-  const oldJson = await sgt(api, "--json", "task", "cancel", "UNF-13", "--reason", "wrong approach");
-  expect(JSON.parse(oldJson.out)).toStrictEqual({ ref: "UNF-13", undelegated: false, stopping: [] });
 
   const stopping = await sgt(api, "task", "cancel", "UNF-14", "--reason", "wrong approach");
   expect(stopping).toMatchObject({ code: 0, out: expect.stringContaining("Sergeant keeps canceling: run_w1") });
@@ -292,38 +285,29 @@ test("admin account remove-person posts the user id and says what it removed", a
   expect((await sgt(api, "admin", "account")).code).toBe(2);
 });
 
-// TECH-5155: version skew between this sgt and the Sergeant it calls (contracts' skew.ts).
-test("an older Sergeant's answer without newer fields is still a success, printed as JSON after one warning", async () => {
-  const account = { id: "person:u1:codex-local", group: "registered", holder: "Ada", adapter: "codex-local", mine: true };
-  const registered = { account, replaced: false, quota: { adapter: "codex-local", readAt: "t" } };
-  const { taskStart: _, ...budget } = detail.budget;
-  // An older server: no version headers, no `notice` (TECH-5159), no `budget.taskStart` (TECH-5161).
+// TECH-5185: no compatibility between sgt and the API, only the oldest sgt the server supports.
+test("an sgt older than its Sergeant supports stops and says to update; one newer than it warns", async () => {
   const { api } = await fakeApi({
-    "POST /v1/accounts/codex-local/register": { json: registered, headers: {} },
-    "GET /v1/tasks/UNF-12": { json: { ...detail, budget }, headers: {} },
+    "GET /v1/tasks/UNF-12": { json: detail },
+    "GET /v1/whoami": { json: { error: { code: "unauthorized", message: "no login" } }, status: 401 },
+    "GET /v1/tasks": { json: { tasks: [] }, headers: { [MIN_CLI_HEADER]: "2.0.5" } },
+    "GET /v1/runs": { json: { runs: [] }, headers: {} },
   });
+  const tooOld = "Your sgt is older than this Sergeant server supports. Run `sgt update`.";
 
-  const done = await sgtWith({ stdin: async () => "secret\n" }, api, "account", "register", "codex-local");
-  expect(done.code).toBe(0);
-  expect(JSON.parse(done.out)).toEqual(registered);
-  const warnings = done.err.split("\n").filter(Boolean);
-  expect(warnings).toEqual([
-    expect.stringMatching(/^sgt: warning: Sergeant at .* predates API contract reporting, so it is older than this client/),
-    expect.stringMatching(/answered POST \/v1\/accounts\/codex-local\/register without notice: it did what was asked, but it is older than this sgt/),
-  ]);
+  // Whatever the API answered, a refusal too: it no longer supports this sgt, and an unknown version is no exception.
+  for (const [version, command] of [["2.0.4+aaaaaaa", ["task", "list"]], ["0.0.0+unknown", ["task", "show", "UNF-12"]], ["0.0.0+unknown", ["whoami"]]] as const) {
+    expect(await sgtWith({ version }, api, ...command)).toEqual({ code: 1, out: "", err: `sgt: bad_request: ${tooOld}\n` });
+  }
+  const json = await sgtWith({ version: "0.0.0+unknown" }, api, "--json", "task", "show", "UNF-12");
+  expect(JSON.parse(json.out)).toEqual({ error: { code: "bad_request", message: tooOld } });
 
-  const shown = await sgt(api, "task", "show", "UNF-12");
-  expect(shown.code).toBe(0);
-  expect(JSON.parse(shown.out)).toEqual({ ...detail, budget });
-  expect(shown.err).toContain("without budget.taskStart");
-});
-
-test("a newer Sergeant's contract is warned of once, and its extra fields do not stop the command", async () => {
-  const newer = { ...versionHeaders("2.9.0+bbbbbbb"), "Sergeant-Api-Contract": "0123456789ab" };
-  const { api } = await fakeApi({ "GET /v1/tasks/UNF-12": { json: { ...detail, addedLater: { by: "a newer server" } }, headers: newer } });
-
-  const shown = await sgt(api, "task", "show", "UNF-12");
-  expect(shown.code).toBe(0);
-  expect(shown.out).toContain("UNF-12  active  Fix the login");
-  expect(shown.err).toMatch(/^sgt: warning: Sergeant at .* \(2\.9\.0\+bbbbbbb\) serves a different API contract than this client \(.*\): fields one side added are missing or ignored on the other\. Update this client \(git pull\) or redeploy Sergeant so they match\.\n$/);
+  // A Sergeant whose minimum is below this sgt's, or that predates saying one, lacks a change this sgt needs.
+  const newer = await sgtWith({ version: "2.0.5+aaaaaaa" }, api, "task", "list");
+  expect(newer).toEqual({
+    code: 0,
+    out: "no tasks\n",
+    err: `sgt: warning: Sergeant at ${api} is older than this sgt (it supports sgt 2.0.5 and later; this sgt needs one that supports ${MIN_CLI_VERSION}), so commands may fail until it is redeployed\n`,
+  });
+  expect((await sgt(api, "run", "list")).err).toContain("does not say which sgt it supports");
 });

@@ -106,10 +106,9 @@ export const CancelTaskResponse = z.object({
   stopping: z.array(RunId),
   /**
    * The task's worker PRs its stop closed so far, across every drive of it. PRs are closed only once
-   * every run is stopped, so more may follow while `stopping` is not empty. Absent from a Sergeant
-   * that predates TECH-4995, which may still have closed PRs: absent is unknown, not none.
+   * every run is stopped, so more may follow while `stopping` is not empty.
    */
-  closedPullRequests: z.array(ClosedPullRequest).optional(),
+  closedPullRequests: z.array(ClosedPullRequest),
 });
 export type CancelTaskResponse = z.infer<typeof CancelTaskResponse>;
 
