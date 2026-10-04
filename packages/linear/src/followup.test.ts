@@ -75,7 +75,7 @@ test("createFollowupIssue files in Backlog, assigned to the origin's owner, and 
           return Response.json({ data: { issue: { id: "origin-1", ...origin, team: { id: "team-1", states: { nodes: workflow } }, project: null } } });
         }
         if (query.includes("SergeantDelegationHistory")) {
-          return history instanceof Response ? history : Response.json({ data: { issue: { history: { nodes: history } } } });
+          return history instanceof Response ? history : Response.json({ data: { issue: { history: { nodes: history, pageInfo: { hasNextPage: false, endCursor: null } } } } });
         }
         if (query.includes("issueCreate")) {
           created.push(variables.input ?? {});
@@ -88,12 +88,12 @@ test("createFollowupIssue files in Backlog, assigned to the origin's owner, and 
     return created[0];
   };
   const sergeant = { id: "sergeant-user" };
-  const delegatedBy = (actor: { id: string } | null, minute: number) => ({ createdAt: at(minute), actor, toDelegate: sergeant });
+  const delegatedBy = (actor: { id: string } | null, minute: number) => ({ createdAt: at(minute), actor: actor && { name: actor.id, ...actor }, toDelegate: sergeant });
 
   // Assigned to X: Backlog, assigned to X, even when someone else delegated it.
   expect(await fileFor({ assignee: { id: "x" }, delegate: sergeant }, [delegatedBy({ id: "d" }, 1)])).toMatchObject({ stateId: "s-backlog", assigneeId: "x" });
   // No assignee: the human whose delegation to Sergeant is the latest.
-  const history = [delegatedBy({ id: "earlier" }, 1), delegatedBy({ id: "d" }, 3), { createdAt: at(4), actor: { id: "other" }, toDelegate: null }];
+  const history = [delegatedBy({ id: "earlier" }, 1), delegatedBy({ id: "d" }, 3), { createdAt: at(4), actor: { id: "other", name: "Other" }, toDelegate: null }];
   expect(await fileFor({ assignee: null, delegate: sergeant }, history)).toMatchObject({ stateId: "s-backlog", assigneeId: "d" });
   expect(logs).toEqual([]);
   // No assignee and no human delegator (none in history, an automation, or Sergeant itself): unassigned, still Backlog.
@@ -101,7 +101,7 @@ test("createFollowupIssue files in Backlog, assigned to the origin's owner, and 
     const filed = await fileFor({ assignee: null, delegate: sergeant }, h);
     expect(filed).toMatchObject({ stateId: "s-backlog" });
     expect(filed).not.toHaveProperty("assigneeId");
-    expect(logs.splice(0)).toEqual([`warning: no human delegator of origin-1 in its first ${h.length} history entries, follow-up left unassigned`]);
+    expect(logs.splice(0)).toEqual(["warning: no human delegator of origin-1 in its history, follow-up left unassigned"]);
   }
   // Not delegated at all: there is no delegator to look for, so nothing to warn about.
   expect(await fileFor({ assignee: null, delegate: null })).not.toHaveProperty("assigneeId");

@@ -17,33 +17,23 @@ export type ContainerRunnerOptions = {
   /** The model each role runs on each adapter; each run is a new agent session in a new container. */
   models: Record<Role, Record<Adapter, string>>;
   /**
-   * The agent CLI per role (TECH-5009). A role not named here runs Claude Code. With `quota`, this is
-   * the fallback when a provider's quota is unknown.
+   * The agent CLI per role (TECH-5009): the provider whose account runs first when no account's quota
+   * can be read. A role not named here prefers Claude Code.
    */
   adapters?: Partial<Record<Role, Adapter>>;
   /**
-   * Live quota per model account (TECH-5117, TECH-5113). With it and more than one account, each
-   * launch picks its provider and account from quota read just before it (`accounts.ts`, `choose.ts`)
-   * and records the readings on the run.
+   * Live quota per model account (TECH-5117). With it, each launch picks among the task owner's
+   * accounts from quota read just before it (`accounts.ts`, `choose.ts`) and records the readings.
    */
   quota?: ReadQuota;
   /**
-   * The installation's own Claude worker token, its first Claude account (`installation-claude`). A
-   * Claude account's credential enters only that run's Claude Code container, always and only as
-   * `CLAUDE_CODE_OAUTH_TOKEN`. There is deliberately no generic environment input.
+   * The model accounts a person registered (TECH-5179), read at each launch for the task owner's Linear
+   * user id: the only accounts that person's tasks may run on. A Claude account's credential enters
+   * only that run's Claude Code container, as `CLAUDE_CODE_OAUTH_TOKEN`; a Codex account's, only its
+   * Codex container, as `CODEX_CREDENTIAL`. There is deliberately no generic environment input. A
+   * failed read throws, and the start fails: an unreadable list is never taken as an empty one.
    */
-  claudeOAuthToken: string;
-  /**
-   * The installation's own Codex credential (`auth.json` JSON or an OpenAI API key), its first Codex
-   * account (`installation-codex`), required when a role runs `codex-local`. A Codex account's
-   * credential enters only that run's Codex container, only as `CODEX_CREDENTIAL`.
-   */
-  codexCredential?: string;
-  /**
-   * The installation's further model accounts (TECH-5113), read at each launch: the owner's own, then
-   * those people registered, in that order. Never throws: an unreadable list is an empty one.
-   */
-  accounts?: () => Promise<ModelAccount[]>;
+  accounts: (ownerId: string) => Promise<ModelAccount[]>;
   /**
    * Mints each run's GitHub token from the worker App, scoped to the run's repositories. A worker's
    * write token is its only GitHub credential and enters its container as `GH_TOKEN`; a reviewer's

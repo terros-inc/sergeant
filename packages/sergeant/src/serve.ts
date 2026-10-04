@@ -46,8 +46,8 @@ const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"))
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
 
 const installation = await connect(config, repositories);
-// The installation's own model accounts, the config's further ones, then people's registered ones (TECH-5113).
-const accounts = modelAccounts(config, installation, (line) => console.log(`[${new Date().toISOString()}] ${line}`));
+// People's registered model accounts: a task's runs use only its owner's (TECH-5179).
+const accounts = modelAccounts(config, (line) => console.log(`[${new Date().toISOString()}] ${line}`));
 // The reasoning CLI inherits this process's environment: with the token set it authenticates as
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;

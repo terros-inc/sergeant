@@ -76,7 +76,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: ["run_worker", "run_review"], recentTurns: [] }));
 
   let live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -93,6 +93,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => live,
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
         postComment: async (c) => void comments.push(c),
         createFollowupIssue: async (req) => (filed.push(req.key), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
@@ -161,7 +162,7 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_worker", "run_review"], recentTurns: [] }));
   const mergedSha = "c".repeat(40);
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Done", stateType: "completed", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Done", stateType: "completed", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -172,7 +173,7 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
+      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async () => ({ ...pr, state: "merged", mergedSha }),
         closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("already merged"); },
@@ -203,7 +204,7 @@ test("a PR Linear links with no worker report is still polled, and its checks ch
   // is linked too but merged by someone else, so it is not taken for this task's merge.
   dir = await mkdtemp(join(tmpdir(), "sergeant-loop-test-"));
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }, { repo: "other/repo", number: 1 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }, { repo: "other/repo", number: 1 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -217,7 +218,7 @@ test("a PR Linear links with no worker report is still polled, and its checks ch
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
+      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async (r, n) => (read.push(`${r}#${n}`), n === 7 ? { ...pr, checks } : other),
         closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); },
@@ -255,7 +256,7 @@ test.each([
     [8, { ...pr, number: 8, url: `https://github.com/${repo}/pull/8`, body: "Fixes UNF-1" }],
   ]);
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -269,7 +270,7 @@ test.each([
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
+      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async (_repo, number) => prs.get(number)!,
         closePullRequest: async () => {}, mergePullRequest: async ({ number }) => {

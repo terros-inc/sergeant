@@ -7,6 +7,7 @@ import {
   checkSend,
   checkStart,
   commentIdFor,
+  NoModelAccount,
   conversationRevision,
   issueRevision,
   type FiledFollowup,
@@ -21,6 +22,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { answeredBudgetQuestion } from "./budget.ts";
+import { accountRefusal, notOwned, type TaskOwner } from "./owner.ts";
 import { ownQuestion, questionComment, questionKey } from "./question.ts";
 
 export type Ports = {
@@ -46,6 +48,16 @@ export type Ports = {
   exclusive?: <T>(step: () => Promise<T>) => Promise<T>;
   /** Best-effort progress line (e.g. moving the issue to In Progress). No-op when absent. */
   log?: (line: string) => void;
+  /**
+   * The task's owner (TECH-5179, owner.ts), set by the loop once the task is admitted: every run uses
+   * only their model accounts. Without one, no run starts.
+   */
+  owner?: TaskOwner;
+  /**
+   * Records the task's handoff stop (cancel.ts) when an effect finds the episode no longer its owner's
+   * (TECH-5179); the loop's stop path then cancels its runs and keeps its PRs.
+   */
+  handoff?: (reason: string) => Promise<void>;
 };
 
 export type ActionOutcome =
@@ -67,7 +79,13 @@ export type ActionOutcome =
       /** GitHub explicitly refused the merge by repository policy. */
       refused?: RefusedMerge;
     }
-  | { action: ProposedAction; status: "failed"; error: string };
+  | {
+      action: ProposedAction;
+      status: "failed";
+      error: string;
+      /** A refusal comment Linear did not accept: the loop posts it again every poll until it does. */
+      unposted?: { issueId: string; key: string; body: string };
+    };
 
 /**
  * Performs one proposed action if the Gate allows it. This is the only path from reasoning to an
@@ -88,6 +106,9 @@ export async function execute(action: ProposedAction, situation: SituationReport
     switch (action.kind) {
       case "start_worker":
       case "start_reviewer": {
+        const { owner } = ports;
+        const payer = owner && { id: owner.id, name: owner.name };
+        if (!owner || !payer) return denied({ rule: "O1", reason: "the task has no admitted owner to pay for its runs (TECH-5179)" });
         const exclusive = ports.exclusive ?? ((step) => step());
         return await exclusive(async (): Promise<ActionOutcome> => {
           // Delegation, the issue's linked PRs, and who opened a reviewer's subject PRs come from live
@@ -99,6 +120,14 @@ export async function execute(action: ProposedAction, situation: SituationReport
           ]);
           const active = checkLive(issue, ports.agentUserId);
           if (!active.allowed) return denied(active);
+          // The issue reassigned, or Linear's history showing a newer or someone else's delegation, since
+          // the task was admitted, reread here at the effect: nothing starts and the task is handed off
+          // (owner.ts). Unreadable history throws, so nothing starts either.
+          const moved = await notOwned(owner, issue, ports);
+          if (moved) {
+            await ports.handoff?.(moved);
+            return denied({ rule: "O1", reason: moved });
+          }
           const verdict = checkStart(action, {
             runs,
             enrolledRepositories,
@@ -116,6 +145,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
             action.kind === "start_worker"
               ? {
                   runId,
+                  owner: payer,
                   role: "worker",
                   conversation,
                   repositories: action.repositories,
@@ -124,6 +154,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
                 }
               : {
                   runId,
+                  owner: payer,
                   role: "reviewer",
                   conversation,
                   repositories: [...new Set(action.subject.map((s) => s.repo))],
@@ -146,6 +177,18 @@ export async function execute(action: ProposedAction, situation: SituationReport
             }
           }
           return { action, status: "done", result: { runId }, started };
+        }).catch(async (e: unknown) => {
+          // Nothing started: the owner is told once per condition what to fix (owner.ts), retried until
+          // Linear accepts it.
+          if (!(e instanceof NoModelAccount)) throw e;
+          const refusal = accountRefusal(conversation.issue.id, owner, e);
+          const comment = { issueId: conversation.issue.id, ...refusal };
+          const unposted = await ports.linear.postComment(comment).then(
+            () => undefined,
+            (p: Error) => p,
+          );
+          if (unposted) return { action, status: "failed", error: `${e.message}; its refusal comment was not posted: ${unposted.message}`, unposted: comment };
+          return denied({ rule: "O2", reason: e.message });
         });
       }
       case "send_run": {
@@ -194,6 +237,13 @@ export async function execute(action: ProposedAction, situation: SituationReport
           },
         );
         if (!verdict.allowed) return denied(verdict);
+        // TECH-5179: the work merges only while the episode is still its owner's, read live as for a
+        // start; otherwise the task is handed off and the PR kept for the new assignee.
+        const moved = ports.owner && (await notOwned(ports.owner, live.issue, ports));
+        if (moved) {
+          await ports.handoff?.(moved);
+          return denied({ rule: "O1", reason: moved });
+        }
         const result = await ports.github.mergePullRequest(action);
         if ("refused" in result) {
           // Repository policy, not a fault. The loop gives it the same one bounded re-check as a

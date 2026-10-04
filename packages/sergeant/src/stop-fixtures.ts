@@ -25,7 +25,7 @@ export const pr = (number: number, author = "sergeant-worker[bot]"): PullRequest
   humanFeedback: [],
 });
 export const issue = (stateType: string, state: string): Conversation => ({
-  issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state, stateType, delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+  issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state, stateType, delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
   humanComments: [],
   agentComments: [],
 });
@@ -46,7 +46,16 @@ export function fakes(live: { conversation: Conversation }) {
     undelegate: async () => void (live.conversation.issue.delegate = null),
     linear: {
       readConversation: async () => structuredClone(live.conversation),
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
+      moveIssueToTodo: async () => {
+        const { issue } = live.conversation;
+        if (issue.stateType !== "started") return { moved: false as const };
+        const from = issue.state;
+        Object.assign(issue, { state: "Todo", stateType: "unstarted" });
+        return { moved: true as const, from, to: "Todo" };
+      },
+      undelegate: async () => void (live.conversation.issue.delegate = null),
       postComment: async ({ key, body }) => {
         seen.commentAttempts.push(key);
         if (!seen.comments.some((comment) => comment.key === key)) seen.comments.push({ key, body });

@@ -30,7 +30,7 @@ afterEach(async () => {
 
 function fakes(runs: RunRecord[] = []) {
   const conversation: Conversation = {
-    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Fix the login", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
+    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Fix the login", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
     humanComments: [],
     agentComments: [],
   };
@@ -46,6 +46,7 @@ function fakes(runs: RunRecord[] = []) {
     },
     linear: {
       readConversation: async (id) => (id === "UNF-1" ? conversation : Promise.reject(new Error(`no ${id}`))),
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
       postComment: async ({ key, body }) => void comments.push({ key, body }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),

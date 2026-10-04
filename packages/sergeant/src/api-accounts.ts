@@ -14,9 +14,9 @@ import { AccountRefused, type AccountRegistry, type Person } from "./accounts.ts
 import { body, notFound, ok, parse, Refusal, type Reply } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
 
-// `/v1/accounts` (TECH-5113): the model accounts runs may use and the runs each paid for, and a
-// person's own account, registered or removed with their own Linear login. A loopback operator is no
-// person, so registers nothing; the owner's accounts are the installation config's.
+// `/v1/accounts` (TECH-5113): the registered model accounts and the runs each paid for, and a person's
+// own account, registered or removed with their own Linear login. A loopback operator is no person, so
+// registers nothing. A task's runs use only its owner's accounts (TECH-5179).
 //
 //   GET  /v1/accounts
 //   POST /v1/accounts/<claude-code-local|codex-local>/register   { "credential": "…" }
@@ -55,7 +55,8 @@ export async function accountsRoute(
   throw notFound(at.pathname);
 }
 
-// The accepted risk (09 §3a), told to everyone who registers: a run's model credential is in its
+// Told to everyone who registers: register a company seat, not a personal plan (TECH-5179, TECH-5129;
+// notice only, nothing enforces it), and the accepted risk (09 §3a): a run's model credential is in its
 // container, so a compromised run can copy it, and removing it from Sergeant does not revoke a copy.
 const ROTATE: Record<AccountAdapter, string> = {
   "claude-code-local": "revoke the token in your Claude account settings and make a new one with `claude setup-token`",
@@ -63,6 +64,7 @@ const ROTATE: Record<AccountAdapter, string> = {
 };
 
 export const exposureNotice = (adapter: AccountAdapter): string =>
+  `Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription: whether personal plans may run Terros work is not settled (TECH-5129). ` +
   `Your credential is used inside Sergeant's worker and reviewer containers while runs work on it, so it could be exposed if a run is compromised, for example by prompt injection. ` +
   `To stop Sergeant using it, run \`sgt account remove ${adapter}\`. That does not revoke a copy: to rotate it, ${ROTATE[adapter]}.`;
 

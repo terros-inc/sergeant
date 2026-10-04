@@ -1,5 +1,6 @@
 import { commentIdFor, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { latestDelegation } from "./delegation.ts";
 import { workflowState } from "./queries.ts";
 
 const followupOrigin = `
@@ -20,20 +21,6 @@ const followupOriginShape = z.object({
     delegate: z.object({ id: z.string() }).nullable(),
     team: z.object({ id: z.string(), states: z.object({ nodes: z.array(workflowState) }) }),
     project: z.object({ id: z.string() }).nullable(),
-  }),
-});
-// The first 100 history entries in Linear's default order, which is not verified to be newest first:
-// on a long-lived issue the delegation may be past this page, and the follow-up is then unassigned.
-const delegationHistory = `
-  query SergeantDelegationHistory($id: String!) {
-    issue(id: $id) { history(first: 100) { nodes { createdAt actor { id } toDelegate { id } } } }
-  }
-`;
-const delegationHistoryShape = z.object({
-  issue: z.object({
-    history: z.object({
-      nodes: z.array(z.object({ createdAt: z.string(), actor: z.object({ id: z.string() }).nullable(), toDelegate: z.object({ id: z.string() }).nullable() })),
-    }),
   }),
 });
 const createIssue = `
@@ -61,22 +48,23 @@ export type FollowupDeps = {
 /** The adapter's `createFollowupIssue`: files a follow-up in Backlog, owned by the origin's owner. */
 export function followupFiler({ request, createOnce, sergeantUsers, log }: FollowupDeps): LinearPort["createFollowupIssue"] {
   /**
-   * The human who most recently delegated the issue to `delegateId`, when Linear's history shows one.
-   * Best-effort: a failed or mismatched history query only leaves the follow-up unassigned, with a
-   * warning, since the query's fields and ordering are unproven against live Linear (TECH-5004).
+   * The human who most recently delegated the issue to `delegateId`, when Linear's history shows one
+   * (delegation.ts, the same read admission relies on). Best-effort here: a failed history read only
+   * leaves the follow-up unassigned, with a warning.
    */
   const delegator = async (issueId: string, delegateId: string | undefined) => {
     if (!delegateId) return undefined;
-    const history = await request(delegationHistory, { id: issueId }, delegationHistoryShape).catch((e: Error) => {
-      log(`warning: delegation history of ${issueId} unreadable, follow-up left unassigned: ${e.message}`);
-      return undefined;
-    });
-    if (!history) return undefined;
-    const { nodes } = history.issue.history;
-    const delegation = nodes.filter((h) => h.toDelegate?.id === delegateId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    const actorId = delegation?.actor?.id;
+    const delegation = await latestDelegation(request, issueId, delegateId).then(
+      (d) => ({ by: d?.by }),
+      (e: Error) => {
+        log(`warning: delegation history of ${issueId} unreadable, follow-up left unassigned: ${e.message}`);
+        return undefined;
+      },
+    );
+    if (!delegation) return undefined;
+    const actorId = delegation.by?.id;
     if (actorId && !sergeantUsers.has(actorId)) return actorId;
-    log(`warning: no human delegator of ${issueId} in its first ${nodes.length} history entries, follow-up left unassigned`);
+    log(`warning: no human delegator of ${issueId} in its history, follow-up left unassigned`);
     return undefined;
   };
 

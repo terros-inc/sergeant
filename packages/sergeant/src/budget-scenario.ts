@@ -58,7 +58,7 @@ export const merge: MergePr = { kind: "merge_pr", repo, number: 7, expectedHeadS
 export const start: ProposedAction = { kind: "start_worker", objective: "finish", repositories: [repo] };
 export const human = (id: string, at: string, body: string): HumanComment => ({ id, author: { id: "u1", name: "Human" }, createdAt: at, updatedAt: at, body });
 
-export const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] };
+export const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] };
 export const turnOf = (actions: ProposedAction[], costUsd?: number) => ({ output: { summary: "s", actions }, model: "m", promptVersion: "p", ...(costUsd !== undefined && { costUsd }) });
 
 export let dir = "";
@@ -99,6 +99,7 @@ export async function scenario(opts: {
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => (live = await opts.onPoll(++polls, live)),
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
         async postComment({ key, body, parentId }) {
           opts.beforePost?.({ key, ...(parentId && { parentId }) });

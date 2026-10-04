@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   issueRevision,
@@ -10,10 +10,11 @@ import {
   WorkerReport,
   type RunId,
   type RunnerPort,
+  type RunSpec,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
-import { installationAccounts, pickAccount, runAccount, setAside } from "./accounts.ts";
+import { pickAccount, runAccount, setAside } from "./accounts.ts";
 import { AGENTS, ADAPTERS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
@@ -42,7 +43,7 @@ const RunMeta = z.object({
   issueRevision: z.string().optional(),
   /** The provider chosen from quota and the readings behind it (TECH-5117); every record of the run carries it. */
   providerChoice: ProviderChoice.optional(),
-  /** The model account it runs on and why (TECH-5113); every record of the run carries them. */
+  /** The task owner's model account it runs on and why (TECH-5179); every record of the run carries them. */
   account: RunAccount.optional(),
   accountReason: z.string().optional(),
 });
@@ -56,20 +57,15 @@ const recorded = ({ issueRevision, providerChoice, account, accountReason }: Run
 /**
  * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
  * reviewer is a new `claude -p` or `codex exec` session in a new container whose only mount is the
- * run's own workspace. Its credentials are its agent's model credential and, for a worker, the
- * worker-App token it pushes branches and opens PRs with. Repositories are cloned on the host before launch.
+ * run's own workspace. Its credentials are one of the task owner's model accounts and, for a worker,
+ * the worker-App token it pushes branches and opens PRs with. Repositories are cloned on the host before launch.
  *
  * Basic cancellation only: no leases, adoption, or restart recovery. `send` is not supported.
  */
 export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   const root = resolve(opts.rootDir);
   const image = opts.image ?? "sergeant-runner:local";
-  if (!opts.claudeOAuthToken) throw new Error("containerRunner needs claudeOAuthToken");
   const adapterOf = (role: Role): Adapter => opts.adapters?.[role] ?? "claude-code-local";
-  for (const role of ["worker", "reviewer"] as const) {
-    if (adapterOf(role) === "codex-local" && !opts.codexCredential) throw new Error(`containerRunner needs codexCredential: the ${role} runs codex-local`);
-  }
-  const installation = installationAccounts(opts.claudeOAuthToken, opts.codexCredential);
   const asides = setAside();
   const exec = opts.exec ?? hostExec;
   const execOk = checked(exec);
@@ -171,20 +167,27 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     return { claims, reviews, workerAdapter: worker?.adapter };
   }
 
-  /** The provider and account for a launch, from quota read now (accounts.ts). */
-  async function chooseAccount(role: Role, workerAdapter: Adapter | undefined) {
-    const more = (await opts.accounts?.().catch(() => [])) ?? [];
-    return pickAccount({ accounts: [...installation, ...more], read: opts.quota, isSetAside: asides.has, role, configured: adapterOf(role), workerAdapter });
+  /** The task owner's account for a launch, from quota read now (accounts.ts). */
+  async function chooseAccount(spec: RunSpec, workerAdapter: Adapter | undefined) {
+    const accounts = await opts.accounts(spec.owner.id);
+    return pickAccount({ owner: spec.owner, accounts, read: opts.quota, isSetAside: asides.has, role: spec.role, configured: adapterOf(spec.role), workerAdapter });
   }
 
   return {
     async start(spec) {
       const p = paths(spec.runId);
+      if (await stat(p.dir).then(() => true, () => false)) return; // idempotent on runId
+      // The reviewer's other provider comes from the earlier runs, so the account is known before
+      // anything is cloned: an owner with no usable account starts nothing (TECH-5179).
+      const prior = spec.role === "reviewer" ? await priorReports(spec.subject) : undefined;
+      const workerAdapter = prior?.workerAdapter;
+      // Quota is read now, before the clones; a burst of launches shares one reading (quota.ts).
+      const { account, accountReason, providerChoice } = await chooseAccount(spec, workerAdapter);
       await mkdir(root, { recursive: true });
       try {
         await mkdir(p.dir);
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "EEXIST") return; // idempotent on runId
+        if ((e as NodeJS.ErrnoException).code === "EEXIST") return;
         throw e;
       }
       await mkdir(p.workspace);
@@ -203,7 +206,6 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       const files = renderAttachments(attachments);
 
       let brief: string;
-      let workerAdapter: Adapter | undefined;
       if (spec.role === "worker") {
         const existing: string[] = [];
         for (const repo of spec.repositories) {
@@ -225,15 +227,11 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           await execOk("git", ["checkout", "--quiet", "--detach", s.headSha], { cwd: dir });
           subjects.push({ ...s, url: pr.html_url, title: pr.title, body: pr.body ?? "", baseRef: pr.base.ref, path: `/workspace/${rel}` });
         }
-        const prior = await priorReports(spec.subject);
-        workerAdapter = prior.workerAdapter;
-        brief = reviewerBrief(spec, subjects, prior.claims, prior.reviews, files);
+        brief = reviewerBrief(spec, subjects, prior?.claims ?? [], prior?.reviews ?? [], files);
       }
       await writeFile(join(p.workspace, "sergeant-brief.md"), brief);
 
       const limits = opts.limits?.[spec.role] ?? DEFAULT_LIMITS[spec.role];
-      // Right before the launch, so the reading is current; a failed read is an unknown reading, never a failed start.
-      const { account, accountReason, providerChoice } = await chooseAccount(spec.role, workerAdapter);
       const adapter = account.adapter;
       const agent = AGENTS[adapter];
       const meta: RunMeta = {
@@ -247,7 +245,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         issueRevision: issueRevision(spec.conversation.issue),
         ...(providerChoice && { providerChoice }),
         account: runAccount(account),
-        ...(accountReason && { accountReason }),
+        accountReason,
       };
       await writeFile(p.meta, JSON.stringify(meta, null, 2));
       // `--env NAME` copies the value from the docker CLI's own environment, so no token is ever on

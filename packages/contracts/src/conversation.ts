@@ -82,6 +82,11 @@ export const Conversation = z.object({
     /** The current Linear delegate. `null` means nobody is delegated. */
     delegate: z.object({ id: z.string().min(1), name: z.string() }).nullable(),
     /**
+     * The current Linear assignee, `null` when nobody is (TECH-5179). A task whose assignee is no
+     * longer its recorded owner stops; absent, as only a fixture leaves it, counts as no assignee.
+     */
+    assignee: z.object({ id: z.string().min(1), name: z.string() }).nullable().optional(),
+    /**
      * The PRs Linear's GitHub integration has attached to the issue: which PRs belong to this task
      * (08 §4). Not part of the conversation revision; it is what humans link, not what they say.
      */

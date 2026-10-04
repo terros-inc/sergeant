@@ -2,16 +2,16 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeJson, type AccountAdapter, type QuotaReading } from "@terros/sergeant-contracts";
-import { accountQuota, installationAccounts, type ModelAccount, type QuotaAccount } from "@terros/sergeant-runner";
+import { accountQuota, type ModelAccount, type QuotaAccount } from "@terros/sergeant-runner";
 import { z } from "zod";
-import { run, secretResolver, type Installation, type InstallationConfig } from "./config.ts";
+import { run, secretResolver, type InstallationConfig } from "./config.ts";
 
 // The model accounts people register (TECH-5113): each person's own Claude or Codex subscription
 // login, at most one per agent CLI, kept with everyone else's in one Secrets Manager secret that only
 // this host reads and writes. A person registers and removes only their own: an entry is found by
-// their Linear user id, which the API takes from their login, never from the request. Runs use the
-// owner's accounts first, then these, in registration order (runner `accounts.ts`). No credential is
-// ever returned, logged, or put in an error.
+// their Linear user id, which the API takes from their login, never from the request. They are the
+// only accounts runs use, and a task's runs use only its owner's (TECH-5179, owner.ts): the human
+// assignee who delegated it. No credential is ever returned, logged, or put in an error.
 
 const Entry = z.object({
   adapter: z.enum(["claude-code-local", "codex-local"]),
@@ -26,7 +26,7 @@ const Registered = z.object({ accounts: z.array(Entry) });
 
 export type Person = { id: string; name: string; email: string };
 /** An account as the API shows it: never its credential. */
-export type ListedAccount = Omit<ModelAccount, "credential"> & { userId?: string; registeredAt?: string };
+export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registered"; userId: string; registeredAt: string };
 
 /** Registration refused for a reason the caller can act on; its message never quotes the credential. */
 export class AccountRefused extends Error {}
@@ -34,10 +34,6 @@ export class AccountRefused extends Error {}
 export type AccountRegistry = ReturnType<typeof accountRegistry>;
 
 export function accountRegistry(opts: {
-  /** The installation's own accounts, which the runner already holds (`installation-claude`, `installation-codex`). */
-  installation: ModelAccount[];
-  /** The config's further accounts: the owner's, after the installation's own. */
-  owners: ModelAccount[];
   /** The secret holding registered accounts; absent, nobody can register. */
   secret?: string | undefined;
   readSecret: (ref: string) => Promise<string>;
@@ -74,28 +70,21 @@ export function accountRegistry(opts: {
     return done;
   }
 
-  const account = (e: Entry): ModelAccount => ({ id: id(e), adapter: e.adapter, group: "registered", holder: holder(e), credential: e.credential });
+  const account = (e: Entry): ModelAccount => ({ id: id(e), adapter: e.adapter, holder: holder(e), credential: e.credential });
+  const listed = (e: Entry): ListedAccount => {
+    const { credential: _, ...a } = account(e);
+    return { ...a, group: "registered", userId: e.userId, registeredAt: e.registeredAt };
+  };
 
   return {
-    /** Every account runs may use after the installation's own two: the config's, then people's. Never throws. */
-    async more(): Promise<ModelAccount[]> {
-      const people = await entries().catch((e: Error) => {
-        opts.log(`registered model accounts unreadable, using the owner's only: ${e.message}`);
-        return [];
-      });
-      return [...opts.owners, ...people.filter((e) => opts.adapters.includes(e.adapter)).map(account)];
+    /** The accounts `userId` registered, for an installation's adapters: the only ones their tasks run on. Throws when unreadable. */
+    async of(userId: string): Promise<ModelAccount[]> {
+      return (await entries()).filter((e) => e.userId === userId && opts.adapters.includes(e.adapter)).map(account);
     },
 
-    /** Every account, owner's first, without credentials. */
+    /** Every registered account, without credentials. */
     async list(): Promise<ListedAccount[]> {
-      const people = await entries();
-      return [
-        ...[...opts.installation, ...opts.owners].map(({ credential: _, ...a }) => a),
-        ...people.map((e) => {
-          const { credential: _, ...a } = account(e);
-          return { ...a, userId: e.userId, registeredAt: e.registeredAt };
-        }),
-      ];
+      return (await entries()).map(listed);
     },
 
     /** Registers, or replaces, the person's own account for `adapter`, once its quota reads with it. */
@@ -114,8 +103,7 @@ export function accountRegistry(opts: {
         return { next: [...current.filter((e) => !mine(e)), entry], result: current.some(mine) };
       });
       opts.log(`${person.name} ${replaced ? "replaced" : "registered"} their ${adapter} model account`);
-      const { credential: _, ...listed } = account(entry);
-      return { account: { ...listed, userId: entry.userId, registeredAt: entry.registeredAt }, replaced, quota };
+      return { account: listed(entry), replaced, quota };
     },
 
     /** Removes the person's own account for `adapter`; false when they had none. */
@@ -141,12 +129,10 @@ export function accountRegistry(opts: {
 }
 
 /** The runner's model accounts and the registry behind `/v1/accounts`, from the installation (serve, canary). */
-export function modelAccounts(config: InstallationConfig, installation: Installation, log: (line: string) => void) {
+export function modelAccounts(config: InstallationConfig, log: (line: string) => void) {
   const readQuota = accountQuota();
-  const { modelToken, codexCredential } = installation;
+  if (config.modelAccounts.length > 0) log(`ignoring the config's modelAccounts: since TECH-5179 runs use only their task owner's registered accounts`);
   const registry = accountRegistry({
-    installation: installationAccounts(modelToken, codexCredential),
-    owners: installation.ownerAccounts,
     secret: config.registeredAccountsSecret,
     readSecret: secretResolver(config),
     writeSecret: secretWriter(config),
@@ -154,7 +140,7 @@ export function modelAccounts(config: InstallationConfig, installation: Installa
     readQuota,
     log,
   });
-  const runner = { claudeOAuthToken: modelToken, ...(codexCredential !== undefined && { codexCredential }), quota: readQuota, accounts: registry.more };
+  const runner = { quota: readQuota, accounts: registry.of };
   return { registry, runner };
 }
 

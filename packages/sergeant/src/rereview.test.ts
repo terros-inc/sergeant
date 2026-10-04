@@ -34,7 +34,7 @@ const records = [worker, approval("run_review_2", second), approval("run_review_
 const agent = { id: "agent-v2", name: "Sergeant" };
 const issue: Conversation["issue"] = {
   id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started",
-  delegate: agent, linkedPullRequests: [{ repo, number: 7 }],
+  delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }],
 };
 const budget: SituationReport["budget"] = {
   window: { wallMinutes: 120, costUsd: 25 }, taskStart: at, windowStart: at, wallDeadline: "2999-10-03T04:00:00.000Z",
@@ -85,7 +85,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
   dir = await mkdtemp(join(tmpdir(), "sergeant-rereview-test-"));
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: records.map((r) => r.runId), recentTurns: [] }));
   const live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -107,6 +107,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
           live.agentComments.push({ id: commentIdFor(key), createdAt: new Date().toISOString(), body });
         },
         createFollowupIssue: async () => { throw new Error("unused"); },
+        readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
       github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); } },

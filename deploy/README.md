@@ -29,7 +29,7 @@ How it fits together:
   instance role at startup, as it does on a laptop (`secretResolver`), and holds them in memory.
 - **Runs cannot reach the instance role.** IMDSv2 is required with a hop limit of 1, so a Docker
   container, one hop further away, cannot get instance credentials. A run's container still gets only
-  the model token and, for a worker, its scoped worker-App token.
+  its task owner's registered model credential and, for a worker, its scoped worker-App token.
 - **State is on the data volume** (`/var/lib/sergeant/state`: `tasks/`, `runs/`, `service.lock`). It
   survives an instance replacement and Terraform refuses to destroy it (`prevent_destroy`).
 - **Only `/health`, `/v1`, and the two webhook endpoints are public.** `serve` listens on
@@ -185,24 +185,30 @@ format in `packages/runner/README.md`, under Codex):
 
 To go back, remove `runners` (or set the role to `claude-code-local`) and update.
 
-### Several model accounts (TECH-5113)
+### Model accounts: each task's owner pays (TECH-5179)
 
-Runs use the owner's model accounts first, across both providers (the model token, the Codex
-credential, then the config's `modelAccounts`), and accounts people register with `sgt` only when no
-owner's account of either provider is usable; each launch runs on the account with the most weekly
-capacity left whose 5-hour window is at least 20% (`packages/runner/README.md`). Every run
-records its `account`, and `sgt account list` shows what each one paid for.
+Workers and reviewers run only on model accounts people register with `sgt`, and each task only on its
+owner's: the issue's human assignee, who must also be the one who delegated it to Sergeant
+(`packages/sergeant/src/owner.ts`); reassigning the issue hands it off: the runs stop, PRs and branches
+are kept, and the issue goes back to Todo, undelegated, for the new assignee to continue or delegate
+(`cancel.ts`). The model token is
+Sergeant's system account: it runs reasoning, retros, and system-health work only, never a worker or
+reviewer (not even the post-merge audit), so Sergeant can still tell an owner what is wrong when their
+accounts are spent. The config's `modelAccounts` (TECH-5113) is ignored, with a warning at startup:
+remove it, and have each person register their own Terros company seat (for example Claude Team or
+ChatGPT Team), not a personal subscription (TECH-5129). Each launch runs on the owner's usable account
+with the most weekly capacity left, skipping one whose 5-hour window is under 20% while another is
+usable (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
+what each one paid for. An owner with no registered account, or none usable, gets a comment on the
+issue saying what to do, and nothing starts.
 
-1. **The owner's further accounts.** Store each credential (the same forms as the model token and the
-   Codex credential) in its own Secrets Manager secret, add the names to `secret_names`, and add
-   `"modelAccounts": [{ "name": "terros-claude-2", "adapter": "claude-code-local", "credentialSecret": "<name>" }]`
-   to the installation config. A `codex-local` account needs the `codex` config, for its model.
-2. **Registration.** Create one secret with the value `{"accounts":[]}`, for example
+1. **Registration is required.** Without it no run can start.
+ Create one secret with the value `{"accounts":[]}`, for example
    `sergeant/<installation>/registered-accounts`; add its name to `secret_names` and set
    `registered_accounts_secret` to it in the infrastructure-config parameter (`./init.sh`, plan, apply:
    the role may then put that secret's value, and only that one's); and set the installation config's
    `registeredAccountsSecret` to it. Update.
-3. **Check.** Someone in `humans.teams` runs `claude setup-token | sgt account register claude-code-local`
+2. **Check.** Someone in `humans.teams` runs `claude setup-token | sgt account register claude-code-local`
    (or `sgt account register codex-local < ~/.codex/auth.json` after `codex login`): it answers with
    the quota it read with the credential, and `sgt account list` shows the account as theirs. They
    remove it with `sgt account remove <adapter>`. The secret then holds every registered credential:

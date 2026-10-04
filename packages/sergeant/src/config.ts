@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { RepoSlug, type GitHubPort, type RunGitHubTokens, type RunSpec } from "@terros/sergeant-contracts";
 import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
 import { createLinearPort } from "@terros/sergeant-linear";
-import { ADAPTERS, type Adapter, type ModelAccount } from "@terros/sergeant-runner";
+import { ADAPTERS, type Adapter } from "@terros/sergeant-runner";
 import { z } from "zod";
 import type { BudgetWindow } from "./budget.ts";
 
@@ -70,7 +70,7 @@ export const InstallationConfig = z.strictObject({
       observedChecksFallback: z.boolean().default(false),
     }),
   ),
-  /** The Sergeant model token for reasoning, workers, and reviewers. */
+  /** The Sergeant model token for reasoning; never a worker's or reviewer's (TECH-5179). */
   modelTokenSecret: SecretRef,
   /** The installation's human commit identity; never an agent's. */
   gitIdentity: z.strictObject({ name: z.string().min(1), email: z.email() }),
@@ -130,9 +130,9 @@ export const InstallationConfig = z.strictObject({
     })
     .optional(),
   /**
-   * The owner's further model accounts (TECH-5113), after `modelTokenSecret` and `codex.credentialSecret`
-   * and before any person's registered one. Each is a Secrets Manager id of a credential in the same
-   * form as those, and its `name` is how runs record whose subscription paid.
+   * Ignored since TECH-5179, kept only so an existing config still loads (`serve` warns): runs use only
+   * their task owner's registered accounts, never an installation's or owner's. Each person registers
+   * their own with `sgt account register`. Was TECH-5113's owner's further accounts.
    */
   modelAccounts: z
     .array(
@@ -232,8 +232,6 @@ export type Installation = {
   modelToken: string;
   /** The Codex credential, when the config has one. */
   codexCredential?: string;
-  /** The config's `modelAccounts`, credentials resolved: the owner's, after the two above. */
-  ownerAccounts: ModelAccount[];
   /** Webhook signing secrets, for the sources the config gives one. */
   webhookSecrets: { linear?: string; github?: string };
 };
@@ -254,9 +252,6 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     optional(config.github.webhookSecret),
     optional(config.codex?.credentialSecret),
   ]);
-  const ownerAccounts = await Promise.all(
-    config.modelAccounts.map(async ({ name, adapter, credentialSecret }) => ({ id: name, adapter, group: "owner" as const, holder: name, credential: await secret(credentialSecret) })),
-  );
   const app = (ref: z.infer<typeof GitHubAppRef>, privateKey: string) =>
     githubApp({ appId: ref.appId, installationId: ref.installationId, privateKey });
   const controlPlaneApp = app(config.github.controlPlaneApp, controlPlaneKey);
@@ -287,7 +282,6 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     githubTokens: runTokens(workerApp),
     modelToken,
     ...(codexCredential !== undefined && { codexCredential }),
-    ownerAccounts,
     webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },
   };
 }

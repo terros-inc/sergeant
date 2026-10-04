@@ -20,6 +20,7 @@ const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | nu
       description: null,
       state: { name: "Todo", type: "unstarted" },
       delegate: { id: "sergeant-user", name: "Sergeant" },
+      assignee: { id: "user-ann", name: "Ann" },
       attachments: {
         nodes: [
           { ...attachment("a1", "https://github.com/o/canary/pull/7", "github"), creator: null },
@@ -168,6 +169,17 @@ test("moveIssueToStarted moves an unstarted issue to the first started state and
     fetch: async () => Response.json({ data: { issue: { state: { name: "Todo", type: "unstarted" }, team: { states: { nodes: states.filter((s) => s.type !== "started") } } } } }),
   });
   expect(await noStarted.moveIssueToStarted("UNF-1")).toEqual({ moved: false });
+
+  // TECH-5179: a handoff moves only a started issue back to the first unstarted state; a state a human
+  // chose (Backlog, Done, Canceled) is never overwritten.
+  updates.length = 0;
+  expect(await portFor({ name: "In Progress", type: "started" }).moveIssueToTodo("UNF-1")).toEqual({ moved: true, from: "In Progress", to: "Todo" });
+  expect(updates).toEqual([{ id: "UNF-1", stateId: "s-todo" }]);
+  updates.length = 0;
+  for (const current of [{ name: "Todo", type: "unstarted" }, { name: "Backlog", type: "backlog" }, { name: "Done", type: "completed" }, { name: "Canceled", type: "canceled" }]) {
+    expect(await portFor(current).moveIssueToTodo("UNF-1")).toEqual({ moved: false });
+  }
+  expect(updates).toEqual([]);
 });
 
 // TECH-5066: intake holds a Todo issue back only for its unfinished "blocked by" issues. Linear keeps

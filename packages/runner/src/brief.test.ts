@@ -48,6 +48,7 @@ const feedback = (f: Partial<HumanPullRequestFeedback> & Pick<HumanPullRequestFe
 
 const spec = (pullRequests: PullRequestFacts[]): Extract<RunSpec, { role: "reviewer" }> => ({
   runId: "run_r1",
+  owner: { id: "ann", name: "Ann" },
   role: "reviewer",
   repositories: ["o/r"],
   subject: [{ repo: "o/r", number: 7, headSha: head }],

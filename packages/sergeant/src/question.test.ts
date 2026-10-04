@@ -73,7 +73,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   await writeFile(stateFile, beforeAsking);
 
   let live: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] },
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
     humanComments: [],
     agentComments: [],
   };
@@ -91,6 +91,7 @@ test("a question is posted once, holds every effect until a human replies, and s
       workerLogin: "sergeant-worker[bot]",
       linear: {
         async moveIssueToStarted() { return { moved: false as const }; },
+        async readTaskOwner() { return { owner: { id: "user-ann", name: "Ann" } }; },
         async readConversation() {
           if (live.agentComments.length > 0 && live.humanComments.length === 0) await onWait(++waits);
           return live;
@@ -149,7 +150,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   expect(posted.filter((p) => p.key.startsWith("question:"))).toHaveLength(1);
 });
 
-const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: [{ repo, number: 7 }] };
+const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] };
 const start: ProposedAction = { kind: "start_worker", objective: "o", repositories: [repo] };
 const followup: ProposedAction = { kind: "create_followup", key: "k", title: "T", description: "D", relation: "related" };
 
@@ -175,6 +176,7 @@ test("a turn that asks does nothing else, whatever order reasoning proposed", as
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => situation.conversation,
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
         postComment: async () => void effects.push("ask"),
         createFollowupIssue: async () => (effects.push("followup"), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
@@ -203,6 +205,7 @@ test("a question whose post failed or went unconfirmed is posted again until Lin
       workerLogin: "sergeant-worker[bot]",
       linear: {
         async moveIssueToStarted() { return { moved: false as const }; },
+        async readTaskOwner() { return { owner: { id: "user-ann", name: "Ann" } }; },
         async readConversation() {
           if (live.agentComments.length > 0 && ++waits === 2) await writeFile(join(dir, "STOP"), "");
           return live;
@@ -244,6 +247,7 @@ test("an open question clears its stale in-memory post retry", async () => {
       workerLogin: "sergeant-worker[bot]",
       linear: {
         async moveIssueToStarted() { return { moved: false as const }; },
+        async readTaskOwner() { return { owner: { id: "user-ann", name: "Ann" } }; },
         async readConversation() {
           reads += 1;
           // One poll observes the question. Its disappearance without a human revision then exposes

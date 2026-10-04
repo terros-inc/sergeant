@@ -1,89 +1,45 @@
-import type { ProviderChoice, QuotaReading } from "@terros/sergeant-contracts";
+import type { QuotaReading } from "@terros/sergeant-contracts";
 import type { Adapter } from "./agents.ts";
 
-// Which provider and which of its model accounts run a worker or reviewer, from live quota (TECH-5117,
-// TECH-5113). Deterministic: no model is asked. Each provider's candidate is the account
-// `chooseAccount` picked for it, so with one account per provider this is TECH-5117's choice unchanged.
+// Which of the task owner's model accounts runs a worker or reviewer, from live quota (TECH-5179, after
+// TECH-5117). Deterministic: no model is asked.
 
-/** A provider whose 5-hour window has less than this percent left is not used while another is usable. */
+/** An account whose 5-hour window has less than this percent left is skipped while another is usable. */
 export const FIVE_HOUR_FLOOR_PERCENT = 20;
 
-export type Candidate = { adapter: Adapter; quota: QuotaReading };
-export type Choice = ProviderChoice & { adapter: Adapter };
+/** One of the owner's accounts and what was read of its quota; no reading when there is no reader. */
+export type Candidate<A> = { account: A; adapter: Adapter; name: string; quota: QuotaReading | undefined };
+/** The account chosen, and why. */
+export type AccountChoice<A> = Candidate<A> & { reason: string };
 
-const known = (c: Candidate) => c.quota.weekly !== undefined && c.quota.fiveHour !== undefined;
-const usable = (c: Candidate) => known(c) && (c.quota.fiveHour?.remainingPercent ?? 0) >= FIVE_HOUR_FLOOR_PERCENT;
-const byWeeklyLeft = (a: Candidate, b: Candidate) => (b.quota.weekly?.remainingPercent ?? 0) - (a.quota.weekly?.remainingPercent ?? 0);
+/** Known to have nothing left in one of its windows. */
+export const spent = <A>(c: Candidate<A>) => (c.quota?.weekly?.remainingPercent ?? 1) <= 0 || (c.quota?.fiveHour?.remainingPercent ?? 1) <= 0;
+/** Both windows read: only then does an account's quota rank (TECH-5179); a partial reading ranks after. */
+const known = <A>(c: Candidate<A>) => c.quota?.weekly !== undefined && c.quota.fiveHour !== undefined;
+const belowFloor = <A>(c: Candidate<A>) => (c.quota?.fiveHour?.remainingPercent ?? FIVE_HOUR_FLOOR_PERCENT) < FIVE_HOUR_FLOOR_PERCENT;
 // Readings are compared exact; only the recorded reason rounds them.
 const shown = (w: { remainingPercent: number } | undefined) => (w ? Math.round(w.remainingPercent * 10) / 10 : "?");
-const percent = (c: Candidate) => `${c.adapter} ${shown(c.quota.weekly)}% weekly, ${shown(c.quota.fiveHour)}% 5-hour left`;
+export const percent = <A>(c: Candidate<A>) => `${shown(c.quota?.weekly)}% weekly, ${shown(c.quota?.fiveHour)}% 5-hour left`;
 
 /**
- * The worker gets the provider with the most weekly capacity left, unless its 5-hour window is below
- * the floor; then the next one that is not, or else the next one anyway (the owner's rule flips even
- * when both are below). Any unknown quota keeps the configured provider.
+ * The account for one run, by one rule: among the usable accounts (not spent), the one with the most
+ * weekly capacity left, skipping those whose 5-hour window is under the floor while another usable one
+ * exists. An account whose quota could not be read in both windows is usable (a known zero in either
+ * still spends it) and ranks after every known one; among
+ * those, the `prefer`red provider's comes first. A reviewer passes its worker's provider as `avoid`, so
+ * review comes from a different AI whenever the owner has a usable account of another provider.
+ * Undefined when no account is usable.
  */
-export function chooseWorker(candidates: Candidate[], configured: Adapter): Choice {
-  const readings = candidates.map((c) => c.quota);
-  const unknown = candidates.filter((c) => !known(c));
-  if (unknown.length > 0) {
-    return { adapter: configured, reason: `quota unknown for ${unknown.map((c) => c.adapter).join(", ")}; configured ${configured}`, readings };
-  }
-  const ranked = [...candidates].sort(byWeeklyLeft);
-  const best = ranked[0];
-  if (!best) return { adapter: configured, reason: `no provider to choose from; configured ${configured}`, readings };
-  const chosen = usable(best) ? best : (ranked.find(usable) ?? ranked[1] ?? best);
-  const reason =
-    chosen === best
-      ? `most weekly left: ${percent(chosen)}${usable(chosen) ? "" : `; no other provider`}`
-      : `${best.adapter} has the most weekly left but its 5-hour window is below ${FIVE_HOUR_FLOOR_PERCENT}% (${percent(best)}): ${percent(chosen)}${usable(chosen) ? "" : `, also below`}`;
-  return { adapter: chosen.adapter, reason, readings };
-}
-
-/**
- * The reviewer gets a provider other than its worker's, so review comes from a different AI. When
- * every other one is known to be below the 5-hour floor it runs on the worker's provider; when an
- * other one's quota is unknown, or the worker's provider is, it keeps the configured provider.
- */
-export function chooseReviewer(candidates: Candidate[], worker: Adapter | undefined, configured: Adapter): Choice {
-  const readings = candidates.map((c) => c.quota);
-  const same = (adapter: Adapter) => (worker !== undefined && adapter === worker ? { sameProviderAsWorker: true } : {});
-  if (worker === undefined) return { adapter: configured, reason: `worker's provider unknown; configured ${configured}`, readings };
-  const others = candidates.filter((c) => c.adapter !== worker);
-  const other = others.filter(usable).sort(byWeeklyLeft)[0];
-  if (other) return { adapter: other.adapter, reason: `other provider than the worker's ${worker}: ${percent(other)}`, readings };
-  const unknown = others.filter((c) => !known(c));
-  if (unknown.length > 0 || others.length === 0) {
-    const why = unknown.length > 0 ? `quota unknown for ${unknown.map((c) => c.adapter).join(", ")}` : "no other provider";
-    return { adapter: configured, reason: `${why}; configured ${configured}`, readings, ...same(configured) };
-  }
-  return {
-    adapter: worker,
-    reason: `every other provider's 5-hour window is below ${FIVE_HOUR_FLOOR_PERCENT}%; same provider as the worker`,
-    readings,
-    sameProviderAsWorker: true,
-  };
-}
-
-/** An account a run may use: its quota is known, its 5-hour window at the floor or above, and its week not spent. */
-export const ready = (c: Candidate) => usable(c) && (c.quota.weekly?.remainingPercent ?? 0) > 0;
-
-/** A model account of one provider, in the owner's order: the owner's own accounts, then people's. */
-export type AccountCandidate<A> = Candidate & { account: A; group: "owner" | "registered" };
-
-/**
- * The account a provider runs on (TECH-5113): the owner's own accounts first, then the ones people
- * registered, and within each group the rule above: the most weekly capacity left among accounts
- * whose 5-hour window is at the floor or above, and whose week is not spent. With none usable it is
- * the first owner account, the installation's own, as an unknown reading keeps the configured provider.
- */
-export function chooseAccount<A>(candidates: AccountCandidate<A>[]): AccountCandidate<A> & { reason: string } {
-  const first = candidates[0];
-  if (!first) throw new Error("chooseAccount needs at least one account");
-  const name = (c: AccountCandidate<A>) => c.quota.account ?? c.adapter;
-  for (const group of ["owner", "registered"] as const) {
-    const best = candidates.filter((c) => c.group === group && ready(c)).sort(byWeeklyLeft)[0];
-    if (best) return { ...best, reason: `${group === "owner" ? "owner's account" : "registered account"} ${name(best)}, ${percent(best).replace(`${best.adapter} `, "")}${group === "registered" ? "; no owner's account usable" : ""}` };
-  }
-  return { ...first, reason: `no account usable (unknown, spent, or 5-hour window below ${FIVE_HOUR_FLOOR_PERCENT}%); first owner's account ${name(first)}` };
+export function chooseAccount<A>(candidates: Candidate<A>[], opts: { prefer: Adapter; avoid?: Adapter | undefined }): AccountChoice<A> | undefined {
+  const usable = candidates.filter((c) => !spent(c));
+  const roomy = usable.filter((c) => !belowFloor(c));
+  const pool = roomy.length > 0 ? roomy : usable;
+  const other = pool.filter((c) => c.adapter !== opts.avoid);
+  const weekly = (c: Candidate<A>) => (known(c) ? (c.quota?.weekly?.remainingPercent ?? -1) : -1);
+  const preferred = (c: Candidate<A>) => (c.adapter === opts.prefer ? 0 : 1);
+  const chosen = (other.length > 0 ? other : pool).toSorted((a, b) => weekly(b) - weekly(a) || preferred(a) - preferred(b))[0];
+  if (!chosen) return undefined;
+  const unread = !known(chosen) ? `, quota unknown (${chosen.quota?.error ?? "not read"})` : "";
+  const floor = roomy.length === 0 && belowFloor(chosen) ? `, every usable account under the ${FIVE_HOUR_FLOOR_PERCENT}% 5-hour floor` : "";
+  return { ...chosen, reason: `${chosen.name}, ${percent(chosen)}: the most weekly left of ${usable.length} usable${floor}${unread}` };
 }

@@ -3,13 +3,14 @@ import { budgetQuestion, budgetQuestionKey, openWindow, type BudgetWindow } from
 import { recordStop, stopReason } from "./cancel.ts";
 import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
+import { reassigned, redelegated } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
 import type { TaskState } from "./task-state.ts";
 
-// The checks the loop (loop.ts) makes on every poll before a turn: the delegation and stop-state
-// stop (A1/A2), the budget, and the holds on unknown runs and on unanswered questions. Each says
-// whether the loop goes on; the loop itself does all the waiting.
+// The checks the loop (loop.ts) makes on every poll before a turn: the delegation, stop-state, and
+// reassignment stop (A1/A2, TECH-5179), the budget, and the holds on unknown runs and on unanswered
+// questions. Each says whether the loop goes on; the loop itself does all the waiting.
 
 /** What the checks act through: the loop's options, ports, task state, and its log and save. */
 export type PollContext = {
@@ -23,8 +24,11 @@ export type PollContext = {
 /** The budget as this poll sees it, and the current window's budget question if Linear has it. */
 export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budgetKey: string; budgetAsked: AgentComment | undefined };
 
-/** A1/A2: why the task stops for good, once the stop is recorded (cancel.ts); undefined to go on. */
-export async function checkStop(conversation: Conversation, runs: RunRecord[], { opts, deps }: PollContext): Promise<string | undefined> {
+/**
+ * A1/A2, and the owner's reassignment or redelegation: why the task stops for good, once the stop is
+ * recorded (cancel.ts); `hold` when the owner's delegation cannot be proven this poll; undefined to go on.
+ */
+export async function checkStop(conversation: Conversation, runs: RunRecord[], { opts, deps, state, log }: PollContext): Promise<string | { hold: string } | undefined> {
   // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer
   // (A1), or that a human moved to Backlog, Canceled, or Done (A2), is not Sergeant's to work on, and
   // its task stops for good (cancel.ts). Done after the worker's closing PR merged is the task's
@@ -34,9 +38,32 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
     !active.allowed &&
     conversation.issue.stateType === "completed" &&
     landedOf(await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps), runs, deps.workerLogin) !== undefined;
+  // TECH-5179 (owner.ts): the issue no longer assigned to the owner the task was admitted for stops it
+  // too, so token ownership never moves mid-task. It is a handoff (cancel.ts): PRs and branches are
+  // kept for whoever continues. Checked first, so an undelegation or a state change seen in the same
+  // poll still hands off rather than closing the PRs.
+  const moved = state.owner && !finished ? reassigned(state.owner, conversation.issue) : undefined;
+  if (moved) {
+    await recordStop(opts.dir, moved, { handoff: { delegatedAt: state.owner?.delegatedAt } });
+    return moved;
+  }
   if (!active.allowed && !finished) {
     await recordStop(opts.dir, stopReason(conversation.issue));
     return active.reason;
+  }
+  // Linear's durable history is reread too: a newer delegation, or someone else's, is a new episode.
+  // Unreadable, nothing new starts this poll (fails closed).
+  if (!active.allowed || !state.owner) return undefined;
+  let changed: string | undefined;
+  try {
+    changed = await redelegated(state.owner, opts.issueId, deps);
+  } catch (e) {
+    log(`holding: who delegated ${opts.issueId} is unreadable: ${(e as Error).message}`);
+    return { hold: "delegation unreadable" };
+  }
+  if (changed) {
+    await recordStop(opts.dir, changed, { handoff: { delegatedAt: state.owner.delegatedAt } });
+    return changed;
   }
   return undefined;
 }

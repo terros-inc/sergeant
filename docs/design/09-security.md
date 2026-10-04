@@ -7,8 +7,10 @@ human credentials, and Sergeant's own control plane. That boundary is enforced s
 credentials exist in which zone, never by prompt instructions. Everything inside the development trust
 zone (all enrolled repositories granted to runs, and dev/stage systems) is within the accepted blast
 radius (§9). One kind of credential deliberately crosses into that zone: the **model credential** a run
-works on, whether the installation owner's or a Claude or Codex subscription a person registered. It is
-in the run's container for the run's duration, an accepted risk (§3a).
+works on: a Claude or Codex account its task's owner registered (TECH-5179). It is in the run's
+container for the run's duration, an accepted risk (§3a). Sergeant's own system model account (the
+installation's model token) is control plane only: it runs reasoning, retros, and system-health work,
+and never a worker or reviewer, the post-merge audit reviewer included.
 
 ## 1. What changed from Sergeant 1
 
@@ -25,7 +27,7 @@ in the run's container for the run's duration, an accepted risk (§3a).
 |---|---|---|---|
 | **Control plane** | Sergeant's deterministic core (daemon) | Linear agent OAuth credential; control-plane GitHub App key; worker App key (used only to mint scoped tokens); ledger; installation config read access; the ability to assume the runner dev role for vending; S3 artifact write | production credentials; IAM/org/billing admin; personal human credentials |
 | **Sergeant's reasoning** | the model session, inside the control plane | nothing directly; it can only call tools, and every action passes the Gate | any credential, shell, filesystem, or network access |
-| **Runner zone** (development) | the primary worker, its subagents, and reviewer runs, all tasks together | worker App tokens for each run's repository set (write for workers, read for reviewers); dev/stage AWS credentials (short-lived); each run's model credential, the owner's or a registered person's (§3a); engineering tools | Linear; control-plane GitHub App; Sergeant's ledger, config, or secrets; production; IAM/org/billing; any other personal credential |
+| **Runner zone** (development) | the primary worker, its subagents, and reviewer runs, all tasks together | worker App tokens for each run's repository set (write for workers, read for reviewers); dev/stage AWS credentials (short-lived); each run's model credential, one its task owner registered (§3a); engineering tools | Linear; control-plane GitHub App; Sergeant's ledger, config, or secrets; production; IAM/org/billing; any other personal credential |
 | **Humans** | team members via Linear and `sgt` | their own identities | — |
 
 ## 3. How each hard exclusion is enforced
@@ -43,9 +45,10 @@ in the run's container for the run's duration, an accepted risk (§3a).
 Settled (owner, 2026-10-03, TECH-5156), after an independent review of the model-account pool (TECH-5113):
 accept the risk instead of building a credential broker.
 
-**What is exposed.** Every worker and reviewer run works on one model account (04 §10): the
-installation's own Claude or Codex credential, one of the owner's further accounts, or a Claude or
-Codex subscription a team member registered through `/v1/accounts` (11). The runner puts that
+**What is exposed.** Every worker and reviewer run works on one model account (04 §10): a Claude or
+Codex subscription its task's owner registered through `/v1/accounts` (11), and only for a task that
+person was assigned and delegated themselves (TECH-5179), so nobody can spend another person's quota;
+reassigning the issue stops the task's runs and hands the issue off (07 §8). The runner puts that
 credential into the run's container (`CLAUDE_CODE_OAUTH_TOKEN`, or the Codex `auth.json`, which holds
 its refresh token) for the run's duration, because the agent CLI needs it to call the model. Anything
 running in that container, including a prompt-injected or compromised agent, can read it and copy it

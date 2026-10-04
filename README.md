@@ -115,7 +115,8 @@ starts, on every poll, and again from a live read before each start, merge, and 
 (Gate rule A1), and only while it is not in Backlog, Canceled, or Done (A2, TECH-4989; Done after
 Sergeant's own closing merge is the normal end). A task either runs or is stopped, and every stop
 takes one path: the issue undelegated or reassigned, moved by a human to Backlog, Canceled, or Done,
-or `sgt task cancel`. The stop is recorded in `<dir>/cancel.json` first, and from then on the loop
+or `sgt task cancel` (a reassignment is a handoff that keeps the PRs open and puts the issue back in
+Todo, undelegated; TECH-5179). The stop is recorded in `<dir>/cancel.json` first, and from then on the loop
 takes no turn and makes no effect: it keeps retrying each run's cancellation, and treats a run whose
 status it cannot read as still running, until the runner confirms every run stopped; then it closes
 the task's open PRs (only those the worker App opened) with a short comment, posts one comment on the

@@ -1,5 +1,6 @@
 import { commentIdFor, Conversation, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { taskOwnerReader } from "./delegation.ts";
 import { followupFiler } from "./followup.ts";
 import { readLinkedIssueBackground } from "./linked-issues.ts";
 import {
@@ -70,8 +71,9 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   completedIssues(agentUserId: string, since: string): Promise<string[]>;
   /** The issue's state type and, while it is completed, when it completed. */
   issueProgress(issueId: string): Promise<{ stateType: string; completedAt: string | null }>;
-  /** Removes the issue's delegate: a human's cancel (`sgt task cancel`). Idempotent. */
+  /** Removes the issue's delegate: a human's cancel (`sgt task cancel`) or a handoff. Idempotent. */
   undelegate(issueId: string): Promise<void>;
+  moveIssueToTodo(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
 } {
   if (!options.apiKey) throw new Error("Linear API key is required");
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -150,6 +152,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
           state: first.state.name,
           stateType: first.state.type,
           delegate: first.delegate,
+          assignee: first.assignee,
           linkedPullRequests: linkedPullRequests(first.attachments.nodes),
           // Only a human's: Sergeant's own, and an integration's with no creator, are not human input.
           attachments: first.attachments.nodes
@@ -203,6 +206,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       return "resolved";
     },
 
+    readTaskOwner: taskOwnerReader(request, sergeantUsers),
+
     createFollowupIssue: followupFiler({ request, createOnce, sergeantUsers, log }),
 
     async moveIssueToStarted(issueId) {
@@ -213,6 +218,19 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       if (issue.state.type !== "unstarted") return { moved: false };
       const target = issue.team.states.nodes
         .filter((s) => s.type === "started")
+        .sort((a, b) => a.position - b.position)[0];
+      if (!target) return { moved: false };
+      const { issueUpdate } = await request(moveState, { id: issueId, stateId: target.id }, z.object({ issueUpdate: z.object({ success: z.boolean() }) }));
+      if (!issueUpdate.success) throw new Error("Linear issueUpdate did not succeed");
+      return { moved: true, from: issue.state.name, to: target.name };
+    },
+
+    async moveIssueToTodo(issueId) {
+      const { issue } = await request(issueWorkflow, { id: issueId }, issueWorkflowShape);
+      if (!issue) throw new Error(`Linear issue not found: ${issueId}`);
+      if (issue.state.type !== "started") return { moved: false };
+      const target = issue.team.states.nodes
+        .filter((s) => s.type === "unstarted")
         .sort((a, b) => a.position - b.position)[0];
       if (!target) return { moved: false };
       const { issueUpdate } = await request(moveState, { id: issueId, stateId: target.id }, z.object({ issueUpdate: z.object({ success: z.boolean() }) }));

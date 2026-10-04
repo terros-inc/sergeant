@@ -6,9 +6,31 @@ import type { RunId, RunRecord } from "./runs.ts";
 // The seams adapters implement. Adapters validate what they read with the schemas above before
 // returning it; the core never trusts an unvalidated external payload.
 
+/** A Linear user, as Sergeant names them in a comment. */
+export type LinearPerson = { id: string; name: string };
+
+/**
+ * Whose model accounts may pay for a task (TECH-5179): the issue's human assignee, and only when
+ * Linear's history shows that same person most recently delegated the issue to Sergeant. Anything
+ * else is a refusal, with what Linear showed: `delegatedAt` is the latest delegation to Sergeant.
+ */
+export type TaskOwnerCheck =
+  | { owner: LinearPerson; delegatedAt?: string }
+  | {
+      refused: "not_delegated" | "no_assignee" | "delegator_unknown" | "delegator_differs";
+      assignee?: LinearPerson;
+      delegator?: LinearPerson;
+      delegatedAt?: string;
+    };
+
 export interface LinearPort {
   /** The issue, every human-authored comment, and bounded explicit linked-issue background, live. */
   readConversation(issueId: string): Promise<Conversation>;
+  /**
+   * Who may pay for the issue's task, read live from the issue and its full history (TECH-5179).
+   * Throws when Linear cannot be read; a caller then admits nothing.
+   */
+  readTaskOwner(issueId: string, agentUserId: string): Promise<TaskOwnerCheck>;
   /**
    * Posts a comment as Sergeant's agent, at most once per `key`: Linear's client-supplied comment id
    * is derived from it, so a retry after a lost response or a crash posts nothing new. With
@@ -41,6 +63,13 @@ export interface LinearPort {
    * team has no `started` state, so it never moves an issue backward. Returns what it did, for a log.
    */
   moveIssueToStarted(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
+  /**
+   * A handoff (TECH-5179): moves the issue back to its team's first `unstarted` state (Todo) only when
+   * its current state type is `started`. Any other state, one a human chose included, is left as it is.
+   */
+  moveIssueToTodo?(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
+  /** Removes the issue's delegate. Idempotent. */
+  undelegate?(issueId: string): Promise<void>;
 }
 
 export interface GitHubPort {
@@ -68,6 +97,8 @@ export type RunSpec = {
   /** The task source, verbatim; never only a summary. */
   conversation: Conversation;
   repositories: RepoSlug[];
+  /** The task's owner (TECH-5179): the run uses only model accounts this person registered. */
+  owner: LinearPerson;
 } & (
   | {
       role: "worker";
@@ -92,8 +123,30 @@ export type RunSpec = {
     }
 );
 
+/**
+ * The task owner has no model account a run may use (TECH-5179): none registered for a provider this
+ * Sergeant runs, or every one spent, set aside after a failure, or otherwise unusable. Nothing started.
+ */
+export class NoModelAccount extends Error {
+  readonly owner: LinearPerson;
+  readonly kind: "none_registered" | "none_usable";
+  /** The owner's accounts, by id, that were considered; part of what makes a refusal new. */
+  readonly accountIds: string[];
+
+  constructor(owner: LinearPerson, kind: NoModelAccount["kind"], accountIds: string[], detail: string) {
+    super(detail);
+    this.name = "NoModelAccount";
+    this.owner = owner;
+    this.kind = kind;
+    this.accountIds = accountIds;
+  }
+}
+
 export interface RunnerPort {
-  /** Starts a run with a fresh session. A reviewer never inherits a worker's session. */
+  /**
+   * Starts a run with a fresh session. A reviewer never inherits a worker's session. Throws
+   * `NoModelAccount`, having started nothing, when the task owner has no usable model account.
+   */
   start(spec: RunSpec): Promise<void>;
   status(runId: RunId): Promise<RunRecord>;
   cancel(runId: RunId): Promise<void>;

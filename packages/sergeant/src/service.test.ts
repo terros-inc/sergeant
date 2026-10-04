@@ -30,7 +30,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
     issues.map((id) => [
       id,
       {
-        issue: { id: `i-${id}`, identifier: id, url: `https://linear.app/x/issue/${id}`, title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
+        issue: { id: `i-${id}`, identifier: id, url: `https://linear.app/x/issue/${id}`, title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
         humanComments: [],
         agentComments: [],
       },
@@ -55,6 +55,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
         if (id === "UNF-2" && readFailures-- > 0) throw new Error("Linear timed out");
         return live.get(id) ?? Promise.reject(new Error(`no ${id}`));
       },
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
       postComment: async () => {},
       createFollowupIssue: async () => ({ identifier: "UNF-9", url: "https://linear.app/x/issue/UNF-9" }),
@@ -106,7 +107,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
 /** Fakes for one delegated issue whose turns hold for `turnMs`, counting turns in flight. */
 function oneIssue(ids: string[], turnMs: number) {
   const conversation: Conversation = {
-    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, linkedPullRequests: [] },
+    issue: { id: "i-UNF-1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "Todo", stateType: "unstarted", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
     humanComments: [],
     agentComments: [],
   };
@@ -115,7 +116,7 @@ function oneIssue(ids: string[], turnMs: number) {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
     delegatedIssues: async () => ids.map(todo),
-    linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")), moveIssueToStarted: async () => ({ moved: false as const }) },
+    linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")), moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
     github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
@@ -186,7 +187,7 @@ test("each task loop audits merged heads at the service's audit sample rate, or 
     await mkdir(taskDir, { recursive: true });
     const at = new Date().toISOString();
     const merged = { repo: "o/r", number: 7, headSha, mergedSha: "c".repeat(40), at, outcomePostedAt: at };
-    await writeFile(join(taskDir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: at, turns: 1, runIds: [], recentTurns: [], merged }));
+    await writeFile(join(taskDir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: at, turns: 1, runIds: [], recentTurns: [], merged, owner: { id: "user-ann", name: "Ann", admittedAt: at } }));
     const { deps } = oneIssue(["UNF-1"], 0);
     const started: string[] = [];
     const pr: PullRequestFacts = { repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", state: "merged", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: merged.mergedSha, baseRef: "main", body: "Fixes UNF-1", mergeable: null, checks: { sha: headSha, required: [] }, humanFeedback: [] };

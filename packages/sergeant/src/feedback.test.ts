@@ -42,7 +42,7 @@ async function world(w: World) {
   const posted = new Map<string, string>();
   const issue: Conversation["issue"] = {
     id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Retry uploads", description: "Retry failed uploads.",
-    state: stateType, stateType, delegate: w.delegate === undefined ? agent : w.delegate,
+    state: stateType, stateType, delegate: w.delegate === undefined ? agent : w.delegate, assignee: { id: "user-ann", name: "Ann" },
     linkedPullRequests: [{ repo, number: 7 }, { repo, number: 8 }, { repo: "o/unenrolled", number: 1 }],
   };
   const prs: Record<number, PullRequestFacts> = {

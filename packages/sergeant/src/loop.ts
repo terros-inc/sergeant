@@ -7,7 +7,7 @@ import { driveMerged, exists, mergedOf } from "./after-merge.ts";
 import { acceptedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
-import { cancelPending, driveCancel } from "./cancel.ts";
+import { cancelPending, driveCancel, recordStop } from "./cancel.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
@@ -18,6 +18,7 @@ import { cancelRuns, describePr, fingerprintOf, landedOf, readPullRequests, unse
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
+import { admitOwner } from "./owner.ts";
 import { applyTurn, loadState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -66,7 +67,20 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     await writeFile(tmp, JSON.stringify(state, null, 2));
     await rename(tmp, files.state);
   };
-  // The start time and the budget window are on disk before anything else happens.
+  // TECH-5179 (owner.ts): a task is admitted only for its owner, read from Linear's history whenever a
+  // task has none, so an intake after a missed webhook or a restart checks it too. Refused, nothing is
+  // saved, and the next intake reads Linear again. Every run of the task is then paid by its owner. A
+  // task saved before TECH-5179 that already ended (merged, accepted) only finishes, and starts no run.
+  // A task already on disk that is refused (one saved before TECH-5179, with runs perhaps still going)
+  // is not left unsupervised: it takes the ordinary stop as a handoff below (cancel.ts), its runs
+  // canceled and its PRs kept. Only unreadable history ends this loop with nothing stopped, so the next
+  // intake reads Linear again.
+  const owner = state.owner ?? (state.merged || state.accepted ? undefined : await admitOwner(opts.issueId, deps, log));
+  if (owner && "refused" in owner) {
+    if (owner.unreadable || !(await exists(files.state))) return { outcome: "stopped", detail: owner.refused };
+    await recordStop(opts.dir, `the task started before Sergeant recorded who pays for it, and Linear does not show its assignee delegated it (${owner.refused.replace(/^not started: /, "")})`, { handoff: {} });
+  } else if (owner) deps = { ...deps, owner: (state.owner = owner) };
+  // The start time, the owner, and the budget window are on disk before anything else happens.
   await save();
   const requested = { ...state.budget.window, ...opts.budget };
   if (requested.wallMinutes !== state.budget.window.wallMinutes || requested.costUsd !== state.budget.window.costUsd) {
@@ -77,6 +91,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const ports: Ports & { reasoner: Reasoner } = {
     ...deps,
     log,
+    handoff: (reason) => recordStop(opts.dir, reason, { handoff: { delegatedAt: state.owner?.delegatedAt } }),
     async recordRun(runId) {
       state.runIds.push(runId);
       state.unconfirmedStarts.push(runId);
@@ -87,6 +102,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // key every poll until Linear shows it or a human changes the conversation, never left to an idle
   // guard. Only in memory: a restart instead finds the turn's fingerprint uncommitted and takes a turn.
   let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
+  // So is the refusal of a start the owner has no usable model account for (TECH-5179), until Linear
+  // accepts it; the turn after that may start the run, or refuse it again under the same key.
+  let refusal: { issueId: string; key: string; body: string } | undefined;
   // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
   const resolvedThreads = new Set<string>();
   const resolveDue = (conversation: Conversation) => resolveAnswered(conversation, state.actedThrough, deps.linear, resolvedThreads, log);
@@ -184,6 +202,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     };
     watch(conversation.issue.linkedPullRequests);
     const stop = await checkStop(conversation, runs, ctx);
+    if (typeof stop === "object") {
+      await wait(pollMs);
+      continue;
+    }
     if (stop) {
       stopping = stop;
       continue;
@@ -197,6 +219,15 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     const { budget } = holds;
+    if (refusal) {
+      const posted = await deps.linear.postComment(refusal).then(
+        () => true,
+        (e: Error) => (log(`model-account refusal still not posted: ${e.message}`), false),
+      );
+      if (posted) refusal = undefined;
+      await wait(pollMs);
+      continue;
+    }
     if (unposted && conversationRevision(unposted.situation.conversation) === conversationRevision(conversation)) {
       const retry = await execute(unposted.action, unposted.situation, deps);
       log(`asking again: ${describeOutcome(retry)}`);
@@ -278,12 +309,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     for (const line of described) log(`  ${line}`);
 
     const failedAsk = outcomes.find((o) => o.action.kind === "ask_human" && o.status === "failed");
+    refusal = outcomes.flatMap((o) => (o.status === "failed" && o.unposted ? [o.unposted] : []))[0];
     if (failedAsk) unposted = { action: failedAsk.action, situation };
     const accepted = outcomes.some((o) => o.action.kind === "accept_as_is" && o.status === "done");
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
-    const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
+    const committed = failedAsk || refusal ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
     const reply = accepted ? latestAnswer(conversation) : undefined;

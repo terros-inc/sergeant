@@ -33,7 +33,7 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
   const conversations = new Map<string, Conversation>();
   const conversation = (identifier: string) => {
     const c = conversations.get(identifier) ?? {
-      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, linkedPullRequests: identifier === withPr ? [{ repo: "o/r", number: 1 }] : [] },
+      issue: { id: `i-${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: "T", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: identifier === withPr ? [{ repo: "o/r", number: 1 }] : [] },
       humanComments: [],
       agentComments: [],
     };
@@ -58,6 +58,7 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
         const c = conversation(issueId.replace(/^i-/, ""));
         if (!c.agentComments.some((a) => a.id === commentIdFor(key))) c.agentComments.push({ id: commentIdFor(key), createdAt: new Date().toISOString(), body });
       },
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },

@@ -40,10 +40,7 @@ async function serve(runs: RunRecord[] = []) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-accounts-test-"));
   const secrets: Record<string, string> = { "sergeant/x/registered-accounts": '{"accounts":[]}' };
   const logs: string[] = [];
-  const installation = { id: "installation-claude", adapter: "claude-code-local", group: "owner", holder: "the installation", credential: "sk-ant-oat01-terros" } as const;
   const accounts = accountRegistry({
-    installation: [installation],
-    owners: [{ ...installation, id: "terros-claude-2", holder: "terros-claude-2", credential: "sk-ant-oat01-terros-2" }],
     secret: "sergeant/x/registered-accounts",
     readSecret: async (ref) => secrets[ref] ?? Promise.reject(new Error(`no ${ref}`)),
     writeSecret: async (ref, value) => void (secrets[ref] = value),
@@ -80,7 +77,7 @@ async function serve(runs: RunRecord[] = []) {
       req.on("error", reject);
       req.end(body === undefined ? undefined : JSON.stringify(body));
     });
-  return { call, secrets, logs };
+  return { call, secrets, logs, accounts };
 }
 
 test("a person registers, replaces, and removes only their own account, and its credential stays in the secret", async () => {
@@ -95,17 +92,14 @@ test("a person registers, replaces, and removes only their own account, and its 
   // The accepted exposure (09 §3a) is said at registration: where the credential goes, that it can leak, and the way out.
   const { notice } = registered.json;
   expect(notice).toContain("inside Sergeant's worker and reviewer containers");
+  expect(notice).toContain("Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription");
   expect(notice).toContain("could be exposed if a run is compromised");
   expect(notice).toContain("`sgt account remove claude-code-local`");
   expect(notice).toContain("`claude setup-token`");
 
   // Bob sees it is not his, and his remove leaves Ada's alone; a loopback operator is nobody's.
   const listed = await call("GET", "/v1/accounts", "bob");
-  expect(listed.json.accounts.map((a: { id: string; mine: boolean }) => [a.id, a.mine])).toEqual([
-    ["installation-claude", false],
-    ["terros-claude-2", false],
-    ["person:u-ada:claude-code-local", false],
-  ]);
+  expect(listed.json.accounts.map((a: { id: string; mine: boolean }) => [a.id, a.mine])).toEqual([["person:u-ada:claude-code-local", false]]);
   expect(await call("POST", "/v1/accounts/claude-code-local/remove", "bob")).toMatchObject({ status: 200, json: { removed: false } });
   expect(await call("POST", "/v1/accounts/claude-code-local/remove")).toMatchObject({ status: 403 });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toHaveLength(1);
@@ -120,8 +114,20 @@ test("a person registers, replaces, and removes only their own account, and its 
   expect(await call("POST", "/v1/accounts/claude-code-local/remove", "ada")).toMatchObject({ status: 200, json: { removed: true } });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([]);
 
-  for (const said of [registered.text, listed.text, refused.text, ...logs]) expect(said).not.toMatch(/sk-ant-oat01-(ada|expired|terros)/);
+  for (const said of [registered.text, listed.text, refused.text, ...logs]) expect(said).not.toMatch(/sk-ant-oat01-(ada|expired)/);
   expect(logs).toContain("Ada Example registered their claude-code-local model account");
+});
+
+// TECH-5179: a task's runs get only its owner's registered accounts: never someone else's, and never
+// an empty list standing in for an unreadable secret.
+test("the runner reads only the task owner's own accounts", async () => {
+  const { call, accounts, secrets } = await serve();
+  await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: CLAUDE });
+  await call("POST", "/v1/accounts/claude-code-local/register", "bob", { credential: "sk-ant-oat01-bob" });
+  expect((await accounts.of(BOB.id)).map((a) => [a.id, a.credential])).toEqual([["person:u-bob:claude-code-local", "sk-ant-oat01-bob"]]);
+  expect(await accounts.of("u-carol")).toEqual([]);
+  secrets["sergeant/x/registered-accounts"] = "not json";
+  await expect(accounts.of(ADA.id)).rejects.toThrow(/is not/);
 });
 
 test("each account's usage is the runs it paid for", async () => {
@@ -133,15 +139,19 @@ test("each account's usage is the runs it paid for", async () => {
     model: "opus",
     report: null,
     ...(costUsd !== undefined && { costUsd }),
-    account: { id: account, group: "owner", holder: account },
+    account: { id: account, group: "registered", holder: account },
   });
-  const { call } = await serve([run("run_a", "installation-claude", 1.5), run("run_b", "installation-claude"), run("run_c", "terros-claude-2", 2)]);
+  const ada = "person:u-ada:claude-code-local";
+  const bob = "person:u-bob:claude-code-local";
+  const { call } = await serve([run("run_a", ada, 1.5), run("run_b", ada), run("run_c", bob, 2)]);
+  await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: CLAUDE });
+  await call("POST", "/v1/accounts/claude-code-local/register", "bob", { credential: "sk-ant-oat01-bob" });
   const { json } = await call("GET", "/v1/accounts", "ada");
   expect(json.accounts.map((a: { id: string; usage: unknown }) => [a.id, a.usage])).toEqual([
-    ["installation-claude", { runs: 2, costUsd: 1.5, unknownCostRuns: 1 }],
-    ["terros-claude-2", { runs: 1, costUsd: 2, unknownCostRuns: 0 }],
+    [ada, { runs: 2, costUsd: 1.5, unknownCostRuns: 1 }],
+    [bob, { runs: 1, costUsd: 2, unknownCostRuns: 0 }],
   ]);
-  expect((await call("GET", "/v1/runs", "ada")).json.runs[0]).toMatchObject({ runId: "run_a", account: "installation-claude" });
+  expect((await call("GET", "/v1/runs", "ada")).json.runs[0]).toMatchObject({ runId: "run_a", account: ada });
 });
 
 // TECH-5130: offboarding. An approver, or an operator on the host, removes everything one person
