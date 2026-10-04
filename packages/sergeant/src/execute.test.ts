@@ -96,6 +96,7 @@ function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversati
   const p: Ports = {
     linear: {
       readConversation: async () => live.conversation ?? conversation,
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async (id) => {
         moved.push(id);
         if (live.moveFails) throw new Error("Linear unavailable");
@@ -109,6 +110,7 @@ function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversati
     },
     agentUserId: "agent-v2",
     workerLogin: "sergeant-worker[bot]",
+    owner: { id: "user-ann", name: "Ann", admittedAt: "2026-10-04T00:00:00.000Z" },
     github: {
       readPullRequest: async () => ({ ...pr, ...live.pr }),
       closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),

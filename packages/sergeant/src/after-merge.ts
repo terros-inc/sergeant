@@ -115,10 +115,14 @@ export async function drawAudit(
   if (!approvedHead(runs, head) && auditDrawn(opts.auditSampleRate ?? 0.2, head)) {
     const conversation = await deps.linear.readConversation(opts.issueId);
     const delegation = checkDelegation(conversation.issue, deps.agentUserId);
-    // An audit is a new run, so it starts only within the task's budget too (B1, UNF-728).
+    // An audit is a new run, so it starts only within the task's budget too (B1, UNF-728), paid by the
+    // task's owner like every other run (TECH-5179).
+    const { owner } = deps;
     const refused = delegation.allowed ? checkBudget(budgetOf(runs, 0), new Date()) : delegation;
     if (!refused.allowed) {
       log(`audit of ${head.repo}#${head.number} not started: ${refused.reason}`);
+    } else if (!owner) {
+      log(`audit of ${head.repo}#${head.number} not started: the task has no admitted owner to pay for it`);
     } else {
       const runId = RunId.parse(`run_audit-${head.headSha}`);
       const skipped = implementerOf(runs, head)?.reported?.review.reason ?? "no reason on record";
@@ -131,6 +135,7 @@ export async function drawAudit(
         await deps.runner
           .start({
             runId,
+            owner: { id: owner.id, name: owner.name },
             role: "reviewer",
             conversation,
             repositories: [head.repo],

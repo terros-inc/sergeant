@@ -104,6 +104,7 @@ async function scenario(opts: {
         workerLogin: "sergeant-worker[bot]",
         linear: {
           readConversation: async () => live,
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
           postComment: async ({ key }) => void events.push(key.startsWith("cancel:") ? "stop comment" : "outcome comment"),
           createFollowupIssue: async () => {

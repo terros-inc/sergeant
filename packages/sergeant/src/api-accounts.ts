@@ -14,9 +14,9 @@ import { AccountRefused, type AccountRegistry, type Person } from "./accounts.ts
 import { body, notFound, ok, parse, Refusal, type Reply } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
 
-// `/v1/accounts` (TECH-5113): the model accounts runs may use and the runs each paid for, and a
-// person's own account, registered or removed with their own Linear login. A loopback operator is no
-// person, so registers nothing; the owner's accounts are the installation config's.
+// `/v1/accounts` (TECH-5113): the registered model accounts and the runs each paid for, and a person's
+// own account, registered or removed with their own Linear login. A loopback operator is no person, so
+// registers nothing. A task's runs use only its owner's accounts (TECH-5179).
 //
 //   GET  /v1/accounts
 //   POST /v1/accounts/<claude-code-local|codex-local>/register   { "credential": "…" }

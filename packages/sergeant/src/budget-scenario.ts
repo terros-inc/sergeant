@@ -99,6 +99,7 @@ export async function scenario(opts: {
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => (live = await opts.onPoll(++polls, live)),
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
         async postComment({ key, body, parentId }) {
           opts.beforePost?.({ key, ...(parentId && { parentId }) });

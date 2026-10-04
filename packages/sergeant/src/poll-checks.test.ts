@@ -72,6 +72,7 @@ test("a recorded run whose status rejects holds the loop as unknown", async () =
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
       linear: {
+        readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
         moveIssueToStarted: async () => ({ moved: false as const }),
         readConversation: async () => {
           await writeFile(join(dir, "STOP"), "");

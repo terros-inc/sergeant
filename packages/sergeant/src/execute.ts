@@ -7,6 +7,7 @@ import {
   checkSend,
   checkStart,
   commentIdFor,
+  NoModelAccount,
   conversationRevision,
   issueRevision,
   type FiledFollowup,
@@ -21,6 +22,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { answeredBudgetQuestion } from "./budget.ts";
+import { accountRefusal, lowQuotaWarning, type TaskOwner } from "./owner.ts";
 import { ownQuestion, questionComment, questionKey } from "./question.ts";
 
 export type Ports = {
@@ -46,6 +48,11 @@ export type Ports = {
   exclusive?: <T>(step: () => Promise<T>) => Promise<T>;
   /** Best-effort progress line (e.g. moving the issue to In Progress). No-op when absent. */
   log?: (line: string) => void;
+  /**
+   * The task's owner (TECH-5179, owner.ts), set by the loop once the task is admitted: every run uses
+   * only their model accounts. Without one, no run starts.
+   */
+  owner?: TaskOwner;
 };
 
 export type ActionOutcome =
@@ -88,6 +95,9 @@ export async function execute(action: ProposedAction, situation: SituationReport
     switch (action.kind) {
       case "start_worker":
       case "start_reviewer": {
+        const { owner } = ports;
+        const payer = owner && { id: owner.id, name: owner.name };
+        if (!owner || !payer) return denied({ rule: "O1", reason: "the task has no admitted owner to pay for its runs (TECH-5179)" });
         const exclusive = ports.exclusive ?? ((step) => step());
         return await exclusive(async (): Promise<ActionOutcome> => {
           // Delegation, the issue's linked PRs, and who opened a reviewer's subject PRs come from live
@@ -112,10 +122,11 @@ export async function execute(action: ProposedAction, situation: SituationReport
           const runId = `run_${randomUUID()}`;
           // Accepted: the deadline can pass during this milliseconds-long write, and the run still starts.
           await ports.recordRun?.(runId);
-          await ports.runner.start(
+          const launched = await ports.runner.start(
             action.kind === "start_worker"
               ? {
                   runId,
+                  owner: payer,
                   role: "worker",
                   conversation,
                   repositories: action.repositories,
@@ -124,6 +135,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
                 }
               : {
                   runId,
+                  owner: payer,
                   role: "reviewer",
                   conversation,
                   repositories: [...new Set(action.subject.map((s) => s.repo))],
@@ -132,6 +144,12 @@ export async function execute(action: ProposedAction, situation: SituationReport
                   ...(action.focus !== undefined && { focus: action.focus }),
                 },
           );
+          const lowQuota = launched?.lowQuota;
+          if (lowQuota) {
+            await ports.linear
+              .postComment({ issueId: conversation.issue.id, ...lowQuotaWarning(conversation.issue.id, owner, lowQuota, runId) })
+              .catch((e: Error) => ports.log?.(`could not warn ${owner.name} about ${lowQuota.accountId}'s 5-hour window: ${e.message}`));
+          }
           const role = action.kind === "start_worker" ? "worker" : "reviewer";
           const started: RunRecord = { runId, role, status: "running", provider: "unknown", model: "unknown", report: null, issueRevision: issueRevision(conversation.issue) };
           // Best effort, after the start is a done fact: show the issue as In Progress the moment the
@@ -146,6 +164,12 @@ export async function execute(action: ProposedAction, situation: SituationReport
             }
           }
           return { action, status: "done", result: { runId }, started };
+        }).catch(async (e: unknown) => {
+          // Nothing started: the owner is told once per condition what to fix (owner.ts).
+          if (!(e instanceof NoModelAccount)) throw e;
+          const refusal = accountRefusal(conversation.issue.id, owner, e);
+          await ports.linear.postComment({ issueId: conversation.issue.id, ...refusal }).catch((p: Error) => ports.log?.(`could not post the model-account refusal: ${p.message}`));
+          return denied({ rule: "O2", reason: e.message });
         });
       }
       case "send_run": {

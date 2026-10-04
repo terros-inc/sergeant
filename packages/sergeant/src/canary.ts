@@ -12,8 +12,8 @@
 //   It reads the conversation, files follow-up issues, and posts the one outcome comment after the merge.
 // - GitHub: the control-plane App reads facts and merges; workers push and open PRs with a worker-App
 //   token scoped to their run's repositories. There is no operator `gh` login and no bridge.
-// - Model: the Sergeant model token, for reasoning here and for Claude Code worker and reviewer
-//   containers; and the installation's Codex credential for a role the config runs on `codex-local`.
+// - Model: the Sergeant model token, for reasoning here. Worker and reviewer containers use only the
+//   task owner's registered accounts (TECH-5179): the issue's assignee, who must have delegated it.
 import { resolve } from "node:path";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -48,8 +48,8 @@ const repo = RepoSlug.parse(values.repo ?? fail("--repo is required"));
 const dir = resolve(values.dir ?? fail("--dir is required"));
 
 const installation = await connect(config, [repo]);
-// The installation's own model accounts, the config's further ones, then people's registered ones (TECH-5113).
-const accounts = modelAccounts(config, installation, (line) => console.log(`[${new Date().toISOString()}] ${line}`));
+// People's registered model accounts: a task's runs use only its owner's (TECH-5179).
+const accounts = modelAccounts(config, (line) => console.log(`[${new Date().toISOString()}] ${line}`));
 // The reasoning CLI inherits this process's environment: with the token set it authenticates as
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;

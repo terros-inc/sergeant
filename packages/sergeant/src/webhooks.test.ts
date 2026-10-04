@@ -74,6 +74,7 @@ async function start() {
       },
       postComment: async () => {},
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
     },
     github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("unused")) },

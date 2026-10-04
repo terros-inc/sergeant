@@ -18,6 +18,7 @@ import { cancelRuns, describePr, fingerprintOf, landedOf, readPullRequests, unse
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
+import { admitOwner } from "./owner.ts";
 import { applyTurn, loadState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -66,7 +67,14 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     await writeFile(tmp, JSON.stringify(state, null, 2));
     await rename(tmp, files.state);
   };
-  // The start time and the budget window are on disk before anything else happens.
+  // TECH-5179 (owner.ts): a task is admitted only for its owner, read from Linear's history whenever a
+  // task has none, so an intake after a missed webhook or a restart checks it too. Refused, nothing is
+  // saved, and the next intake reads Linear again. Every run of the task is then paid by its owner. A
+  // task saved before TECH-5179 that already ended (merged, accepted) only finishes, and starts no run.
+  const owner = state.owner ?? (state.merged || state.accepted ? undefined : await admitOwner(opts.issueId, deps, log));
+  if (owner && "refused" in owner) return { outcome: "stopped", detail: owner.refused };
+  if (owner) deps = { ...deps, owner: (state.owner = owner) };
+  // The start time, the owner, and the budget window are on disk before anything else happens.
   await save();
   const requested = { ...state.budget.window, ...opts.budget };
   if (requested.wallMinutes !== state.budget.window.wallMinutes || requested.costUsd !== state.budget.window.costUsd) {

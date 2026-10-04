@@ -93,6 +93,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
       workerLogin: "sergeant-worker[bot]",
       linear: {
         readConversation: async () => live,
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
         postComment: async (c) => void comments.push(c),
         createFollowupIssue: async (req) => (filed.push(req.key), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
@@ -172,7 +173,7 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
+      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async () => ({ ...pr, state: "merged", mergedSha }),
         closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("already merged"); },
@@ -217,7 +218,7 @@ test("a PR Linear links with no worker report is still polled, and its checks ch
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
+      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async (r, n) => (read.push(`${r}#${n}`), n === 7 ? { ...pr, checks } : other),
         closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); },
@@ -269,7 +270,7 @@ test.each([
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
-      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }) },
+      linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async (_repo, number) => prs.get(number)!,
         closePullRequest: async () => {}, mergePullRequest: async ({ number }) => {

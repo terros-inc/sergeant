@@ -58,6 +58,7 @@ function fakes(issues: DelegatedIssue[], withPr?: string) {
         const c = conversation(issueId.replace(/^i-/, ""));
         if (!c.agentComments.some((a) => a.id === commentIdFor(key))) c.agentComments.push({ id: commentIdFor(key), createdAt: new Date().toISOString(), body });
       },
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },

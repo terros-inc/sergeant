@@ -46,6 +46,7 @@ export function fakes(live: { conversation: Conversation }) {
     undelegate: async () => void (live.conversation.issue.delegate = null),
     linear: {
       readConversation: async () => structuredClone(live.conversation),
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
       postComment: async ({ key, body }) => {
         seen.commentAttempts.push(key);

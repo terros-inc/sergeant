@@ -248,15 +248,18 @@ deterministic code: the worker gets the most weekly capacity left unless its 5-h
 unknown reading keeps the `runners` default, so a quota read never blocks a launch. The run record's
 `providerChoice` keeps the choice and the readings behind it.
 
-**Model accounts (TECH-5113).** A provider may have several accounts: the installation's own, the
-config's `modelAccounts` (both the owner's), then those people register through `/v1/accounts`. The
-owner's accounts come first across providers: while any owner's account of either provider is usable
-(5-hour window at least 20%, week not spent), only those take part, and registered ones only when none
-is. Each provider's account is its usable one with the most weekly capacity left, and the provider
-choice above compares the providers that have one (a reviewer shares its worker's provider when only
-that one does). With nothing usable, each provider runs the installation's own account as before. A run that fails on the account's quota
-or authentication (`failureReason`) sets the account aside for an hour, in memory, so the next launch
-takes the next one. The run record's `account` says whose subscription paid, never the credential.
+**Model accounts (TECH-5179, replacing TECH-5113's shared pool).** Every run carries its task's owner
+(`RunSpec.owner`: the issue's human assignee, admitted only when Linear's history shows that person
+delegated it, 07 §5) and runs only on an account that person registered through `/v1/accounts`, never
+the installation's credentials or anyone else's. Among the owner's accounts the runner takes the one
+with the most weekly capacity left whose 5-hour window is at least 20% (a reviewer prefers one of
+another provider than its worker's, the provider choice above); with none, the one below the floor
+with the most weekly left, and the start says so, so the owner is warned on the issue; with none of
+those, one whose quota could not be read. A run that fails on the account's quota or authentication
+(`failureReason`) sets the account aside for an hour, in memory, so the next launch takes another of
+the owner's. An owner with no account, or none usable, gets `NoModelAccount` from `start`, which
+starts nothing; the core then tells the owner on the issue. The run record's `account` says whose
+subscription paid, never the credential.
 
 An adapter may wrap a tiny native helper (for example a Rust binary that owns process groups and clean
 termination) if OS process handling genuinely needs one. Sergeant itself stays TypeScript.

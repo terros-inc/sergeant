@@ -1,5 +1,6 @@
 import { commentIdFor, Conversation, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { taskOwnerReader } from "./delegation.ts";
 import { followupFiler } from "./followup.ts";
 import { readLinkedIssueBackground } from "./linked-issues.ts";
 import {
@@ -202,6 +203,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       if (!commentResolve.success) throw new Error("Linear commentResolve did not succeed");
       return "resolved";
     },
+
+    readTaskOwner: taskOwnerReader(request, sergeantUsers),
 
     createFollowupIssue: followupFiler({ request, createOnce, sergeantUsers, log }),
 

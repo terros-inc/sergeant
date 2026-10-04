@@ -63,6 +63,7 @@ const deps = (readPullRequest: Ports["github"]["readPullRequest"], start: Ports[
   ({
     agentUserId: "agent-v2",
     workerLogin: "sergeant-worker[bot]",
+    owner: { id: "user-ann", name: "Ann", admittedAt: "2026-10-04T00:00:00.000Z" },
     linear: { readConversation: async () => conversation },
     github: { readPullRequest },
     runner: { start },

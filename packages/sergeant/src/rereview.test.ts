@@ -107,6 +107,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
           live.agentComments.push({ id: commentIdFor(key), createdAt: new Date().toISOString(), body });
         },
         createFollowupIssue: async () => { throw new Error("unused"); },
+        readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
       github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); } },

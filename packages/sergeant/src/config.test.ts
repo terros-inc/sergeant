@@ -53,13 +53,14 @@ test("reviewer profiles are validated and GitHub logins are matched case-insensi
 test("a task starts with the installation config's budget window, or the default without one, and keeps it", async () => {
   const root = await mkdtemp(join(tmpdir(), "sergeant-config-test-"));
   try {
-    // The loop saves the task's window before anything else, then finds STOP and ends: no port is used.
+    // The loop admits the task's owner and saves its window before anything else, then finds STOP and
+    // ends: no other port is used.
     const start = async (task: string, raw: object) => {
       const dir = join(root, task);
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, "STOP"), "");
       const budget = taskBudget(InstallationConfig.parse(raw));
-      await runLoop({ issueId: task, enrolledRepositories: [], dir, budget, log: () => {} }, {} as Parameters<typeof runLoop>[1]);
+      await runLoop({ issueId: task, enrolledRepositories: [], dir, budget, log: () => {} }, { agentUserId: "agent-v2", linear: { readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) } } as unknown as Parameters<typeof runLoop>[1]);
       return (JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as { budget: { window: unknown } }).budget.window;
     };
     const lowered = { ...config(1, 2), budget: { minutes: 45, usd: 10 } };

@@ -112,6 +112,10 @@ sgt account remove codex-local                  # remove yours; runs already on 
   new one with `claude setup-token`, or sign out of all ChatGPT sessions and `codex login` again.
   `register` says this each time. This risk is accepted on purpose (design/09-security.md §3a).
 - You can only register or remove your own account. `sgt run show <run>` says which account a run used.
+- **Only your own tasks spend it** (TECH-5179): an issue assigned to you that you delegated to Sergeant
+  yourself. Someone else delegating an issue assigned to you is refused with a comment; assign it to
+  yourself and delegate it, and its runs use your accounts and nobody else's. With none of yours
+  registered or usable, the issue says so and nothing starts.
 - **Offboarding.** An approver removes every account a person registered with
   `sgt admin account remove-person <linear-user-id>` (`sgt account list --json` shows each account's
   id, `person:<linear-user-id>:<adapter>`). Runs already on them finish on them, and it does not revoke

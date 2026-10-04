@@ -107,7 +107,15 @@ A guardrail admits an issue when **all** of these hold (deterministic):
 4. no open task exists for it;
 5. every issue it is blocked by is completed or canceled;
 6. open tasks < `limits.maxOpenTasks`;
-7. the installation is not paused.
+7. the installation is not paused;
+8. it has a human assignee, and Linear's issue history shows that same person most recently
+   delegated it to Sergeant (TECH-5179). That person is the task's **owner**, recorded with the task:
+   every run of it uses only their registered model accounts (04 §10), and reassigning the issue
+   while the task runs changes nothing. A new episode (§9) is checked afresh. The history is read in
+   full on every admission attempt, so a missed webhook or downtime cannot skip the check; anything it
+   cannot prove refuses. Each refusal (no human assignee; someone else delegated it; the delegation is
+   not attributable) is one comment saying what to do, keyed by what Linear showed, so a poll never
+   repeats it; an owner with no usable model account is told the same way when a run would start.
 
 Issues that fail only (5), (6), or (7) stay queued in Linear and are re-checked on every intake pass,
 highest Linear priority first, then oldest delegation. No comment is posted for queueing;

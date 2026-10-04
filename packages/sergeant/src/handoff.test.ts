@@ -92,6 +92,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
         readConversation: async () => live,
         postComment: async (c) => void comments.push(c),
         createFollowupIssue: async () => { throw new Error("unused"); },
+        readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
       github: {

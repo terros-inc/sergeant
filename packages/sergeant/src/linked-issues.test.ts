@@ -37,7 +37,7 @@ test("an explicitly linked issue reaches the brief as background outside the Tas
   };
 
   const conversation = await createLinearPort({ apiKey: "test", sergeantUserIds: [], fetch }).readConversation("TECH-1");
-  const brief = workerBrief({ runId: "run_w1", role: "worker", conversation, repositories: ["o/r"], objective: "Write the docs.", context: { pullRequests: [], runs: [] } }, []);
+  const brief = workerBrief({ runId: "run_w1", owner: { id: "user-ann", name: "Ann" }, role: "worker", conversation, repositories: ["o/r"], objective: "Write the docs.", context: { pullRequests: [], runs: [] } }, []);
 
   expect(requested).toEqual(["TECH-2"]);
   const sections = brief.split(/^(?=## )/m);

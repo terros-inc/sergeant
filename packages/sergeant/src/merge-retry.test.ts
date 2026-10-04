@@ -78,6 +78,7 @@ async function fixture(waitingGraceMinutes = 0) {
         readConversation: async () => live,
         postComment: async (comment) => void comments.push(comment),
         createFollowupIssue: async () => { throw new Error("unused"); },
+        readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
       github: {

@@ -43,9 +43,9 @@ in the run's container for the run's duration, an accepted risk (§3a).
 Settled (owner, 2026-10-03, TECH-5156), after an independent review of the model-account pool (TECH-5113):
 accept the risk instead of building a credential broker.
 
-**What is exposed.** Every worker and reviewer run works on one model account (04 §10): the
-installation's own Claude or Codex credential, one of the owner's further accounts, or a Claude or
-Codex subscription a team member registered through `/v1/accounts` (11). The runner puts that
+**What is exposed.** Every worker and reviewer run works on one model account (04 §10): a Claude or
+Codex subscription its task's owner registered through `/v1/accounts` (11), and only for a task that
+person was assigned and delegated themselves (TECH-5179), so nobody can spend another person's quota. The runner puts that
 credential into the run's container (`CLAUDE_CODE_OAUTH_TOKEN`, or the Codex `auth.json`, which holds
 its refresh token) for the run's duration, because the agent CLI needs it to call the model. Anything
 running in that container, including a prompt-injected or compromised agent, can read it and copy it

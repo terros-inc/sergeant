@@ -41,6 +41,7 @@ test("a task accepted while its issue is in Todo is not started again until a hu
     delegatedIssues: async () => [{ identifier: "UNF-1", priority: 0, createdAt: ago(300), state, blockedBy: [] }],
     linear: {
       readConversation: async () => conversation,
+      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
       postComment: async ({ body }) => void posted.push(body),
       resolveThread: async () => "resolved" as const,

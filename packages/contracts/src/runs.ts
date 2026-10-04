@@ -118,9 +118,9 @@ export const ProviderChoice = z.object({
 export type ProviderChoice = z.infer<typeof ProviderChoice>;
 
 /**
- * The model account a run used (TECH-5113): whose subscription paid for it. `owner` is the
- * installation owner's own account (its config); `registered`, one a person registered with `sgt`.
- * Never the credential.
+ * The model account a run used (TECH-5113): whose subscription paid for it. `registered`, one a person
+ * registered with `sgt`, the task owner's (TECH-5179); `owner`, the installation's own, only on records
+ * made before TECH-5179. Never the credential.
  */
 export const RunAccount = z.object({
   id: z.string(),
@@ -163,7 +163,7 @@ const RunBase = {
   providerChoice: ProviderChoice.optional(),
   /** Absent on records made before TECH-5113. */
   account: RunAccount.optional(),
-  /** Why the account was chosen: owner's accounts first, then registered ones, each by quota (TECH-5113). */
+  /** Why the account was chosen among the task owner's, by quota (TECH-5179). */
   accountReason: z.string().optional(),
 };
 

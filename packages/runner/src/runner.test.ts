@@ -2,7 +2,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { issueRevision, type RunSpec } from "@terros/sergeant-contracts";
+import { issueRevision, NoModelAccount, type RunSpec } from "@terros/sergeant-contracts";
 import type { Exec, ExecOptions } from "./exec.ts";
 import { containerRunner, type ContainerRunnerOptions } from "./runner.ts";
 
@@ -24,8 +24,15 @@ function fakeHost() {
 
 const TOKEN = "sk-ant-oat01-test-token";
 const GH = "ghs_worker-app-run-token";
+const CODEX = '{"auth_mode":"chatgpt","tokens":{"access_token":"codex-test-token"}}';
+const ann = { id: "ann", name: "Ann" };
+// Ann's registered accounts, and someone else's that her task must never run on (TECH-5179).
+const annClaude = { id: "person:ann:claude-code-local", adapter: "claude-code-local" as const, holder: "Ann <ann@example.com>", credential: TOKEN };
+const annCodex = { id: "person:ann:codex-local", adapter: "codex-local" as const, holder: "Ann <ann@example.com>", credential: CODEX };
+const registered = { ann: [annClaude, annCodex], bob: [{ ...annClaude, id: "person:bob:claude-code-local", credential: "sk-ant-oat01-bob" }] } as Record<string, (typeof annClaude | typeof annCodex)[]>;
 const spec: RunSpec = {
   runId: "run_t1",
+  owner: ann,
   role: "worker",
   objective: "Do it.",
   context: { pullRequests: [], runs: [] },
@@ -47,20 +54,20 @@ const spec: RunSpec = {
   },
 };
 
-async function started(extra: Record<string, unknown> = {}) {
+async function started(extra: Record<string, unknown> = {}, run: RunSpec = spec) {
   const host = fakeHost();
   const minted: unknown[] = [];
   const options = {
     rootDir: await mkdtemp(join(tmpdir(), "sergeant-runner-test-")),
     models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
-    claudeOAuthToken: TOKEN,
+    accounts: async (ownerId: string) => registered[ownerId] ?? [],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async (req: unknown) => (minted.push(req), GH),
     exec: host.exec,
     ...extra,
   } as ContainerRunnerOptions;
   const runner = containerRunner(options);
-  await runner.start(spec);
+  await runner.start(run);
   return { runner, host, minted, rootDir: options.rootDir };
 }
 
@@ -139,7 +146,7 @@ test("gives the run the issue's files read-only, fetched on the host, skipping o
   const runner = containerRunner({
     rootDir,
     models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
-    claudeOAuthToken: TOKEN,
+    accounts: async () => [annClaude],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => GH,
     exec: host.exec,
@@ -163,13 +170,12 @@ test("gives the run the issue's files read-only, fetched on the host, skipping o
   expect(brief).toContain(`${huge} ("huge.bin") — not downloaded: over the`);
 });
 
-const CODEX = '{"auth_mode":"chatgpt","tokens":{"access_token":"codex-test-token"}}';
 const envNames = (args: string[] = []) => args.flatMap((a, i, all) => (a === "--env" ? [all[i + 1]] : []));
 
 // TECH-5009: a role on Codex gets the Codex credential in place of the Claude token, never both, and
 // otherwise the same container: workspace mount, worker-App token, and human git identity.
 test("a codex-local run gets only the Codex credential in place of the Claude token", async () => {
-  const { host } = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
+  const { host } = await started({ adapters: { worker: "codex-local" } });
 
   const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
   expect(envNames(run?.args)).toEqual([
@@ -184,9 +190,6 @@ test("a codex-local run gets only the Codex credential in place of the Claude to
   expect(run?.args.join(" ")).toContain("codex exec --json");
   expect(run?.args.slice(-3)).toEqual(["3600", "gpt-5", "10"]);
   expect(host.calls.flatMap((c) => c.args).join(" ")).not.toContain("codex-test-token");
-  expect(() => containerRunner({ ...({} as ContainerRunnerOptions), rootDir: "/x", claudeOAuthToken: TOKEN, adapters: { reviewer: "codex-local" } })).toThrow(
-    /codexCredential/,
-  );
 });
 
 const REPORT = `Done.
@@ -214,7 +217,7 @@ test("a Codex run records its summed tokens and no cost; a Claude run its report
     '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50,"reasoning_output_tokens":20}}',
     '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}',
   ].join("\n");
-  const codex = await ended({ adapters: { worker: "codex-local" }, codexCredential: CODEX }, codexLogs);
+  const codex = await ended({ adapters: { worker: "codex-local" } }, codexLogs);
   // M13 skips a record without `issueRevision`, so a Codex run must carry it like a Claude run (TECH-5045).
   expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "gpt-5", issueRevision: issueRevision(spec.conversation.issue) });
   expect(codex.tokens).toEqual({ input: 1010, cachedInput: 400, output: 55, reasoningOutput: 20 });
@@ -233,7 +236,7 @@ test.each([
   "Your access token could not be refreshed. Please log out and sign in again.",
   "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
 ])("a Codex refresh failure is recorded as authentication: %s", async (message) => {
-  const run = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
+  const run = await started({ adapters: { worker: "codex-local" } });
   run.host.docker.running = false;
   run.host.docker.logErrors = `Error refreshing token: ${message}`;
 
@@ -247,13 +250,13 @@ test.each([
 test("non-auth Codex failures and unrelated stderr do not report authentication", async () => {
   // A usage limit is the account's quota (TECH-5113), which sets the account aside, never an auth alert.
   const turn = await ended(
-    { adapters: { worker: "codex-local" }, codexCredential: CODEX },
+    { adapters: { worker: "codex-local" } },
     '{"type":"turn.failed","error":{"message":"The model hit its usage limit."}}',
     "",
   );
   expect(turn).toMatchObject({ status: "failed", reportError: expect.stringContaining("The model hit its usage limit."), failureReason: "quota" });
 
-  const timeout = await started({ adapters: { worker: "codex-local" }, codexCredential: CODEX });
+  const timeout = await started({ adapters: { worker: "codex-local" } });
   timeout.host.docker.running = false;
   timeout.host.docker.exitCode = 124;
   timeout.host.docker.logErrors = "health probe returned 401 Unauthorized";
@@ -262,7 +265,7 @@ test("non-auth Codex failures and unrelated stderr do not report authentication"
   expect(timedOut.failureReason).toBeUndefined();
 
   const success = await ended(
-    { adapters: { worker: "codex-local" }, codexCredential: CODEX },
+    { adapters: { worker: "codex-local" } },
     '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}',
     REPORT,
     "an unrelated request returned 401 Unauthorized",
@@ -292,4 +295,18 @@ test("a canceled run keeps the report its worker wrote, and a run that wrote non
   await silent.runner.cancel("run_t1");
   expect(await silent.runner.status("run_t1")).toMatchObject({ status: "canceled", report: null });
   expect((await silent.runner.status("run_t1")).reportError).toBeUndefined();
+});
+
+// TECH-5179: a task's runs spend only its owner's quota. The account comes from the owner's own
+// registrations, and an owner with none starts nothing: no clone, no container, no run to cancel.
+test("a run uses only its task owner's account, and an owner with none starts nothing", async () => {
+  const bob = await started({}, { ...spec, owner: { id: "bob", name: "Bob" } });
+  const run = bob.host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
+  expect(run?.opts.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-bob");
+  expect(await bob.runner.status("run_t1")).toMatchObject({ account: { id: "person:bob:claude-code-local", group: "registered" } });
+
+  const carol = { id: "carol", name: "Carol" };
+  const refused = await started({}, { ...spec, owner: carol }).catch((e: unknown) => e);
+  expect(refused).toBeInstanceOf(NoModelAccount);
+  expect(refused).toMatchObject({ kind: "none_registered", owner: carol });
 });
