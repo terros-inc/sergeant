@@ -196,3 +196,21 @@ export const RemovePersonAccountsResponse = z.object({
   removed: z.array(RunAccount.pick({ id: true, holder: true }).extend({ adapter: AccountAdapter })),
 });
 export type RemovePersonAccountsResponse = z.infer<typeof RemovePersonAccountsResponse>;
+
+// --- enrolled repositories (TECH-5193)
+
+export const MergeMethod = z.enum(["merge", "squash", "rebase"]);
+
+/** Every signed-in user may list them; `whoami` already names them. */
+export const RepositoryList = z.object({ repositories: z.array(z.object({ repo: RepoSlug, mergeMethod: MergeMethod })) });
+export type RepositoryList = z.infer<typeof RepositoryList>;
+
+/** An approver's change to the enrolled list: written to the installation's config in AWS, taken by serve in place. */
+export const AddRepositoryRequest = z.strictObject({ repo: RepoSlug, mergeMethod: MergeMethod.default("squash") });
+export const RemoveRepositoryRequest = z.strictObject({ repo: RepoSlug });
+/**
+ * The repository as enrolled, whether this call changed the installation's config (false: it already
+ * had the change, so nothing was written), and the enrolled list now.
+ */
+export const RepositoryChange = z.object({ repo: RepoSlug, changed: z.boolean(), repositories: z.array(RepoSlug) });
+export type RepositoryChange = z.infer<typeof RepositoryChange>;

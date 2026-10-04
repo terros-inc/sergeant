@@ -33,6 +33,7 @@ export type WebhookOptions = {
   /** Signing secrets; a source without one has no endpoint. */
   secrets: { linear?: string; github?: string };
   agentUserId: string;
+  /** Read at each delivery: an approver's `sgt admin repo add` changes it in place (TECH-5193). */
   enrolledRepositories: string[];
   nudge: (nudge: Nudge) => void;
   log: (line: string) => void;
@@ -40,7 +41,6 @@ export type WebhookOptions = {
 
 /** Handles `POST /webhooks/linear` and `POST /webhooks/github`. */
 export function webhookHandler(opts: WebhookOptions): (req: IncomingMessage, res: ServerResponse) => void {
-  const enrolled = new Set(opts.enrolledRepositories.map((r) => r.toLowerCase()));
   const handle = async (req: IncomingMessage): Promise<number> => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     const source = path === WEBHOOK_PATHS.linear ? "linear" : "github";
@@ -59,6 +59,7 @@ export function webhookHandler(opts: WebhookOptions): (req: IncomingMessage, res
       opts.log("linear webhook refused: missing or stale webhookTimestamp");
       return 401;
     }
+    const enrolled = new Set(opts.enrolledRepositories.map((r) => r.toLowerCase()));
     const nudge = source === "linear" ? linearNudge(payload, opts.agentUserId) : githubNudge(header(req, "x-github-event") ?? "", payload, enrolled);
     if (nudge) opts.nudge(nudge);
     // Linear counts anything but 200 as a failed delivery, and retries it.

@@ -20,6 +20,7 @@ export type GitHubRepositoryConfig = {
 export type GitHubAdapterOptions = {
   /** The control-plane App's installation token, fetched per request so it can be refreshed. */
   token: () => Promise<string>;
+  /** Read at each call, so a repository enrolled or removed in place (TECH-5193) takes effect at once. */
   repositories: Readonly<Record<string, GitHubRepositoryConfig>>;
   apiUrl?: string;
   fetch?: typeof globalThis.fetch;
@@ -48,11 +49,6 @@ const statusState = (state: z.infer<typeof commitStatus>["state"]): ObservedChec
 
 /** The control plane's live GitHub surface: fact reads, the SHA-guarded merge, and a canceled task's PR close. */
 export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
-  const repositories = new Map(
-    Object.entries(options.repositories).map(
-      ([repo, config]) => [RepoSlug.parse(repo), repositoryConfig.parse(config)] as const,
-    ),
-  );
   const fetchFn = options.fetch ?? globalThis.fetch;
   const apiUrl = (options.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
 
@@ -79,9 +75,9 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
 
   const configFor = (repo: string) => {
     const parsed = RepoSlug.parse(repo);
-    const config = repositories.get(parsed);
+    const config = Object.hasOwn(options.repositories, parsed) ? options.repositories[parsed] : undefined;
     if (!config) throw new Error(`GitHub repository is not allowed: ${parsed}`);
-    return { repo: parsed, config };
+    return { repo: parsed, config: repositoryConfig.parse(config) };
   };
 
   const readRawPullRequest = async (repo: string, number: number) => {

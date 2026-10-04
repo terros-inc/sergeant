@@ -282,7 +282,7 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   so a too-old `sgt` changes nothing. Every `/v1` call names its caller and fails closed without one (TECH-4938): a bearer Linear access token
   from `sgt login`, which `serve` reads back from Linear on every call and admits only for an active
   user of the agent's own Linear workspace, not an agent, in one of `humans.teams`; those listed
-  in `humans.approvers` are approvers too. `/v1/whoami` says whether the caller is an approver; only an approver (or the loopback operator) may `POST /v1/accounts/remove-person` to remove everything one person registered (TECH-5130), or restart or update the Sergeant host through `/v1/admin` (TECH-5195, deploy/README.md). Wakes and cancels are logged
+  in `humans.approvers` are approvers too. `/v1/whoami` says whether the caller is an approver; only an approver (or the loopback operator) may `POST /v1/accounts/remove-person` to remove everything one person registered (TECH-5130), restart or update the Sergeant host through `/v1/admin` (TECH-5195, deploy/README.md), or `POST /v1/repositories/add` or `/remove` to change the enrolled repositories, which every caller may `GET /v1/repositories` (TECH-5193). A change is refused unless both GitHub Apps reach the repository; it rewrites only `repositories` in the installation-config parameter (`--config-parameter`, else `SERGEANT_CONFIG_PARAMETER`), naming the caller in the parameter version's description, and `serve` takes it in place. With a parameter, `serve` reads its enrolled repositories from it at startup rather than from `--config`, so a restart keeps every change. Wakes and cancels are logged
   with the caller's name, and a cancel's note on the issue names them. Only `GET /v1/auth/config`, the
   public client id `sgt login` starts with, needs no caller. For development on one machine,
   `--trust-loopback` also admits a caller on the host with no login, as an operator; it is refused
@@ -290,7 +290,7 @@ It is a thin shell over the canary's per-task loop, not a workflow engine:
   `Host`. Posts must be JSON, so a cross-site form cannot post.
 
 ```sh
-pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2] [--waiting-grace-minutes 15] [--trust-loopback]
+pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8080] [--max-tasks 2] [--waiting-grace-minutes 15] [--config-parameter <SSM name>] [--trust-loopback]
 ```
 
 To run `serve` on one AWS host behind an HTTPS endpoint, see [`deploy/`](deploy/README.md): Terraform,
@@ -304,7 +304,7 @@ This section is the reference.
 `sgt` (UNF-714) only calls the client API and prints the answer: concise lines by default, the API's
 own JSON with `--json` (errors too, as `{"error":{"code","message"}}`; exit 1 for an API error, 2 for
 usage). It needs no AWS credentials. Run `sgt --help` for the commands: `login`, `logout`, `whoami`,
-`task list | show | wake | cancel`, `run list | show | report | cancel`, `update`. Keep it current: the
+`task list | show | wake | cancel`, `run list | show | report | cancel`, `account …`, `repo list`, `admin repo add | remove`, `update`. Keep it current: the
 installation refuses every request from an `sgt` older than it supports, before acting on it, and says
 to run `sgt update`, which needs no API.
 

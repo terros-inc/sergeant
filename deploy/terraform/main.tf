@@ -108,6 +108,14 @@ data "aws_iam_policy_document" "host" {
     resources = [local.config_parameter]
   }
 
+  # An approver's `sgt admin repo add|remove` (TECH-5193): serve rewrites this one parameter, changing
+  # only its `repositories` (packages/sergeant/src/enrollment.ts). SSM core grants no other write.
+  statement {
+    sid       = "WriteInstallationConfig"
+    actions   = ["ssm:PutParameter"]
+    resources = [local.config_parameter]
+  }
+
   # AmazonSSMManagedInstanceCore allows ssm:GetParameter(s) on every parameter in the account; this
   # host reads only its config.
   statement {

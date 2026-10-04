@@ -15,6 +15,8 @@ import {
   RegisterAccountResponse,
   RemoveAccountResponse,
   RemovePersonAccountsResponse,
+  RepositoryChange,
+  RepositoryList,
   RunDetail,
   RunList,
   MIN_CLI_VERSION,
@@ -55,6 +57,7 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   run show <run>
   run report <run>                   the run's raw Markdown report
   run cancel <run> [--reason …]
+  repo list                          the enrolled repositories and how Sergeant merges in each
   account list                       model accounts runs may use: name, provider, whose, what each paid for
   account register <claude|codex> [--name <name>]
                                      register your own subscription: signs in with \`claude setup-token\`
@@ -69,6 +72,10 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   admin update [<ref>]               an approver's: move the host to <ref>, a commit on main whose check
                                      passed, else to what its release channel would choose; then wait
   admin status                       the host's release, when serve started, and the last restart or update
+  admin repo add <owner/name> [--merge-method squash|merge|rebase]
+                                     an approver's enrollment (default squash), once both GitHub
+                                     Apps reach it; serve takes it at once, no host update
+  admin repo remove <owner/name>     an approver's removal: Sergeant stops working in it at once
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
 one through an SSM port-forward). Each API URL has its own login. --json prints the API's JSON
@@ -91,7 +98,7 @@ export type Io = {
   sleep?: (ms: number) => Promise<void>;
 };
 
-type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined };
+type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined; "merge-method"?: string | undefined };
 /**
  * `token`: the Linear access token sent as the caller's bearer, when signed in. `warned`: whether this
  * invocation has said its server is older than it, shared by every copy of the context.
@@ -244,6 +251,28 @@ const commands: Record<string, Command> = {
     optional: 1,
     run: (ctx, [ref]) => adminRequest(ctx, "update", ref === undefined ? {} : { ref }),
   },
+  "repo list": {
+    args: 0,
+    run: async (ctx) => {
+      const { repositories } = await call(ctx, "GET", "/v1/repositories", RepositoryList);
+      print(ctx, { repositories }, () => (repositories.length ? table(repositories.map((r) => [r.repo, r.mergeMethod])) : "no enrolled repositories"));
+    },
+  },
+  "admin repo add": {
+    args: 1,
+    flags: ["merge-method"],
+    run: async (ctx, [repo]) => {
+      const res = await call(ctx, "POST", "/v1/repositories/add", RepositoryChange, { repo, mergeMethod: ctx.flags["merge-method"] });
+      print(ctx, res, () => `${res.changed ? "enrolled" : "already enrolled:"} ${res.repo}; enrolled now: ${res.repositories.join(", ")}`);
+    },
+  },
+  "admin repo remove": {
+    args: 1,
+    run: async (ctx, [repo]) => {
+      const res = await call(ctx, "POST", "/v1/repositories/remove", RepositoryChange, { repo });
+      print(ctx, res, () => `${res.changed ? "removed" : "not enrolled:"} ${res.repo}; enrolled now: ${res.repositories.join(", ") || "none"}`);
+    },
+  },
   login: {
     args: 0,
     run: async (ctx) => {
@@ -320,6 +349,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         name: { type: "string" },
         reason: { type: "string" },
         task: { type: "string" },
+        "merge-method": { type: "string" },
         version: { type: "boolean", short: "v" },
         help: { type: "boolean", short: "h" },
       },
@@ -345,7 +375,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(`${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags = { name: values.name, reason: values.reason, task: values.task };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"] };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

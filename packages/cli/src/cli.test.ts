@@ -291,6 +291,20 @@ test("admin account remove-person posts the user id and says what it removed", a
   expect((await sgt(api, "admin", "account")).code).toBe(2);
 });
 
+test("repo list is any signed-in user's, and only adding and removing are under admin", async () => {
+  const { api, seen } = await fakeApi({
+    "GET /v1/repositories": { json: { repositories: [{ repo: "terros-inc/one", mergeMethod: "squash" }] } },
+    "POST /v1/repositories/add": { json: { repo: "terros-inc/two", changed: true, repositories: ["terros-inc/one", "terros-inc/two"] } },
+  });
+  expect(await sgt(api, "repo", "list")).toMatchObject({ code: 0, out: "terros-inc/one  squash\n" });
+  expect((await sgt(api, "admin", "repo", "list")).code).toBe(2);
+  expect(await sgt(api, "admin", "repo", "add", "terros-inc/two", "--merge-method", "rebase")).toMatchObject({ code: 0, out: expect.stringContaining("enrolled terros-inc/two") });
+  expect(seen.map((s) => [s.method, s.url, s.body && JSON.parse(s.body)])).toEqual([
+    ["GET", "/v1/repositories", ""],
+    ["POST", "/v1/repositories/add", { repo: "terros-inc/two", mergeMethod: "rebase" }],
+  ]);
+});
+
 // TECH-5185: no compatibility between sgt and the API, only the oldest sgt the server supports. Each
 // request names this sgt's version, so a Sergeant that no longer supports it refuses before acting (TECH-5188).
 test("an sgt older than its Sergeant supports stops and says to update; one newer than it warns", async () => {
