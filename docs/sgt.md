@@ -61,8 +61,8 @@ in `~/.config/sergeant/credentials.json` and renewed automatically; `sgt logout`
 that is a member of one of the installation's configured Linear teams; that membership is checked on
 every call, so leaving those teams ends your access. Every such member may use every `sgt` command.
 **Approvers** are members the installation also lists by name (`sgt whoami` says `, an approver`
-after your name); being an approver never admits someone outside those teams, and no `sgt` command is
-limited to approvers yet. If `sgt login` or `sgt whoami` says you are in none of the installation's
+after your name); being an approver never admits someone outside those teams, and only
+`sgt admin account remove-person` is limited to approvers. If `sgt login` or `sgt whoami` says you are in none of the installation's
 teams, ask a Linear admin of your workspace to add you to one of the teams it names. To become an
 approver, or to have another team configured, ask your installation's operator (who manages its
 configuration).
@@ -111,5 +111,9 @@ sgt account remove codex-local                  # remove yours; runs already on 
   new one with `claude setup-token`, or sign out of all ChatGPT sessions and `codex login` again.
   `register` says this each time. This risk is accepted on purpose (design/09-security.md §3a).
 - You can only register or remove your own account. `sgt run show <run>` says which account a run used.
+- **Offboarding.** An approver removes every account a person registered with
+  `sgt admin account remove-person <linear-user-id>` (`sgt account list --json` shows each account's
+  id, `person:<linear-user-id>:<adapter>`). Runs already on them finish on them, and it does not revoke
+  a copy: the person, or their workspace admin, rotates the credential as above.
 - The installation must be configured for registration (`registeredAccountsSecret`, deploy/README.md);
   otherwise `register` says so.

@@ -6,11 +6,13 @@ import {
   type AccountSummary,
   type RegisterAccountResponse,
   type RemoveAccountResponse,
+  RemovePersonAccountsRequest,
+  type RemovePersonAccountsResponse,
   type RunRecord,
 } from "@terros/sergeant-contracts";
 import { AccountRefused, type AccountRegistry, type Person } from "./accounts.ts";
 import { body, notFound, ok, parse, Refusal, type Reply } from "./api-http.ts";
-import type { Caller } from "./auth.ts";
+import { callerName, type Caller } from "./auth.ts";
 
 // `/v1/accounts` (TECH-5113): the model accounts runs may use and the runs each paid for, and a
 // person's own account, registered or removed with their own Linear login. A loopback operator is no
@@ -19,6 +21,12 @@ import type { Caller } from "./auth.ts";
 //   GET  /v1/accounts
 //   POST /v1/accounts/<claude-code-local|codex-local>/register   { "credential": "…" }
 //   POST /v1/accounts/<claude-code-local|codex-local>/remove
+//   POST /v1/accounts/remove-person   { "userId": "<Linear user id>" }
+//
+// `remove-person` is offboarding hygiene (TECH-5130), an approver's or a loopback operator's: it removes
+// every account that person registered, so Sergeant starts no new run on them. It is no launch guard:
+// once a task runs only on its own owner's accounts (TECH-5179), a leaver's registration cannot pay for
+// anyone else's work in any case.
 
 export async function accountsRoute(
   registry: AccountRegistry | undefined,
@@ -31,6 +39,11 @@ export async function accountsRoute(
   const me = caller.kind === "linear" ? caller.user : undefined;
   if (at.id === undefined && req.method === "GET") return ok(await listAccounts(registry, me?.id, await runs()));
   if (at.id === undefined || req.method !== "POST") throw notFound(at.pathname);
+  if (at.id === "remove-person" && at.verb === undefined) {
+    if (!caller.approver) throw new Refusal(403, "forbidden", "only an approver, or an operator on the Sergeant host, removes another person's model accounts");
+    const { userId } = parse(RemovePersonAccountsRequest, await body(req));
+    return ok({ userId, removed: await refusing(registry.removePerson(userId, callerName(caller))) } satisfies RemovePersonAccountsResponse);
+  }
   const adapter = parse(AccountAdapter, at.id);
   if (!me) throw new Refusal(403, "forbidden", "an account is registered or removed by its own person: sign in with `sgt login`");
   if (at.verb === "register") {

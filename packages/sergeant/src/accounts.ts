@@ -127,6 +127,16 @@ export function accountRegistry(opts: {
       if (removed) opts.log(`${person.name} removed their ${adapter} model account`);
       return removed;
     },
+
+    /** Offboarding (TECH-5130): removes every account `userId` registered, by `by`; the ones removed, without credentials. */
+    async removePerson(userId: string, by: string): Promise<{ id: string; adapter: AccountAdapter; holder: string }[]> {
+      const removed = await change(async (current) => ({
+        next: current.filter((e) => e.userId !== userId),
+        result: current.filter((e) => e.userId === userId).map((e) => ({ id: id(e), adapter: e.adapter, holder: holder(e) })),
+      }));
+      for (const a of removed) opts.log(`${by} removed ${a.holder}'s ${a.adapter} model account`);
+      return removed;
+    },
   };
 }
 

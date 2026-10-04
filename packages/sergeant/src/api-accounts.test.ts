@@ -20,6 +20,7 @@ const CLAUDE = "sk-ant-oat01-ada-personal";
 const callers: Record<string, Caller> = {
   ada: { kind: "linear", user: ADA, approver: false },
   bob: { kind: "linear", user: BOB, approver: false },
+  grace: { kind: "linear", user: { id: "u-grace", name: "Grace Example", email: "grace@example.com" }, approver: true },
 };
 
 let dir = "";
@@ -141,4 +142,31 @@ test("each account's usage is the runs it paid for", async () => {
     ["terros-claude-2", { runs: 1, costUsd: 2, unknownCostRuns: 0 }],
   ]);
   expect((await call("GET", "/v1/runs", "ada")).json.runs[0]).toMatchObject({ runId: "run_a", account: "installation-claude" });
+});
+
+// TECH-5130: offboarding. An approver, or an operator on the host, removes everything one person
+// registered; nobody else can remove another person's accounts, and nobody else's are touched.
+test("an approver removes every account a person registered, and only theirs", async () => {
+  const { call, secrets, logs } = await serve();
+  const stored = () => JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts.map((e: { userId: string }) => e.userId);
+  await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: CLAUDE });
+  await call("POST", "/v1/accounts/claude-code-local/register", "bob", { credential: "sk-ant-oat01-bob-personal" });
+
+  expect(await call("POST", "/v1/accounts/remove-person", "bob", { userId: "u-ada" })).toMatchObject({ status: 403 });
+  expect(await call("POST", "/v1/accounts/remove-person", "grace", {})).toMatchObject({ status: 400 });
+  expect(stored()).toEqual(["u-ada", "u-bob"]);
+
+  const removed = await call("POST", "/v1/accounts/remove-person", "grace", { userId: "u-ada" });
+  expect(removed).toMatchObject({
+    status: 200,
+    json: { userId: "u-ada", removed: [{ id: "person:u-ada:claude-code-local", adapter: "claude-code-local", holder: "Ada Example <ada@example.com>" }] },
+  });
+  expect(removed.text).not.toContain(CLAUDE);
+  expect(stored()).toEqual(["u-bob"]);
+  expect(logs).toContain("Grace Example removed Ada Example <ada@example.com>'s claude-code-local model account");
+
+  // Removing someone with nothing registered is no error; a loopback operator may offboard too.
+  expect(await call("POST", "/v1/accounts/remove-person", "grace", { userId: "u-ada" })).toMatchObject({ status: 200, json: { removed: [] } });
+  expect(await call("POST", "/v1/accounts/remove-person", undefined, { userId: "u-bob" })).toMatchObject({ status: 200, json: { removed: [{ id: "person:u-bob:claude-code-local" }] } });
+  expect(stored()).toEqual([]);
 });

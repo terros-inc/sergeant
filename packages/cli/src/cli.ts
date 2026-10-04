@@ -11,6 +11,7 @@ import {
   type Method,
   RegisterAccountResponse,
   RemoveAccountResponse,
+  RemovePersonAccountsResponse,
   RunDetail,
   RunList,
   sergeantVersion,
@@ -50,6 +51,9 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      read from stdin: \`claude setup-token\`'s token, or the JSON of
                                      ~/.codex/auth.json after \`codex login\`; it replaces one you had
   account remove <adapter>           remove your own registered account
+  admin account remove-person <linear-user-id>
+                                     an approver's offboarding: remove every model account that
+                                     person registered (\`sgt account list\` shows whose each is)
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
 one through an SSM port-forward). Each API URL has its own login. --json prints the API's JSON
@@ -179,6 +183,17 @@ const commands: Record<string, Command> = {
       print(ctx, res, () => (res.removed ? `removed your ${res.adapter} account; runs already on it finish on it` : `you have no registered ${res.adapter} account`));
     },
   },
+  "admin account remove-person": {
+    args: 1,
+    run: async (ctx, [userId]) => {
+      const res = await call(ctx, "POST", "/v1/accounts/remove-person", RemovePersonAccountsResponse, { userId });
+      print(ctx, res, () =>
+        res.removed.length
+          ? `removed ${res.removed.map((a) => `${a.id} (${a.holder})`).join(", ")}; runs already on them finish on them, and a copy is not revoked`
+          : `${res.userId} has no registered model account`,
+      );
+    },
+  },
   login: {
     args: 0,
     run: async (ctx) => {
@@ -222,7 +237,6 @@ const commands: Record<string, Command> = {
 const caller = (me: WhoAmI) =>
   me.user ? `${me.user.name} <${me.user.email}>${me.approver ? ", an approver" : ""}` : "an operator on the Sergeant host (serve --trust-loopback)";
 
-const ONE_WORD = ["login", "logout", "whoami"];
 
 /** Runs one `sgt` invocation; returns the exit code: 0 ok, 1 the API refused or failed, 2 usage. */
 export async function main(argv: string[], io: Io): Promise<number> {
@@ -251,9 +265,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
       io.out(`${USAGE}\n`);
       return values.help ? 0 : 2;
     }
-    const name = ONE_WORD.includes(positionals[0] ?? "") ? (positionals[0] ?? "") : positionals.slice(0, 2).join(" ");
-    const command = commands[name];
-    if (!command) throw new Usage(`unknown command: ${positionals.join(" ")}`);
+    // The longest command the leading words name: `whoami`, `task show`, `admin account remove-person`.
+    const name = [3, 2, 1].map((n) => positionals.slice(0, n).join(" ")).find((n) => Object.hasOwn(commands, n));
+    const command = name === undefined ? undefined : commands[name];
+    if (name === undefined || !command) throw new Usage(`unknown command: ${positionals.join(" ")}`);
     const args = positionals.slice(name.split(" ").length);
     if (args.length !== command.args) throw new Usage(`${name} takes ${command.args || "no"} argument${command.args === 1 ? "" : "s"}`);
     const flags = { reason: values.reason, task: values.task };

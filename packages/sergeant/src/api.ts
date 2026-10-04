@@ -51,7 +51,8 @@ import type { ServiceDeps } from "./service.ts";
 // on every call, or, only under `serve --trust-loopback`, an operator on this host: a loopback peer
 // with no token, naming a loopback Host (so a DNS-rebound page cannot pass), and not relayed by a
 // proxy (so the hosted proxy's callers cannot). Posts must be JSON, so a cross-site form cannot post.
-// Approvers are told apart (`Caller.approver`); no action here is theirs alone yet.
+// Approvers are told apart (`Caller.approver`); only removing another person's model accounts
+// (api-accounts.ts) is theirs alone.
 
 export type ApiControl = {
   stateDir: string;
