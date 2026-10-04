@@ -208,10 +208,9 @@ issue saying what to do, and nothing starts.
    `registered_accounts_secret` to it in the infrastructure-config parameter (`./init.sh`, plan, apply:
    the role may then put that secret's value, and only that one's); and set the installation config's
    `registeredAccountsSecret` to it. Update.
-2. **Check.** Someone in `humans.teams` runs `claude setup-token | sgt account register claude-code-local`
-   (or `sgt account register codex-local < ~/.codex/auth.json` after `codex login`): it answers with
-   the quota it read with the credential, and `sgt account list` shows the account as theirs. They
-   remove it with `sgt account remove <adapter>`. The secret then holds every registered credential:
+2. **Check.** Someone in `humans.teams` runs `sgt account register claude` (or `codex`), which signs
+   them in with the provider's own CLI: it answers with the quota it read with the credential, and
+   `sgt account list` shows the account as theirs. They remove it with `sgt account remove claude`. The secret then holds every registered credential:
    treat it as the model token, readable by this host's role only.
 
 ### Taking over from Sergeant 1 (DNS)

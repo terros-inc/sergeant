@@ -8,11 +8,13 @@ export const authAlertKey = (issueId: string, runId: string) => `codex-auth-fail
 
 export function authAlertComment(run: RunRecord): string {
   const codex = run.provider === "openai/codex";
-  const adapter = codex ? "codex-local" : "claude-code-local";
+  const provider = codex ? "codex" : "claude";
   const account = run.account;
+  // A registered account's id is `person:<Linear user id>:<account name>` (accounts.ts).
+  const name = account?.id.split(":").at(-1) ?? provider;
   const fix =
     account?.group === "registered"
-      ? `It is ${account.holder}'s registered account: they can register it again with \`sgt account register ${adapter}\` or remove it with \`sgt account remove ${adapter}\`.`
+      ? `It is ${account.holder}'s registered account: they can register it again with \`sgt account register ${provider}${name === provider ? "" : ` --name ${name}`}\` or remove it with \`sgt account remove ${name}\`.`
       : codex
         ? "Log in again as the installation's ChatGPT account and replace its configured Secrets Manager secret, or switch `codex-local` to an OpenAI API key."
         : "Create a new token with `claude setup-token` as the installation's Claude account and replace its configured Secrets Manager secret.";

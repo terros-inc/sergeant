@@ -137,9 +137,21 @@ export type WhoAmI = z.infer<typeof WhoAmI>;
 export const AccountAdapter = z.enum(["claude-code-local", "codex-local"]);
 export type AccountAdapter = z.infer<typeof AccountAdapter>;
 
+/** The provider names people type and see for the adapters (TECH-5196); an adapter's own name is an alias. */
+export const PROVIDERS = { claude: "claude-code-local", codex: "codex-local" } as const satisfies Record<string, AccountAdapter>;
+export type Provider = keyof typeof PROVIDERS;
+export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "codex-local" ? "codex" : "claude");
+/** The adapter a provider name or an adapter's own name names; undefined for anything else. */
+export const adapterNamed = (name: string): AccountAdapter | undefined =>
+  Object.hasOwn(PROVIDERS, name) ? PROVIDERS[name as Provider] : AccountAdapter.safeParse(name).data;
+
+/** A model account's name, unique among one person's accounts (TECH-5196); it defaults to the provider's name. */
+export const AccountName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/, "an account name is up to 40 letters, digits, - and _, starting with a letter or digit");
+
 /** A model account Sergeant may run on, without its credential, and the runs it paid for. */
 export const AccountSummary = RunAccount.extend({
   adapter: AccountAdapter,
+  name: z.string(),
   /** The caller registered it, so may remove it. */
   mine: z.boolean(),
   registeredAt: z.string().optional(),
@@ -152,14 +164,18 @@ export const AccountList = z.object({ accounts: z.array(AccountSummary) });
 export type AccountList = z.infer<typeof AccountList>;
 
 /**
- * A person's own subscription login for the adapter: the token `claude setup-token` prints, or the
- * JSON of the `auth.json` a `codex login` writes. Stored in the installation's Secrets Manager; never
- * echoed, logged, or returned.
+ * A person's own subscription login for the adapter, under a name of theirs: the token
+ * `claude setup-token` prints, or the JSON of the `auth.json` a `codex login` writes. Stored in the
+ * installation's Secrets Manager; never echoed, logged, or returned.
  */
-export const RegisterAccountRequest = z.strictObject({ credential: z.string().trim().min(1, "a credential is required").max(32_000, "credential too long") });
+export const RegisterAccountRequest = z.strictObject({
+  adapter: AccountAdapter,
+  name: AccountName,
+  credential: z.string().trim().min(1, "a credential is required").max(32_000, "credential too long"),
+});
 export const RegisterAccountResponse = z.object({
   account: AccountSummary.omit({ usage: true }),
-  /** It replaced the caller's earlier credential for this adapter. */
+  /** It replaced the caller's earlier account of this name. */
   replaced: z.boolean(),
   /** The quota read with it at registration, which proved it works. */
   quota: QuotaReading,
@@ -168,7 +184,8 @@ export const RegisterAccountResponse = z.object({
 });
 export type RegisterAccountResponse = z.infer<typeof RegisterAccountResponse>;
 
-export const RemoveAccountResponse = z.object({ adapter: AccountAdapter, removed: z.boolean() });
+export const RemoveAccountRequest = z.strictObject({ name: AccountName });
+export const RemoveAccountResponse = z.object({ name: z.string(), removed: z.boolean() });
 export type RemoveAccountResponse = z.infer<typeof RemoveAccountResponse>;
 
 /**

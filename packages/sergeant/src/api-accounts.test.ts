@@ -83,10 +83,10 @@ async function serve(runs: RunRecord[] = []) {
 test("a person registers, replaces, and removes only their own account, and its credential stays in the secret", async () => {
   const { call, secrets, logs } = await serve();
 
-  const registered = await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: CLAUDE });
+  const registered = await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claude", credential: CLAUDE });
   expect(registered).toMatchObject({
     status: 200,
-    json: { account: { id: "person:u-ada:claude-code-local", group: "registered", holder: "Ada Example <ada@example.com>", mine: true }, replaced: false, quota: { weekly: { remainingPercent: 70 } } },
+    json: { account: { id: "person:u-ada:claude", group: "registered", holder: "Ada Example <ada@example.com>", mine: true }, replaced: false, quota: { weekly: { remainingPercent: 70 } } },
   });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([expect.objectContaining({ userId: "u-ada", credential: CLAUDE })]);
   // The accepted exposure (09 §3a) is said at registration: where the credential goes, that it can leak, and the way out.
@@ -94,40 +94,62 @@ test("a person registers, replaces, and removes only their own account, and its 
   expect(notice).toContain("inside Sergeant's worker and reviewer containers");
   expect(notice).toContain("Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription");
   expect(notice).toContain("could be exposed if a run is compromised");
-  expect(notice).toContain("`sgt account remove claude-code-local`");
+  expect(notice).toContain("`sgt account remove claude`");
   expect(notice).toContain("`claude setup-token`");
 
   // Bob sees it is not his, and his remove leaves Ada's alone; a loopback operator is nobody's.
   const listed = await call("GET", "/v1/accounts", "bob");
-  expect(listed.json.accounts.map((a: { id: string; mine: boolean }) => [a.id, a.mine])).toEqual([["person:u-ada:claude-code-local", false]]);
-  expect(await call("POST", "/v1/accounts/claude-code-local/remove", "bob")).toMatchObject({ status: 200, json: { removed: false } });
-  expect(await call("POST", "/v1/accounts/claude-code-local/remove")).toMatchObject({ status: 403 });
+  expect(listed.json.accounts.map((a: { id: string; mine: boolean }) => [a.id, a.mine])).toEqual([["person:u-ada:claude", false]]);
+  expect(await call("POST", "/v1/accounts/remove", "bob", { name: "claude" })).toMatchObject({ status: 200, json: { removed: false } });
+  expect(await call("POST", "/v1/accounts/remove", undefined, { name: "claude" })).toMatchObject({ status: 403 });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toHaveLength(1);
 
   // A re-registration replaces Ada's own; an unreadable credential is refused and changes nothing.
-  expect(await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: "sk-ant-oat01-ada-new" })).toMatchObject({ json: { replaced: true } });
-  const refused = await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: "sk-ant-oat01-expired" });
+  expect(await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claude", credential: "sk-ant-oat01-ada-new" })).toMatchObject({ json: { replaced: true } });
+  const refused = await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claude", credential: "sk-ant-oat01-expired" });
   expect(refused).toMatchObject({ status: 400, json: { error: { message: expect.stringContaining("usage endpoint answered 401") } } });
-  expect(await call("POST", "/v1/accounts/codex-local/register", "ada", { credential: "{}" })).toMatchObject({ status: 400 });
+  expect(await call("POST", "/v1/accounts/register", "ada", { adapter: "codex-local", name: "codex", credential: "{}" })).toMatchObject({ status: 400 });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([expect.objectContaining({ credential: "sk-ant-oat01-ada-new" })]);
 
-  expect(await call("POST", "/v1/accounts/claude-code-local/remove", "ada")).toMatchObject({ status: 200, json: { removed: true } });
+  expect(await call("POST", "/v1/accounts/remove", "ada", { name: "claude" })).toMatchObject({ status: 200, json: { removed: true } });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([]);
 
   for (const said of [registered.text, listed.text, refused.text, ...logs]) expect(said).not.toMatch(/sk-ant-oat01-(ada|expired)/);
-  expect(logs).toContain("Ada Example registered their claude-code-local model account");
+  expect(logs).toContain("Ada Example registered their claude-code-local model account claude");
 });
 
 // TECH-5179: a task's runs get only its owner's registered accounts: never someone else's, and never
 // an empty list standing in for an unreadable secret.
 test("the runner reads only the task owner's own accounts", async () => {
   const { call, accounts, secrets } = await serve();
-  await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: CLAUDE });
-  await call("POST", "/v1/accounts/claude-code-local/register", "bob", { credential: "sk-ant-oat01-bob" });
-  expect((await accounts.of(BOB.id)).map((a) => [a.id, a.credential])).toEqual([["person:u-bob:claude-code-local", "sk-ant-oat01-bob"]]);
+  await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claude", credential: CLAUDE });
+  await call("POST", "/v1/accounts/register", "bob", { adapter: "claude-code-local", name: "claude", credential: "sk-ant-oat01-bob" });
+  expect((await accounts.of(BOB.id)).map((a) => [a.id, a.credential])).toEqual([["person:u-bob:claude", "sk-ant-oat01-bob"]]);
   expect(await accounts.of("u-carol")).toEqual([]);
   secrets["sergeant/x/registered-accounts"] = "not json";
   await expect(accounts.of(ADA.id)).rejects.toThrow(/is not/);
+});
+
+// TECH-5196: a person keeps several accounts, a provider's more than once, each under a name of theirs.
+// Registering a name again replaces that one alone, and an entry stored before names existed is kept,
+// named for its provider.
+test("a person's accounts are named: a stored one is named for its provider, and only the named one is replaced or removed", async () => {
+  const { call, accounts, secrets } = await serve();
+  const legacy = { adapter: "claude-code-local", userId: ADA.id, name: ADA.name, email: ADA.email, credential: "sk-ant-oat01-legacy", registeredAt: "2026-10-01T00:00:00.000Z" };
+  secrets["sergeant/x/registered-accounts"] = JSON.stringify({ accounts: [legacy] });
+  const mine = async () => (await accounts.of(ADA.id)).map((a) => [a.id, a.credential]);
+  expect(await mine()).toEqual([["person:u-ada:claude", "sk-ant-oat01-legacy"]]);
+
+  const work = await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claudeWork", credential: "sk-ant-oat01-work" });
+  expect(work).toMatchObject({ json: { account: { id: "person:u-ada:claudeWork", name: "claudeWork" }, replaced: false } });
+  expect(work.json.notice).toContain("`sgt account remove claudeWork`");
+  expect(await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claude", credential: "sk-ant-oat01-new" })).toMatchObject({ json: { replaced: true } });
+  expect(await mine()).toEqual([["person:u-ada:claudeWork", "sk-ant-oat01-work"], ["person:u-ada:claude", "sk-ant-oat01-new"]]);
+  expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts.map((e: { accountName: string }) => e.accountName)).toEqual(["claudeWork", "claude"]);
+  expect(await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "my work", credential: "sk-ant-oat01-x" })).toMatchObject({ status: 400 });
+
+  expect(await call("POST", "/v1/accounts/remove", "ada", { name: "claudeWork" })).toMatchObject({ json: { name: "claudeWork", removed: true } });
+  expect(await mine()).toEqual([["person:u-ada:claude", "sk-ant-oat01-new"]]);
 });
 
 test("each account's usage is the runs it paid for", async () => {
@@ -141,11 +163,11 @@ test("each account's usage is the runs it paid for", async () => {
     ...(costUsd !== undefined && { costUsd }),
     account: { id: account, group: "registered", holder: account },
   });
-  const ada = "person:u-ada:claude-code-local";
-  const bob = "person:u-bob:claude-code-local";
+  const ada = "person:u-ada:claude";
+  const bob = "person:u-bob:claude";
   const { call } = await serve([run("run_a", ada, 1.5), run("run_b", ada), run("run_c", bob, 2)]);
-  await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: CLAUDE });
-  await call("POST", "/v1/accounts/claude-code-local/register", "bob", { credential: "sk-ant-oat01-bob" });
+  await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claude", credential: CLAUDE });
+  await call("POST", "/v1/accounts/register", "bob", { adapter: "claude-code-local", name: "claude", credential: "sk-ant-oat01-bob" });
   const { json } = await call("GET", "/v1/accounts", "ada");
   expect(json.accounts.map((a: { id: string; usage: unknown }) => [a.id, a.usage])).toEqual([
     [ada, { runs: 2, costUsd: 1.5, unknownCostRuns: 1 }],
@@ -159,8 +181,8 @@ test("each account's usage is the runs it paid for", async () => {
 test("an approver removes every account a person registered, and only theirs", async () => {
   const { call, secrets, logs } = await serve();
   const stored = () => JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts.map((e: { userId: string }) => e.userId);
-  await call("POST", "/v1/accounts/claude-code-local/register", "ada", { credential: CLAUDE });
-  await call("POST", "/v1/accounts/claude-code-local/register", "bob", { credential: "sk-ant-oat01-bob-personal" });
+  await call("POST", "/v1/accounts/register", "ada", { adapter: "claude-code-local", name: "claude", credential: CLAUDE });
+  await call("POST", "/v1/accounts/register", "bob", { adapter: "claude-code-local", name: "claude", credential: "sk-ant-oat01-bob-personal" });
 
   expect(await call("POST", "/v1/accounts/remove-person", "bob", { userId: "u-ada" })).toMatchObject({ status: 403 });
   expect(await call("POST", "/v1/accounts/remove-person", "grace", {})).toMatchObject({ status: 400 });
@@ -169,7 +191,7 @@ test("an approver removes every account a person registered, and only theirs", a
   const removed = await call("POST", "/v1/accounts/remove-person", "grace", { userId: "u-ada" });
   expect(removed).toMatchObject({
     status: 200,
-    json: { userId: "u-ada", removed: [{ id: "person:u-ada:claude-code-local", adapter: "claude-code-local", holder: "Ada Example <ada@example.com>" }] },
+    json: { userId: "u-ada", removed: [{ id: "person:u-ada:claude", adapter: "claude-code-local", holder: "Ada Example <ada@example.com>" }] },
   });
   expect(removed.text).not.toContain(CLAUDE);
   expect(stored()).toEqual(["u-bob"]);
@@ -177,6 +199,6 @@ test("an approver removes every account a person registered, and only theirs", a
 
   // Removing someone with nothing registered is no error; a loopback operator may offboard too.
   expect(await call("POST", "/v1/accounts/remove-person", "grace", { userId: "u-ada" })).toMatchObject({ status: 200, json: { removed: [] } });
-  expect(await call("POST", "/v1/accounts/remove-person", undefined, { userId: "u-bob" })).toMatchObject({ status: 200, json: { removed: [{ id: "person:u-bob:claude-code-local" }] } });
+  expect(await call("POST", "/v1/accounts/remove-person", undefined, { userId: "u-bob" })).toMatchObject({ status: 200, json: { removed: [{ id: "person:u-bob:claude" }] } });
   expect(stored()).toEqual([]);
 });

@@ -1,7 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import {
-  AccountAdapter,
+  type AccountAdapter,
   RegisterAccountRequest,
+  RemoveAccountRequest,
   type AccountList,
   type AccountSummary,
   type RegisterAccountResponse,
@@ -15,12 +16,13 @@ import { body, notFound, ok, parse, Refusal, type Reply } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
 
 // `/v1/accounts` (TECH-5113): the registered model accounts and the runs each paid for, and a person's
-// own account, registered or removed with their own Linear login. A loopback operator is no person, so
-// registers nothing. A task's runs use only its owner's accounts (TECH-5179).
+// own accounts, each under a name of theirs (TECH-5196), registered or removed with their own Linear
+// login. A loopback operator is no person, so registers nothing. A task's runs use only its owner's
+// accounts (TECH-5179).
 //
 //   GET  /v1/accounts
-//   POST /v1/accounts/<claude-code-local|codex-local>/register   { "credential": "…" }
-//   POST /v1/accounts/<claude-code-local|codex-local>/remove
+//   POST /v1/accounts/register   { "adapter": "claude-code-local|codex-local", "name": "…", "credential": "…" }
+//   POST /v1/accounts/remove     { "name": "…" }
 //   POST /v1/accounts/remove-person   { "userId": "<Linear user id>" }
 //
 // `remove-person` is offboarding hygiene (TECH-5130), an approver's or a loopback operator's: it removes
@@ -38,21 +40,21 @@ export async function accountsRoute(
   if (!registry) throw new Refusal(404, "not_found", "this Sergeant lists no model accounts");
   const me = caller.kind === "linear" ? caller.user : undefined;
   if (at.id === undefined && req.method === "GET") return ok(await listAccounts(registry, me?.id, await runs()));
-  if (at.id === undefined || req.method !== "POST") throw notFound(at.pathname);
-  if (at.id === "remove-person" && at.verb === undefined) {
+  if (at.id === undefined || at.verb !== undefined || req.method !== "POST") throw notFound(at.pathname);
+  if (at.id === "remove-person") {
     if (!caller.approver) throw new Refusal(403, "forbidden", "only an approver, or an operator on the Sergeant host, removes another person's model accounts");
     const { userId } = parse(RemovePersonAccountsRequest, await body(req));
     return ok({ userId, removed: await refusing(registry.removePerson(userId, callerName(caller))) } satisfies RemovePersonAccountsResponse);
   }
-  const adapter = parse(AccountAdapter, at.id);
+  if (at.id !== "register" && at.id !== "remove") throw notFound(at.pathname);
   if (!me) throw new Refusal(403, "forbidden", "an account is registered or removed by its own person: sign in with `sgt login`");
-  if (at.verb === "register") {
-    const { credential } = parse(RegisterAccountRequest, await body(req));
-    const res = await refusing(registry.register(me, adapter, credential));
-    return ok({ account: { ...res.account, mine: true }, replaced: res.replaced, quota: res.quota, notice: exposureNotice(adapter) } satisfies RegisterAccountResponse);
+  if (at.id === "register") {
+    const { adapter, name, credential } = parse(RegisterAccountRequest, await body(req));
+    const res = await refusing(registry.register(me, adapter, name, credential));
+    return ok({ account: { ...res.account, mine: true }, replaced: res.replaced, quota: res.quota, notice: exposureNotice(adapter, name) } satisfies RegisterAccountResponse);
   }
-  if (at.verb === "remove") return ok({ adapter, removed: await refusing(registry.remove(me, adapter)) } satisfies RemoveAccountResponse);
-  throw notFound(at.pathname);
+  const { name } = parse(RemoveAccountRequest, await body(req));
+  return ok({ name, removed: await refusing(registry.remove(me, name)) } satisfies RemoveAccountResponse);
 }
 
 // Told to everyone who registers: register a company seat, not a personal plan (TECH-5179, TECH-5129;
@@ -63,10 +65,10 @@ const ROTATE: Record<AccountAdapter, string> = {
   "codex-local": "sign out of all ChatGPT sessions in your ChatGPT security settings and `codex login` again",
 };
 
-export const exposureNotice = (adapter: AccountAdapter): string =>
+export const exposureNotice = (adapter: AccountAdapter, name: string): string =>
   `Register your Terros company seat (for example Claude Team or ChatGPT Team), not a personal subscription: whether personal plans may run Terros work is not settled (TECH-5129). ` +
   `Your credential is used inside Sergeant's worker and reviewer containers while runs work on it, so it could be exposed if a run is compromised, for example by prompt injection. ` +
-  `To stop Sergeant using it, run \`sgt account remove ${adapter}\`. That does not revoke a copy: to rotate it, ${ROTATE[adapter]}.`;
+  `To stop Sergeant using it, run \`sgt account remove ${name}\`. That does not revoke a copy: to rotate it, ${ROTATE[adapter]}.`;
 
 const refusing = <T>(p: Promise<T>): Promise<T> =>
   p.catch((e: Error) => {

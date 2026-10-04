@@ -1,4 +1,4 @@
-import type { AccountSummary, RunDetail, RunSummary, TaskDetail, TaskSummary } from "@terros/sergeant-contracts";
+import { providerOf, type AccountSummary, type RunDetail, type RunSummary, type TaskDetail, type TaskSummary } from "@terros/sergeant-contracts";
 
 // --- human output: one line per item, aligned; detail only in `show`
 
@@ -20,8 +20,8 @@ export const taskRow = (t: TaskSummary) => [t.ref, `${t.status}${t.acceptedEndin
 export const runRow = (r: RunSummary) => [r.runId, r.task, r.role ?? "-", r.status, usd(r.costUsd), clip(r.account, 30) || "-", clip(r.summary ?? r.error, 60)];
 
 export const accountRow = (a: AccountSummary) => [
-  a.id,
-  a.group,
+  a.name,
+  providerOf(a.adapter),
   `${a.holder}${a.mine ? " (yours)" : ""}`,
   plural(a.usage.runs, "run"),
   `${usd(a.usage.costUsd)}${a.usage.unknownCostRuns ? ` +${a.usage.unknownCostRuns} of unknown cost` : ""}`,
