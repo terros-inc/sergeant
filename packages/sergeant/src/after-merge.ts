@@ -3,7 +3,7 @@ import { checkBudget, checkDelegation, NoModelAccount, RunId, type BudgetStatus,
 import { cancelPending, recordStop } from "./cancel.ts";
 import { outcomeComment } from "./outcome.ts";
 import { cancelRuns } from "./poll.ts";
-import { accountRefusal, reassigned } from "./owner.ts";
+import { accountRefusal, notOwned, reassigned } from "./owner.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions, LoopResult, TaskState } from "./loop.ts";
 import { approvedHead, auditDrawn, implementerOf, type ReviewFacts, reviewFacts } from "./review-quality.ts";
@@ -135,13 +135,20 @@ export async function drawAudit(
     // task's owner like every other run, and only while the issue is still assigned to them (TECH-5179).
     const { owner } = deps;
     const refused = delegation.allowed ? checkBudget(budgetOf(runs, 0), new Date()) : delegation;
-    const moved = owner && reassigned(owner, conversation.issue);
+    // Linear's history is reread too, right before the start: a newer or someone else's delegation is a
+    // handoff, and unreadable history starts nothing (fails closed).
+    let moved: string | undefined;
+    let unreadable: string | undefined;
+    if (owner && refused.allowed) moved = await notOwned(owner, conversation.issue, deps).catch((e: Error) => ((unreadable = e.message), undefined));
     if (!refused.allowed) {
       log(`audit of ${head.repo}#${head.number} not started: ${refused.reason}`);
     } else if (!owner) {
       log(`audit of ${head.repo}#${head.number} not started: the task has no admitted owner to pay for it`);
+    } else if (unreadable !== undefined) {
+      log(`audit of ${head.repo}#${head.number} not started: who delegated the issue is unreadable: ${unreadable}`);
     } else if (moved) {
       log(`audit of ${head.repo}#${head.number} not started: ${moved}`);
+      await recordStop(opts.dir, moved, { handoff: { delegatedAt: owner.delegatedAt, merged: true } });
     } else {
       const runId = RunId.parse(`run_audit-${head.headSha}`);
       const skipped = implementerOf(runs, head)?.reported?.review.reason ?? "no reason on record";

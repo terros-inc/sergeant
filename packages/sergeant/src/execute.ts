@@ -22,7 +22,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { answeredBudgetQuestion } from "./budget.ts";
-import { accountRefusal, reassigned, type TaskOwner } from "./owner.ts";
+import { accountRefusal, notOwned, type TaskOwner } from "./owner.ts";
 import { ownQuestion, questionComment, questionKey } from "./question.ts";
 
 export type Ports = {
@@ -53,6 +53,11 @@ export type Ports = {
    * only their model accounts. Without one, no run starts.
    */
   owner?: TaskOwner;
+  /**
+   * Records the task's handoff stop (cancel.ts) when an effect finds the episode no longer its owner's
+   * (TECH-5179); the loop's stop path then cancels its runs and keeps its PRs.
+   */
+  handoff?: (reason: string) => Promise<void>;
 };
 
 export type ActionOutcome =
@@ -109,9 +114,14 @@ export async function execute(action: ProposedAction, situation: SituationReport
           ]);
           const active = checkLive(issue, ports.agentUserId);
           if (!active.allowed) return denied(active);
-          // The issue reassigned since the task was admitted: the loop's next poll stops it (owner.ts).
-          const moved = reassigned(owner, issue);
-          if (moved) return denied({ rule: "O1", reason: moved });
+          // The issue reassigned, or Linear's history showing a newer or someone else's delegation, since
+          // the task was admitted, reread here at the effect: nothing starts and the task is handed off
+          // (owner.ts). Unreadable history throws, so nothing starts either.
+          const moved = await notOwned(owner, issue, ports);
+          if (moved) {
+            await ports.handoff?.(moved);
+            return denied({ rule: "O1", reason: moved });
+          }
           const verdict = checkStart(action, {
             runs,
             enrolledRepositories,
@@ -215,6 +225,13 @@ export async function execute(action: ProposedAction, situation: SituationReport
           },
         );
         if (!verdict.allowed) return denied(verdict);
+        // TECH-5179: the work merges only while the episode is still its owner's, read live as for a
+        // start; otherwise the task is handed off and the PR kept for the new assignee.
+        const moved = ports.owner && (await notOwned(ports.owner, live.issue, ports));
+        if (moved) {
+          await ports.handoff?.(moved);
+          return denied({ rule: "O1", reason: moved });
+        }
         const result = await ports.github.mergePullRequest(action);
         if ("refused" in result) {
           // Repository policy, not a fault. The loop gives it the same one bounded re-check as a

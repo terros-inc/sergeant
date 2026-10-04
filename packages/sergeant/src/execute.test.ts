@@ -87,7 +87,8 @@ const situation: SituationReport = {
 };
 const merge: MergePr = { kind: "merge_pr", repo: pr.repo, number: 7, expectedHeadSha: head, reviewStanding: { kind: "reviewed", reviewRunId: "run_review" } };
 
-function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversation; moveFails?: boolean } = {}) {
+function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversation; moveFails?: boolean; taskOwner?: Ports["linear"]["readTaskOwner"] } = {}) {
+  const handoffs: string[] = [];
   const merged: Parameters<GitHubPort["mergePullRequest"]>[0][] = [];
   const started: string[] = [];
   const sent: string[] = [];
@@ -96,7 +97,7 @@ function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversati
   const p: Ports = {
     linear: {
       readConversation: async () => live.conversation ?? conversation,
-      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
+      readTaskOwner: live.taskOwner ?? (async () => ({ owner: { id: "user-ann", name: "Ann" }, delegatedAt: "2026-10-04T00:00:00.000Z" })),
       moveIssueToStarted: async (id) => {
         moved.push(id);
         if (live.moveFails) throw new Error("Linear unavailable");
@@ -110,7 +111,8 @@ function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversati
     },
     agentUserId: "agent-v2",
     workerLogin: "sergeant-worker[bot]",
-    owner: { id: "user-ann", name: "Ann", admittedAt: "2026-10-04T00:00:00.000Z" },
+    owner: { id: "user-ann", name: "Ann", admittedAt: "2026-10-04T00:00:00.000Z", delegatedAt: "2026-10-04T00:00:00.000Z" },
+    handoff: async (reason) => void handoffs.push(reason),
     github: {
       readPullRequest: async () => ({ ...pr, ...live.pr }),
       closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),
@@ -122,7 +124,7 @@ function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversati
       send: async (runId) => void sent.push(runId),
     },
   };
-  return { p, merged, started, sent, moved, filed };
+  return { p, merged, started, sent, moved, filed, handoffs };
 }
 
 test("an exact-head reviewed merge reaches GitHub with the expected head", async () => {
@@ -295,4 +297,35 @@ test("a reviewer starts with the live human feedback on its subject PRs, not the
   const review: ProposedAction = { kind: "start_reviewer", subject: [{ repo: pr.repo, number: 7, headSha: head }] };
   expect(await execute(review, { ...situation, runs: [] }, p)).toMatchObject({ status: "done" });
   expect(specs).toMatchObject([{ role: "reviewer", pullRequests: [{ repo: pr.repo, number: 7, humanFeedback: [requested] }] }]);
+});
+
+// TECH-5179: the owner's episode is reread from Linear's history at the effect, not only each poll.
+test("a newer or someone else's delegation since the poll starts no run and records the handoff; unreadable history starts nothing", async () => {
+  const start: ProposedAction = { kind: "start_worker", repositories: [pr.repo], objective: "o" };
+  const again = ports({ taskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" }, delegatedAt: "2026-10-04T01:00:00.000Z" }) });
+  expect(await execute(start, situation, again.p)).toMatchObject({ status: "denied", rule: "O1" });
+  expect(again.started).toEqual([]);
+  expect(again.handoffs).toEqual([expect.stringMatching(/delegated to Sergeant again/)]);
+
+  const bob = ports({ taskOwner: async () => ({ refused: "delegator_differs", assignee: { id: "user-ann", name: "Ann" }, delegator: { id: "user-bob", name: "Bob" } }) });
+  expect(await execute(start, situation, bob.p)).toMatchObject({ status: "denied", rule: "O1" });
+  expect(bob.started).toEqual([]);
+  expect(bob.handoffs).toHaveLength(1);
+
+  const unreadable = ports({ taskOwner: async () => Promise.reject(new Error("Linear down")) });
+  expect(await execute(start, situation, unreadable.p)).toMatchObject({ status: "failed" });
+  expect(unreadable.started).toEqual([]);
+  expect(unreadable.handoffs).toEqual([]);
+});
+
+test("the live merge preflight refuses a reassigned issue or a newer delegation and records the handoff, keeping the PR", async () => {
+  const moved = ports({ conversation: { ...conversation, issue: { ...conversation.issue, assignee: { id: "user-bob", name: "Bob" } } } });
+  expect(await execute(merge, situation, moved.p)).toMatchObject({ status: "denied", rule: "O1" });
+  expect(moved.merged).toEqual([]);
+  expect(moved.handoffs).toEqual([expect.stringMatching(/reassigned from Ann to Bob/)]);
+
+  const again = ports({ taskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" }, delegatedAt: "2026-10-04T01:00:00.000Z" }) });
+  expect(await execute(merge, situation, again.p)).toMatchObject({ status: "denied", rule: "O1" });
+  expect(again.merged).toEqual([]);
+  expect(again.handoffs).toHaveLength(1);
 });

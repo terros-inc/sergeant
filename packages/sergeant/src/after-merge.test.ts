@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { NoModelAccount, RunId, type BudgetStatus, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
 import { drawAudit, finishReviews } from "./after-merge.ts";
@@ -60,24 +63,25 @@ const merged = (): NonNullable<TaskState["merged"]> => ({
 });
 
 const posted: Parameters<LinearPort["postComment"]>[0][] = [];
+let taskOwner: LinearPort["readTaskOwner"] = async () => ({ owner: { id: "user-ann", name: "Ann" } });
 const deps = (readPullRequest: Ports["github"]["readPullRequest"], start: Ports["runner"]["start"]): Ports =>
   ({
     agentUserId: "agent-v2",
     workerLogin: "sergeant-worker[bot]",
     owner: { id: "user-ann", name: "Ann", admittedAt: "2026-10-04T00:00:00.000Z" },
-    linear: { readConversation: async () => conversation, postComment: async (c: Parameters<LinearPort["postComment"]>[0]) => void posted.push(c) },
+    linear: { readConversation: async () => conversation, readTaskOwner: (...a: Parameters<LinearPort["readTaskOwner"]>) => taskOwner(...a), postComment: async (c: Parameters<LinearPort["postComment"]>[0]) => void posted.push(c) },
     github: { readPullRequest },
     runner: { start },
   }) as unknown as Ports;
 
-async function draw(readPullRequest: Ports["github"]["readPullRequest"], start: Ports["runner"]["start"]) {
+async function draw(readPullRequest: Ports["github"]["readPullRequest"], start: Ports["runner"]["start"], dir = "/unused") {
   const state = merged();
   const logs: string[] = [];
   const save = vi.fn(async () => {});
   await drawAudit(
     state,
     [],
-    { issueId: "TECH-5023", enrolledRepositories: [repo], dir: "/unused", auditSampleRate: 1 },
+    { issueId: "TECH-5023", enrolledRepositories: [repo], dir, auditSampleRate: 1 },
     deps(readPullRequest, start),
     (line) => logs.push(line),
     save,
@@ -118,6 +122,33 @@ test("a sampled audit the owner has no usable account for tells the owner on the
   expect(posted).toHaveLength(2);
   expect(posted[0]?.body).toMatch(/register or fix another model account/);
   expect(posted[1]?.key).toBe(posted[0]?.key);
+});
+
+test("a sampled audit starts nothing when Linear's history shows someone else delegated the issue since, and records the handoff stop", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "audit-handoff-"));
+  await writeFile(join(dir, "state.json"), "{}");
+  taskOwner = async () => ({ owner: { id: "user-bob", name: "Bob" }, delegatedAt: "2026-10-04T05:00:00.000Z" });
+  const start = vi.fn<Ports["runner"]["start"]>();
+  try {
+    const { logs } = await draw(async () => pr, start, dir);
+    expect(start).not.toHaveBeenCalled();
+    expect(logs.join("\n")).toMatch(/not started: Bob, not Ann, now owns the issue/);
+    expect(JSON.parse(await readFile(join(dir, "cancel.json"), "utf8"))).toMatchObject({ handoff: { merged: true } });
+  } finally {
+    taskOwner = async () => ({ owner: { id: "user-ann", name: "Ann" } });
+  }
+});
+
+test("a sampled audit starts nothing when Linear's delegation history is unreadable", async () => {
+  taskOwner = async () => Promise.reject(new Error("Linear down"));
+  const start = vi.fn<Ports["runner"]["start"]>();
+  try {
+    const { logs } = await draw(async () => pr, start);
+    expect(start).not.toHaveBeenCalled();
+    expect(logs.join("\n")).toMatch(/unreadable: Linear down/);
+  } finally {
+    taskOwner = async () => ({ owner: { id: "user-ann", name: "Ann" } });
+  }
 });
 
 test("a review still running after the merge is canceled, and the task stopped, once the issue is reassigned away from its owner", async () => {

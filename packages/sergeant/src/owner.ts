@@ -38,6 +38,15 @@ export async function redelegated(owner: TaskOwner, issueId: string, deps: { lin
   return undefined;
 }
 
+/**
+ * Why the task's episode is no longer its owner's, checked right before an effect that spends their
+ * quota or lands their work (execute.ts, after-merge.ts): the live issue reassigned, or Linear's history
+ * showing a newer or someone else's delegation. Throws when the history is unreadable (fail closed).
+ */
+export async function notOwned(owner: TaskOwner, issue: Conversation["issue"], deps: { linear: LinearPort; agentUserId: string }): Promise<string | undefined> {
+  return reassigned(owner, issue) ?? (await redelegated(owner, issue.id, deps));
+}
+
 /** What a refusal tells the humans on the issue, and the key that keeps it to one comment per condition. */
 export function ownerRefusal(issueId: string, check: Exclude<TaskOwnerCheck, { owner: LinearPerson }>): { key: string; body: string } | undefined {
   const { refused, assignee, delegator, delegatedAt } = check;

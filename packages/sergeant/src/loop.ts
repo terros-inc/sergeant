@@ -91,6 +91,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const ports: Ports & { reasoner: Reasoner } = {
     ...deps,
     log,
+    handoff: (reason) => recordStop(opts.dir, reason, { handoff: { delegatedAt: state.owner?.delegatedAt } }),
     async recordRun(runId) {
       state.runIds.push(runId);
       state.unconfirmedStarts.push(runId);
