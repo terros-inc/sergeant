@@ -79,7 +79,13 @@ export type ActionOutcome =
       /** GitHub explicitly refused the merge by repository policy. */
       refused?: RefusedMerge;
     }
-  | { action: ProposedAction; status: "failed"; error: string };
+  | {
+      action: ProposedAction;
+      status: "failed";
+      error: string;
+      /** A refusal comment Linear did not accept: the loop posts it again every poll until it does. */
+      unposted?: { issueId: string; key: string; body: string };
+    };
 
 /**
  * Performs one proposed action if the Gate allows it. This is the only path from reasoning to an
@@ -172,10 +178,16 @@ export async function execute(action: ProposedAction, situation: SituationReport
           }
           return { action, status: "done", result: { runId }, started };
         }).catch(async (e: unknown) => {
-          // Nothing started: the owner is told once per condition what to fix (owner.ts).
+          // Nothing started: the owner is told once per condition what to fix (owner.ts), retried until
+          // Linear accepts it.
           if (!(e instanceof NoModelAccount)) throw e;
           const refusal = accountRefusal(conversation.issue.id, owner, e);
-          await ports.linear.postComment({ issueId: conversation.issue.id, ...refusal }).catch((p: Error) => ports.log?.(`could not post the model-account refusal: ${p.message}`));
+          const comment = { issueId: conversation.issue.id, ...refusal };
+          const unposted = await ports.linear.postComment(comment).then(
+            () => undefined,
+            (p: Error) => p,
+          );
+          if (unposted) return { action, status: "failed", error: `${e.message}; its refusal comment was not posted: ${unposted.message}`, unposted: comment };
           return denied({ rule: "O2", reason: e.message });
         });
       }

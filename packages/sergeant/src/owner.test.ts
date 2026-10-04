@@ -43,7 +43,7 @@ async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promi
     return runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0.01, log: () => {}, signal: abort.signal, ...(idleMinutes !== undefined && { idleMinutes }) }, deps);
   };
   const saved = async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as { owner?: { id: string; name: string } };
-  return { loop, live, seen, starts, saved, dir, checks: () => checks };
+  return { loop, live, seen, starts, saved, dir, deps, checks: () => checks };
 }
 
 test("someone delegating another person's issue is refused with one comment, however often intake retries", async () => {
@@ -118,14 +118,18 @@ test("an unassigned issue stops its task before anything more starts", async () 
   expect(t.starts).toHaveLength(1);
 });
 
-test("an owner with no usable account starts nothing and is told what to fix, once", async () => {
+test("an owner with no usable account starts nothing and is told what to fix, once, retried until Linear accepts it", async () => {
   const t = await task(
     () => ({ owner: ann }),
     async (spec) => {
       throw new NoModelAccount(spec.owner, "none_registered", [], "Ann has no model account registered for a provider this Sergeant runs");
     },
   );
+  const post = t.deps.linear.postComment;
+  let failures = 2;
+  t.deps.linear.postComment = async (c) => (failures-- > 0 ? Promise.reject(new Error("Linear unavailable")) : post(c));
   expect(await t.loop(0)).toMatchObject({ outcome: "idle" });
+  expect(failures).toBeLessThan(0);
   expect(t.seen.comments.map((c) => c.body)).toEqual([
     "Sergeant needs one of Ann's model accounts before it can start. Ann: register one with `sgt account register claude-code-local` (or `codex-local`), then comment here, or run `sgt task wake`, so Sergeant tries again.",
   ]);
