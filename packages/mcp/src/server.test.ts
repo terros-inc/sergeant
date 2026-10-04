@@ -2,14 +2,12 @@ import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { versionHeaders } from "@terros/sergeant-contracts";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 
 // The real `sgt-mcp` process over stdio, as an MCP client starts it, against a fake Sergeant API:
 // that its tools return the API's own answers (what `sgt task show` prints from), that failures are
 // tool errors an agent can read, and that it only ever reads.
 
-// A route's `headers` replace the version headers of a Sergeant at this client's own contract.
 type Route = { status?: number; json?: unknown; text?: string; drop?: boolean; headers?: Record<string, string> };
 let routes: Record<string, Route> = {};
 const seen: string[] = [];
@@ -22,7 +20,7 @@ beforeAll(async () => {
     seen.push(`${req.method} ${req.url}`);
     const route = routes[`${req.method} ${req.url}`] ?? { status: 404, json: { error: { code: "not_found", message: `no ${req.url}` } } };
     if (route.drop) return req.socket.destroy();
-    res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...(route.headers ?? versionHeaders("test")) });
+    res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...route.headers });
     res.end(route.text ?? JSON.stringify(route.json));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -106,7 +104,11 @@ test("an MCP client reads a task and its runs as the API answers them, through r
 });
 
 test("refusals, an unreachable API, answers outside the contract, and bad refs are tool errors, not guesses", async () => {
-  routes = { "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: 7, role: "worker" } } } };
+  routes = {
+    "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: 7, role: "worker" } } },
+    // TECH-5185: a Sergeant that supports only a newer sgt-mcp than this one.
+    "GET /v1/tasks": { json: { tasks: [] }, headers: { "Sergeant-Min-Cli-Version": "999.0.0" } },
+  };
   const errorOf = async (name: string, args: Record<string, unknown>) => {
     const res = await client.callTool({ name, arguments: args });
     expect(res.isError).toBe(true);
@@ -116,7 +118,8 @@ test("refusals, an unreachable API, answers outside the contract, and bad refs a
   expect(JSON.parse(await errorOf("task_show", { ref: "UNF-99" }))).toEqual({ error: { code: "not_found", message: "no /v1/tasks/UNF-99" } });
   expect(await errorOf("run_show", { run: "run_x" })).toContain("outside the API contract");
   expect(await errorOf("task_show", { ref: "not a ref" })).toMatch(/Linear issue identifier/);
-  expect(seen).toEqual(["GET /v1/tasks/UNF-99", "GET /v1/runs/run_x"]);
+  expect(JSON.parse(await errorOf("task_list", {})).error.message).toBe("Your sgt is older than this Sergeant server supports. Run `sgt update`.");
+  expect(seen).toEqual(["GET /v1/tasks/UNF-99", "GET /v1/runs/run_x", "GET /v1/tasks"]);
 
   // Dropping the API connection exercises the same fetch rejection as an unreachable port without
   // paying for another cold `sgt-mcp` process in this integration suite.
@@ -126,32 +129,4 @@ test("refusals, an unreachable API, answers outside the contract, and bad refs a
   const error = JSON.parse((res.content as { text: string }[])[0]?.text ?? "").error;
   expect(error.code).toBe("unavailable");
   expect(error.message).toMatch(/cannot reach the Sergeant API/);
-});
-
-// TECH-5155: version skew between this sgt-mcp and the Sergeant it reads (contracts' skew.ts).
-test("a differing contract is told to the agent, and an older Sergeant's answer lacking a field comes back as text", async () => {
-  const { taskStart: _, ...budget } = detail.budget;
-  routes = {
-    "GET /v1/tasks": { json: { tasks: [detail.task] }, headers: { ...versionHeaders("2.9.0+bbbbbbb"), "Sergeant-Api-Contract": "0123456789ab" } },
-    // An older server: no version headers, and a budget from before `taskStart` (TECH-5161).
-    "GET /v1/tasks/UNF-12": { json: { ...detail, budget }, headers: {} },
-    "GET /v1/runs/run_x": { status: 404, json: { error: { code: "not_found", message: "no run_x" } }, headers: {} },
-  };
-  const texts = (res: { content: unknown }) => (res.content as { text: string }[]).map((c) => c.text);
-
-  const listed = await client.callTool({ name: "task_list", arguments: {} });
-  expect(listed.structuredContent).toEqual({ tasks: [detail.task] });
-  expect(texts(listed)[1]).toMatch(/^warning: Sergeant at .* \(2\.9\.0\+bbbbbbb\) serves a different API contract than this client/);
-
-  const shown = await client.callTool({ name: "task_show", arguments: { ref: "UNF-12" } });
-  expect(shown.isError).toBe(true);
-  const [why, answer, warning] = texts(shown);
-  expect(why).toMatch(/is older than this sgt-mcp: its answer lacks budget\.taskStart, so it is returned as text/);
-  expect(JSON.parse(answer ?? "")).toEqual({ ...detail, budget });
-  expect(warning).toMatch(/predates API contract reporting/);
-
-  // A refusal keeps the warning too: the skew may be why it was refused.
-  const refused = await client.callTool({ name: "run_show", arguments: { run: "run_x" } });
-  expect(refused.isError).toBe(true);
-  expect(texts(refused)[1]).toMatch(/predates API contract reporting/);
 });

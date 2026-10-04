@@ -1,17 +1,16 @@
 import type { z } from "zod";
 import { ApiError } from "./api.ts";
-import { absentFields, apiContract, CONTRACT_HEADER, type ServerVersion, VERSION_HEADER } from "./skew.ts";
+import { CLI_TOO_OLD, MIN_CLI_HEADER, MIN_CLI_VERSION, olderThan } from "./min-cli.ts";
 
 // The one typed client of the Sergeant API (`/v1`, api.ts) that `sgt` and `sgt-mcp` share (TECH-4950):
 // one request, and its answer validated against the contract. A refusal, an unreachable API, or an
 // answer outside the contract comes back as an `ApiError`'s error, never as a guess; each client
 // decides how to show it. It lives here because client packages may depend only on contracts. It
-// applies the version-skew policy (skew.ts): it reports a server whose contract differs, and accepts
-// an answer that lacks only fields an older server never sent, naming them in `absent`.
+// applies the minimum CLI version (min-cli.ts): it refuses a server that needs a newer client, and
+// reports one older than this client.
 
 export type ApiFailure = ApiError["error"];
-/** `absent`: required fields the answer lacks (skew.ts rule 3); `value` is then the API's JSON as sent, without them. */
-export type ApiResult<T> = { ok: true; value: T; absent?: string[] } | { ok: false; error: ApiFailure };
+export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: ApiFailure };
 export type Method = "GET" | "POST";
 
 export type ApiClientOptions = {
@@ -22,8 +21,10 @@ export type ApiClientOptions = {
   token?: string | undefined;
   /** Appended to the message when the API cannot be reached: where the human should look. */
   unreachableHint?: string | undefined;
-  /** Called for each answer from a Sergeant whose API contract differs from this client's (skew.ts). */
-  onSkew?: ((server: ServerVersion) => void) | undefined;
+  /** This client's own version (sergeantVersion): an answer from a Sergeant that supports only newer clients is refused. */
+  version?: string | undefined;
+  /** Called for each answer from a Sergeant older than this client's minimum (min-cli.ts), or that reports none. */
+  onOlderServer?: ((serverMin: string | undefined) => void) | undefined;
 };
 
 export type ApiClient = {
@@ -60,10 +61,11 @@ export function apiClient(opts: ApiClientOptions): ApiClient {
     }
     const text = await res.text();
     const refused = res.ok ? undefined : ApiError.safeParse(safeJson(text));
-    // Only Sergeant's own answers say anything about its version: a proxy's 502 does not.
+    // Only Sergeant's own answers say which clients it supports: a proxy's 502 does not.
     if (res.ok || refused?.success) {
-      const server = { version: res.headers.get(VERSION_HEADER) ?? undefined, contract: res.headers.get(CONTRACT_HEADER) ?? undefined };
-      if (server.contract !== apiContract()) opts.onSkew?.(server);
+      const serverMin = res.headers.get(MIN_CLI_HEADER) ?? undefined;
+      if (opts.version !== undefined && serverMin !== undefined && olderThan(opts.version, serverMin)) return failure("bad_request", CLI_TOO_OLD);
+      if (serverMin === undefined || olderThan(serverMin, MIN_CLI_VERSION)) opts.onOlderServer?.(serverMin);
     }
     if (res.ok) return { ok: true, value: text };
     if (refused?.success) return { ok: false, error: refused.data.error };
@@ -73,10 +75,7 @@ export function apiClient(opts: ApiClientOptions): ApiClient {
   async function call<T>(method: Method, path: string, schema: z.ZodType<T>, body?: object): Promise<ApiResult<T>> {
     const res = await request(method, path, body);
     if (!res.ok) return res;
-    const json = safeJson(res.value);
-    const parsed = schema.safeParse(json);
-    const absent = parsed.success ? undefined : absentFields(parsed.error.issues, json);
-    if (absent) return { ok: true, value: json as T, absent };
+    const parsed = schema.safeParse(safeJson(res.value));
     if (!parsed.success) return failure("unavailable", `${method} ${path} answered outside the API contract: ${parsed.error.issues[0]?.message ?? res.value.slice(0, 200)}`);
     return { ok: true, value: parsed.data };
   }

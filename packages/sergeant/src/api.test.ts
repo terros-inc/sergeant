@@ -3,7 +3,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { apiContract, type Conversation, type RunRecord } from "@terros/sergeant-contracts";
+import { type Conversation, MIN_CLI_VERSION, type RunRecord } from "@terros/sergeant-contracts";
 import type { LinearUser } from "@terros/sergeant-linear";
 import { linearCallers } from "./auth.ts";
 import { startService, type Service, type ServiceDeps, type ServiceOptions } from "./service.ts";
@@ -106,22 +106,14 @@ test("a wake makes an unchanged task take a turn now, and a task without a deleg
   expect(await call(port, "POST", "/v1/tasks/UNF-7/wake", {})).toMatchObject({ status: 409, json: { error: { code: "conflict" } } });
 }, 30_000);
 
-test("every /v1 answer, a refusal too, says Sergeant's API contract, and its version once the caller is authenticated (TECH-5155)", async () => {
+test("every /v1 answer, a refusal too, says the oldest sgt it supports (TECH-5185)", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
   const port = await start(fakes().deps, {});
   for (const path of ["/v1/whoami", "/v1/nothing"]) {
     const res = await fetch(`http://127.0.0.1:${port}${path}`);
-    expect(res.status).toBe(401);
-    expect(res.headers.get("Sergeant-Api-Contract")).toBe(apiContract());
-    expect(res.headers.get("Sergeant-Version")).toBeNull();
+    expect([res.status, res.headers.get("Sergeant-Min-Cli-Version")]).toEqual([401, MIN_CLI_VERSION]);
   }
-  const outside = await fetch(`http://127.0.0.1:${port}/elsewhere`);
-  expect([outside.headers.get("Sergeant-Api-Contract"), outside.headers.get("Sergeant-Version")]).toEqual([null, null]);
-  await service?.stop();
-  const res = await fetch(`http://127.0.0.1:${await start(fakes().deps)}/v1/nothing`); // a trusted loopback operator
-  expect(res.status).toBe(404);
-  expect(res.headers.get("Sergeant-Api-Contract")).toBe(apiContract());
-  expect(res.headers.get("Sergeant-Version")).toMatch(/^\d+\.\d+\.\d+\+/);
+  expect((await fetch(`http://127.0.0.1:${port}/elsewhere`)).headers.get("Sergeant-Min-Cli-Version")).toBeNull();
 }, 30_000);
 
 test("a run view includes its provider choice and credential-free account", async () => {

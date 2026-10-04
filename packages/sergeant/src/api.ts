@@ -6,11 +6,9 @@ import {
   CancelTaskRequest,
   checkBudget,
   RunId,
-  sergeantVersion,
+  MIN_CLI_HEADER,
+  MIN_CLI_VERSION,
   TaskRef,
-  CONTRACT_HEADER,
-  VERSION_HEADER,
-  versionHeaders,
   WakeRequest,
   type ApiError,
   type CancelRunResponse,
@@ -79,12 +77,10 @@ export type ApiControl = {
 
 /** Handles `/v1/*`; anything else is a 404. */
 export function apiHandler(ctl: ApiControl): (req: IncomingMessage, res: ServerResponse) => void {
-  // The contract on every /v1 answer, refusals included, so a client can tell it differs (contracts'
-  // skew.ts); the git version only once the caller has authenticated, so it is not disclosed to anyone.
-  const { [VERSION_HEADER]: version, [CONTRACT_HEADER]: contract } = versionHeaders(sergeantVersion().version);
   return (req, res) => {
-    if (req.url?.startsWith("/v1")) res.setHeader(CONTRACT_HEADER, contract);
-    route(req, ctl, () => res.setHeader(VERSION_HEADER, version)).then(
+    // On every /v1 answer, refusals and `sgt login`'s included: the oldest sgt this server supports (contracts' min-cli.ts).
+    if (req.url?.startsWith("/v1")) res.setHeader(MIN_CLI_HEADER, MIN_CLI_VERSION);
+    route(req, ctl).then(
       (reply) => send(res, reply),
       (e: Error) => {
         const refusal = e instanceof Refusal ? e : new Refusal(503, "unavailable", e.message);
@@ -94,7 +90,7 @@ export function apiHandler(ctl: ApiControl): (req: IncomingMessage, res: ServerR
   };
 }
 
-async function route(req: IncomingMessage, ctl: ApiControl, authenticated: () => void): Promise<Reply> {
+async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname.split("/").slice(1);
   if (path[0] !== "v1") return { status: 404 };
@@ -108,7 +104,6 @@ async function route(req: IncomingMessage, ctl: ApiControl, authenticated: () =>
     return ok({ linear: { clientId: ctl.linearClientId } } satisfies LoginConfig);
   }
   const caller = await callerOf(req, ctl);
-  authenticated();
   if (noun === "whoami" && get && id === undefined) {
     const user = caller.kind === "linear" ? caller.user : null;
     return ok({ auth: caller.kind, user, approver: caller.approver, enrolledRepositories: ctl.enrolledRepositories } satisfies WhoAmI);

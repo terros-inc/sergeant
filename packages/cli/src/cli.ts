@@ -14,9 +14,8 @@ import {
   RemovePersonAccountsResponse,
   RunDetail,
   RunList,
+  MIN_CLI_VERSION,
   sergeantVersion,
-  type ServerVersion,
-  skewWarning,
   TaskDetail,
   TaskList,
   WakeResponse,
@@ -25,11 +24,14 @@ import {
 import type { z } from "zod";
 import { accountRow, runRow, showRun, showTask, table, taskRow } from "./format.ts";
 import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
+import { CHECKOUT, update } from "./update.ts";
 
 // `sgt`, a thin client of the Sergeant 2 API (11 §7, UNF-714): it sends one request per command and
 // prints the answer, concise by default and the API's own JSON with `--json`. Every decision is the
 // server's. `sgt login` signs the human in with their own Linear login (login.ts), kept per API URL and
 // sent as a bearer on every call; the server checks it against Linear and refuses anything else.
+// There is no compatibility between versions of sgt and the API (contracts' min-cli.ts): an sgt older
+// than its server supports stops and says to run `sgt update`, and one newer than its server warns once.
 
 export const DEFAULT_API = "http://127.0.0.1:8080";
 
@@ -38,6 +40,7 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   login                              sign in with your Linear account (opens a browser)
   logout                             forget this machine's login for the API
   whoami                             who the API takes you for
+  update                             update this sgt: fast-forward its checkout to main and install it
   task list                          tasks Sergeant knows, with status, turns, and runs
   task show <UNF-123>                one task: issue, budget, runs, recent turns
   task wake <UNF-123> [--reason …]   take a turn now
@@ -68,15 +71,16 @@ export type Io = {
   openUrl?: (url: string) => void;
   /** All of standard input: a credential to register, never an argument a shell history would keep. */
   stdin?: () => Promise<string>;
+  /** This sgt's version (tests); sergeantVersion's otherwise. */
+  version?: string;
 };
 
 type Flags = { reason?: string | undefined; task?: string | undefined };
 /**
- * `token`: the Linear access token sent as the caller's bearer, when signed in. `skew`: this
- * invocation's version-skew state (contracts' skew.ts), shared by every copy of the context: whether
- * it has warned, and whether an answer lacked fields, so it is printed as the API's JSON.
+ * `token`: the Linear access token sent as the caller's bearer, when signed in. `warned`: whether this
+ * invocation has said its server is older than it, shared by every copy of the context.
  */
-type Context = { api: string; json: boolean; io: Io; flags: Flags; token?: string | undefined; skew: { warned: boolean; partial: boolean } };
+type Context = { api: string; json: boolean; io: Io; flags: Flags; token?: string | undefined; warned: { olderServer: boolean } };
 type Command = { args: number; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
 
 class Usage extends Error {}
@@ -121,9 +125,8 @@ const commands: Record<string, Command> = {
         if (res.stopping.length > 0) {
           return `${res.ref} canceling: ${delegation}; not yet confirmed stopped, Sergeant keeps canceling: ${res.stopping.join(", ")} (sgt run list --task ${res.ref}). Its open PRs are closed once they stop.`;
         }
-        // An older Sergeant does not report the PRs it closed: say nothing rather than guess.
         const prs = res.closedPullRequests;
-        const closed = prs === undefined ? [] : prs.length === 0 ? ["no open worker PR to close"] : prs.map((p) => `closed ${p.repo}#${p.number}  ${p.url}`);
+        const closed = prs.length === 0 ? ["no open worker PR to close"] : prs.map((p) => `closed ${p.repo}#${p.number}  ${p.url}`);
         return [`${res.ref} canceled: ${delegation} and no run of it is running`, ...closed].join("\n");
       });
     },
@@ -225,6 +228,14 @@ const commands: Record<string, Command> = {
       );
     },
   },
+  update: {
+    args: 0,
+    run: async (ctx) => {
+      ctx.io.err(`updating ${CHECKOUT} to origin's main\n`);
+      const version = await update(CHECKOUT).catch((e: Error) => fail(ctx, "unavailable", e.message));
+      print(ctx, { version }, () => `sgt ${version}`);
+    },
+  },
   whoami: {
     args: 0,
     run: async (ctx) => {
@@ -275,8 +286,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");
-    const ctx: Context = { api, json, io, flags, skew: { warned: false, partial: false } };
-    if (name !== "login" && name !== "logout") {
+    const ctx: Context = { api, json, io, flags, warned: { olderServer: false } };
+    if (name !== "login" && name !== "logout" && name !== "update") {
       ctx.token = await currentToken(io.env, api, io.fetch ?? globalThis.fetch).catch((e: Error) => fail(ctx, "unauthorized", e.message));
     }
     await command.run(ctx, args);
@@ -295,15 +306,8 @@ async function request(ctx: Context, method: Method, path: string, body?: object
   return settle(ctx, await client(ctx).request(method, path, body));
 }
 
-/** One call; an answer lacking only fields an older Sergeant never sent is still its answer (skew.ts). */
 async function call<T>(ctx: Context, method: Method, path: string, schema: z.ZodType<T>, body?: object): Promise<T> {
-  const res = await client(ctx).call(method, path, schema, body);
-  if (res.ok && res.absent) {
-    ctx.skew.partial = true;
-    const done = method === "POST" ? "it did what was asked, but " : "";
-    ctx.io.err(`sgt: warning: Sergeant at ${ctx.api} answered ${method} ${path} without ${res.absent.join(", ")}: ${done}it is older than this sgt, so its answer is printed as JSON\n`);
-  }
-  return settle(ctx, res);
+  return settle(ctx, await client(ctx).call(method, path, schema, body));
 }
 
 const client = (ctx: Context) =>
@@ -312,14 +316,16 @@ const client = (ctx: Context) =>
     fetch: ctx.io.fetch,
     token: ctx.token,
     unreachableHint: ". Is serve running there, and is SGT_API_URL the hosted HTTPS endpoint (README.md)?",
-    onSkew: (server) => warnSkew(ctx, server),
+    version: ctx.io.version ?? sergeantVersion().version,
+    onOlderServer: (serverMin) => warnOlderServer(ctx, serverMin),
   });
 
-/** Once per invocation: the Sergeant answering serves a different API contract than this sgt. */
-function warnSkew(ctx: Context, server: ServerVersion): void {
-  if (ctx.skew.warned) return;
-  ctx.skew.warned = true;
-  ctx.io.err(`sgt: warning: ${skewWarning(ctx.api, server, sergeantVersion().version)}\n`);
+/** Once per invocation: the Sergeant answering predates a change this sgt needs, so commands may fail. */
+function warnOlderServer(ctx: Context, serverMin: string | undefined): void {
+  if (ctx.warned.olderServer) return;
+  ctx.warned.olderServer = true;
+  const supports = serverMin === undefined ? "does not say which sgt it supports" : `supports sgt ${serverMin} and later`;
+  ctx.io.err(`sgt: warning: Sergeant at ${ctx.api} is older than this sgt (it ${supports}; this sgt needs one that supports ${MIN_CLI_VERSION}), so commands may fail until it is redeployed\n`);
 }
 
 const settle = <T>(ctx: Context, res: ApiResult<T>): T => (res.ok ? res.value : fail(ctx, res.error.code, res.error.message));
@@ -333,5 +339,5 @@ function fail(ctx: Context, code: ApiError["error"]["code"], message: string): n
 const path = (segment: string | undefined) => encodeURIComponent(segment ?? "");
 
 function print(ctx: Context, value: unknown, human: () => string): void {
-  ctx.io.out(`${ctx.json || ctx.skew.partial ? JSON.stringify(value) : human()}\n`);
+  ctx.io.out(`${ctx.json ? JSON.stringify(value) : human()}\n`);
 }

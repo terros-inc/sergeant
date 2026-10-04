@@ -301,7 +301,8 @@ This section is the reference.
 `sgt` (UNF-714) only calls the client API and prints the answer: concise lines by default, the API's
 own JSON with `--json` (errors too, as `{"error":{"code","message"}}`; exit 1 for an API error, 2 for
 usage). It needs no AWS credentials. Run `sgt --help` for the commands: `login`, `logout`, `whoami`,
-`task list | show | wake | cancel`, `run list | show | report | cancel`.
+`task list | show | wake | cancel`, `run list | show | report | cancel`, `update`. Keep it current: an
+`sgt` older than its installation supports stops and says to run `sgt update`.
 
 ```sh
 alias sgt="node $PWD/packages/cli/src/sgt.ts"   # from the repository root

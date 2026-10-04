@@ -43,23 +43,15 @@ Every call that changes durable state or an external system is one action throug
 actions have ordered steps and are re-driven until complete (03 §10), so a failure can leave them
 pending, never half-forgotten. Drain and undrain are process-local controls, not actions.
 
-**Version skew (TECH-5155).** `sgt` and `sgt-mcp` run from people's own clones, so they are often
-older or newer than the hosted `serve`. One rule covers it, so a contract change needs no
-compatibility ticket of its own (`packages/contracts/src/skew.ts`):
-
-1. *Visible.* Every `/v1` answer carries `Sergeant-Api-Contract` (a fingerprint of the `/v1`
-   schemas), and every answer to an authenticated caller also `Sergeant-Version` (its git version,
-   which is not shown to unauthenticated callers). A client whose own fingerprint
-   differs, or whose server sends none, warns once per invocation (`sgt`) or in each tool result
-   (`sgt-mcp`). Unequal versions with equal contracts do not warn.
-2. *Additive.* A response may gain fields: an older client ignores them, and rule 1 warns it. Removing
-   or retyping a field, a new enum value an older client must parse, or a new required request field
-   is a breaking change, made deliberately and outside this rule.
-3. *Tolerant.* A client accepts a 2xx answer whose only fault is required fields it lacks, of any
-   type (enum, literal, and union fields included), names them,
-   and shows the API's JSON instead of formatting it, so a mutation the server performed is never
-   reported as failed for a field the older server did not know. New response fields of any type are
-   therefore added as required, not optional.
+**Client versions (TECH-5185).** There is no compatibility between versions of `sgt` (or `sgt-mcp`)
+and the hosted `serve`: people keep their CLI current. Every `/v1` answer carries
+`Sergeant-Min-Cli-Version`, the oldest client this server supports (`packages/contracts/src/min-cli.ts`).
+A client older than that stops with "Your sgt is older than this Sergeant server supports. Run `sgt
+update`."; `sgt update` fast-forwards its checkout to `main` and runs `pnpm install`. A client whose own
+minimum is above the server's, or whose server sends none, is newer than the server across a breaking
+change, and `sgt` warns once. A change an older client cannot work with (a removed, retyped, or newly
+required field, a new enum value) raises the minimum in the same change; response schemas are not
+otherwise made tolerant of a missing field.
 
 ## 3. Webhooks
 
