@@ -38,17 +38,18 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
     !active.allowed &&
     conversation.issue.stateType === "completed" &&
     landedOf(await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps), runs, deps.workerLogin) !== undefined;
-  if (!active.allowed && !finished) {
-    await recordStop(opts.dir, stopReason(conversation.issue));
-    return active.reason;
-  }
   // TECH-5179 (owner.ts): the issue no longer assigned to the owner the task was admitted for stops it
-  // the same way, so token ownership never moves mid-task.
-  // It is a handoff (cancel.ts): PRs and branches are kept for whoever continues.
-  const moved = active.allowed && state.owner ? reassigned(state.owner, conversation.issue) : undefined;
+  // too, so token ownership never moves mid-task. It is a handoff (cancel.ts): PRs and branches are
+  // kept for whoever continues. Checked first, so an undelegation or a state change seen in the same
+  // poll still hands off rather than closing the PRs.
+  const moved = state.owner && !finished ? reassigned(state.owner, conversation.issue) : undefined;
   if (moved) {
     await recordStop(opts.dir, moved, { handoff: { delegatedAt: state.owner?.delegatedAt } });
     return moved;
+  }
+  if (!active.allowed && !finished) {
+    await recordStop(opts.dir, stopReason(conversation.issue));
+    return active.reason;
   }
   // Linear's durable history is reread too: a newer delegation, or someone else's, is a new episode.
   // Unreadable, nothing new starts this poll (fails closed).

@@ -66,6 +66,17 @@ test("a reassignment hands off: runs stop, PRs stay open, the issue is Todo and 
   expect(t.seen.closed).toEqual([]);
 });
 
+test("reassigned and undelegated in the same poll, it is still a handoff: the PR stays open and the handoff comment is posted", async () => {
+  const t = await activeTask();
+  Object.assign(t.live.conversation.issue, { assignee: bob, delegate: null });
+  t.owns(() => ({ refused: "not_delegated" }));
+  expect(await t.loop()).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("reassigned from Ann to Bob") });
+  expect(t.seen.canceled).toEqual(["run_w1"]);
+  expect(t.seen.closed).toEqual([]);
+  expect(t.live.conversation.issue).toMatchObject({ state: "Todo", delegate: null });
+  expect(t.seen.comments.map((c) => c.body)).toEqual([expect.stringContaining("Bob can continue it personally, or delegate it to Sergeant")]);
+});
+
 test("the handoff comment links every existing PR, merged and closed ones too, and never says there is none", async () => {
   const t = await activeTask();
   t.live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }, { repo, number: 9 }, { repo, number: 10 }];
