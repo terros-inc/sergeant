@@ -9,8 +9,9 @@ import { runLoop } from "./loop.ts";
 // direct effectors they are one action, so a human comment that lands while reasoning is deciding
 // must deny that merge and wake a new turn that sees it, never be overtaken by the merge. The same
 // holds for a reassignment (UNF-724), which instead stops the loop; and a merge gets exactly one
-// outcome comment, even when the loop is run again. A non-blocking finding merged as is becomes one
-// follow-up issue however often reasoning proposes it (UNF-729), and the outcome lists it.
+// outcome comment, even when the loop is run again. A follow-up reasoning proposes becomes one issue
+// however often it is proposed (UNF-729), and the outcome lists it; the merge's feedback, one Sergeant
+// feedback comment and label (TECH-5186).
 
 const head = "a".repeat(40);
 const repo = "o/canary";
@@ -43,7 +44,7 @@ const review: RunRecord = {
     summary: "",
   },
 };
-const followup: CreateFollowup = { kind: "create_followup", key: "retry-jitter", title: "Add jitter to retries", description: "Review f1.", relation: "related" };
+const followup: CreateFollowup = { kind: "create_followup", key: "retry-jitter", title: "Add jitter to retries", category: "concrete_bug", why: "Retries stampede.", description: "Review f1.", relation: "related" };
 const worker: RunRecord = {
   runId: "run_worker",
   role: "worker",
@@ -59,7 +60,7 @@ const worker: RunRecord = {
     followups: [],
   },
 };
-const merge: MergePr = { kind: "merge_pr", repo, number: 7, expectedHeadSha: head, reviewStanding: { kind: "reviewed", reviewRunId: "run_review" } };
+const merge: MergePr = { kind: "merge_pr", repo, number: 7, expectedHeadSha: head, reviewStanding: { kind: "reviewed", reviewRunId: "run_review" }, feedback: ["CI took 20 minutes to start."] };
 const comment = { id: "c1", author: { id: "u1", name: "Human" }, createdAt: "2026-10-02T06:01:00.000Z", updatedAt: "2026-10-02T06:01:00.000Z", body: "Hold on: also update the README." };
 
 const agent = { id: "agent-v2", name: "Sergeant" };
@@ -68,8 +69,8 @@ let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
 /**
- * A loop over fakes whose reasoner always proposes the merge and a follow-up for the review's
- * non-blocking finding; `duringTurn` changes Linear meanwhile.
+ * A loop over fakes whose reasoner always proposes the merge and a follow-up; `duringTurn` changes
+ * Linear meanwhile.
  */
 async function scenario(duringTurn: (live: Conversation, turn: number) => Conversation) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-loop-test-"));
@@ -85,6 +86,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
   const comments: { body: string; key: string }[] = [];
   const filed: string[] = [];
   const closed: { number: number; comment: string }[] = [];
+  const labels: string[] = [];
 
   const run = () => runLoop(
     { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {} },
@@ -96,8 +98,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
       readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
         postComment: async (c) => void comments.push(c),
-        createFollowupIssue: async (req) => (filed.push(req.key), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
-      },
+        createFollowupIssue: async (req) => (filed.push(req.key), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }), addLabel: async (_, name) => void labels.push(name) },
       github: {
         readPullRequest: async () => pr,
         closePullRequest: async ({ number, comment }) => void closed.push({ number, comment }),
@@ -117,12 +118,12 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
       },
     },
   );
-  return { result: await run(), rerun: run, seen, merged, comments, filed, closed };
+  return { result: await run(), rerun: run, seen, merged, comments, filed, closed, labels };
 }
 
 test("a human comment landing before the merge denies it and wakes a turn that sees it", async () => {
   // The human comments while the first turn is still deciding to merge.
-  const { result, rerun, seen, merged, comments, filed } = await scenario((live, turn) => (turn === 1 ? { ...live, humanComments: [comment] } : live));
+  const { result, rerun, seen, merged, comments, filed, labels } = await scenario((live, turn) => (turn === 1 ? { ...live, humanComments: [comment] } : live));
 
   expect(seen.map((s) => s.conversation.humanComments.length)).toEqual([0, 1]);
   expect(seen[1]?.recentTurns[0]?.outcomes[0]).toMatch(/denied by M10/);
@@ -132,14 +133,15 @@ test("a human comment landing before the merge denies it and wakes a turn that s
   expect(filed).toEqual(["followup:canary_UNF-1:retry-jitter"]);
   expect(seen[1]?.followups).toMatchObject([{ key: "retry-jitter", identifier: "UNF-2" }]);
 
-  // One evidence-bearing outcome, and running the command again posts nothing more.
-  expect(comments).toHaveLength(1);
+  // One evidence-bearing outcome, one feedback comment and label, and running it again posts nothing more.
+  expect(comments.map((c) => c.body.split(":")[0])).toEqual(["**Merged** [o/canary#7](https", "**Sergeant feedback"]);
+  expect(comments[1]?.body).toBe("**Sergeant feedback:** CI took 20 minutes to start.");
   expect(comments[0]?.body).toContain(pr.url);
   expect(comments[0]?.body).toContain(head.slice(0, 12));
   expect(comments[0]?.body).toContain("validate");
   expect(comments[0]?.body).toContain("[UNF-2](https://linear.app/x/issue/UNF-2) Add jitter to retries");
   expect((await rerun()).outcome).toBe("done");
-  expect(comments).toHaveLength(1);
+  expect([comments.length, labels]).toEqual([2, ["sergeant-feedback"]]);
   expect(filed).toHaveLength(1);
 });
 

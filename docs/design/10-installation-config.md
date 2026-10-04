@@ -36,7 +36,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 | Runners | reconcile interval (60 s), idle/unreachable wake (20 min) | 04 §6 |
 | Reasoning | model, max turn cost and seconds, max sleep, session mode, compaction threshold | |
 | Review | audit sample rate (default 0.2), review-quality budget per day | 06; subagent reviews never count until the captain decides (06 §5) |
-| Follow-ups | max per task, max depth, auto-delegate | |
+| Follow-ups | max depth, auto-delegate | |
 | Human waits | remind after hours | |
 | Approvers | Linear user ids | budget grants, waivers, escalations |
 | AWS | runner dev role ARN, artifact bucket, CloudWatch log group | |

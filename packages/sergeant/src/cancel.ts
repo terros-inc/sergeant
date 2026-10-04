@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ClosedPullRequest, RepoSlug, RunId, STOP_STATE_TYPES, type Conversation, type PullRequestFacts, type PullRequestRef, type RunRecord, type TaskRef } from "@terros/sergeant-contracts";
+import { checkDelegation, ClosedPullRequest, RepoSlug, RunId, STOP_STATE_TYPES, type Conversation, type PullRequestFacts, type PullRequestRef, type RunRecord, type TaskRef } from "@terros/sergeant-contracts";
 import { z } from "zod";
-import { exists } from "./after-merge.ts";
+import { exists, postFeedbackComment } from "./after-merge.ts";
 import type { Ports } from "./execute.ts";
+import { feedbackComment, workerFeedback } from "./outcome.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
 import type { ServiceDeps } from "./service.ts";
 
@@ -247,6 +248,11 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     log(`${ref}: closed ${pr.url}`);
   }
   if (!intent.handoff) await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: stopComment(intent, unreadablePastGrace) });
+  // TECH-5186: an issue completed in Linear, still Sergeant's, without a recognized closing merge gets
+  // its feedback like a merged one, once under the stop's key. A failed comment or label throws before
+  // `state.json` is set aside and the intent removed, so the next drive retries it.
+  const feedback = issue.stateType === "completed" && checkDelegation(issue, deps.agentUserId).allowed ? feedbackComment(workerFeedback(runs)) : undefined;
+  if (feedback) await postFeedbackComment(issue, feedback, `feedback:${issue.id}:stop:${intent.requestId}`, deps, log);
   await rename(join(dir, "state.json"), join(dir, `state.stopped-${intent.at.replace(/[:.]/g, "-")}.json`)).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "ENOENT") throw e;
   });

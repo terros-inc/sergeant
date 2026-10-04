@@ -4,6 +4,10 @@ import { RepoSlug } from "./conversation.ts";
 export const RunId = z.string().regex(/^run_[\w-]+$/);
 export type RunId = z.infer<typeof RunId>;
 
+/** The only reasons a follow-up issue may be filed (07 §11, TECH-5186). */
+export const FollowupCategory = z.enum(["concrete_bug", "required_unfinished_work", "real_blocker", "operational_or_security"]);
+export type FollowupCategory = z.infer<typeof FollowupCategory>;
+
 /**
  * A machine-readable terminal failure that Sergeant handles outside ordinary agent reasoning. On
  * either, the runner sets the run's model account aside, so the next launch takes the next one (TECH-5113).
@@ -53,8 +57,21 @@ export const WorkerReport = z.object({
     .default([]),
   knownGaps: z.array(z.string()).default([]),
   unreadableInputs: UnreadableInputs,
-  /** Out-of-scope work the worker found; Sergeant's reasoning decides whether to file it. */
-  followups: z.array(z.object({ title: z.string(), why: z.string().default("") })).default([]),
+  /**
+   * A concrete bug, required unfinished work, a real blocker, or a current operational or security
+   * problem the worker found, each with its category and why; more than one is exceptional. Sergeant's
+   * reasoning decides whether to file it (TECH-5186). A missing or unknown category reads as absent
+   * rather than failing the report.
+   */
+  followups: z
+    .array(z.object({ title: z.string(), category: FollowupCategory.optional().catch(undefined), why: z.string().default("") }))
+    .default([]),
+  /**
+   * Everything else worth knowing across tasks: friction, possible improvements, things that might
+   * recur, non-blocking review notes left as they are (TECH-5186). Never filed as an issue; a later
+   * retro reads it from the run's record. A malformed list reads as absent rather than failing the report.
+   */
+  feedback: z.array(z.string()).optional().catch(undefined),
   /**
    * How the worker answered earlier review findings (01 `FindingResolution`), each named by its
    * review run and finding id. Only telemetry reads it (`ReviewFacts.resultingMutation`), so a

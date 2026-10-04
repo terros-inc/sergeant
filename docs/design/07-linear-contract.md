@@ -241,8 +241,26 @@ second between that read and GitHub's merge is an accepted race (captain, 2026-1
 
 ## 11. Follow-up issues
 
-Only Sergeant creates issues; workers suggest them (`followups[]`). Sergeant creates one when the
-work is a separate outcome, or when out-of-scope work was discovered that someone should do.
+Only Sergeant creates issues; workers suggest them (`followups[]`). Sergeant creates one only for a
+concrete bug, required unfinished work from the task's own scope, a real blocker, or a current
+operational or security problem (TECH-5186). There is no per-task quota, but more than one is
+exceptional, and each states its category and why (`create_followup.category`, `why`; the issue's
+description opens with them). A reviewer's non-blocking notes never become one, nor do theoretical
+edge cases, future robustness, generalized cleanup, speculative rollback hazards, or abstraction
+improvements: those are feedback.
+
+**Sergeant feedback (TECH-5186).** With the closing PR's merge, reasoning may give up to three short
+lines from the workers' `feedback` and non-blocking review notes worth keeping (`merge_pr.feedback`;
+for a merge Sergeant did not make, only the closing worker's `feedback`). After the outcome comment,
+Sergeant posts them once as a **Sergeant feedback** comment, keyed `feedback:<issue>:<pr>:<mergedSha>`,
+and adds the `sergeant-feedback` label (a workspace label, else the team's; a human provisions it and
+Sergeant never creates it). Delivery is both: a failed comment or label leaves the feedback unposted
+and the task open, and a later pass retries under the same key. A task with nothing worth keeping
+gets neither. An issue completed in Linear without a recognized closing merge takes the stop path
+(§8); when it is still delegated to Sergeant, the stop's last drive posts the same comment from the
+latest worker's `feedback`, keyed `feedback:<issue>:stop:<request>`, and adds the label, before the stop
+intent is removed. No custom field or other store: a retro across tasks (TECH-5187) reads these
+comments and the label.
 
 - Same team, linked to the origin (`related`, or `blocked_by` when it must wait).
 - Description: why it exists, what was learned, a link back. Written to stand alone.
@@ -250,7 +268,8 @@ work is a separate outcome, or when out-of-scope work was discovered that someon
 - In the team's first `backlog` state, never Triage (whose rotation would auto-assign it to whoever is
   on call). Assigned to the origin's assignee unless that is Sergeant, else to the human who delegated
   the origin to Sergeant when Linear's history shows it, else unassigned.
-- Limits: `maxPerTask` and `maxDepth` (F1–F3); deduplicated by Sergeant's semantic key (02 §6).
+- Limits: no per-task count (TECH-5186); `maxDepth` (F2–F3); deduplicated by Sergeant's semantic key
+  (02 §6).
 
 **Feedback after the work landed (TECH-4985).** Once the completing PR merged or the issue is Done,
 the task loop takes no more turns, so a human comment on the issue, or a comment or review on its

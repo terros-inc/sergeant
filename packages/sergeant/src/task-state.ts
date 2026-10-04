@@ -16,7 +16,7 @@ import {
 import { z } from "zod";
 import { DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
 import type { ActionOutcome } from "./execute.ts";
-import { outcomeComment } from "./outcome.ts";
+import { feedbackComment, outcomeComment } from "./outcome.ts";
 
 // The loop's deliberately temporary local store (`state.json`), which lets a restarted loop resume;
 // Linear, GitHub, and the runner's own run records stay the authority for everything else.
@@ -72,6 +72,9 @@ const TaskState = z.looseObject({
       /** The outcome comment, built from the facts the merge was allowed on; posted once. */
       outcome: z.string().optional(),
       outcomePostedAt: z.iso.datetime().optional(),
+      /** TECH-5186: the Sergeant feedback comment, absent when there was nothing worth keeping; posted once. */
+      feedback: z.string().optional(),
+      feedbackPostedAt: z.iso.datetime().optional(),
       /** When the audit sample was drawn for the merged head; done once. */
       auditDrawnAt: z.iso.datetime().optional(),
       /** The sampled audit review of the merged head. */
@@ -142,7 +145,8 @@ export function applyTurn(
       }
       const mergedSha = Sha.parse(o.merged.mergedSha);
       const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups, situation.conversation.issue);
-      state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, at, outcome };
+      const feedback = feedbackComment(o.action.feedback);
+      state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, at, outcome, ...(feedback && { feedback }) };
     }
   }
 }

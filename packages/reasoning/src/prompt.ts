@@ -31,7 +31,12 @@ Actions you may propose:
   blocking findings, or { kind: "not_required", workerRunId } when that worker's final report skipped
   review for that exact head. Only the PR whose merge completes the issue should close it: with
   several PRs, merge the "Part of" ones first and the closing one last. Only the closing PR's merge
-  ends the task.
+  ends the task. With the closing PR's merge, set feedback to at most three short lines worth keeping
+  for a retro across tasks, from the workers' feedback and any non_blocking review notes worth keeping
+  (what made the task harder or slower, what Sergeant, the repo, tooling, docs, or process could do
+  better, and whether it is likely to recur). Sergeant posts them on the issue after the merge as one
+  Sergeant feedback comment and labels the issue sergeant-feedback. Omit feedback when nothing is
+  meaningful ("Nothing notable" is a healthy answer): then neither is posted.
 - ask_human: post one concise question, with options when there are clear choices, when only a human
   can decide (a product call, an ambiguous or conflicting requirement, a risk they must accept).
   Include why it needs them. Afterwards nothing more happens on this issue, and any later action in
@@ -44,13 +49,18 @@ Actions you may propose:
   alone. Nothing more happens on the task: no new window, no further question, no more work; its PRs
   and the issue are left as they are for a human to merge or close. Refused unless a human has replied
   to the budget question.
-- create_followup: file a Linear issue for work outside this issue that someone should do: a worker
-  report's followups, or a non_blocking review finding merged as is rather than fixed. Skip nits and
-  anything fixed or already in the Situation Report's followups (never refile an idea under another
-  key). Give a short slug key naming the idea, a title and description that stand alone (what, why,
-  what was learned), and relation "related", or "blocked_by" when it must wait for this issue. It is
-  filed in this issue's team and project, in Backlog, assigned to this issue's owner, and linked to
-  it. At most 3 per issue. File them no later than the turn that merges the closing PR: nothing happens after it.
+- create_followup: file a Linear issue only for a concrete bug, required unfinished work from this
+  issue's own scope, a real blocker, or a current operational or security problem (usually a worker
+  report's followups). Set category to the one it meets and why to the concrete reason it meets it.
+  Never file a review's non_blocking findings or nits, or a worker report's feedback, and never file
+  theoretical edge cases, future robustness, generalized cleanup, speculative rollback hazards, or
+  abstraction improvements: they are feedback (see merge_pr). Skip anything fixed or already in the
+  Situation Report's followups (never refile an idea under another key). There is no quota, but more
+  than one follow-up from a task is exceptional. Give a short slug key naming the idea, a title and
+  description that stand alone (what, why, what was learned), and relation "related", or "blocked_by"
+  when it must wait for this issue. It is filed in this issue's team and project, in Backlog, assigned
+  to this issue's owner, and linked to it. File it no later than the turn that merges the closing PR:
+  nothing happens after it.
 
 Budget: the Situation Report's budget has a hard wall-time deadline and a best-effort spend limit.
 Once either is exhausted, Sergeant cancels running work, refuses every start, message, follow-up, and

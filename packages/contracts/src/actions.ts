@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { RepoSlug, Sha } from "./conversation.ts";
-import { RunId } from "./runs.ts";
+import { FollowupCategory, RunId } from "./runs.ts";
 
 const PrHead = z.object({ repo: RepoSlug, number: z.number().int().positive(), headSha: Sha });
 
@@ -37,6 +37,12 @@ export const MergePr = z.object({
   number: z.number().int().positive(),
   expectedHeadSha: Sha,
   reviewStanding: ReviewStanding,
+  /**
+   * TECH-5186: for the closing PR, up to three short lines worth keeping from the runs' feedback and
+   * non-blocking review notes. After the merge they are posted once on the issue as the Sergeant
+   * feedback comment, with the `sergeant-feedback` label; absent or empty, neither.
+   */
+  feedback: z.array(z.string().min(1).max(300)).max(3).optional(),
 });
 export type MergePr = z.infer<typeof MergePr>;
 
@@ -64,15 +70,18 @@ export const AskHuman = z.object({
 export const AcceptAsIs = z.object({ kind: z.literal("accept_as_is") });
 
 /**
- * A Linear issue for work outside this task that someone should do: a worker's suggestion, or a
- * non-blocking review finding merged as is (07 §11). Filed in the task's team and project, linked to
- * the task's issue, and delegated to nobody.
+ * A Linear issue for a concrete bug, required unfinished work from this task's scope, a real blocker,
+ * or a current operational or security problem (07 §11, TECH-5186); never a review's non-blocking
+ * notes. Filed in the task's team and project, linked to the task's issue, and delegated to nobody.
  */
 export const CreateFollowup = z.object({
   kind: z.literal("create_followup"),
   /** Names the idea, not the wording: proposing the same key again files nothing new. */
   key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, "expected a short lowercase slug"),
   title: z.string().min(1).max(200),
+  /** Which of the four reasons this meets, and why; both open the filed issue's description. */
+  category: FollowupCategory,
+  why: z.string().min(1).max(1_000),
   description: z.string().min(1).max(8_000),
   /** `blocked_by`: the follow-up must wait for this task's issue. */
   relation: z.enum(["related", "blocked_by"]),
