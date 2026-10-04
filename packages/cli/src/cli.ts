@@ -28,7 +28,7 @@ import {
   WhoAmI,
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
-import { showOutcome, showStatus, waitForOutcome } from "./admin.ts";
+import { showOutcome, showStatus, staleConfig, waitForOutcome } from "./admin.ts";
 import { accountRow, runRow, showRun, showTask, table, taskRow } from "./format.ts";
 import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
 import { registrationRefusal, strandedNotice } from "./register.ts";
@@ -71,8 +71,10 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   admin restart                      an approver's: reread the installation config and restart serve on
                                      the release it runs, then wait for the outcome
   admin update [<ref>]               an approver's: move the host to <ref>, a commit on main whose check
-                                     passed, else to what its release channel would choose; then wait
-  admin status                       the host's release, when serve started, and the last restart or update
+                                     passed, else to what its release channel would choose; then wait.
+                                     With nothing to install, it says if the config needs a restart
+  admin status                       the host's release, when serve started, the last restart or update,
+                                     and whether the installation config changed since serve started
   admin repo add <owner/name> [--merge-method squash|merge|rebase]
                                      an approver's enrollment (default squash), once both GitHub
                                      Apps reach it; serve takes it at once, no host update
@@ -105,10 +107,18 @@ type Flags = { name?: string | undefined; reason?: string | undefined; task?: st
  * invocation has said its server is older than it, shared by every copy of the context.
  */
 type Context = { api: string; json: boolean; io: Io; flags: Flags; token?: string | undefined; warned: { olderServer: boolean } };
-/** `args` arguments, and up to `optional` more. */
-type Command = { args: number; optional?: number; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
+/** `args` arguments, and up to `optional` more; `usage`, what a wrong number of them says instead of the count. */
+type Command = { args: number; optional?: number; usage?: string; flags?: (keyof Flags)[]; run: (ctx: Context, args: string[]) => Promise<void> };
 
 class Usage extends Error {}
+
+// TECH-5205: a bare `sgt account register` names the providers and how to name an account.
+const REGISTER_USAGE = [
+  "account register takes the provider: claude (your Claude subscription) or codex (your ChatGPT login for Codex).",
+  "The account is named after the provider unless --name gives it a name of your own:",
+  "  sgt account register claude",
+  "  sgt account register codex --name codexWork",
+].join("\n");
 class Failure extends Error {}
 
 const commands: Record<string, Command> = {
@@ -196,10 +206,11 @@ const commands: Record<string, Command> = {
   },
   "account register": {
     args: 1,
+    usage: REGISTER_USAGE,
     flags: ["name"],
     run: async (ctx, [named]) => {
       const provider = Provider.safeParse(named).data;
-      if (!provider) throw new Usage("account register takes claude or codex");
+      if (!provider) throw new Usage(REGISTER_USAGE);
       const name = ctx.flags.name ?? provider;
       const valid = AccountName.safeParse(name);
       if (!valid.success) throw new Usage(`--name: ${valid.error.issues[0]?.message}`);
@@ -341,7 +352,9 @@ async function adminRequest(ctx: Context, action: "restart" | "update", body: { 
   const sleep = ctx.io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const read = () => client(ctx).call("GET", "/v1/admin/status", AdminStatus);
   const outcome = settle(ctx, await waitForOutcome(request, last, read, { sleep, say: (line) => ctx.io.err(`${line}\n`), now: Date.now }));
-  print(ctx, { request, outcome }, () => showOutcome(outcome));
+  // TECH-5205: nothing newer to install, but the installation config changed since serve started: only a restart rereads it.
+  const stale = outcome.outcome === "unchanged" ? await read().then((s) => (s.ok ? staleConfig(s.value) : undefined)) : undefined;
+  print(ctx, { request, outcome }, () => (stale ? `${showOutcome(outcome)}\n${stale}` : showOutcome(outcome)));
   if (outcome.outcome === "failed") throw new Failure(outcome.message);
 }
 
@@ -386,7 +399,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
     const most = command.args + (command.optional ?? 0);
     if (args.length < command.args || args.length > most) {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
-      throw new Usage(`${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
+      throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
     const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"] };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
@@ -402,7 +415,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
     if (e instanceof Failure) return 1;
     const usage = e instanceof Usage || (e as { code?: string }).code?.startsWith("ERR_PARSE_ARGS");
     if (!usage) throw e;
-    io.err(`sgt: ${(e as Error).message} (sgt --help for usage)\n`);
+    const message = (e as Error).message;
+    io.err(`sgt: ${message}${message.includes("\n") ? "\n" : " "}(sgt --help for usage)\n`);
     return 2;
   }
 }

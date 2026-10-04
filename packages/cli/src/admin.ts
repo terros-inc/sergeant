@@ -61,5 +61,14 @@ export function showStatus(s: AdminStatus): string {
   } else {
     lines.push("last     no restart or update recorded");
   }
+  const config = s.config;
+  if (config) lines.push(`config   ${staleConfig(s) ?? (config.current === null ? `version ${config.loaded}; serve cannot read the parameter now (serve.log says why)` : `version ${config.loaded}, as serve has it`)}`);
   return lines.join("\n");
+}
+
+/** TECH-5205: what to do when the installation-config parameter changed since serve started; undefined when it did not. */
+export function staleConfig(s: AdminStatus): string | undefined {
+  const c = s.config;
+  if (!c || c.current === null || c.current === c.loaded) return undefined;
+  return `version ${c.current} in AWS, but serve has version ${c.loaded}: the installation config changed since serve started, so run \`sgt admin restart\` to reread it`;
 }

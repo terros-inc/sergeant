@@ -29,6 +29,8 @@ export type HostAdmin = {
   releaseFile: string;
   /** This process, as it started: the checkout may change under it during an update. */
   serve: AdminStatus["serve"];
+  /** The installation-config parameter's version serve has and its version now (enrollment.ts `versions`). */
+  config: () => Promise<AdminStatus["config"]>;
 };
 
 export async function adminRoute(
@@ -77,12 +79,13 @@ async function hand(admin: HostAdmin, what: Pick<AdminRequest, "action" | "ref">
 }
 
 async function status(admin: HostAdmin): Promise<AdminStatus> {
-  const [release, pending, last] = await Promise.all([
+  const [release, pending, last, config] = await Promise.all([
     readFile(admin.releaseFile, "utf8").then(parseRelease, () => null),
     readJson(admin.requestFile, AdminRequest),
     readJson(admin.resultFile, AdminResult),
+    admin.config(),
   ]);
-  return { serve: admin.serve, release, pending, last };
+  return { serve: admin.serve, release, pending, last, config };
 }
 
 /** sergeant-update's `ref=…`, `sha=…`, `at=…` lines. */

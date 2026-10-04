@@ -264,6 +264,11 @@ test("account register sends the piped or signed-in credential under its name an
   const signIn = async (provider: string) => (signIns.push(provider), `${credential}\n`);
 
   for (const bad of [["codex", "--name", "my work"], ["codex-local"]]) expect((await sgtWith({ signIn }, api, "account", "register", ...bad)).code).toBe(2);
+  // TECH-5205: bare, it names the providers and shows --name, before any login or API call.
+  const bare = await sgtWith({ signIn }, api, "account", "register");
+  expect([bare.code, bare.out, seen, signIns]).toEqual([2, "", [], []]);
+  expect(bare.err).toMatch(/claude \(your Claude subscription\) or codex/);
+  expect(bare.err).toContain("\n  sgt account register codex --name codexWork\n(sgt --help for usage)\n");
   expect((await sgtWith({ stdin: async () => "\n", signIn }, api, "account", "register", "codex")).code).toBe(2);
   expect([seen, signIns]).toEqual([[], []]);
 
@@ -413,8 +418,8 @@ test("admin update waits through serve's restart for the host's outcome, and a f
   // The host's outcome when the request was made: an automatic update that finished earlier.
   const before = { action: "automatic", by: "the release channel (main)", outcome: "succeeded", message: "updated zzz to aaa", startedAt: "2026-10-04T09:50:00Z" };
   const running = { id: "req-1", action: "update", ref: "v2.1.0", by: request.by, outcome: "running", message: "updating aaa to bbb", startedAt: "2026-10-04T10:00:05Z" };
-  const status = (last: object | null, pending: object | null = null) => ({
-    json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T09:00:00.000Z" }, release: null, pending, last },
+  const status = (last: object | null, pending: object | null = null, config: object | null = null) => ({
+    json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T09:00:00.000Z" }, release: null, pending, last, config },
   });
   let statuses: { status?: number; json?: unknown; text?: string }[] = [];
   const { api, seen } = await fakeApi({
@@ -447,4 +452,29 @@ test("admin update waits through serve's restart for the host's outcome, and a f
   expect(replaced.code).toBe(1);
   expect(replaced.err).toContain("sgt: conflict: the host took your update (req-1), but automatic by the release channel (main) replaced its outcome before sgt read it");
   expect(statuses).toEqual([]);
+
+  // TECH-5205: nothing newer to install, but the installation config changed since serve started.
+  const unchanged = { ...running, outcome: "unchanged", message: "up to date at aaa (requested by Grace Example <grace@example.com>)" };
+  statuses = [status(unchanged, null, { loaded: 3, current: 4 }), status(unchanged, null, { loaded: 3, current: 4 })];
+  const stale = await sgtWith(noWait, api, "admin", "update", "v2.1.0");
+  expect(stale).toMatchObject({ code: 0, out: `unchanged: ${unchanged.message}\nversion 4 in AWS, but serve has version 3: the installation config changed since serve started, so run \`sgt admin restart\` to reread it\n` });
+  statuses = [status(unchanged, null, { loaded: 4, current: 4 }), status(unchanged, null, { loaded: 4, current: 4 })];
+  expect((await sgtWith(noWait, api, "admin", "update", "v2.1.0")).out).toBe(`unchanged: ${unchanged.message}\n`);
+});
+
+test("admin status says when the installation config changed since serve started", async () => {
+  const status = (config: object | null) => ({ json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T09:00:00.000Z" }, release: null, pending: null, last: null, config } });
+  let next = status({ loaded: 3, current: 4 });
+  const { api } = await fakeApi({
+    get "GET /v1/admin/status"() {
+      return next;
+    },
+  });
+  expect((await sgt(api, "admin", "status")).out).toContain("config   version 4 in AWS, but serve has version 3: the installation config changed since serve started, so run `sgt admin restart` to reread it");
+  next = status({ loaded: 4, current: 4 });
+  expect((await sgt(api, "admin", "status")).out).toContain("config   version 4, as serve has it\n");
+  next = status({ loaded: 4, current: null });
+  expect((await sgt(api, "admin", "status")).out).toContain("config   version 4; serve cannot read the parameter now");
+  next = status(null);
+  expect((await sgt(api, "admin", "status")).out).not.toContain("config");
 });
