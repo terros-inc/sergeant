@@ -1,4 +1,4 @@
-import { NoModelAccount, type LinearPerson, type ProviderChoice, type RunAccount } from "@terros/sergeant-contracts";
+import { NoModelAccount, type LinearPerson, type ProviderChoice, type QuotaReading, type RunAccount } from "@terros/sergeant-contracts";
 import type { Adapter } from "./agents.ts";
 import { chooseAccount, percent, spent, type Candidate } from "./choose.ts";
 import type { Role } from "./options.ts";
@@ -6,24 +6,35 @@ import type { QuotaAccount, ReadQuota } from "./quota.ts";
 
 // Which model account a launch runs on (TECH-5179): only the task owner's own registered accounts,
 // never the installation's or anyone else's. Each launch picks among them from live quota (choose.ts).
-// A run that fails on quota or authentication sets its account aside for a while, so the next launch
-// takes another of the owner's; the set-aside lives in memory only, and losing it on a restart costs at
-// most one more failed run.
+// A run that fails on quota or authentication sets its account aside for an hour, or until the failing
+// window resets if that is sooner (TECH-5213), so the next launch takes another of the owner's; the
+// set-aside lives in memory only, and losing it on a restart costs at most one more failed run.
 
 /** A model account a run may use: its credential, and whose it is. */
 export type ModelAccount = QuotaAccount & { holder: string };
 
 export const SET_ASIDE_MS = 60 * 60_000;
 
-/** Accounts whose last run failed on quota or authentication, until when. */
+/** Accounts whose last run failed on quota or authentication, until when: `SET_ASIDE_MS`, or `resetsAt` if sooner. */
 export function setAside(now: () => number = Date.now) {
   const until = new Map<string, number>();
   return {
-    add(accountId: string) {
-      until.set(accountId, now() + SET_ASIDE_MS);
+    add(accountId: string, resetsAt?: string) {
+      const reset = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+      until.set(accountId, Math.min(now() + SET_ASIDE_MS, Number.isNaN(reset) ? Infinity : reset));
     },
     has: (accountId: string) => (until.get(accountId) ?? 0) > now(),
   };
+}
+
+/**
+ * When the window an account ran out of resets, from its reading at launch: the window with less left.
+ * Undefined when that window's reset is unknown.
+ */
+export function failingReset(reading: QuotaReading | undefined): string | undefined {
+  const { weekly, fiveHour } = reading ?? {};
+  const failing = weekly && fiveHour ? (weekly.remainingPercent <= fiveHour.remainingPercent ? weekly : fiveHour) : (weekly ?? fiveHour);
+  return failing?.resetsAt;
 }
 
 export type AccountPick = {
@@ -44,6 +55,7 @@ export async function pickAccount(opts: {
   role: Role;
   configured: Adapter;
   workerAdapter: Adapter | undefined;
+  now?: () => number;
 }): Promise<AccountPick> {
   const { owner, accounts, read } = opts;
   const ids = accounts.map((a) => a.id);
@@ -53,7 +65,7 @@ export async function pickAccount(opts: {
     live.map(async (account) => ({ account, adapter: account.adapter, name: account.id, quota: read ? await read(account) : undefined })),
   );
   const avoid = opts.role === "reviewer" ? opts.workerAdapter : undefined;
-  const chosen = chooseAccount(candidates, { prefer: opts.configured, avoid });
+  const chosen = chooseAccount(candidates, { prefer: opts.configured, avoid, now: (opts.now ?? Date.now)() });
   if (!chosen) {
     const why = [
       ...accounts.filter((a) => opts.isSetAside(a.id)).map((a) => `${a.id} set aside after a quota or authentication failure`),

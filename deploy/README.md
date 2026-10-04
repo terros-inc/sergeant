@@ -198,8 +198,7 @@ reviewer (not even the post-merge audit), so Sergeant can still tell an owner wh
 accounts are spent. The config's `modelAccounts` (TECH-5113) is ignored, with a warning at startup:
 remove it, and have each person register their own subscription, personal or company-paid
 (TECH-5198). Each launch runs on the owner's usable account
-with the most weekly capacity left, skipping one whose 5-hour window is under 20% while another is
-usable (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
+whose quota is furthest ahead of its weekly and 5-hour reset schedule (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
 what each one paid for. An owner with no registered account, or none usable, gets a comment on the
 issue saying what to do, and nothing starts.
 

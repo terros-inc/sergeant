@@ -31,14 +31,16 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
     if (cmd === "docker" && args[0] === "logs") return { code: 0, stdout: '{"is_error":false}', stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
-  const left: Record<Adapter, [number, number]> = { "claude-code-local": [83, 90], "codex-local": [43, 90] };
+  // Half of each window gone: claude's pace is 1.66, and codex's 1.5 is within 20% of it for the reviewer.
+  const left: Record<Adapter, [number, number]> = { "claude-code-local": [83, 90], "codex-local": [75, 90] };
+  const resetIn = (hours: number) => new Date(Date.now() + hours * 60 * 60_000).toISOString();
   const quota = async ({ id, adapter }: { id: string; adapter: Adapter }): Promise<QuotaReading> => ({
     adapter,
     account: id,
     readAt: "2026-10-03T12:00:00.000Z",
     ...(adapter === "claude-code-local" && { source: "header-fallback" as const }),
-    weekly: { remainingPercent: left[adapter][0] },
-    fiveHour: { remainingPercent: left[adapter][1] },
+    weekly: { remainingPercent: left[adapter][0], resetsAt: resetIn(84) },
+    fiveHour: { remainingPercent: left[adapter][1], resetsAt: resetIn(2.5) },
   });
   const rootDir = await mkdtemp(join(tmpdir(), "sergeant-provider-test-"));
   const runner = containerRunner({

@@ -34,7 +34,7 @@ test("reads Claude's and Codex's weekly and 5-hour percent left, with their rese
   expect(await read(claude())).toMatchObject({
     source: "usage-endpoint",
     weekly: { remainingPercent: 83 },
-    // Unrounded: 80.4% used is 19.6% left, below the 20% floor, never rounded up to it.
+    // Unrounded: 80.4% used is 19.6% left, never rounded up to 20%.
     fiveHour: { remainingPercent: 19.6, resetsAt: "2026-10-03T15:00:00.000Z" },
   });
   expect(await read(codex())).toMatchObject({
@@ -84,7 +84,8 @@ test("a failed read is unknown, never throws, and never records the credential",
   });
 });
 
-test("a burst of launches shares one reading until it is a few minutes old", async () => {
+test("a burst of launches shares one reading until it is 4 minutes old", async () => {
+  expect(QUOTA_CACHE_MS).toBe(4 * 60_000);
   let clock = 0;
   const { fetch, calls } = fakeFetch(() => json({ five_hour: { utilization: 1 }, seven_day: { utilization: 1 } }));
   const read = accountQuota({ fetch, now: () => clock });

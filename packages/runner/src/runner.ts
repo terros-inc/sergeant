@@ -14,7 +14,7 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
-import { pickAccount, runAccount, setAside } from "./accounts.ts";
+import { failingReset, pickAccount, runAccount, setAside } from "./accounts.ts";
 import { AGENTS, ADAPTERS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
@@ -123,8 +123,11 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       ...(agent.tokens && { tokens: agent.tokens }),
       ...(agent.failureReason && { failureReason: agent.failureReason }),
     } as const;
-    // The next launch takes the next account (TECH-5113).
-    if (agent.failureReason && meta.account) asides.add(meta.account.id);
+    // The next launch takes the next account (TECH-5113); a quota failure's account is back when its window resets, if within the hour.
+    if (agent.failureReason && meta.account) {
+      const reading = meta.providerChoice?.readings.find((r) => r.account === meta.account?.id);
+      asides.add(meta.account.id, agent.failureReason === "quota" ? failingReset(reading) : undefined);
+    }
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 

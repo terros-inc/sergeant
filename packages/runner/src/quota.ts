@@ -13,13 +13,13 @@ export type ReadQuota = (account: QuotaAccount) => Promise<QuotaReading>;
 
 const READ_TIMEOUT_MS = 5_000;
 /** A burst of launches shares one reading. */
-export const QUOTA_CACHE_MS = 5 * 60_000;
+export const QUOTA_CACHE_MS = 4 * 60_000;
 
 /** A failure whose message is safe to record: a status, never a response body or a credential. */
 class Unreadable extends Error {}
 
 type Window = NonNullable<QuotaReading["weekly"]>;
-// Exact, not rounded: 80.4% used is 19.6% left, below the floor. Only float noise is dropped, so a
+// Exact, not rounded: 80.4% used is 19.6% left, never 20%. Only float noise is dropped, so a
 // header's 0.57 reads as 43% left rather than 43.00000000000001%.
 const left = (usedPercent: number) => Math.max(0, Math.min(100, Number((100 - usedPercent).toFixed(6))));
 const unixTime = (seconds: number | null | undefined) => (seconds ? { resetsAt: new Date(seconds * 1000).toISOString() } : {});

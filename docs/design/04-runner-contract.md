@@ -243,8 +243,8 @@ Claude token). Checked against Codex CLI 0.160.0:
 
 **Provider by quota (TECH-5117).** With both credentials configured, the runner picks each run's
 adapter right before launch from each provider's live quota (weekly and 5-hour percent left), by
-deterministic code: the worker gets the most weekly capacity left unless its 5-hour window is below
-20%; the reviewer gets the other provider than its worker's unless that one is below the floor. An
+deterministic code: the worker gets the best-paced account (the model accounts paragraph below); the
+reviewer gets the other provider than its worker's when that provider's best scores within 20% of the best. An
 unknown reading keeps the `runners` default, so a quota read never blocks a launch. The run record's
 `providerChoice` keeps the choice and the readings behind it.
 
@@ -252,11 +252,15 @@ unknown reading keeps the `runners` default, so a quota read never blocks a laun
 (`RunSpec.owner`: the issue's human assignee, admitted only when Linear's history shows that person
 delegated it, 07 §5) and runs only on an account that person registered through `/v1/accounts`, never
 the installation's credentials or anyone else's. Among the owner's usable accounts the runner takes,
-by one rule, the one with the most weekly capacity left, skipping any whose 5-hour window is under
-20% while another usable one exists; one whose quota could not be read ranks after every known one.
-A reviewer prefers an account of another provider than its worker's when the owner has a usable one
-(the provider choice above), else the same provider. No low-quota warning is posted. A run that fails
-on the account's quota or authentication (`failureReason`) sets the account aside for an hour, in
+by one rule (TECH-5213), the one with the highest pace: for each window, percent left over percent of
+the window's time left (from its reset and nominal length, counted as at least one hour's share: 20%
+of the 5-hour window, about 0.6% of the week), and the lower of the two windows' paces. Above 1 the
+quota would expire unused; below 1 it runs out before its reset. One whose quota could not be read,
+or has a window without a reset time, ranks after every scored one. A reviewer takes an account of
+another provider than its worker's when that provider's best scores within 20% of the best (the
+provider choice above), else the best overall. Nothing is remembered between launches: no burn
+history, stickiness, or round-robin. No low-quota warning is posted. A run that fails
+on the account's quota or authentication (`failureReason`) sets the account aside for an hour, or until the failing window resets if sooner, in
 memory, so the next launch takes another of the owner's. An owner with no account, or none usable, gets `NoModelAccount` from `start`, which
 starts nothing; the core then tells the owner on the issue. The run record's `account` says whose
 subscription paid, never the credential.
