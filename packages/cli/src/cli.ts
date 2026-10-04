@@ -31,7 +31,7 @@ import type { z } from "zod";
 import { showOutcome, showStatus, staleConfig, waitForOutcome } from "./admin.ts";
 import { accountRow, quotaLeft, runRow, showRun, showTask, table, taskRow } from "./format.ts";
 import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
-import { registrationRefusal, strandedNotice } from "./register.ts";
+import { providerEmail, registeredLine, registeringFor, registrationRefusal, strandedNotice } from "./register.ts";
 import { CHECKOUT, update } from "./update.ts";
 
 // `sgt`, a thin client of the Sergeant 2 API (11 §7, UNF-714): it sends one request per command and
@@ -218,11 +218,13 @@ const commands: Record<string, Command> = {
       if (piped === "") throw new Usage("account register read an empty stdin: pipe the credential, or run it with nothing piped to sign in");
       if (!piped && !ctx.io.signIn) throw new Usage("account register needs the credential on stdin here");
       // TECH-5202: the login and whether this Sergeant takes the account, before anything makes a credential.
-      const refused = registrationRefusal(await call(ctx, "GET", "/v1/whoami", WhoAmI), provider);
+      const me = await call(ctx, "GET", "/v1/whoami", WhoAmI);
+      const refused = registrationRefusal(me, provider);
       if (refused) fail(ctx, refused.code, refused.message);
+      ctx.io.err(`${registeringFor(me, provider, name)}\n`);
       let credential = piped;
       if (!credential && ctx.io.signIn) {
-        ctx.io.err(`Signing in with ${provider === "claude" ? "`claude setup-token`" : "`codex login` (in a temporary CODEX_HOME; your ~/.codex is not touched)"} to register ${name}.\n`);
+        ctx.io.err(`Signing in with ${provider === "claude" ? "`claude setup-token`" : "`codex login` (in a temporary CODEX_HOME; your ~/.codex is not touched)"}.\n`);
         credential = (await ctx.io.signIn(provider).catch((e: Error) => fail(ctx, "bad_request", e.message))).trim();
         if (!credential) fail(ctx, "bad_request", "the sign-in gave no credential; nothing was registered");
       }
@@ -237,7 +239,7 @@ const commands: Record<string, Command> = {
         }
       }
       const res = settle(ctx, posted);
-      print(ctx, res, () => `${res.replaced ? "replaced" : "registered"} ${provider} account ${res.account.name} for ${res.account.holder}: ${quotaLeft(res.quota)}. Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
+      print(ctx, res, () => `${registeredLine(res.replaced ? "replaced" : "registered", res.account.name, provider, providerEmail(provider, credential ?? ""), quotaLeft(res.quota))} Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
     },
   },
   "account remove": {
