@@ -157,6 +157,8 @@ function summarize(ctl: ApiControl, { ref, state }: Task): TaskSummary {
     lastSummary: state?.recentTurns.at(-1)?.summary,
     runs: runIdsOf(state).length,
     merged: merged && { repo: merged.repo, number: merged.number, mergedSha: merged.mergedSha, at: merged.at },
+    // TECH-5164: a task stuck finishing its accepted ending (a resolve that keeps failing, say) says so.
+    acceptedEnding: state?.accepted && { since: state.accepted.at },
   };
 }
 
