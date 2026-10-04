@@ -266,6 +266,25 @@ ref and commit. To roll back, update to the previous commit; with automatic upda
 them or remove `release` (Automatic updates, Pin or roll back), or the next tick moves the host
 forward again.
 
+**Rolling back over a task's saved state (TECH-5163).** From TECH-5163 on, a release keeps the
+`state.json` keys it does not know and saves them back, so a later rollback leaves a newer release's
+state for it to finish once the host moves forward. A commit from before TECH-5163 drops them the
+first time it saves the task, and moving forward again does not bring them back. The one that matters
+is `accepted` (TECH-5136, from #90): a task saved with it has taken its accepting turn and only
+replays its ending (resolve the question thread, post the acknowledgment, set `state.json` aside),
+usually within a poll. Code from before TECH-5136 drops it and, since that turn's fingerprint is
+committed, neither takes the turn again nor ends the task: it sits idle with no acknowledgment and no
+`accepted.json`. So before updating to a commit from before TECH-5136, on the host:
+
+```sh
+sudo grep -l '"accepted"' /var/lib/sergeant/state/tasks/*/state.json
+```
+
+Wait until it lists nothing (a task that stays listed for several polls is failing to resolve or
+post: see its log), then roll back. A task stranded anyway is recovered with `sgt task wake <issue>`:
+the old code takes a fresh turn, and if reasoning accepts again it ends the task as that code did.
+If it does not, the issue is left for a human, who can post the acknowledgment and finish the task.
+
 ### Automatic updates (TECH-4959)
 
 A systemd timer runs `sergeant-autoupdate` every 10 minutes. Each tick rereads the installation-config
