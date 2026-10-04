@@ -319,21 +319,23 @@ test("an sgt older than its Sergeant supports stops and says to update; one newe
 // TECH-5195: `sgt admin update` hands the host its request and waits out serve's restart for the outcome,
 // so nobody polls the host; a failed outcome says why and exits 1.
 test("admin update waits through serve's restart for the host's outcome, and a failed one exits 1", async () => {
-  const request = { id: "req-1", action: "update", ref: "v2.1.0", by: "Grace Example <grace@example.com>", at: "2026-10-04T10:00:00.000Z" };
+  const request = { id: "req-1", action: "update", ref: "v2.1.0", by: "Grace Example <grace@example.com>", at: "2026-10-04T10:00:00.700Z" };
+  // The host's outcome when the request was made: an automatic update that finished earlier.
+  const before = { action: "automatic", by: "the release channel (main)", outcome: "succeeded", message: "updated zzz to aaa", startedAt: "2026-10-04T09:50:00Z" };
   const running = { id: "req-1", action: "update", ref: "v2.1.0", by: request.by, outcome: "running", message: "updating aaa to bbb", startedAt: "2026-10-04T10:00:05Z" };
   const status = (last: object | null, pending: object | null = null) => ({
     json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T09:00:00.000Z" }, release: null, pending, last },
   });
   let statuses: { status?: number; json?: unknown; text?: string }[] = [];
   const { api, seen } = await fakeApi({
-    "POST /v1/admin/update": { json: { request } },
+    "POST /v1/admin/update": { json: { request, last: before } },
     get "GET /v1/admin/status"() {
       return statuses.shift() ?? { status: 500, text: "read too often" };
     },
   });
   const noWait = { sleep: async () => {} };
 
-  statuses = [status(null, request), status(running), { status: 502, text: "bad gateway" }, status({ ...running, outcome: "succeeded", message: "updated aaa to bbb" })];
+  statuses = [status(before, request), status(running), { status: 502, text: "bad gateway" }, status({ ...running, outcome: "succeeded", message: "updated aaa to bbb" })];
   const done = await sgtWith(noWait, api, "admin", "update", "v2.1.0");
   expect(done).toEqual({
     code: 0,
@@ -348,8 +350,9 @@ test("admin update waits through serve's restart for the host's outcome, and a f
   expect(failed.out).toBe("failed: update to bbb failed; reinstalled aaa\n\nlast lines of the update's output:\nserve is not healthy at /health\n");
   expect((await sgt(api, "admin", "update", "a", "b")).code).toBe(2);
 
-  // A later action, or an automatic update, replaced the outcome before sgt read it: say so, never wait it out.
-  statuses = [status(running), status({ action: "automatic", by: "the release channel (main)", outcome: "running", message: "updating bbb to ccc", startedAt: "2026-10-04T10:20:00Z" })];
+  // An automatic update replaced the outcome before sgt read it, even one the host stamped in the same
+  // second as the request (its whole-second startedAt is before the request's): say so, never wait it out.
+  statuses = [status(before, request), status({ ...before, outcome: "running", message: "updating bbb to ccc", startedAt: "2026-10-04T10:00:00Z" })];
   const replaced = await sgtWith(noWait, api, "admin", "update", "v2.1.0");
   expect(replaced.code).toBe(1);
   expect(replaced.err).toContain("sgt: conflict: the host took your update (req-1), but automatic by the release channel (main) replaced its outcome before sgt read it");

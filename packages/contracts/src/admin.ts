@@ -63,5 +63,6 @@ export const AdminStatus = z.object({
 });
 export type AdminStatus = z.infer<typeof AdminStatus>;
 
-export const AdminRequestResponse = z.object({ request: AdminRequest });
+/** `last`: the host's outcome when the request was made; any other one but the request's own replaced it. */
+export const AdminRequestResponse = z.object({ request: AdminRequest, last: AdminResult.nullable() });
 export type AdminRequestResponse = z.infer<typeof AdminRequestResponse>;

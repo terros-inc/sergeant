@@ -73,7 +73,7 @@ async function hand(admin: HostAdmin, what: Pick<AdminRequest, "action" | "ref">
     await rm(tmp, { force: true });
   }
   log(`admin ${request.action}${request.ref ? ` to ${request.ref}` : ""} requested by ${by} (${request.id})`);
-  return { request };
+  return { request, last: busy };
 }
 
 async function status(admin: HostAdmin): Promise<AdminStatus> {

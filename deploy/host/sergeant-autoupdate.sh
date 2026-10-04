@@ -140,8 +140,9 @@ deploy() { # <who, for the log>
   finish failed 1 "update to $target failed, and so did reinstalling $current; needs an operator"
 }
 
-# Takes an approver's request: removed first, so no later run repeats it, whatever happens next. serve
-# wrote it; it is checked again here, and only its id, action, ref, and who asked are used.
+# Takes an approver's request, so no later run repeats it, whatever happens next. serve wrote it; it is
+# checked again here, and only its id, action, ref, and who asked are used. A valid one is recorded
+# running before it is removed, so a waiting `sgt` never sees it neither pending nor running.
 take() {
   local body asked
   if [ -L "$request" ] || [ ! -f "$request" ]; then
@@ -149,21 +150,24 @@ take() {
     finish failed 1 "ignoring an admin request that is not a plain file"
   fi
   body=$(head -c 4096 "$request")
-  rm -f -- "$request"
   id=$(jq -r '.id // empty' <<<"$body" 2>/dev/null) || true
-  [[ $id =~ ^[A-Za-z0-9-]{1,64}$ ]] || finish failed 1 "ignoring an admin request with no valid id"
+  [[ $id =~ ^[A-Za-z0-9-]{1,64}$ ]] || { drop; finish failed 1 "ignoring an admin request with no valid id"; }
   by=$(jq -r '.by // empty' <<<"$body" | tr -d '[:cntrl:]' | cut -c1-200)
   ref=$(jq -r '.ref // empty' <<<"$body")
   asked=$(jq -r '.action // empty' <<<"$body")
   started=$(date -u +%FT%TZ)
   action=update # until it is known, so a refusal below is still recorded for the request
-  [[ $asked =~ ^(restart|update)$ ]] || finish failed 1 "ignoring admin request $id: unknown action '$asked'"
+  [[ $asked =~ ^(restart|update)$ ]] || { drop; finish failed 1 "ignoring admin request $id: unknown action '$asked'"; }
   action=$asked
   [ -z "$ref" ] || { [[ $ref =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]] && [[ $ref != *..* ]]; } ||
-    finish failed 1 "admin request $id: '$ref' is not a branch, tag, or commit sha"
+    { drop; finish failed 1 "admin request $id: '$ref' is not a branch, tag, or commit sha"; }
   log "admin $action${ref:+ to $ref} by ${by:-unknown} ($id)"
-  record running "taken by the host"
+  # Removed even if recording fails: a request left in place would start this unit again at once.
+  record running "taken by the host" || true
+  drop
 }
+
+drop() { rm -f -- "$request"; }
 
 # Does what the approver asked; every way out records its outcome.
 requested() {

@@ -3,15 +3,17 @@ import type { AdminRequest, AdminResult, AdminStatus, ApiFailure, ApiResult } fr
 // `sgt admin restart` and `sgt admin update` (TECH-5195) hand the host a request and then wait for its
 // outcome, reading `GET /v1/admin/status` until the outcome names their request. serve is down for part of
 // any restart, so an unreachable API is waited out; any other refusal ends the wait. The host keeps only
-// its latest outcome, so one that started after the request, for another action or an automatic update,
-// means the request's own outcome was replaced before it was read: that ends the wait too.
+// its latest outcome, and records a request running before it stops being pending. So once the request is
+// neither pending nor the latest outcome, an outcome other than the one current when it was made (another
+// action's, or an automatic update's) replaced its own before it was read: that ends the wait too.
 
 /** Long enough for serve's graceful stop (up to 15 minutes), an install, and a rollback. */
 export const WAIT_MINUTES = 45;
 const EVERY_MS = 5000;
 
 export async function waitForOutcome(
-  request: Pick<AdminRequest, "id" | "action" | "at">,
+  request: Pick<AdminRequest, "id" | "action">,
+  before: AdminResult | null,
   read: () => Promise<ApiResult<AdminStatus>>,
   io: { sleep: (ms: number) => Promise<void>; say: (line: string) => void; now: () => number },
 ): Promise<{ ok: true; value: AdminResult } | { ok: false; error: ApiFailure }> {
@@ -26,7 +28,7 @@ export async function waitForOutcome(
       if (last?.id === id && last.outcome !== "running") return { ok: true, value: last };
       if (last?.id === id) line = `running: ${last.message}`;
       else if (pending?.id === id) line = last?.outcome === "running" ? `waiting for the host to finish: ${last.message}` : "waiting for the host to take it";
-      else if (last && Date.parse(last.startedAt) > Date.parse(request.at)) {
+      else if (last && !(before && last.id === before.id && last.action === before.action && last.startedAt === before.startedAt)) {
         const replaced = `the host took your ${request.action} (${id}), but ${last.action} by ${last.by} replaced its outcome before sgt read it`;
         return { ok: false, error: { code: "conflict", message: `${replaced}: \`sgt admin status\` shows the latest, and the host's autoupdate.log has yours` } };
       } else line = "waiting for the host";

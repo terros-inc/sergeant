@@ -99,6 +99,7 @@ test("status reads the release, the request not yet taken, and the host's last o
   const last = { action: "automatic", by: "the release channel (main)", outcome: "succeeded", message: "updated a to b", startedAt: "2026-10-04T09:50:00Z", finishedAt: "2026-10-04T09:58:00Z", sha: "0123abc" };
   await writeFile(admin.resultFile, JSON.stringify(last));
   const { json: request } = await call("POST", "/v1/admin/update", "grace", {});
+  expect(request.last).toEqual(last);
   expect((await call("GET", "/v1/admin/status", "grace")).json).toEqual({
     serve: admin.serve,
     release: { ref: "main", sha: "0123abc", at: "2026-10-04T09:58:00Z" },
