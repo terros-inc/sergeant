@@ -38,8 +38,11 @@ export type ServiceOptions = {
   webhookSecrets?: { linear?: string; github?: string };
   /** The least time between two webhook wakes of one task loop, or of intake (`Wake.nudge`). */
   webhookGapSeconds?: number;
-  /** Who may call the client API with a Linear login, and the client id `sgt login` uses (auth.ts). */
-  humans?: { callerOf: (accessToken: string) => Promise<Caller>; linearClientId: string };
+  /**
+   * Who may call the client API with a Linear login, the client id `sgt login` uses (auth.ts), and the
+   * approvers' names, which `whoami` tells people to ask (TECH-5202).
+   */
+  humans?: { callerOf: (accessToken: string) => Promise<Caller>; linearClientId: string; approverNames?: () => Promise<string[]> };
   /** The model accounts, and people's registrations of their own, for `/v1/accounts` (TECH-5113). */
   accounts?: AccountRegistry;
   /** On the Sergeant host: approvers restart and update it through `/v1/admin` (TECH-5195). */

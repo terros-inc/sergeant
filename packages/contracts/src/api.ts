@@ -120,17 +120,6 @@ export type CancelRunResponse = z.infer<typeof CancelRunResponse>;
 export const LoginConfig = z.object({ linear: z.object({ clientId: z.string().min(1) }) });
 export type LoginConfig = z.infer<typeof LoginConfig>;
 
-export const WhoAmI = z.object({
-  /** `linear`: the caller's own Linear OAuth token. `loopback`: an operator on the host (`serve --trust-loopback`). */
-  auth: z.enum(["linear", "loopback"]),
-  /** The Linear user; null for a loopback operator. */
-  user: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable(),
-  /** One of the installation's configured approvers; a loopback operator always is. */
-  approver: z.boolean(),
-  enrolledRepositories: z.array(RepoSlug),
-});
-export type WhoAmI = z.infer<typeof WhoAmI>;
-
 // --- model accounts (TECH-5113)
 
 /** The agent CLI a model account serves: a Claude login for Claude Code, a ChatGPT login for Codex. */
@@ -142,6 +131,21 @@ export const Provider = z.enum(["claude", "codex"]);
 export type Provider = z.infer<typeof Provider>;
 export const PROVIDER_ADAPTER: Record<Provider, AccountAdapter> = { claude: "claude-code-local", codex: "codex-local" };
 export const providerOf = (adapter: AccountAdapter): Provider => (adapter === "codex-local" ? "codex" : "claude");
+
+export const WhoAmI = z.object({
+  /** `linear`: the caller's own Linear OAuth token. `loopback`: an operator on the host (`serve --trust-loopback`). */
+  auth: z.enum(["linear", "loopback"]),
+  /** The Linear user; null for a loopback operator. */
+  user: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable(),
+  /** One of the installation's configured approvers; a loopback operator always is. */
+  approver: z.boolean(),
+  enrolledRepositories: z.array(RepoSlug),
+  /** The providers whose model accounts this Sergeant takes registrations for (TECH-5202); none when it takes none. */
+  registration: z.object({ providers: z.array(Provider) }),
+  /** The installation's approvers by name, whom to ask for what only they can do; empty when Linear could not name them. */
+  approvers: z.array(z.string()),
+});
+export type WhoAmI = z.infer<typeof WhoAmI>;
 
 /** A model account's name, unique among one person's accounts (TECH-5196); it defaults to the provider's name. */
 export const AccountName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/, "an account name is up to 40 letters, digits, - and _, starting with a letter or digit");

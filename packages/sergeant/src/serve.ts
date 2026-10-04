@@ -108,6 +108,7 @@ const service = await startService(
           agentUserIds: [installation.agentUserId, ...config.linear.otherAgentUserIds],
           lookup: (token) => linearUser(token),
         }),
+        approverNames: () => installation.linear.userNames(config.humans?.approvers ?? []),
       },
     }),
   },

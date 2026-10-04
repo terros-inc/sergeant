@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AccountAdapter, safeJson, type QuotaReading } from "@terros/sergeant-contracts";
+import { AccountAdapter, type Provider, providerOf, safeJson, type QuotaReading } from "@terros/sergeant-contracts";
 import { accountQuota, type ModelAccount, type QuotaAccount } from "@terros/sergeant-runner";
 import { z } from "zod";
 import { run, secretResolver, type InstallationConfig } from "./config.ts";
@@ -33,6 +33,10 @@ export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registe
 /** Registration refused for a reason the caller can act on; its message never quotes the credential. */
 export class AccountRefused extends Error {}
 
+// Refusals in plain English (TECH-5202): a person reads them, not an operator, so they name no config.
+const NOT_SET_UP = "This Sergeant isn't set up for account registration yet. Ask an approver to enable it.";
+const PROVIDER_NAME: Record<Provider, string> = { claude: "Claude", codex: "Codex" };
+
 export type AccountRegistry = ReturnType<typeof accountRegistry>;
 
 export function accountRegistry(opts: {
@@ -62,7 +66,7 @@ export function accountRegistry(opts: {
 
   function change<T>(edit: (current: Entry[]) => Promise<{ next: Entry[]; result: T }>): Promise<T> {
     const secret = opts.secret;
-    if (!secret) return Promise.reject(new AccountRefused("this Sergeant takes no registered accounts (installation config `registeredAccountsSecret`)"));
+    if (!secret) return Promise.reject(new AccountRefused(NOT_SET_UP));
     const done = writes.then(async () => {
       const { next, result } = await edit(await entries());
       await opts.writeSecret(secret, JSON.stringify({ accounts: next }));
@@ -79,6 +83,11 @@ export function accountRegistry(opts: {
   };
 
   return {
+    /** The providers people may register accounts of: none without the secret (TECH-5202). */
+    providers(): Provider[] {
+      return opts.secret ? opts.adapters.map(providerOf) : [];
+    },
+
     /** The accounts `userId` registered, for an installation's adapters: the only ones their tasks run on. Throws when unreadable. */
     async of(userId: string): Promise<ModelAccount[]> {
       return (await entries()).filter((e) => e.userId === userId && opts.adapters.includes(e.adapter)).map(account);
@@ -91,7 +100,7 @@ export function accountRegistry(opts: {
 
     /** Registers, or replaces, the person's own account named `accountName`, once its quota reads with it. */
     async register(person: Person, adapter: AccountAdapter, accountName: string, credential: string) {
-      if (!opts.adapters.includes(adapter)) throw new AccountRefused(`this Sergeant runs no ${adapter}`);
+      if (!opts.adapters.includes(adapter)) throw new AccountRefused(`This Sergeant doesn't run ${PROVIDER_NAME[providerOf(adapter)]} accounts. Ask an approver if you need it.`);
       if (adapter === "codex-local" && !credential.startsWith("{")) {
         throw new AccountRefused("a Codex account is the JSON of the auth.json a `codex login` with your ChatGPT account writes, not an API key");
       }

@@ -3,7 +3,7 @@ import { chmod, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/pro
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MIN_CLI_HEADER, MIN_CLI_VERSION } from "@terros/sergeant-contracts";
+import { MIN_CLI_HEADER, MIN_CLI_VERSION, type WhoAmI } from "@terros/sergeant-contracts";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { main, type Io } from "./cli.ts";
 import { TOKEN_URL } from "./login.ts";
@@ -176,7 +176,7 @@ test("a refusal, an off-contract answer, and an unreachable API each exit 1 with
 // a redirect this login did not start is refused, the login is kept where only its owner can read
 // it, even when it replaces a file others could read, and every later call sends it, renewed before it expires.
 test("login signs in through the browser with PKCE, keeps the token privately, and sends it renewed", async () => {
-  const me = { auth: "linear", user: { id: "u1", name: "Ada", email: "ada@example.com" }, approver: false, enrolledRepositories: ["o/r"] };
+  const me = { auth: "linear", user: { id: "u1", name: "Ada", email: "ada@example.com" }, approver: false, enrolledRepositories: ["o/r"], registration: { providers: [] }, approvers: [] };
   const { api, seen } = await fakeApi({ "GET /v1/auth/config": { json: { linear: { clientId: "client-1" } } }, "GET /v1/whoami": { json: me }, "GET /v1/tasks": { json: { tasks: [] } } });
   const tokenRequests: URLSearchParams[] = [];
   const fetch: typeof globalThis.fetch = async (url, init) => {
@@ -255,6 +255,7 @@ test("account register sends the piped or signed-in credential under its name an
   const notice = "Your credential is used inside Sergeant's worker and reviewer containers … run `sgt account remove codex` … `codex login` again.";
   const account = { id: "person:u1:codex", group: "registered", holder: "Ada Example <ada@example.com>", adapter: "codex-local", name: "codex", mine: true };
   const { api, seen } = await fakeApi({
+    "GET /v1/whoami": { json: whoami() },
     "POST /v1/accounts/register": { json: { account, replaced: false, quota: { adapter: "codex-local", readAt: "t", weekly: { remainingPercent: 82 }, fiveHour: { remainingPercent: 99 } }, notice } },
     "GET /v1/accounts": { json: { accounts: [{ ...account, usage: { runs: 3, costUsd: 0, unknownCostRuns: 3 } }] } },
   });
@@ -272,11 +273,56 @@ test("account register sends the piped or signed-in credential under its name an
   const signedIn = await sgtWith({ signIn }, api, "account", "register", "codex", "--name", "codexWork");
   expect(signedIn.code).toBe(0);
   expect(signIns).toEqual(["codex"]);
-  expect(seen.map((s) => JSON.parse(s.body))).toEqual([{ provider: "codex", name: "codex", credential }, { provider: "codex", name: "codexWork", credential }]);
+  const posted = seen.filter((s) => s.method === "POST").map((s) => JSON.parse(s.body));
+  expect(posted).toEqual([{ provider: "codex", name: "codex", credential }, { provider: "codex", name: "codexWork", credential }]);
   for (const r of [piped, signedIn]) expect(r.out + r.err).not.toContain("secret-access");
 
   const list = await sgt(api, "account", "list");
   expect(list.out).toMatch(/codex\s+codex\s+Ada Example <ada@example.com> \(yours\)\s+3 runs\s+\$0.00 \+3 of unknown cost/);
+});
+
+const whoami = (over: Partial<WhoAmI> = {}): WhoAmI => ({
+  auth: "linear",
+  user: { id: "u1", name: "Ada Example", email: "ada@example.com" },
+  approver: false,
+  enrolledRepositories: [],
+  registration: { providers: ["claude", "codex"] },
+  approvers: ["Grace Hopper", "Linus Torvalds"],
+  ...over,
+});
+
+// TECH-5202: a refusal comes before the provider's sign-in makes a credential, in words a person acts
+// on; one that comes after says what to do with the credential that now exists.
+test("account register asks first, refuses before any sign-in, and says what to do with a credential it could not register", async () => {
+  const signIns: string[] = [];
+  const signIn = async (provider: string) => (signIns.push(provider), "sk-ant-oat01-made");
+  const refusedBy = async (me: WhoAmI, provider: string) => {
+    const { api, seen } = await fakeApi({ "GET /v1/whoami": { json: me } });
+    const res = await sgtWith({ signIn }, api, "account", "register", provider, "--name", "claudeWork");
+    await new Promise<void>((resolve) => server?.close(() => resolve()));
+    expect(seen.map((s) => s.url)).toEqual(["/v1/whoami"]);
+    return res;
+  };
+  expect(await refusedBy(whoami({ registration: { providers: [] } }), "claude")).toEqual({
+    code: 1,
+    out: "",
+    err: "sgt: bad_request: This Sergeant isn't set up for account registration yet. Ask an approver (Grace Hopper or Linus Torvalds) to enable it.\n",
+  });
+  expect((await refusedBy(whoami({ registration: { providers: ["claude"] }, approvers: [] }), "codex")).err).toContain(
+    "This Sergeant doesn't run Codex accounts, only Claude. Ask an approver if you need Codex.",
+  );
+  expect((await refusedBy(whoami({ auth: "loopback", user: null }), "claude")).err).toContain("sign in with `sgt login`");
+  expect(signIns).toEqual([]);
+
+  const refusal = { status: 400, json: { error: { code: "bad_request", message: "its subscription quota cannot be read with this credential" } } };
+  const { api } = await fakeApi({ "GET /v1/whoami": { json: whoami() }, "POST /v1/accounts/register": refusal });
+  const failed = await sgtWith({ signIn }, api, "account", "register", "claude", "--name", "claudeWork");
+  expect(failed.code).toBe(1);
+  expect(failed.err).toContain("`pbpaste | sgt account register claude --name claudeWork`");
+  expect(failed.err).toContain("revoke the token `claude setup-token` made");
+  expect(failed.out + failed.err).not.toContain("sk-ant-oat01-made");
+  // A piped credential is the person's own copy: nothing is stranded.
+  expect((await sgtWith({ stdin: async () => "sk-ant-oat01-mine", signIn }, api, "account", "register", "claude")).err).not.toContain("pbpaste");
 });
 
 // TECH-5198: removing an account passes on where to revoke it, since removal does not revoke a copy.

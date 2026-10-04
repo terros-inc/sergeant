@@ -306,7 +306,7 @@ test("a trusted loopback still refuses a proxied request, a foreign Host, and a 
   expect(await call(port, "POST", "/v1/tasks/UNF-1/cancel", "reason=x", { "Content-Type": "text/plain" })).toMatchObject({ status: 400 });
   expect(f.conversation.issue.delegate).not.toBeNull();
   expect((await call(port, "GET", "/health")).status).toBe(200);
-  expect((await call(port, "GET", "/v1/whoami")).json).toEqual({ auth: "loopback", user: null, approver: true, enrolledRepositories: ["o/r"] });
+  expect((await call(port, "GET", "/v1/whoami")).json).toEqual({ auth: "loopback", user: null, approver: true, enrolledRepositories: ["o/r"], registration: { providers: [] }, approvers: [] });
   await service?.stop();
   service = undefined;
   await expect(start(f.deps, { trustLoopback: true, host: "0.0.0.0" })).rejects.toThrow(/--trust-loopback/);
@@ -357,6 +357,8 @@ test("only an admitted Linear user may call the API, and approvers are told apar
     user: { id: "Ada", name: "Ada", email: "Ada@example.com" },
     approver: false,
     enrolledRepositories: ["o/r"],
+    registration: { providers: [] },
+    approvers: [],
   });
   expect((await call(port, "GET", "/v1/whoami", undefined, as("approver"))).json).toMatchObject({ user: { id: "Grace" }, approver: true });
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" }, as("member"))).json).toMatchObject({ undelegated: true });

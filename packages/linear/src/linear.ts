@@ -26,6 +26,7 @@ import {
   moveState,
   resolveComment,
   response,
+  usersQuery,
   viewerQuery,
 } from "./queries.ts";
 
@@ -60,6 +61,8 @@ export type LinearAdapterOptions = {
 export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   /** The token's own user and the Linear workspace (organization) it is in. */
   viewer(): Promise<{ id: string; name: string; organizationId: string }>;
+  /** The names of the users with these ids, in their order; an id Linear does not know is left out. */
+  userNames(ids: readonly string[]): Promise<string[]>;
   /** The open issues (not completed or canceled) delegated to `agentUserId`. */
   delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>;
   /**
@@ -241,6 +244,12 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     async viewer() {
       const { viewer } = await request(viewerQuery, {}, z.object({ viewer: actor.extend({ organization: z.object({ id: z.string().min(1) }) }) }));
       return { id: viewer.id, name: viewer.name, organizationId: viewer.organization.id };
+    },
+
+    async userNames(ids) {
+      if (ids.length === 0) return [];
+      const { users } = await request(usersQuery, { ids }, z.object({ users: z.object({ nodes: z.array(actor) }) }));
+      return ids.flatMap((id) => users.nodes.find((u) => u.id === id)?.name ?? []);
     },
 
     async delegatedIssues(agentUserId) {
