@@ -15,7 +15,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
-| `host/sergeant-autoupdate.sh`, `.service`, `.timer` | Every 10 minutes, run `sergeant-update` to a newer green commit of `main` if the installation config's `release` setting asks for one (Automatic updates below). |
+| `host/sergeant-autoupdate.sh`, `.service`, `.timer`, `.path` | Every 10 minutes, run `sergeant-update` to a newer green commit of `main` if the installation config's `release` setting asks for one (Automatic updates below); and at once, an approver's `sgt admin restart` or `update` (Restart or update with `sgt` below). |
 | `host/install.sh` | Idempotent install from the checkout: packages (Docker, Node 24, Caddy, the `claude` CLI at the runner image's version), the data volume, the `sergeant` user, the runner image, dependencies, the config, and a restart of `serve`. |
 | `host/installation.example.json` | The shape of the installation config (`InstallationConfig`; identifiers and secret references only). |
 | `host/sergeant.service`, `Caddyfile`, `cloudwatch-agent.json`, `logrotate` | The systemd unit, the HTTPS proxy, log shipping, and log rotation. |
@@ -35,7 +35,7 @@ How it fits together:
 - **Only `/health`, `/v1`, and the two webhook endpoints are public.** `serve` listens on
   `127.0.0.1:8080`; Caddy terminates HTTPS for the hostname (Let's Encrypt over HTTP-01) and proxies
   `/v1` without granting trust to the proxy. `serve` checks a person's Linear bearer on every
-  operational `/v1` call. `/status` and installation-admin operations remain loopback-only. Caddy
+  operational `/v1` call. `/status` remains loopback-only. Caddy
   also proxies `GET /health` and `POST /webhooks/linear` and `/webhooks/github` (bodies up to 1 MB),
   nothing else. `/health` answers only `{"ok":true}`, or 503 `{"ok":false}` while stopping or after a
   failed intake; active task ids and intake errors are on `/status`, which Caddy does not proxy. A webhook endpoint answers 404
@@ -45,7 +45,7 @@ How it fits together:
   `/sergeant/v2/installation-config`) and replaces `/etc/sergeant/installation.json` only if it parses
   as an `InstallationConfig`; a config that does not parse stops the update before `serve` restarts.
   Enrolling a repository, changing the per-task budget, or changing the task slots (`maxTasks`,
-  `waitingGraceMinutes`), is: edit the parameter, then update.
+  `waitingGraceMinutes`), is: edit the parameter, then update (or `sgt admin restart`).
 - **Logs** go to `/var/log/sergeant/serve.log` and `autoupdate.log` on the host and to CloudWatch Logs
   group `/sergeant/v2` (streams `<instance id>/serve`, `<instance id>/autoupdate`, and
   `<instance id>/first-boot`).
@@ -255,7 +255,9 @@ obtains the certificate once the A record resolves to the Elastic IP.
 
 ### Update
 
-Move the host to a branch, tag, or commit, reread the config parameter, and restart `serve`:
+Move the host to a branch, tag, or commit, reread the config parameter, and restart `serve`. An
+approver does this with `sgt admin update [<ref>]` or `sgt admin restart` and no AWS access (Restart or
+update with `sgt` below); the operator's equivalent over SSM is:
 
 ```sh
 CMD=$(aws ssm send-command --instance-ids "$ID" --document-name AWS-RunShellScript \
@@ -292,6 +294,36 @@ post: see its log), then roll back. A task stranded anyway is recovered with `sg
 the old code takes a fresh turn, and if reasoning accepts again it ends the task as that code did.
 If it does not, the issue is left for a human, who can post the acknowledgment and finish the task.
 
+### Restart or update with `sgt` (TECH-5195)
+
+An approver (`humans.approvers`), signed in with `sgt login`, restarts or updates the host with no AWS
+access:
+
+```sh
+sgt admin restart          # reread the installation config, restart serve on the release it runs
+sgt admin update           # move to what the release channel would choose (main's green head without one)
+sgt admin update v2.1.0    # or to a branch, tag, or commit: only a commit on main whose v2 check passed
+sgt admin status           # the release, when serve started, and the last restart or update
+```
+
+`restart` and `update` each print the outcome when the host has one, including why it failed, waiting
+out serve's restart (up to 45 minutes). `serve` runs nothing privileged: it logs who asked and leaves
+one request, `/var/lib/sergeant/state/admin-request.json`, which a second request cannot replace
+until the host takes it (409). `sergeant-autoupdate.path` starts the same `sergeant-autoupdate`
+service the timer does, as root, so a request never overlaps a tick. It removes the request, checks it
+again, and runs `sergeant-update`: on the release the host is on for `restart`, so `install.sh`
+rereads the config and restarts `serve`, or on the commit for `update`, resolved and checked against
+GitHub anonymously like a tick. An update whose install fails after checking out its commit
+reinstalls the previous release and records the commit in `/etc/sergeant/autoupdate-failed`, as a
+tick does; an approver's update ignores that file, so naming the commit again retries it. A `paused`
+release setting does not stop an approver's update, which is how to pin (Pin or roll back below). The
+restart is the usual graceful one (Update above): running worker and reviewer containers keep running.
+
+Every outcome, an approver's or an automatic update's, with who asked, is written to
+`/etc/sergeant/admin-result.json` and logged to `autoupdate.log`; `serve.log` names who asked for each
+request. Nothing new in AWS: no person gets AWS access and the instance role is unchanged. `serve`
+offers `/v1/admin` only on a host where `sergeant-update` has written `/etc/sergeant/release`.
+
 ### Automatic updates (TECH-4959)
 
 A systemd timer runs `sergeant-autoupdate` every 10 minutes. Each tick rereads the installation-config
@@ -327,7 +359,8 @@ The next tick uses it; no update is needed. The same edit with `jq '.release.pau
 and `jq 'del(.release.paused)'` resumes.
 
 **Pin or roll back.** Between two commits that both know `release` (TECH-4959 or later), pause, then
-Update to the commit you want; resume to unpin. A commit from before TECH-4959 rejects the unknown
+Update to the commit you want (`sgt admin update <commit>` when it is a green commit on main); resume to
+unpin. A commit from before TECH-4959 rejects the unknown
 `release` key, so its update stops at the config check without restarting `serve`. Before updating
 to one, remove the setting entirely with the same edit and `jq 'del(.release)'` (pausing is not
 enough); set it again once the host is back on a commit that knows it.

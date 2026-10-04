@@ -62,8 +62,8 @@ in `~/.config/sergeant/credentials.json` and renewed automatically; `sgt logout`
 that is a member of one of the installation's configured Linear teams; that membership is checked on
 every call, so leaving those teams ends your access. Every such member may use every `sgt` command.
 **Approvers** are members the installation also lists by name (`sgt whoami` says `, an approver`
-after your name); being an approver never admits someone outside those teams, and only
-`sgt admin account remove-person` is limited to approvers. If `sgt login` or `sgt whoami` says you are in none of the installation's
+after your name); being an approver never admits someone outside those teams, and only the
+`sgt admin` commands are limited to approvers. If `sgt login` or `sgt whoami` says you are in none of the installation's
 teams, ask a Linear admin of your workspace to add you to one of the teams it names. To become an
 approver, or to have another team configured, ask your installation's operator (who manages its
 configuration).
@@ -81,6 +81,8 @@ sgt run list --task TECH-123                   # the task's runs, with their ids
 sgt run show <run>                             # one run: status, model, cost, outcome, PRs
 sgt run report <run>                           # the run's Markdown report
 ```
+
+Approvers also have `sgt admin` (§7).
 
 - `--json` prints JSON for scripts and `jq`: the API's own JSON for most commands, `{"report": "…"}`
   for `run report`, `{"api","signedOut"}` for `logout`, and errors as `{"error":{"code","message"}}`.
@@ -139,3 +141,22 @@ sgt account remove claudeWork                   # remove yours; runs already on 
   a copy: the person, or their workspace admin, rotates the credential as above.
 - The installation must be configured for registration (`registeredAccountsSecret`, deploy/README.md);
   otherwise `register` says so.
+
+## 7. Restarting or updating Sergeant (approvers)
+
+An approver applies an installation config change, or moves the hosted Sergeant to another release,
+without AWS access (TECH-5195):
+
+```sh
+sgt admin restart          # reread the installation config and restart Sergeant on its current release
+sgt admin update           # move to the newest green main commit its release channel would choose
+sgt admin update v2.1.0    # or to a branch, tag, or commit, which must be on main with a green check
+sgt admin status           # its release, when it last restarted, and the last restart or update
+```
+
+- `restart` and `update` wait for the outcome and print it, with the reason when it failed (exit 1).
+  Sergeant is unreachable for part of it; that is expected and waited out.
+- The restart is graceful: Sergeant stops taking new work, ends each task at its next poll (up to 15
+  minutes), and leaves running workers and reviewers running; the new process picks them up.
+- One request at a time: a second one is refused until the host takes the first. Every request, and
+  who made it, is logged on the host. An update that fails to install puts back the previous release.

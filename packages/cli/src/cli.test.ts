@@ -315,3 +315,36 @@ test("an sgt older than its Sergeant supports stops and says to update; one newe
   });
   expect((await sgt(api, "run", "list")).err).toContain("does not say which sgt it supports");
 });
+
+// TECH-5195: `sgt admin update` hands the host its request and waits out serve's restart for the outcome,
+// so nobody polls the host; a failed outcome says why and exits 1.
+test("admin update waits through serve's restart for the host's outcome, and a failed one exits 1", async () => {
+  const request = { id: "req-1", action: "update", ref: "v2.1.0", by: "Grace Example <grace@example.com>", at: "2026-10-04T10:00:00.000Z" };
+  const running = { id: "req-1", action: "update", ref: "v2.1.0", by: request.by, outcome: "running", message: "updating aaa to bbb", startedAt: "2026-10-04T10:00:05Z" };
+  const status = (last: object | null, pending: object | null = null) => ({
+    json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T09:00:00.000Z" }, release: null, pending, last },
+  });
+  let statuses: { status?: number; json?: unknown; text?: string }[] = [];
+  const { api, seen } = await fakeApi({
+    "POST /v1/admin/update": { json: { request } },
+    get "GET /v1/admin/status"() {
+      return statuses.shift() ?? { status: 500, text: "read too often" };
+    },
+  });
+  const noWait = { sleep: async () => {} };
+
+  statuses = [status(null, request), status(running), { status: 502, text: "bad gateway" }, status({ ...running, outcome: "succeeded", message: "updated aaa to bbb" })];
+  const done = await sgtWith(noWait, api, "admin", "update", "v2.1.0");
+  expect(done).toEqual({
+    code: 0,
+    out: "succeeded: updated aaa to bbb\n",
+    err: "update to v2.1.0 requested (req-1); waiting for the host\nwaiting for the host to take it\nrunning: updating aaa to bbb\nserve is restarting\n",
+  });
+  expect(JSON.parse(seen[0]?.body ?? "")).toEqual({ ref: "v2.1.0" });
+
+  statuses = [status({ ...running, outcome: "failed", message: "update to bbb failed; reinstalled aaa", output: "serve is not healthy at /health" })];
+  const failed = await sgtWith(noWait, api, "admin", "update", "v2.1.0");
+  expect(failed.code).toBe(1);
+  expect(failed.out).toBe("failed: update to bbb failed; reinstalled aaa\n\nlast lines of the update's output:\nserve is not healthy at /health\n");
+  expect((await sgt(api, "admin", "update", "a", "b")).code).toBe(2);
+});

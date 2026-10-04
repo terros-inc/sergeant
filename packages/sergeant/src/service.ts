@@ -268,6 +268,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     ...(opts.humans && { callerOf: opts.humans.callerOf, linearClientId: opts.humans.linearClientId }),
     trustLoopback: opts.trustLoopback ?? false,
     ...(opts.accounts && { accounts: opts.accounts }),
+    ...(opts.admin && { admin: opts.admin }),
   });
   // A webhook ends the wait of each loop watching what it names, and runs an intake for a task or a
   // delegated issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at

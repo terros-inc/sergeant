@@ -31,6 +31,7 @@ import {
 } from "@terros/sergeant-contracts";
 import type { z } from "zod";
 import type { AccountRegistry } from "./accounts.ts";
+import { adminRoute, type HostAdmin } from "./api-admin.ts";
 import { accountsRoute } from "./api-accounts.ts";
 import { body, callerOf, notFound, ok, parse, Refusal, type Reply, send } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
@@ -55,7 +56,7 @@ import type { ServiceDeps } from "./service.ts";
 // with no token, naming a loopback Host (so a DNS-rebound page cannot pass), and not relayed by a
 // proxy (so the hosted proxy's callers cannot). Posts must be JSON, so a cross-site form cannot post.
 // Approvers are told apart (`Caller.approver`); only removing another person's model accounts
-// (api-accounts.ts) is theirs alone.
+// (api-accounts.ts) and restarting or updating the host (api-admin.ts) are theirs alone.
 
 export type ApiControl = {
   stateDir: string;
@@ -78,6 +79,8 @@ export type ApiControl = {
   trustLoopback?: boolean;
   /** The model accounts runs may use, and people's own (TECH-5113, api-accounts.ts). */
   accounts?: AccountRegistry;
+  /** Restarting and updating the host through it (TECH-5195, api-admin.ts); absent off the Sergeant host. */
+  admin?: HostAdmin;
 };
 
 /** Handles `/v1/*`; anything else is a 404. */
@@ -139,6 +142,7 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
     if (verb === "report" && get) return { status: 200, markdown: await runReport(ctl, runId) };
     if (verb === "cancel" && post) return ok(await cancelRunOf(ctl, runId, parse(CancelRunRequest, await body(req)), caller));
   }
+  if (noun === "admin") return adminRoute(ctl.admin, caller, req, { id, verb, pathname: url.pathname }, ctl.log);
   if (noun === "accounts") return accountsRoute(ctl.accounts, caller, req, { id, verb, pathname: url.pathname }, () => allRuns(ctl));
   throw notFound(url.pathname);
 }
