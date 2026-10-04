@@ -1,4 +1,4 @@
-import { commentIdFor, type AgentComment, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { latestAnswer, latestQuestion } from "./question.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
@@ -42,15 +42,6 @@ export function openWindow(state: { turnCostUsd: number; runIds: string[]; budge
 export const budgetQuestionKey = (issueId: string, windowStart: string) => `budget-question:${issueId}:${windowStart}`;
 
 /**
- * Whether `comment` is this task's budget question for the window from `windowStart`. A first-window
- * question posted under the old `0` key before TECH-5145 is this task's only if posted since it started.
- */
-export function isBudgetQuestion(comment: Pick<AgentComment, "id" | "createdAt">, issueId: string, taskStart: string, windowStart: string): boolean {
-  if (comment.id === commentIdFor(budgetQuestionKey(issueId, windowStart))) return true;
-  return windowStart === taskStart && comment.id === commentIdFor(`budget-question:${issueId}:0`) && Date.parse(comment.createdAt) >= Date.parse(taskStart);
-}
-
-/**
  * TECH-5118: whether a human has replied to Sergeant's budget question, the question it asked last (or a
  * clarifying question in that question's thread). Read from the conversation alone, so it survives a
  * restart: a window opens at the task's start or at a later human comment's time, so every budget
@@ -67,12 +58,11 @@ export function answeredBudgetQuestion(conversation: Conversation, budget: Pick<
   const asked = latestQuestion(conversation);
   const reply = latestAnswer(conversation);
   if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(budget.windowStart)) return false;
-  const { issue, humanComments, agentComments } = conversation;
+  const { issue, humanComments } = conversation;
   const thread = asked.parentId ?? asked.id;
-  const root = agentComments.find((c) => c.id === thread) ?? { id: thread, createdAt: asked.createdAt };
   const since = (at: string) => Date.parse(at) >= Date.parse(budget.taskStart);
   const windows = [budget.taskStart, ...humanComments.map((c) => c.createdAt).filter(since)];
-  return windows.some((windowStart) => isBudgetQuestion(root, issue.id, budget.taskStart, windowStart));
+  return windows.some((windowStart) => commentIdFor(budgetQuestionKey(issue.id, windowStart)) === thread);
 }
 
 /** The task's budget now, from what `state.json` keeps (start, window, turn spend) and the run records. */

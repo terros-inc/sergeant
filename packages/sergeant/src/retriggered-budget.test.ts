@@ -1,10 +1,8 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { commentIdFor, QUESTION_HEADING, type AgentComment, type Conversation } from "@terros/sergeant-contracts";
 import { acceptedKey } from "./accepted.ts";
 import { budgetQuestionKey } from "./budget.ts";
-import { cleanup, dir, human, pr, scenario, turnOf, worker } from "./budget-scenario.ts";
+import { cleanup, human, pr, scenario, turnOf, worker } from "./budget-scenario.ts";
 
 // TECH-5145: the first window's budget question was keyed `0` for every task. A re-triggered task that
 // ran out of its first window then asked under the earlier task's key, Linear deduplicated it, and the
@@ -61,23 +59,4 @@ test.each([
     ownQuestion,
     commentIdFor(acceptedKey("i1", "c-new")),
   ]);
-});
-
-test("a first-window question posted under the old shared key since the task started is still found and not asked twice", async () => {
-  // A task running when TECH-5145 deployed had already asked under `0`; its restarted loop must wait on that.
-  const asked = { id: commentIdFor("budget-question:i1:0"), createdAt: ago(60), body: `${QUESTION_HEADING}\n\nContinue?` };
-  let turns = 0;
-  const { posted } = await scenario({
-    state: { startedAt, runIds: ["run_w"], turnCostUsd: 0 },
-    conversation: { agentComments: [asked] },
-    runner: { start: async () => {}, status: async () => worker("succeeded", 30), cancel: async () => {} },
-    reasoner: async () => (turns++, turnOf([])),
-    onPoll: async (poll, live) => {
-      if (poll >= 5) await writeFile(join(dir, "STOP"), "");
-      return live;
-    },
-  });
-
-  expect(posted).toEqual([]);
-  expect(turns).toBe(0);
 });
