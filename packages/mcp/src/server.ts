@@ -49,9 +49,11 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
   async function read<T extends Record<string, unknown>>(path: string, schema: z.ZodType<T>): Promise<Result> {
     skew = undefined;
     const res = await client.call("GET", path, schema);
-    if (!res.ok) return error(res.error);
     const warning = skew === undefined ? [] : [{ type: "text" as const, text: skew }];
+    if (!res.ok) return withWarning(error(res.error), warning);
     const text = JSON.stringify(res.value);
+    // isError, because a result with an outputSchema must carry structuredContent that matches it,
+    // and this answer does not; the data is still in the text.
     if (res.absent) {
       const why = `Sergeant at ${api} is older than this sgt-mcp: its answer lacks ${res.absent.join(", ")}, so it is returned as text, not structured content.`;
       return { content: [{ type: "text", text: why }, { type: "text", text }, ...warning], isError: true };
@@ -142,6 +144,8 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
 
   return server;
 }
+
+const withWarning = (result: Result, warning: Result["content"]): Result => ({ ...result, content: [...result.content, ...warning] });
 
 function error(failure: ApiFailure): Result {
   return { content: [{ type: "text", text: JSON.stringify({ error: failure } satisfies ApiError) }], isError: true };

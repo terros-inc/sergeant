@@ -162,7 +162,7 @@ test("a refusal, an off-contract answer, and an unreachable API each exit 1 with
   const refusal = { error: { code: "conflict", message: "UNF-7 is not delegated to Sergeant's agent" } };
   const { api } = await fakeApi({
     "POST /v1/tasks/UNF-7/wake": { status: 409, json: refusal },
-    "GET /v1/tasks": { json: { tasks: [{ ref: "UNF-1" }] } },
+    "GET /v1/tasks": { json: { tasks: [{ ref: "UNF-1", status: "dozing" }] } },
   });
 
   const human = await sgt(api, "task", "wake", "UNF-7");

@@ -6,8 +6,8 @@ import * as api from "./api.ts";
 // they are often older or newer than the hosted `serve`. The policy, so a contract change needs no
 // compatibility ticket of its own:
 //
-// 1. Visible: `serve` stamps every `/v1` answer with its git version and a fingerprint of the `/v1`
-//    contract (api.ts and what it embeds). A client whose own fingerprint differs, or whose server
+// 1. Visible: `serve` stamps every `/v1` answer with a fingerprint of the `/v1` contract (api.ts and
+//    what it embeds), and an authenticated one with its git version too. A client whose own fingerprint differs, or whose server
 //    sends none (it predates this), warns once that fields one side added are missing or ignored on
 //    the other. Unequal versions with an equal contract are not worth a warning.
 // 2. Additive: a response may gain fields. An older client drops them (zod strips unknown keys),
@@ -15,7 +15,7 @@ import * as api from "./api.ts";
 //    new enum value an older client must parse is not additive: it is a breaking change to make
 //    deliberately, not under this rule.
 // 3. Tolerant: a client accepts a 2xx answer whose only fault is required fields it lacks (an older
-//    server never sent them), names them, and shows the API's JSON instead of reading them, so a
+//    server never sent them), of any type, enum, literal, and union included, names them, and shows the API's JSON instead of reading them, so a
 //    command the server performed is never reported as failed for a field it did not know. So a new
 //    response field is added as required, not optional; any other mismatch is still an error.
 
@@ -58,7 +58,9 @@ export function skewWarning(apiUrl: string, server: ServerVersion, clientVersion
 export function absentFields(issues: readonly z.core.$ZodIssue[], input: unknown): string[] | undefined {
   const absent: string[] = [];
   for (const issue of issues) {
-    if (issue.code !== "invalid_type" || issue.path.length === 0) return undefined;
+    // Keyed on the absent key, not the issue's code: a missing enum, literal, or union field is
+    // invalid_value or invalid_union, not invalid_type, and is just as much a field the server lacks.
+    if (issue.path.length === 0) return undefined;
     const parent = issue.path.slice(0, -1).reduce<unknown>((v, key) => (v as Record<PropertyKey, unknown> | undefined)?.[key], input);
     const key = issue.path.at(-1) as PropertyKey;
     if (typeof parent !== "object" || parent === null || Array.isArray(parent) || key in parent) return undefined;

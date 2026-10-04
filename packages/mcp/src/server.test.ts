@@ -106,7 +106,7 @@ test("an MCP client reads a task and its runs as the API answers them, through r
 });
 
 test("refusals, an unreachable API, answers outside the contract, and bad refs are tool errors, not guesses", async () => {
-  routes = { "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: "run_x" } } } };
+  routes = { "GET /v1/runs/run_x": { json: { task: "UNF-12", run: { runId: 7, role: "worker" } } } };
   const errorOf = async (name: string, args: Record<string, unknown>) => {
     const res = await client.callTool({ name, arguments: args });
     expect(res.isError).toBe(true);
@@ -135,6 +135,7 @@ test("a differing contract is told to the agent, and an older Sergeant's answer 
     "GET /v1/tasks": { json: { tasks: [detail.task] }, headers: { ...versionHeaders("2.9.0+bbbbbbb"), "Sergeant-Api-Contract": "0123456789ab" } },
     // An older server: no version headers, and a budget from before `taskStart` (TECH-5161).
     "GET /v1/tasks/UNF-12": { json: { ...detail, budget }, headers: {} },
+    "GET /v1/runs/run_x": { status: 404, json: { error: { code: "not_found", message: "no run_x" } }, headers: {} },
   };
   const texts = (res: { content: unknown }) => (res.content as { text: string }[]).map((c) => c.text);
 
@@ -148,4 +149,9 @@ test("a differing contract is told to the agent, and an older Sergeant's answer 
   expect(why).toMatch(/is older than this sgt-mcp: its answer lacks budget\.taskStart, so it is returned as text/);
   expect(JSON.parse(answer ?? "")).toEqual({ ...detail, budget });
   expect(warning).toMatch(/predates API contract reporting/);
+
+  // A refusal keeps the warning too: the skew may be why it was refused.
+  const refused = await client.callTool({ name: "run_show", arguments: { run: "run_x" } });
+  expect(refused.isError).toBe(true);
+  expect(texts(refused)[1]).toMatch(/predates API contract reporting/);
 });

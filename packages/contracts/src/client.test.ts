@@ -76,7 +76,7 @@ test("a refusal, a non-contract error, an off-contract answer, and an unreachabl
     ok: false,
     error: { code: "unavailable", message: "GET /v1/tasks answered 502: Bad Gateway" },
   });
-  const drift = await answering(() => Response.json({ tasks: [{ ref: "UNF-1" }] })).call("GET", "/v1/tasks", TaskList);
+  const drift = await answering(() => Response.json({ tasks: "none" })).call("GET", "/v1/tasks", TaskList);
   expect(drift).toMatchObject({ ok: false, error: { code: "unavailable", message: expect.stringContaining("GET /v1/tasks answered outside the API contract") } });
 
   const down = apiClient({
@@ -129,6 +129,10 @@ test("an older server's answer lacking only newer required fields is accepted an
   const budget = { window: { wallMinutes: 120, costUsd: 25 }, windowStart: "2026-10-02T10:00:00.000Z", wallDeadline: "2026-10-02T12:00:00.000Z", spentUsd: 1, costLimitUsd: 25, unknownCostRuns: 0 };
   const detail = { task: { ref: "UNF-1", status: "active", turns: 1, runs: 0 }, issue: { error: "x" }, budget, runs: [], recentTurns: [], followups: [] };
   expect(await answering(detail).call("GET", "/v1/tasks/UNF-1", TaskDetail)).toEqual({ ok: true, value: detail, absent: ["budget.taskStart"] });
+
+  // A field of any type: an enum the older server never sent is as absent as a string.
+  const wake = answering({ ref: "UNF-1" }).call("POST", "/v1/tasks/UNF-1/wake", WakeResponse, {});
+  expect(await wake).toEqual({ ok: true, value: { ref: "UNF-1" }, absent: ["woke"] });
 
   // A present field of the wrong type, or a value the contract does not have, is still outside it.
   const wrong = await answering({ ...registered, notice: 7 }).call("POST", "/v1/accounts/codex-local/register", RegisterAccountResponse, { credential: "c" });
