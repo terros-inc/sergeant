@@ -19,8 +19,10 @@ import { outcomeComment } from "./outcome.ts";
 
 // The loop's deliberately temporary local store (`state.json`), which lets a restarted loop resume;
 // Linear, GitHub, and the runner's own run records stay the authority for everything else.
+// TECH-5163: keys this code does not know, a newer release's, are kept and saved back, not dropped, so a
+// rollback (to this code or later) leaves them for the newer release to act on once the host moves forward.
 
-const TaskState = z.object({
+const TaskState = z.looseObject({
   issueId: z.string(),
   startedAt: z.iso.datetime(),
   turns: z.number().int(),
@@ -46,7 +48,7 @@ const TaskState = z.object({
   /** Reported cost of every reasoning turn; runs report their own. */
   turnCostUsd: z.number().default(0),
   budget: z
-    .object({
+    .looseObject({
       /** Fixed when the window opens; a restart with other flags does not change it (budget.ts). */
       window: BudgetStatus.shape.window,
       /** When the window opened, if not at the task's start: a human's answer (TECH-5059). */
@@ -55,7 +57,7 @@ const TaskState = z.object({
       priorRuns: z.array(RunId).default([]),
     }),
   merged: z
-    .object({
+    .looseObject({
       repo: RepoSlug,
       number: z.number().int(),
       headSha: Sha,
@@ -77,7 +79,7 @@ const TaskState = z.object({
    * the loop only replays the ending (loop.ts): no reasoning turn can deny it or fail to propose it again.
    */
   accepted: z
-    .object({
+    .looseObject({
       at: z.iso.datetime(),
       /** The human reply that accepted, which keys the acknowledgment; absent, none is posted. */
       replyId: z.string().optional(),
