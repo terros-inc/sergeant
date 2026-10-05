@@ -204,7 +204,8 @@ path touches, and only the hard controls that path needs:
   the PR linked to the task, the repository's merge policy, the conversation revision unchanged);
 - one worker per task (R1) and a per-run wall-clock limit with cancellation;
 - the runner zone and credential vending, so no run holds production, admin, personal, or
-  control-plane authority (on the laptop, a container);
+  control-plane authority (on the laptop, a container), except the run's selected model credential
+  (09 §3a);
 - the installation pause as the operator's stop;
 - idempotency keys for starting runs and merging.
 
