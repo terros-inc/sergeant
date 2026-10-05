@@ -11,7 +11,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 
 | Path | What it is |
 |---|---|
-| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or six with the webhook signing secrets); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
+| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or six with the webhook signing secrets, plus an adopted registered-accounts secret if it stays listed); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
@@ -71,7 +71,7 @@ anything, and the state backend and the provider refuse any other account.
 
    The state bucket already exists; this configuration never creates it. `secret_names` lists every
    secret the config refers to, and nothing else: four literal names, or up to six with the webhook
-   signing secrets (Webhooks below), which Terraform enforces. Codex needs no secret here (A Codex reviewer below).
+   signing secrets (Webhooks below), and seven if an adopted registered-accounts secret stays listed, which Terraform enforces. Codex needs no secret here (A Codex reviewer below).
    The registered-accounts secret is not one of them: Terraform creates it (Model accounts below).
    To change an input later, put the parameter again and rerun `./init.sh`.
 2. **Secrets** exist in Secrets Manager under those names: both GitHub Apps' private keys, the Linear
@@ -212,7 +212,7 @@ issue saying what to do, and nothing starts.
    - **An existing secret** (made by hand before TECH-5204; Terros:
      `sergeant/terros/registered-accounts`) is adopted, not recreated: with `registered_accounts_secret`
      naming it, the next plan shows it imported (its description and tags updated in place) and a
-     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` or leave it.
+     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` (the reason `secret_names` accepts up to seven names) or leave it: the role reads and writes it through its own grant either way.
    - **Another name, later, is unsupported.** Changing `registered_accounts_secret` would replace the
      secret, which holds every registered credential, so its `prevent_destroy` makes the plan fail
      and nothing changes. Keep the name the first apply used. On the host, leave the installation

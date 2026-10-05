@@ -19,7 +19,8 @@ type Role = RunSpec["role"];
 /**
  * Each role's configured adapter, and its model on each adapter, for `containerRunner` (TECH-5009). A
  * role's model flag is for its configured adapter; otherwise Codex runs `codex.model` and Claude Code
- * "opus", today's default. Quota may run a role on the other adapter, on the owner's other account (TECH-5117).
+ * "opus", today's default. When the owner has an account for the other provider, quota may run a role
+ * on the other adapter (TECH-5117).
  */
 export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role, string | undefined>) {
   const adapter = (role: Role): Adapter => config.runners?.[role] ?? "claude-code-local";

@@ -27,13 +27,13 @@ variable "source_repository_url" {
 }
 
 variable "secret_names" {
-  description = "The Secrets Manager secrets the host may read, by name: every secret reference in the installation config except the registered-accounts secret, which is granted on its own. None is created here."
+  description = "The Secrets Manager secrets the host may read, by name: every secret reference in the installation config except the registered-accounts secret, which is granted on its own (an adopted one may still be listed: hence up to seven). None is created here."
   type        = list(string)
 
   # They become IAM resource patterns, so a wildcard or an ARN here would widen the grant.
   validation {
-    condition     = length(var.secret_names) >= 4 && length(var.secret_names) <= 6 && length(distinct(var.secret_names)) == length(var.secret_names) && alltrue([for name in var.secret_names : can(regex("^[A-Za-z0-9/_+=.@-]+$", name))])
-    error_message = "Expected four to six distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, the model token, and optionally the Linear and GitHub webhook signing secrets. The registered-accounts secret need not be listed."
+    condition     = length(var.secret_names) >= 4 && length(var.secret_names) <= 7 && length(distinct(var.secret_names)) == length(var.secret_names) && alltrue([for name in var.secret_names : can(regex("^[A-Za-z0-9/_+=.@-]+$", name))])
+    error_message = "Expected four to seven distinct Secrets Manager names (letters, digits, and /_+=.@- only; no wildcards or ARNs): the two GitHub App keys, the Linear agent token, the model token, and optionally the Linear and GitHub webhook signing secrets and an adopted registered-accounts secret, which need not be listed because it is granted on its own but may stay from before TECH-5204."
   }
 }
 
