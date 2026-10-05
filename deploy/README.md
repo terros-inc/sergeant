@@ -1,8 +1,9 @@
 # Sergeant 2 hosting
 
 One AWS host runs `serve` (the long-running service, `packages/sergeant/src/serve.ts`) for one
-installation, behind that installation's permanent HTTPS endpoint. There is no release pipeline, no
-image registry, and no second environment: the host checks out a git ref of this repository and runs it.
+installation, behind that installation's permanent HTTPS endpoint. There is no release pipeline and no
+second environment: the host checks out a git ref of this repository and runs it. The one registry is
+for workers on Fargate: each install pushes the runner image it built there (Workers on Fargate below).
 
 Nothing installation-specific is committed here, and nothing lives only on an operator's machine. Two
 SSM parameters the operator writes hold it: Terraform's inputs and state location
@@ -12,6 +13,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 | Path | What it is |
 |---|---|
 | `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or six with the webhook signing secrets, plus an adopted registered-accounts secret if it stays listed); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
+| `terraform/fargate.tf` | Workers on ECS Fargate (TECH-5237): the runner image's ECR repository, the `sergeant-v2-runs` cluster and security group (no ingress), the `/sergeant/v2/runs` log group, the tasks' execution role (it reads only `sergeant/runs/*` secrets, pulls the image, and writes the run logs; there is no task role), the host's permissions to run, stop, and collect tasks, and the `/sergeant/v2/fargate-runner` parameter telling the host where they run. Workers use it only once the installation config says so. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
@@ -188,6 +190,46 @@ registered accounts (Model accounts below); the installation has no Codex creden
 
 To go back, remove `runners` (or set the role to `claude-code-local`) and update.
 
+### Workers on Fargate (TECH-5237)
+
+Workers can run as one ECS Fargate task each, with their own 2 vCPU and 8 GiB, so they stop
+competing with the host for CPU and memory. Reviewers stay on the host. How a run works is in
+`packages/runner/README.md`, under Fargate.
+
+1. **Apply** (Apply above). The plan adds `terraform/fargate.tf`'s resources and an inline policy on
+   the host's role, and changes the host's deny on other parameters to let it read
+   `/sergeant/v2/fargate-runner`. Nothing is imported: the TECH-5231 spike's hand-made resources
+   (ECR `sergeant-runner`, cluster `sergeant-fargate-spike`, log group `/sergeant/fargate-spike`, role
+   `sergeant-fargate-spike-exec`, security group `sergeant-fargate-spike`) have other names and are
+   deleted by hand once workers run here.
+2. **Update** the host (Update below). The install now pushes the runner image it built to
+   `sergeant-v2-runner`, tagged by the installed commit, and writes `/etc/sergeant/fargate-runner.json`
+   (`pushed the runner image to …` in its output). Workers still run on the host.
+3. **Turn it on.** Add `"workerBackend": "fargate"` to the installation config's `runners`, put the
+   parameter, and update (or `sgt admin restart`). `serve` logs `workers run on Fargate; Fargate image …`
+   at startup, and refuses to start if `/etc/sergeant/fargate-runner.json` is missing. From then on an
+   install whose push fails stops before restarting `serve`.
+4. **Live check.** Let one controlled worker run start. Its `runs/<run>/run.json` says
+   `"backend": "fargate"`, and `launch.json` names its task. While it runs:
+
+   ```sh
+   aws ecs describe-tasks --cluster sergeant-v2-runs --tasks <taskArn> --query 'tasks[0].{status: lastStatus, cpu: cpu, memory: memory}'
+   aws secretsmanager list-secrets --filters Key=name,Values=sergeant/runs/ --query 'SecretList[].Name'   # this run's only
+   aws ecs describe-task-definition --task-definition <taskDefinitionArn from launch.json> \
+     --query 'taskDefinition.{taskRole: taskRoleArn, secrets: containerDefinitions[0].secrets}'  # no task role; valueFrom only
+   ```
+
+   Once it ends, its `record.json` has its status, `costUsd`, and report, and the secret list is
+   empty. Then stop a second controlled task while its worker runs (`sgt` or undelegating it): the run
+   records `canceled` once ECS shows its task `STOPPED` (`UserInitiated`), and its secret is gone.
+
+To go back, remove `workerBackend` (or set it to `local`) and update: new workers start on the host,
+and runs already on Fargate are still read, stopped, and collected there.
+
+A worker's brief, the issue's files, and its two credentials travel in its secret, which Secrets
+Manager caps at 64 KiB: files that do not fit are left out and named in the brief as not downloaded,
+and a brief that does not fit alone fails the start with an error saying so.
+
 ### Model accounts: each task's owner pays (TECH-5179)
 
 Workers and reviewers run only on model accounts people register with `sgt`, and each task only on its
@@ -244,7 +286,7 @@ Run no Sergeant 1 `apply` after V2's first apply: it would point the record back
 
 ```sh
 EXPECTED_ACCOUNT_ID=<account> ./init.sh   # the inputs and state location, from the parameter
-terraform plan -out tfplan     # first apply: the A record import (if any) and 12 new resources
+terraform plan -out tfplan     # first apply: the A record import (if any) and 21 new resources (12 before fargate.tf)
 terraform apply tfplan
 ```
 

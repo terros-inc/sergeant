@@ -14,6 +14,9 @@
     "live-check": "node src/live-check.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.1146.0",
+    "@aws-sdk/client-ecs": "^3.1146.0",
+    "@aws-sdk/client-secrets-manager": "^3.1146.0",
     "@terros/sergeant-contracts": "workspace:*",
     "zod": "^4.6.5"
   },

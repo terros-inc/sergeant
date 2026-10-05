@@ -3,12 +3,17 @@ import type { AttachmentLimits, FetchUpload } from "./attachments.ts";
 import type { Adapter } from "./agents.ts";
 import type { CodexPrice } from "./codex-prices.ts";
 import type { Exec } from "./exec.ts";
-import type { ModelAccount } from "./accounts.ts";
+import type { ModelAccount, setAside } from "./accounts.ts";
 import type { ReadQuota } from "./quota.ts";
 import type { FetchLink } from "./public-fetch.ts";
 
 export type Role = RunSpec["role"];
 export type Limits = { maxWallSeconds: number; maxCostUsd: number };
+
+export const DEFAULT_LIMITS: Record<Role, Limits> = {
+  worker: { maxWallSeconds: 3_600, maxCostUsd: 10 },
+  reviewer: { maxWallSeconds: 1_800, maxCostUsd: 5 },
+};
 
 export type ContainerRunnerOptions = {
   /** Host directory holding one directory per run: its workspace, metadata, and final record. */
@@ -52,6 +57,11 @@ export type ContainerRunnerOptions = {
    */
   codexPrices?: Record<string, CodexPrice>;
   limits?: Partial<Record<Role, Limits>>;
+  /**
+   * The accounts set aside after a quota or authentication failure (`accounts.ts`). Runners that
+   * serve one installation together (`byRole`) share one, so a worker's failure counts for its reviewer.
+   */
+  asides?: ReturnType<typeof setAside>;
   /** Host command runner; injected in tests so no real process is launched. */
   exec?: Exec;
   githubApiUrl?: string;

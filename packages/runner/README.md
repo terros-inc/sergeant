@@ -119,6 +119,40 @@ each run uses an account its task's owner registered for Sergeant to use.
 - **Sandbox.** Codex runs with `--dangerously-bypass-approvals-and-sandbox`: the container is the
   sandbox, as with Claude Code's `bypassPermissions`.
 
+## Fargate (`fargateRunner`, TECH-5237)
+
+With the installation config's `"runners": { "workerBackend": "fargate" }`, each worker runs as one
+ECS Fargate task (`src/fargate/`); reviewers stay on the host's `containerRunner`. `byRole` routes a
+start by role and every later call by where the run started (`run.json`'s `backend`), so changing the
+setting leaves running runs where they are. Account choice, the brief, the agent scripts, parsing, and
+the report are the same as the local runner's; only where the run happens differs.
+
+- **Start.** On the host: choose the account, mint the worker token, list the repositories'
+  `sergeant/*` branches with `git ls-remote`, fetch the issue's files, render the brief. Then one
+  Secrets Manager secret per run, `sergeant/runs/<runId>`, holds the brief, the files, `GH_TOKEN`, and
+  the model credential as JSON keys; a task definition revision references those keys (never values);
+  `RunTask` starts it with a client token and `startedBy: <runId>`. Each step is recorded in the run's
+  `launch.json` before it can exist (`launch.ts`): a failure before the task deletes the secret and
+  the revision, and a lost `RunTask` answer is settled by the run's next `status` or `cancel`, which
+  finds the task by `startedBy` or repeats the same idempotent `RunTask`.
+- **In the task** (`TASK_SCRIPT`): write the brief and files, clone with the worker token, run the
+  adapter's unchanged script. Its output goes to the task's CloudWatch log stream. At the end the
+  script prints, base64 between `SERGEANT-RESULT-…`/`SERGEANT-REPORT-… <nonce>` markers, the agent's
+  last JSON line and `sergeant-report.md`. The first keeps Claude Code's result (its cost) intact when
+  the log splits a line over 16 KiB.
+- **Status and cancel.** `DescribeTasks`; only `MISSING` is loss, anything unreadable throws (unknown).
+  A stopped task is collected from its log stream once its report frame arrives (or two minutes
+  after it stopped), then its secret is deleted and its revision deregistered, and only then is the
+  terminal record written. `cancel` calls `StopTask` and records `canceled` only once the task is
+  `STOPPED` and its report, which may name PRs, is in; until then it throws and the caller retries.
+- **Limits.** A secret holds at most 64 KiB: files that do not fit are left out and named in the
+  brief; a brief that does not fit alone fails the start with an error saying so. Nothing else
+  (no S3). The task has no task role, so nothing in a run can call AWS; Fargate does not support
+  `no-new-privileges`, so the container drops all capabilities and runs as `node`.
+
+The AWS resources are `deploy/terraform/fargate.tf`, and turning it on is in `deploy/README.md`
+("Workers on Fargate"). Tests run against in-memory SDK clients (`src/fargate/fake-aws.ts`).
+
 ## Manual live check
 
 Not part of CI. It starts a container the way a worker run is started, with placeholder credential

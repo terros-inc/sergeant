@@ -8,6 +8,11 @@ boundary? Target shape if yes:
 live on 2026-10-04 (about 11:10 PM PT), in us-west-2 on ARM64, with this spike driver. Section 6
 has the measured results and section 7 the final recommendation: continue with Fargate.
 
+> **Since TECH-5237** the spike driver (`cli.ts`, `brief.ts`) is gone: its pieces became the
+> production `fargateRunner` in `packages/runner/src/fargate/` over the AWS SDK, with Terraform in
+> `deploy/terraform/fargate.tf` (`packages/runner/README.md`, Fargate). Section 5's procedure ran
+> against the driver as it was then, before TECH-5237's commit.
+
 ## 1. What was built
 
 Standalone, in `packages/runner/src/fargate-spike/`. It is not wired into `serve`, and it does not
