@@ -3,30 +3,35 @@ import { AGENTS, type Adapter } from "../agents.ts";
 // TECH-5231 spike: the deterministic pieces of running one worker as an ECS Fargate task. Not
 // wired into `serve` or `containerRunner`; `cli.ts` drives it by hand. docs/spikes/tech-5231-fargate.md.
 
+/** The line the task prints once its workspace is ready and its agent starts. */
+export const WORKSPACE_READY = "sergeant: workspace ready";
+
 /**
  * What the task runs in place of the host's clone + bind mount: it writes the brief, clones the run's
  * repositories with the worker token (the image's credential helper reads `GH_TOKEN`), runs the
  * adapter's unchanged agent script, then prints the report between two marker lines, base64 encoded,
  * so it reaches the control plane through the task's CloudWatch log stream, after a cancel too.
- * Exits with the agent's code.
+ * Exits with the agent's code; 71 if the brief cannot be written, 70 if a clone fails, both before
+ * `WORKSPACE_READY` and with no report frame.
  * Args: `<wall> <model> <budget> <repo>...`.
  */
 export const TASK_SCRIPT = `
 set -u
 wall="$1"; model="$2"; budget="$3"; shift 3
-printf '%s' "$SERGEANT_BRIEF" > /workspace/sergeant-brief.md
+printf '%s' "$SERGEANT_BRIEF" > /workspace/sergeant-brief.md || exit 71
 unset SERGEANT_BRIEF
 for repo in "$@"; do
   git clone --quiet "https://github.com/$repo.git" "/workspace/$repo" || exit 70
 done
-echo "sergeant: workspace ready"
+echo "${WORKSPACE_READY}"
 # In the background so a cancel's SIGTERM reaches the agent and this script still prints its report.
 sh -c "$SERGEANT_AGENT_SCRIPT" sh "$wall" "$model" "$budget" &
 agent=$!
 trap 'kill -TERM "$agent" 2>/dev/null' TERM
 wait "$agent"; code=$?
 while kill -0 "$agent" 2>/dev/null; do wait "$agent"; code=$?; done
-echo "SERGEANT-REPORT-BEGIN $SERGEANT_REPORT_NONCE"
+# The leading newline ends an agent's unterminated last line, so the marker stays a line of its own.
+printf '\\nSERGEANT-REPORT-BEGIN %s\\n' "$SERGEANT_REPORT_NONCE"
 if [ -f /workspace/sergeant-report.md ] && [ ! -L /workspace/sergeant-report.md ]; then
   base64 /workspace/sergeant-report.md
 fi
@@ -150,6 +155,22 @@ export function extractReport(lines: string[], nonce: string): { complete: boole
   if (b < 0) return { complete: false };
   const body = lines.slice(b + 1, e).join("");
   return body ? { complete: true, markdown: Buffer.from(body, "base64").toString("utf8") } : { complete: true };
+}
+
+/** How long after a task stops its last log lines may still be on their way to CloudWatch. */
+export const LOG_GRACE_SECONDS = 120;
+
+/**
+ * Whether `result` should wait for more logs rather than record the run now. Only a task stopped with
+ * an exit code, not canceled, and with no complete report frame is in doubt; it waits only within
+ * `LOG_GRACE_SECONDS` of stopping, and only if its agent may have printed a frame: it exited 0, or
+ * reached `WORKSPACE_READY`. A clone failure (70) is final at once; an OOM kill (137) after the agent
+ * started is final after the grace period. `force` records the run regardless.
+ */
+export function awaitingLogs(s: TaskState, lines: string[], nonce: string, stoppedSecondsAgo: number | undefined, force = false) {
+  if (force || s.state !== "stopped" || s.exitCode === undefined || s.canceled || extractReport(lines, nonce).complete) return false;
+  if (stoppedSecondsAgo === undefined || stoppedSecondsAgo >= LOG_GRACE_SECONDS) return false;
+  return s.exitCode === 0 || lines.includes(WORKSPACE_READY);
 }
 
 /** Seconds between two ECS timestamps (ISO strings or epoch seconds, as the CLI prints them). */

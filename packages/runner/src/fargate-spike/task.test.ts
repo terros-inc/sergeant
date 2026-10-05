@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractReport, taskDefinition, taskState, terminalStatus } from "./task.ts";
+import { awaitingLogs, extractReport, LOG_GRACE_SECONDS, taskDefinition, taskState, terminalStatus, WORKSPACE_READY } from "./task.ts";
 
 describe("taskState", () => {
   it("is loss only when ECS says the task is MISSING; any other empty answer is unknown", () => {
@@ -34,6 +34,32 @@ describe("extractReport", () => {
   it("is incomplete until the end marker arrives, and complete but empty when no report was written", () => {
     expect(extractReport(["SERGEANT-REPORT-BEGIN n1", "IyBS"], "n1")).toEqual({ complete: false });
     expect(extractReport(["SERGEANT-REPORT-BEGIN n1", "SERGEANT-REPORT-END n1"], "n1")).toEqual({ complete: true });
+  });
+});
+
+describe("awaitingLogs", () => {
+  const stopped = (exitCode: number | undefined, canceled = false) => ({ state: "stopped" as const, exitCode, canceled, detail: "" });
+  const framed = [WORKSPACE_READY, "SERGEANT-REPORT-BEGIN n1", "SERGEANT-REPORT-END n1"];
+
+  it("waits, within the grace period, only for a task whose agent may still have a frame on its way", () => {
+    expect(awaitingLogs(stopped(0), [], "n1", 5)).toBe(true);
+    expect(awaitingLogs(stopped(137), [WORKSPACE_READY, "agent output"], "n1", 5)).toBe(true);
+    expect(awaitingLogs(stopped(0), framed, "n1", 5)).toBe(false);
+  });
+
+  it("never waits forever: a task that died before its agent, after the grace period, or with --force is final", () => {
+    // A clone failure or an unwritable workspace exits before the agent starts, so prints no frame.
+    expect(awaitingLogs(stopped(70), ["fatal: repository not found"], "n1", 5)).toBe(false);
+    // An OOM kill after the agent started never prints one either; the grace period ends the wait.
+    expect(awaitingLogs(stopped(137), [WORKSPACE_READY], "n1", LOG_GRACE_SECONDS)).toBe(false);
+    expect(awaitingLogs(stopped(0), [], "n1", undefined)).toBe(false);
+    expect(awaitingLogs(stopped(0), [], "n1", 5, true)).toBe(false);
+  });
+
+  it("does not wait for a canceled task, one that never started, or one ECS has forgotten", () => {
+    expect(awaitingLogs(stopped(143, true), [WORKSPACE_READY], "n1", 5)).toBe(false);
+    expect(awaitingLogs(stopped(undefined), [], "n1", 5)).toBe(false);
+    expect(awaitingLogs({ state: "gone" }, [], "n1", 5)).toBe(false);
   });
 });
 

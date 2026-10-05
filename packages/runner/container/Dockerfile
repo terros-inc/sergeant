@@ -15,6 +15,9 @@ ARG CLAUDE_CODE_VERSION=2.1.287
 ARG CODEX_VERSION=0.160.0
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/codex@${CODEX_VERSION}" && corepack enable
 
+# Owned by node: the local runner bind-mounts a run's workspace here, but a Fargate task (TECH-5231
+# spike) clones into the image's own directory, which WORKDIR alone may leave root-owned.
+RUN install -d -o node -g node /workspace
 USER node
 WORKDIR /workspace
 # No git identity here: the runner sets the installation's human identity through GIT_AUTHOR_* and

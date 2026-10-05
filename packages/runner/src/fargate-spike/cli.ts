@@ -5,7 +5,7 @@
 //   node src/fargate-spike/cli.ts start  --run-id <id> --brief <file> --repo <owner/name> --model <m> [--adapter codex-local]
 //   node src/fargate-spike/cli.ts status --run-id <id>
 //   node src/fargate-spike/cli.ts cancel --run-id <id>
-//   node src/fargate-spike/cli.ts result --run-id <id>    # once stopped: record.json, report.md, cleanup
+//   node src/fargate-spike/cli.ts result --run-id <id> [--force]  # once stopped: record.json, report.md, cleanup
 //
 // `start` reads GH_TOKEN and the adapter's model credential (CLAUDE_CODE_OAUTH_TOKEN or
 // CODEX_CREDENTIAL) from its own environment and the SPIKE_* settings below; no value is ever an argument.
@@ -17,7 +17,7 @@ import { parseArgs } from "node:util";
 import { parseReport, RunRecord, WorkerReport } from "@terros/sergeant-contracts";
 import { ADAPTERS, AGENTS, type Adapter } from "../agents.ts";
 import { execOk } from "../exec.ts";
-import { extractReport, secondsBetween, taskDefinition, taskState, TASK_SCRIPT, terminalStatus, type DescribeTasks } from "./task.ts";
+import { awaitingLogs, extractReport, secondsBetween, taskDefinition, taskState, TASK_SCRIPT, terminalStatus, type DescribeTasks } from "./task.ts";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -32,6 +32,7 @@ const { positionals, values } = parseArgs({
     wall: { type: "string", default: "3600" },
     budget: { type: "string", default: "10" },
     "state-dir": { type: "string", default: "fargate-spike-runs" },
+    force: { type: "boolean", default: false },
   },
 });
 
@@ -169,13 +170,20 @@ async function logLines(l: Launch) {
 
 async function result() {
   const l = await readLaunch();
-  const s = taskState(await describe(l));
+  const out = await describe(l);
+  const s = taskState(out);
   if (s.state === "running") throw new Error(`${runId} is still ${s.lastStatus}`);
   // ECS forgets a stopped task after about an hour; its log stream, and so its report, outlives it.
-  const lines = s.state === "gone" ? await logLines(l).catch(() => []) : await logLines(l);
+  // A task that fails before its first log line (an image pull, say) has no stream at all.
+  const lines = await logLines(l).catch((e: Error) => {
+    if (/ResourceNotFoundException/.test(e.message)) return [];
+    throw e;
+  });
   const framed = extractReport(lines, l.nonce);
-  // A task that ran to its end prints the end marker last; without it the logs have not all arrived yet.
-  if (s.state === "stopped" && s.exitCode !== undefined && !s.canceled && !framed.complete) throw new Error("report not in the logs yet; retry");
+  // CloudWatch delivers a stopped task's last lines a few seconds late; a task that died before its frame never prints one.
+  if (awaitingLogs(s, lines, l.nonce, secondsBetween(out.tasks?.[0]?.stoppedAt, at()), values.force)) {
+    throw new Error("report not in the logs yet; retry, or pass --force to record the run without it");
+  }
   const agentOut = lines.join("\n");
   const agent = AGENTS[l.adapter].parse(agentOut, agentOut);
   const parsed = framed.markdown ? parseReport(framed.markdown, WorkerReport) : undefined;

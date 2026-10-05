@@ -19,6 +19,10 @@ change `containerRunner`:
 | `task.ts` | Pure pieces: the task definition, the in-task wrapper script (`TASK_SCRIPT`), ECS task state from `describe-tasks`, the terminal status, and report extraction from log lines. |
 | `task.test.ts` | Unit tests for those pieces: loss vs unknown, cancel vs failed start, report framing, and no credential values in the task definition. |
 | `cli.ts` | Manual control-plane driver over the `aws` CLI: `start`, `status`, `cancel`, `result`. No new dependency. |
+| `brief.ts` | Renders the normal worker brief (`workerBrief`) from a worker RunSpec in JSON, for `start --brief`. |
+
+The runner image's `/workspace` is now created owned by `node`. The local runner bind-mounts over
+it, so only a Fargate task, which clones into the image's own directory, sees the difference.
 
 How a run works:
 
@@ -46,8 +50,10 @@ How a run works:
    the report. `result` reads the stream and runs the adapter's existing `parse` (cost, tokens, session,
    failureReason). It takes the last complete report frame, parses it with `WorkerReport`, and writes
    `record.json` (validated by `RunRecord.parse`) and `report.md`. Then it deletes the secret and
-   deregisters the task definition. If the end marker has not arrived yet (CloudWatch delivers a stopped
-   task's last lines a few seconds late), it throws so the caller retries.
+   deregisters the task definition. CloudWatch delivers a stopped task's last lines a few seconds
+   late, so while the frame may still arrive, `result` throws and the caller retries. A task that died
+   before its frame (a clone failure, an OOM kill) gets a failed record after at most two minutes, or
+   at once with `--force` (section 5.4).
 
 ### The execution boundary
 
@@ -142,43 +148,188 @@ in different regions, and NAT costs if production uses private subnets.
 
 ## 5. Running the live proof (operator, outside CI)
 
-One-time setup, in the installation's account and region:
+Tracked in TECH-5234. It needs someone with admin-level AWS access to the installation's account (ECR,
+ECS, IAM, EC2, Logs, Secrets Manager, and SSM read). It also needs Node 24 and `pnpm install` in a
+checkout of this repository, bash, Docker able to build arm64 images (the Sergeant host, or `buildx
+--platform linux/arm64`), and `jq`, `openssl`, and `curl`. Every command below runs from the
+checkout's root unless it says otherwise. No credential is ever typed as an argument: each one goes
+from a command's output into an environment variable.
+
+### 5.1 One-time setup
 
 ```sh
+export AWS_REGION=us-west-2                      # the installation's region
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+ECR=$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/sergeant-runner
+
 aws ecr create-repository --repository-name sergeant-runner
 aws ecs create-cluster --cluster-name sergeant-fargate-spike
 aws logs create-log-group --log-group-name /sergeant/fargate-spike
-# Execution role: trust ecs-tasks.amazonaws.com; attach AmazonECSTaskExecutionRolePolicy, plus an
-# inline policy allowing secretsmanager:GetSecretValue on
-# arn:aws:secretsmanager:<region>:<account>:secret:sergeant/fargate-spike/*
-# Security group in the default VPC: no ingress, all egress.
-# Image: on the Sergeant host (arm64) or with buildx --platform linux/arm64:
-docker build -t <account>.dkr.ecr.<region>.amazonaws.com/sergeant-runner:spike packages/runner/container
-docker push <account>.dkr.ecr.<region>.amazonaws.com/sergeant-runner:spike
+
+# Execution role, used by ECS itself (image pull, logs, the run's secret), never by the run.
+aws iam create-role --role-name sergeant-fargate-spike-execution --assume-role-policy-document '{
+  "Version": "2012-10-17",
+  "Statement": [{ "Effect": "Allow", "Principal": { "Service": "ecs-tasks.amazonaws.com" }, "Action": "sts:AssumeRole" }]
+}'
+aws iam attach-role-policy --role-name sergeant-fargate-spike-execution \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+aws iam put-role-policy --role-name sergeant-fargate-spike-execution --policy-name run-secrets --policy-document "{
+  \"Version\": \"2012-10-17\",
+  \"Statement\": [{ \"Effect\": \"Allow\", \"Action\": \"secretsmanager:GetSecretValue\",
+    \"Resource\": \"arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:sergeant/fargate-spike/*\" }]
+}"
+
+# Network: the default VPC's default subnets (public), and a new security group, which has no
+# ingress and all egress by default.
+VPC=$(aws ec2 describe-vpcs --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)
+SUBNETS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC Name=default-for-az,Values=true \
+  --query 'Subnets[].SubnetId' --output text | tr '\t' ',')
+SG=$(aws ec2 create-security-group --group-name sergeant-fargate-spike --vpc-id $VPC \
+  --description "Sergeant Fargate spike: no ingress" --query GroupId --output text)
+
+# The runner image, arm64, from this branch's Dockerfile (or main's once this PR is merged).
+aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR%%/*}
+docker build -t $ECR:spike packages/runner/container      # on an x86 machine: docker buildx build --platform linux/arm64 --push -t $ECR:spike packages/runner/container
+docker push $ECR:spike
 ```
 
-One run, from `packages/runner`, with a scoped worker-App token for one test repository and one
-registered model credential exported in the shell (never typed as arguments):
+Then set what `cli.ts` reads. Use the installation's own git identity, the one `serve` gives runs:
 
 ```sh
-export AWS_REGION=… SPIKE_CLUSTER=sergeant-fargate-spike SPIKE_IMAGE=<ecr uri>:spike \
-  SPIKE_EXECUTION_ROLE_ARN=… SPIKE_SUBNETS=subnet-… SPIKE_SECURITY_GROUP=sg-… \
-  SPIKE_GIT_NAME=… SPIKE_GIT_EMAIL=…
-# GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN already exported
-node src/fargate-spike/cli.ts start  --run-id run_spike-1 --brief brief.md --repo <owner/test-repo> --model <model>
-node src/fargate-spike/cli.ts status --run-id run_spike-1     # repeat while running
-node src/fargate-spike/cli.ts result --run-id run_spike-1     # once STOPPED
-# cancel: start run_spike-2 the same way, then
-node src/fargate-spike/cli.ts cancel --run-id run_spike-2 && node src/fargate-spike/cli.ts status --run-id run_spike-2
+export SPIKE_CLUSTER=sergeant-fargate-spike SPIKE_IMAGE=$ECR:spike \
+  SPIKE_EXECUTION_ROLE_ARN=arn:aws:iam::$ACCOUNT:role/sergeant-fargate-spike-execution \
+  SPIKE_SUBNETS=$SUBNETS SPIKE_SECURITY_GROUP=$SG \
+  SPIKE_GIT_NAME='<installation git name>' SPIKE_GIT_EMAIL='<installation git email>'
 ```
 
-`brief.md` is a normal worker brief (`workerBrief`) for a tiny change in the test repository.
+### 5.2 The run's credentials
+
+Pick one test repository that the worker App is installed on, where a throwaway PR is fine (`TEST_REPO`,
+`<owner>/<name>`). Then mint its scoped worker-App token, as the runner's `runTokens` does: a
+one-hour installation token for that repository only, with a worker's permissions. The App's ids and
+key come from the installation config (`SERGEANT_CONFIG_PARAMETER` and
+`SERGEANT_REGISTERED_ACCOUNTS_SECRET` are in `/etc/sergeant/host.env` on the host). Mint it within
+the hour before `start`, and again for a later run:
+
+```sh
+export TEST_REPO=<owner>/<name> SERGEANT_CONFIG_PARAMETER=<from host.env>
+cfg=$(aws ssm get-parameter --name "$SERGEANT_CONFIG_PARAMETER" --query Parameter.Value --output text)
+APP_ID=$(jq -r .github.workerApp.appId <<<"$cfg")
+INSTALLATION_ID=$(jq -r .github.workerApp.installationId <<<"$cfg")
+key=$(mktemp) && chmod 600 "$key"
+aws secretsmanager get-secret-value --secret-id "$(jq -r .github.workerApp.privateKeySecret <<<"$cfg")" \
+  --query SecretString --output text >"$key"
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+now=$(date +%s)
+unsigned="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url).$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now-60)) $((now+540)) "$APP_ID" | b64url)"
+jwt="$unsigned.$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key" | b64url)"
+rm -f "$key"
+# The JWT goes to curl on stdin (-H @-), so it is not in curl's argv either.
+export GH_TOKEN=$(printf 'Authorization: Bearer %s\n' "$jwt" | curl -fsS -X POST -H @- \
+  -H 'Accept: application/vnd.github+json' \
+  -d "{\"repositories\":[\"${TEST_REPO#*/}\"],\"permissions\":{\"contents\":\"write\",\"pull_requests\":\"write\",\"checks\":\"read\",\"actions\":\"read\",\"metadata\":\"read\"}}" \
+  "https://api.github.com/app/installations/$INSTALLATION_ID/access_tokens" | jq -r .token)
+unset jwt
+[ -n "$GH_TOKEN" ] && [ "$GH_TOKEN" != null ] && echo "worker token minted"
+```
+
+Then take one registered model account: your own, registered with `sgt account register claude`
+(docs/sgt.md), from the registered-accounts secret (Terros: `sergeant/terros/registered-accounts`):
+
+```sh
+export CLAUDE_CODE_OAUTH_TOKEN=$(aws secretsmanager get-secret-value \
+  --secret-id "${SERGEANT_REGISTERED_ACCOUNTS_SECRET:-sergeant/terros/registered-accounts}" --query SecretString --output text |
+  jq -r --arg email '<your email>' '.accounts[] | select(.email == $email and .adapter == "claude-code-local" and .accountName == "claude") | .credential')
+[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && echo "model credential found"
+# For Codex: .adapter == "codex-local" and .accountName == "codex", into CODEX_CREDENTIAL, and pass
+# --adapter codex-local to start.
+```
+
+### 5.3 The brief
+
+`brief.ts` renders the normal worker brief (`workerBrief`) from a worker RunSpec, listing the
+repository's `sergeant/*` branches with `GH_TOKEN` as the runner does. Write a spec for a tiny change
+(the issue fields only feed the brief; nothing reads Linear):
+
+```sh
+cat >/tmp/spike-spec.json <<EOF
+{
+  "runId": "run_spike-1",
+  "owner": { "id": "operator", "name": "<your name>" },
+  "repositories": ["$TEST_REPO"],
+  "objective": "Fargate spike run: make the tiny change the task asks for, open a ready PR, and write your report.",
+  "conversation": {
+    "issue": {
+      "id": "spike", "identifier": "TECH-5234", "url": "https://linear.app/terros/issue/TECH-5234",
+      "title": "Fargate spike: tiny change",
+      "description": "Add one line to README.md saying this repository was touched by a Sergeant Fargate spike run.",
+      "state": "In Progress", "stateType": "started", "delegate": null, "linkedPullRequests": []
+    },
+    "humanComments": [], "agentComments": []
+  }
+}
+EOF
+cd packages/runner
+node src/fargate-spike/brief.ts /tmp/spike-spec.json >/tmp/brief-1.md
+jq '.runId = "run_spike-2"' /tmp/spike-spec.json >/tmp/spike-spec-2.json
+node src/fargate-spike/brief.ts /tmp/spike-spec-2.json >/tmp/brief-2.md
+```
+
+### 5.4 The runs
+
+Still in `packages/runner`, with everything above exported. `--model` is the model the installation's
+workers use:
+
+```sh
+# 1. A full run: start, status while running, terminal status and exit code, result.
+node src/fargate-spike/cli.ts start  --run-id run_spike-1 --brief /tmp/brief-1.md --repo $TEST_REPO --model <model>
+node src/fargate-spike/cli.ts status --run-id run_spike-1     # repeat: PROVISIONING, PENDING, RUNNING, then stopped with exitCode
+node src/fargate-spike/cli.ts result --run-id run_spike-1     # once stopped; retry if it says the report is not in the logs yet
+
+# 2. A canceled run: start, cancel once RUNNING, then status and result, which also cleans it up.
+node src/fargate-spike/cli.ts start  --run-id run_spike-2 --brief /tmp/brief-2.md --repo $TEST_REPO --model <model>
+node src/fargate-spike/cli.ts status --run-id run_spike-2     # until RUNNING
+node src/fargate-spike/cli.ts cancel --run-id run_spike-2
+node src/fargate-spike/cli.ts status --run-id run_spike-2     # until stopped, canceled: true
+node src/fargate-spike/cli.ts result --run-id run_spike-2     # writes its canceled record.json
+```
+
+`result` waits for the report frame only when the task might still have one on the way: it stopped
+with an exit code, was not canceled, exited 0 or got as far as its agent (`sergeant: workspace ready`),
+and stopped under two minutes ago. Otherwise, as after a clone failure (exit 70), an unwritable workspace
+(71), or an OOM kill (137), it records a failed run without a report. `--force` records the run at
+once. Either way it deletes the run's secret and deregisters its task definition.
+
+Each run leaves `fargate-spike-runs/<runId>/` with `launch.json`, `record.json`, and `report.md`.
+Then check that nothing is left and nothing leaked:
+
+```sh
+aws secretsmanager list-secrets --filters Key=name,Values=sergeant/fargate-spike/ --query 'SecretList[].Name'   # []
+aws ecs list-task-definitions --family-prefix sergeant-fargate-spike --status ACTIVE                           # none
+aws ecs describe-task-definition --task-definition "$(jq -r .taskDefinitionArn fargate-spike-runs/run_spike-1/launch.json)" \
+  --query 'taskDefinition.containerDefinitions[0].{secrets: secrets, env: environment[].name}'                  # valueFrom only
+aws logs filter-log-events --log-group-name /sergeant/fargate-spike --filter-pattern '"ghs_"' --query 'events[].logStreamName'  # []
+```
+
+Record the results in TECH-5234 against section 6's list, and the measured `secondsToRunning` and
+`pullSeconds` in sections 4 and 7. Afterwards, remove the setup: the ECR repository, the cluster, the
+log group, the role, and the security group.
 
 ## 6. Validation
 
 **Observed:**
 
 - `task.test.ts` passes, and the runner package's typecheck and lint pass.
+- `result` against a fake `aws`, for a task stopped with exit 70 and no frame: it wrote a
+  `RunRecord.parse`-valid failed record (`no report written; exit 70 …`), deleted the secret, and
+  deregistered the definition. For exit 137 after `sergeant: workspace ready`, it asked for a retry
+  within the grace period, and recorded the failed run after it or with `--force`.
+- `TASK_SCRIPT` under `sh`: an agent whose output lacks a final newline still leaves the BEGIN marker
+  on its own line; an unwritable workspace exits 71 before any clone; a missing repository exits 70.
+- `brief.ts` rendered a worker brief from section 5.3's spec, with the repository's `sergeant/*`
+  branches listed through the token.
+- The worker-token JWT commands of section 5.2 made a JWT that verifies with RS256 against a test key.
+  Minting from the real worker App was not run.
 - `TASK_SCRIPT` was run locally under `sh` with a stand-in agent. On a normal exit it wrote the brief,
   framed the report, and kept the agent's exit code (3). On SIGTERM mid-run it still framed the report
   the agent had written and exited 143. `extractReport` decoded both.
