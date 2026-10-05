@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import type { Conversation, MergePr, PullRequestFacts, RunRecord } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
+import { Wake } from "./wake.ts";
 
 // TECH-5077: a merge call that fails gets one re-check after the existing waiting grace. A second
 // unchanged failure hands the same head to a human once; this is derived from timestamps and the
@@ -55,7 +56,7 @@ const merge: MergePr = { kind: "merge_pr", repo, number: 7, expectedHeadSha: hea
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
-async function fixture(waitingGraceMinutes = 0) {
+async function fixture(waitingGraceMinutes = 0, refuse = false) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-merge-retry-test-"));
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: [worker.runId, review.runId], recentTurns: [] }));
   let live: Conversation = {
@@ -69,8 +70,9 @@ async function fixture(waitingGraceMinutes = 0) {
   let turns = 0;
   let computeOnFirstTurn = false;
   const comments: { key: string; body: string }[] = [];
+  const wake = new Wake();
   const run = () => runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, waitingGraceMinutes, idleMinutes: 0, completionWaitMinutes: 0, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, waitingGraceMinutes, idleMinutes: 0, completionWaitMinutes: 0, wake, log: () => {} },
     {
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
@@ -86,6 +88,7 @@ async function fixture(waitingGraceMinutes = 0) {
         readPullRequest: async () => livePr,
         mergePullRequest: async () => {
           attempts++;
+          if (attempts <= failures && refuse) return { refused: "Waiting on code owner review from terros-inc/owners." };
           if (attempts <= failures) throw new Error("GitHub 405: Pull Request is not mergeable");
           livePr = { ...livePr, state: "merged", mergedSha: "c".repeat(40) };
           live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
@@ -113,6 +116,8 @@ async function fixture(waitingGraceMinutes = 0) {
       saved.mergeRetries[0].at = "2000-01-01T00:00:00.000Z";
       await writeFile(file, JSON.stringify(saved));
     },
+    wake: () => wake.request(),
+    retries: async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")).mergeRetries,
     changeBase() { livePr = { ...livePr, baseSha: "d".repeat(40) }; },
     attempts: () => attempts,
     turns: () => turns,
@@ -144,6 +149,22 @@ test("a temporary merge failure recovers on its one delayed re-check", async () 
   expect(f.attempts()).toBe(2);
   expect(f.turns()).toBe(2);
   expect(f.handoffs()).toEqual([]);
+});
+
+// TECH-5089: a human's `sgt task wake` before the grace ends takes a turn the retry did not cause.
+// Its failure is still the one re-check, so it hands off rather than restarting the grace.
+test.each([["fails", false], ["is refused", true]])("a merge that %s on a wake before the grace ends is the re-check and hands off", async (_, refuse) => {
+  const f = await fixture(60, refuse);
+  expect((await f.run()).outcome).toBe("idle");
+  expect(await f.retries()).toHaveLength(1);
+  f.wake();
+  expect((await f.run()).outcome).toBe("idle");
+  expect(f.attempts()).toBe(2);
+  expect(await f.retries()).toEqual([]);
+  expect(f.handoffs()).toHaveLength(1);
+  expect((await f.run()).outcome).toBe("idle");
+  expect(f.attempts()).toBe(2);
+  expect(f.turns()).toBe(2);
 });
 
 test("a persistent 405 gets one re-check, one handoff, and no more turns", async () => {
