@@ -16,7 +16,11 @@ export function reconcileMergeRetries(state: TaskState, fingerprint: string): bo
 
 export const dueMergeRetries = (state: TaskState, graceMs: number) => state.mergeRetries.filter((r) => Date.now() - Date.parse(r.at) >= graceMs);
 
-/** Consumes due re-checks and turns another unchanged failure into the existing human handoff. */
+/**
+ * Consumes due re-checks and turns another unchanged failure into the existing human handoff. Any
+ * failure while a re-check is pending for the same facts is that re-check, whichever turn caused it
+ * (TECH-5089): a human's wake before the grace ends must not restart the grace.
+ */
 export function recordMergeRetries(
   state: TaskState,
   outcomes: ActionOutcome[],
@@ -24,14 +28,17 @@ export function recordMergeRetries(
   fingerprint: string,
   dueRetries: TaskState["mergeRetries"],
 ): void {
-  const due = new Set(dueRetries.map((r) => `${r.repo}#${r.number}@${r.headSha}`));
-  state.mergeRetries = state.mergeRetries.filter((r) => !due.has(`${r.repo}#${r.number}@${r.headSha}`));
+  const keyOf = (r: { repo: string; number: number; headSha: string }) => `${r.repo}#${r.number}@${r.headSha}`;
+  const pending = new Set(state.mergeRetries.filter((r) => r.fingerprint === fingerprint).map(keyOf));
+  const due = new Set(dueRetries.map(keyOf));
+  state.mergeRetries = state.mergeRetries.filter((r) => !due.has(keyOf(r)));
   for (const failure of failedMerges(outcomes, situation)) {
-    const key = `${failure.repo}#${failure.number}@${failure.headSha}`;
-    if (due.has(key)) {
-      state.refusedMerges = [...state.refusedMerges.filter((r) => r.repo !== failure.repo || r.number !== failure.number), { ...failure, fingerprint }];
+    const others = <T extends { repo: string; number: number }>(list: T[]) => list.filter((r) => r.repo !== failure.repo || r.number !== failure.number);
+    if (pending.has(keyOf(failure))) {
+      state.mergeRetries = others(state.mergeRetries);
+      state.refusedMerges = [...others(state.refusedMerges), { ...failure, fingerprint }];
     } else {
-      state.mergeRetries = [...state.mergeRetries.filter((r) => r.repo !== failure.repo || r.number !== failure.number), { ...failure, fingerprint }];
+      state.mergeRetries = [...others(state.mergeRetries), { ...failure, fingerprint }];
     }
   }
 }
