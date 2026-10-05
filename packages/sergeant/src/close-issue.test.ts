@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { afterEach, expect, test } from "vitest";
 import type { ProposedAction, RunRecord } from "@terros/sergeant-contracts";
 import { closedKey } from "./accepted.ts";
-import { cleanup, dir, issue, saved, scenario, start, turnOf } from "./budget-scenario.ts";
+import { cleanup, dir, human, issue, saved, scenario, start, turnOf } from "./budget-scenario.ts";
 
 // TECH-5232: a worker that verified an issue needs no change used to leave Sergeant asking a human to
 // close it (TECH-5093 already covered on main, TECH-5100 obsolete). Now the task closes the issue
@@ -66,35 +66,80 @@ test("a task with a PR is refused the close and goes on, closing nothing and pos
   expect((await saved()).recentTurns.at(-1)?.outcomes).toEqual([expect.stringMatching(/^close_issue: denied by C1 \(the task has PRs \(o\/canary#7\)/)]);
 });
 
-test("a close whose comment post failed is replayed once resumed, under the same key and with no new turn", async () => {
+test("a close whose comment post failed is decided again by a fresh turn, its evidence posted once under the same key", async () => {
   const keys: string[] = [];
-  const failed = await scenario({
+  let turns = 0;
+  const { result, posted, closed } = await scenario({
+    state: task,
+    conversation: noPr,
+    runner: runner([]),
+    reasoner: async () => (turns++, turnOf([close])),
+    onPoll: (_poll, live) => live,
+    beforePost: ({ key }) => {
+      keys.push(key);
+      if (keys.length === 1) throw new Error("socket hang up");
+    },
+  });
+
+  expect(result.detail).toBe("Sergeant closed the issue as Done: nothing to change");
+  expect(turns).toBe(2);
+  expect(closed).toEqual(["done"]);
+  expect(posted).toHaveLength(1);
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+  expect(keys[0]).toMatch(new RegExp(`^${closedKey("i1", "")}`));
+});
+
+// TECH-5236: the close used to be saved with the turn and made on the next pass, which rechecked only
+// delegation, so a human comment or a PR that came in between was overtaken. Now the evidence and the
+// close are made on the very read the Gate allowed (C1-C4); anything newer denies it and wakes a turn.
+
+test("a close is made on the read the Gate allowed, before any later read, so later input is never overtaken", async () => {
+  let polls = 0;
+  let postedOnPoll = 0;
+  const { result, closed, live } = await scenario({
     state: task,
     conversation: noPr,
     runner: runner([]),
     reasoner: async () => turnOf([close]),
-    onPoll: (_poll, live) => live,
-    beforePost: ({ key }) => {
-      keys.push(key);
-      throw new Error("socket hang up");
-    },
-  }).catch((e: Error) => e);
-  expect(failed).toBeInstanceOf(Error);
-  expect(await readdir(dir)).toContain("state.json");
-
-  let turns = 0;
-  const { result, closed } = await scenario({
-    conversation: noPr,
-    runner: runner([]),
-    reasoner: async () => (turns++, turnOf([start])),
-    onPoll: (_poll, live) => live,
-    beforePost: ({ key }) => void keys.push(key),
+    // The pass after the closing turn is where the deferred close used to run: a human objects there.
+    onPoll: (poll, live) => ((polls = poll), poll === 3 ? { ...live, humanComments: [human("c1", ago(0), "wait, this still needs work")] } : live),
+    beforePost: () => void (postedOnPoll = polls),
   });
 
-  expect(result.detail).toBe("Sergeant closed the issue as Done: nothing to change");
-  expect(turns).toBe(0);
+  expect(postedOnPoll).toBe(2);
   expect(closed).toEqual(["done"]);
-  expect(keys).toHaveLength(2);
-  expect(keys[0]).toBe(keys[1]);
-  expect(keys[0]).toMatch(new RegExp(`^${closedKey("i1", "")}`));
+  expect(live.issue.stateType).toBe("completed");
+  expect(result.outcome).toBe("accepted");
+});
+
+test("a human comment posted while the closing turn reasoned denies the close (C4), and a fresh turn reads it", async () => {
+  const seen: number[] = [];
+  const { closed, posted } = await scenario({
+    state: task,
+    conversation: noPr,
+    runner: runner([]),
+    reasoner: async (s) => (seen.push(s.conversation.humanComments.length), turnOf(seen.length === 1 ? [close] : [])),
+    onPoll: (poll, live) => (poll === 2 ? { ...live, humanComments: [human("c1", ago(0), "wait, this still needs work")] } : live),
+  });
+
+  expect(closed).toEqual([]);
+  expect(posted).toEqual([]);
+  expect(seen).toEqual([0, 1]);
+  const turns = (await saved()).recentTurns;
+  expect(turns.at(-2)?.outcomes).toEqual([expect.stringMatching(/^close_issue: denied by C4 /)]);
+});
+
+test("a PR linked while the closing turn reasoned denies the close (C1), posting nothing", async () => {
+  const { closed, posted } = await scenario({
+    state: task,
+    conversation: noPr,
+    runner: runner([]),
+    reasoner: async () => turnOf([close]),
+    onPoll: (poll, live) => (poll === 2 ? { ...live, issue: { ...live.issue, linkedPullRequests: [{ repo: "o/canary", number: 9 }] } } : live),
+  });
+
+  expect(closed).toEqual([]);
+  expect(posted).toEqual([]);
+  expect((await saved()).recentTurns.at(-1)?.outcomes).toEqual([expect.stringMatching(/^close_issue: denied by C1 \(the task has PRs \(o\/canary#9\)/)]);
 });

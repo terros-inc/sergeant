@@ -145,7 +145,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       // TECH-5118: a human accepted the work as it is in reply to the budget question, so the task ends
       // with no fresh window and nothing more asked, its saved ending replayed (accepted.ts).
       // TECH-5232: so does a task that closed its issue itself, nothing to change.
-      const ended = await endAccepted(state.accepted, opts.dir, opts.issueId, deps.linear, resolveDue, deps.agentUserId);
+      const ended = await endAccepted(state.accepted, opts.dir, opts.issueId, deps.linear, resolveDue);
       if (ended) return ended;
       await wait(pollMs);
       continue;
@@ -262,7 +262,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);
     const earlierTurns = await turnsSoFar();
-    const { turn, outcomes } = await takeTurn(situation, ports);
+    // A close posts the task's cost with its evidence, this turn's included (execute.ts).
+    const costOf = (turnCostUsd: number) => costTotal({ ...spent(earlierTurns + turnCostUsd), at: new Date().toISOString() });
+    const { turn, outcomes } = await takeTurn(situation, { ...ports, costOf });
     const at = new Date().toISOString();
     const described = outcomes.map(describeOutcome);
     log(`turn ${state.turns + 1} (${turn.model}, $${turn.costUsd ?? "?"}): ${turn.output.summary}`);
@@ -271,18 +273,22 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // A start the owner has no usable model account for asks them instead (TECH-5217): retried the same way.
     const failedAsk = outcomes.flatMap((o) => (o.status !== "failed" ? [] : o.action.kind === "ask_human" ? [o.action] : o.unposted ? [o.unposted] : []))[0];
     if (failedAsk) unposted = { action: failedAsk, situation };
+    // A close Linear failed is decided again by a fresh turn, on whatever the conversation is by then
+    // (TECH-5236); its evidence, if posted, is not posted twice for the same conversation.
+    const failedClose = outcomes.some((o) => o.status === "failed" && o.action.kind === "close_issue");
     const accepted = outcomes.some((o) => o.action.kind === "accept_as_is" && o.status === "done");
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
-    const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
+    const committed = failedAsk || failedClose ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
     const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
-    // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
+    // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above). A
+    // close's effects were made in the turn itself (execute.ts), so its ending only sets the task aside.
     const reply = accepted ? latestAnswer(conversation) : undefined;
     if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests, costTotal({ ...spent(taskTurnCostUsd), at })) };
     const close = outcomes.flatMap((o) => (o.status === "done" && o.action.kind === "close_issue" ? [o.action] : []))[0];
-    if (close) state.accepted = { at, close: close.state, comment: closedComment(close, costTotal({ ...spent(taskTurnCostUsd), at })) };
+    if (close) state.accepted = { at, close: close.state, comment: closedComment(close) };
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();

@@ -46,6 +46,8 @@ export type Ports = {
    * (TECH-5179); the loop's stop path then cancels its runs and keeps its PRs.
    */
   handoff?: (reason: string) => Promise<void>;
+  /** The task's cost so far, this turn's included, for the comment a close posts (TECH-5227). */
+  costLine?: () => string;
 };
 
 export type ActionOutcome =

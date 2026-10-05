@@ -173,11 +173,13 @@ stays delegated and in Todo, intake does not start it afresh; a human moving it 
 **Nothing to change (TECH-5232).** When a worker's own verification shows the issue needs no change,
 reasoning proposes `close_issue` instead of asking: `done` when main already covers it, citing the
 commit, files, or tests, and `canceled` when it is obsolete, citing what superseded it. Sergeant posts
-that evidence as one comment, keyed by the closing turn, moves the issue to the team's first completed
+that evidence as one comment, keyed by the conversation revision it decided on, moves the issue to the team's first completed
 or canceled state, and ends the task through the accepted ending above, with no question asked. Gate
 rules C1–C4 allow it only while the issue is delegated to Sergeant (A1, A2), with no PR in the task
 (linked to the issue or reported by a run), with evidence, after a worker finished its verification
-with no run still going, and on the live conversation the turn read. A human reopens the issue by
+with no run still going, and on the live conversation the turn read. The comment and the close are made
+on that same live read, with nothing that waits in between (TECH-5236), so a human comment, an edit, or
+a PR linked meanwhile denies the close and the next turn reads it. A human reopens the issue by
 moving it back to Todo, which starts a fresh task. Partial coverage or a judgment call still asks.
 
 ## 7. Completion: PRs, automation, and Done
