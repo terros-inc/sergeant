@@ -13,7 +13,7 @@ import {
 } from "@terros/sergeant-contracts";
 import type { FeedbackJudge } from "@terros/sergeant-reasoning";
 import { z } from "zod";
-import { readTaskState } from "./task-state.ts";
+import { completedEpisodes, readTaskState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 
 // Post-merge feedback (TECH-4985). While a task is active, a human's comment is part of its
@@ -114,28 +114,41 @@ async function sweepIssue(issueId: string, record: FeedbackRecord, save: () => P
   if (progress.stateType === "canceled") return;
   const done = progress.stateType === "completed";
   const origin = await deps.linear.readConversation(issueId);
-  // Open work a human took back is theirs, and the issue can still absorb the change.
-  if (!done && origin.issue.delegate?.id !== deps.agentUserId) return;
   const linked = origin.issue.linkedPullRequests.filter((p) => opts.enrolledRepositories.includes(p.repo));
   const prs = (await Promise.all(linked.map((p) => deps.github.readPullRequest(p.repo, p.number)))).filter((p) => p.author === deps.workerLogin);
-  // A PR of the task still open: the task is active, and its loop reads the conversation.
-  if (!done && prs.some((p) => p.state === "open")) return;
   const merged = prs.filter((p): p is PullRequestFacts & { mergedAt: string } => p.state === "merged" && !!p.mergedAt);
-  const closingMerges = merged.filter((p) => hasClosingReference(p.body, origin.issue.identifier)).map((p) => Date.parse(p.mergedAt));
-  // Landed: the completing PR merged, or the issue reached Done, whichever came first.
-  const marks = [...(done && progress.completedAt ? [Date.parse(progress.completedAt)] : []), ...(closingMerges.length > 0 ? [Math.max(...closingMerges)] : [])];
-  if (marks.length === 0) return;
-  const landed = Math.max(Math.min(...marks), Date.parse(record.since));
+  const since = Date.parse(record.since);
+  // TECH-5190: a reopened issue's earlier episodes, set aside when it was delegated again (task-state.ts).
+  // A PR merged before one was seen through is that episode's, and its feedback is swept as it was before
+  // the reopen, from the episode's merge on, whatever the new episode is doing. The issue's state, its
+  // comments, and its other PRs are the new episode's.
+  const episodes = await completedEpisodes(join(opts.stateDir, "tasks", issueId));
+  const episodeOf = (p: { mergedAt: string }) => episodes.find((e) => Date.parse(p.mergedAt) <= Date.parse(e.completedAt));
+  // When the current episode landed; undefined while it has not, or the work is a human's again.
+  const currentLanding = (): number | undefined => {
+    // Open work a human took back is theirs, and the issue can still absorb the change.
+    if (!done && origin.issue.delegate?.id !== deps.agentUserId) return undefined;
+    // A PR of the task still open: the task is active, and its loop reads the conversation.
+    if (!done && prs.some((p) => p.state === "open")) return undefined;
+    const closingMerges = merged.filter((p) => !episodeOf(p) && hasClosingReference(p.body, origin.issue.identifier)).map((p) => Date.parse(p.mergedAt));
+    // Landed: the completing PR merged, or the issue reached Done, whichever came first.
+    const marks = [...(done && progress.completedAt ? [Date.parse(progress.completedAt)] : []), ...(closingMerges.length > 0 ? [Math.max(...closingMerges)] : [])];
+    return marks.length === 0 ? undefined : Math.max(Math.min(...marks), since);
+  };
+  const landed = currentLanding();
 
   const feedback: Feedback[] = [
     ...origin.humanComments
-      .filter((c) => Date.parse(c.createdAt) > landed && c.body.trim())
+      .filter((c) => landed !== undefined && Date.parse(c.createdAt) > landed && c.body.trim())
       .map((c) => ({ key: `linear:${c.id}`, source: "linear_comment" as const, author: c.author.name, createdAt: c.createdAt, body: c.body, url: origin.issue.url })),
-    ...merged.flatMap((p) =>
-      p.humanFeedback
-        .filter((f) => TRUSTED_ASSOCIATIONS.has(f.association ?? "") && f.body.trim() && Date.parse(f.createdAt) > Math.max(landed, Date.parse(p.mergedAt)))
-        .map((f) => fromPullRequest(p, f)),
-    ),
+    ...merged.flatMap((p) => {
+      const episode = episodeOf(p);
+      const from = episode ? Math.max(Date.parse(episode.mergedAt), since) : landed;
+      if (from === undefined) return [];
+      return p.humanFeedback
+        .filter((f) => TRUSTED_ASSOCIATIONS.has(f.association ?? "") && f.body.trim() && Date.parse(f.createdAt) > Math.max(from, Date.parse(p.mergedAt)))
+        .map((f) => fromPullRequest(p, f));
+    }),
   ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   const filed = origin.agentComments.filter((c) => c.body.startsWith(FILED_MARKER)).map((c) => c.body);
@@ -246,13 +259,14 @@ const where = (item: Feedback) =>
     pr_review: `[a review](${item.url})`,
   })[item.source];
 
-/** Tasks this host ran whose completing PR merged after `since` (`state.json`'s `merged`). */
+/** Tasks this host ran whose completing PR merged after `since`: `state.json`'s `merged`, or a set-aside episode's. */
 async function mergedTasks(stateDir: string, since: string): Promise<string[]> {
   const dirs = await readdir(join(stateDir, "tasks")).catch(() => []);
   const tasks = await Promise.all(
     dirs.map(async (id) => {
       const state = await readTaskState(join(stateDir, "tasks", id, "state.json")).catch(() => undefined);
-      return state?.merged && state.merged.at > since ? [state.issueId] : [];
+      if (state?.merged && state.merged.at > since) return [state.issueId];
+      return (await completedEpisodes(join(stateDir, "tasks", id))).some((e) => e.mergedAt > since) ? [id] : [];
     }),
   );
   return tasks.flat();

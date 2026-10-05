@@ -1,4 +1,4 @@
-import { readFile, rename } from "node:fs/promises";
+import { readdir, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BudgetStatus,
@@ -183,4 +183,19 @@ export async function setAsideCompleted(dir: string): Promise<boolean> {
   if (!completedAt) return false;
   await rename(join(dir, "state.json"), join(dir, `state.completed-${completedAt.replace(/[:.]/g, "-")}.json`));
   return true;
+}
+
+/**
+ * TECH-5190: the episodes `setAsideCompleted` set aside in `dir`, oldest first: when each recorded its
+ * merge and when it was seen through. One that cannot be read is left out.
+ */
+export async function completedEpisodes(dir: string): Promise<{ mergedAt: string; completedAt: string }[]> {
+  const files = (await readdir(dir).catch(() => [])).filter((f) => /^state\.completed-.+\.json$/.test(f));
+  const episodes = await Promise.all(
+    files.map(async (f) => {
+      const merged = (await readTaskState(join(dir, f)).catch(() => undefined))?.merged;
+      return merged?.completedAt ? [{ mergedAt: merged.at, completedAt: merged.completedAt }] : [];
+    }),
+  );
+  return episodes.flat().sort((a, b) => Date.parse(a.completedAt) - Date.parse(b.completedAt));
 }

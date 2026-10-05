@@ -231,7 +231,10 @@ A task seen through after its merge and back in Todo, delegated, is such a reope
 including its periodic poll of Linear, sets the old `state.json` aside as
 `state.completed-<time>.json` beside it, and the new episode is admitted like any other: the owner
 check (§5) runs again on Linear's latest delegation and fails closed. A task still under way, merged
-or not, is never set aside.
+or not, is never set aside. The post-merge feedback sweep keeps reading the set-aside episodes
+(TECH-5190): feedback on a PR merged before an episode was seen through is swept from that episode's
+merge on, as before the reopen, whatever the new episode is doing; the issue's comments, and its later
+PRs, are the new episode's until it lands.
 
 ## 10. Humans editing the issue while work is active
 
