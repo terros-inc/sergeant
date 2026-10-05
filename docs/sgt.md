@@ -88,7 +88,8 @@ posted as a `Sergeant retro <date>` document in the Sergeant project. Otherwise 
 Approvers also have `sgt admin` (§7).
 
 - `--json` prints JSON for scripts and `jq`: the API's own JSON for most commands, `{"report": "…"}`
-  for `run report`, `{"api","signedOut"}` for `logout`, and errors as `{"error":{"code","message"}}`.
+  for `run report`, `{"api","signedOut"}` for `logout`, `{"version"}` for `update` and `--version`,
+  `{"request","outcome"}` for `admin restart` and `admin update`, and errors as `{"error":{"code","message"}}`.
 - `sgt --help` lists every command, including `run cancel <run> [--reason …]` and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
 - MCP: `node <repo>/packages/mcp/src/sgt-mcp.ts` is a read-only MCP server over stdio, but it sends
