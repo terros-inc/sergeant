@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { type Credential, tokenRequest } from "@terros/sergeant-contracts";
+import { type Credential, tokenRequest } from "@terros/sergeant-contracts/credentials";
 
 // `sgt login` (TECH-4938): Linear OAuth 2.0 with PKCE, as the human (`actor=user`), against the
 // installation's Linear OAuth app, whose public client id the API serves. No client secret is ever on

@@ -1,5 +1,6 @@
 import { createServer, type RequestListener, type Server } from "node:http";
-import { sergeantVersion, type ApiError } from "@terros/sergeant-contracts";
+import type { ApiError } from "@terros/sergeant-contracts";
+import { sergeantVersion } from "@terros/sergeant-contracts/version";
 import { fromThisHost, send } from "./api-http.ts";
 import type { Slot } from "./slots.ts";
 import { WEBHOOK_PATHS } from "./webhooks.ts";

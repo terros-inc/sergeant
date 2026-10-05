@@ -1,5 +1,7 @@
 import { parseArgs } from "node:util";
-import { currentToken, LoginConfig, loadCredential, RetroRequestResponse, saveCredential, sergeantVersion, WhoAmI } from "@terros/sergeant-contracts";
+import { LoginConfig, RetroRequestResponse, WhoAmI } from "@terros/sergeant-contracts";
+import { currentToken, loadCredential, saveCredential } from "@terros/sergeant-contracts/credentials";
+import { sergeantVersion } from "@terros/sergeant-contracts/version";
 import { accountCommands } from "./cli-accounts.ts";
 import { adminCommands } from "./cli-admin.ts";
 import { type Command, type Context, call, caller, Failure, fail, type Flags, type Io, print, Usage } from "./cli-call.ts";
