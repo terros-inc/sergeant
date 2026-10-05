@@ -1,6 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import type { RunRecord } from "@terros/sergeant-contracts";
-import { logFollowUp, mergedHead } from "./after-merge.ts";
+import { logFollowUp, mergedHead } from "./audit.ts";
 import { type ReviewFacts, reviewFacts } from "./review-quality.ts";
 import type { TaskState } from "./task-state.ts";
 

@@ -1,131 +1,13 @@
 import { expect, test, vi } from "vitest";
-import {
-  conversationRevision,
-  type Conversation,
-  type GitHubPort,
-  type MergePr,
-  type ProposedAction,
-  type PullRequestFacts,
-  type SituationReport,
-} from "@terros/sergeant-contracts";
-import { execute, type Ports } from "./execute.ts";
+import { conversationRevision, type ProposedAction } from "@terros/sergeant-contracts";
+import { execute } from "./execute.ts";
+import { conversation, followup, head, merge, ports, pr, situation } from "./execute-fixtures.ts";
 import { takeTurn } from "./index.ts";
 
 // The Gate is only protective if the executor feeds it live facts. If the executor checked the
 // turn's own snapshot instead, M4 and M10 would always pass and a merge could overtake a pushed
 // head or a new human comment. This proves an allowed merge reaches the effect seam and a live
 // change stops it there.
-
-const head = "a".repeat(40);
-const conversation: Conversation = {
-  issue: {
-    id: "i1",
-    identifier: "UNF-1",
-    url: "https://linear.app/x/issue/UNF-1",
-    title: "T",
-    description: "D",
-    state: "In Progress",
-    stateType: "started",
-    delegate: { id: "agent-v2", name: "Sergeant" }, assignee: { id: "user-ann", name: "Ann" },
-    linkedPullRequests: [{ repo: "trevorallred/canary", number: 7 }],
-  },
-  humanComments: [],
-  agentComments: [],
-};
-const pr: PullRequestFacts = {
-  repo: "trevorallred/canary",
-  number: 7,
-  url: "https://github.com/trevorallred/canary/pull/7",
-  state: "open",
-  draft: false,
-  author: "sergeant-worker[bot]",
-  headSha: head,
-  mergedSha: null,
-  baseRef: "main",
-  body: "Fixes UNF-1",
-  mergeable: true,
-  checks: { sha: head, required: [{ name: "ci", state: "passed" }] },
-  humanFeedback: [],
-};
-const situation: SituationReport = {
-  taskId: "tsk_1",
-  generatedAt: "2026-10-02T06:00:00.000Z",
-  conversationRevision: conversationRevision(conversation),
-  conversation,
-  enrolledRepositories: [pr.repo],
-  pullRequests: [pr],
-  runs: [
-    {
-      runId: "run_review",
-      role: "reviewer",
-      status: "succeeded",
-      provider: "anthropic",
-      model: "m",
-      report: { reportVersion: "s2-review-report/1", reviewed: [{ repo: pr.repo, number: 7, headSha: head }], verdict: "approve", findings: [], summary: "" },
-    },
-    {
-      runId: "run_worker",
-      role: "worker",
-      status: "succeeded",
-      provider: "anthropic",
-      model: "m",
-      report: {
-        reportVersion: "s2-worker-report/1",
-        outcome: "completed",
-        summary: "",
-        pullRequests: [{ repo: pr.repo, number: 7, headSha: head, url: pr.url, closesIssue: true, review: { required: true, reason: "" } }],
-        knownGaps: [],
-        followups: [],
-      },
-    },
-  ],
-  followups: [],
-  uploads: [],
-  refusedMerges: [],
-  budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2999-01-01T00:00:00.000Z", spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 0, taskStart: "2026-10-02T10:00:00.000Z", windowStart: "2026-10-02T10:00:00.000Z" },
-  recentTurns: [],
-};
-const merge: MergePr = { kind: "merge_pr", repo: pr.repo, number: 7, expectedHeadSha: head, reviewStanding: { kind: "reviewed", reviewRunId: "run_review" } };
-
-function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Conversation; moveFails?: boolean; taskOwner?: Ports["linear"]["readTaskOwner"] } = {}) {
-  const handoffs: string[] = [];
-  const merged: Parameters<GitHubPort["mergePullRequest"]>[0][] = [];
-  const started: string[] = [];
-  const sent: string[] = [];
-  const moved: string[] = [];
-  const filed: Parameters<Ports["linear"]["createFollowupIssue"]>[0][] = [];
-  const p: Ports = {
-    linear: {
-      readConversation: async () => live.conversation ?? conversation,
-      readTaskOwner: live.taskOwner ?? (async () => ({ owner: { id: "user-ann", name: "Ann" }, delegatedAt: "2026-10-04T00:00:00.000Z" })),
-      moveIssueToStarted: async (id) => {
-        moved.push(id);
-        if (live.moveFails) throw new Error("Linear unavailable");
-        return { moved: true as const, from: "Todo", to: "In Progress" };
-      },
-      postComment: async () => {},
-      createFollowupIssue: async (req) => {
-        filed.push(req);
-        return { identifier: `UNF-${100 + filed.length}`, url: `https://linear.app/x/issue/UNF-${100 + filed.length}` };
-      },
-    },
-    agentUserId: "agent-v2",
-    workerLogin: "sergeant-worker[bot]",
-    owner: { id: "user-ann", name: "Ann", admittedAt: "2026-10-04T00:00:00.000Z", delegatedAt: "2026-10-04T00:00:00.000Z" },
-    handoff: async (reason) => void handoffs.push(reason),
-    github: {
-      readPullRequest: async () => ({ ...pr, ...live.pr }),
-      closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),
-    },
-    runner: {
-      start: async (spec) => void started.push(spec.runId),
-      status: async () => { throw new Error("unused"); },
-      cancel: async () => {},
-      send: async (runId) => void sent.push(runId),
-    },
-  };
-  return { p, merged, started, sent, moved, filed, handoffs };
-}
 
 test("an exact-head reviewed merge reaches GitHub with the expected head", async () => {
   const { p, merged } = ports();
@@ -160,8 +42,6 @@ test("a wall deadline that passes during the merge's live reads stops the merge"
     vi.useRealTimers();
   }
 });
-
-const followup = (key: string): ProposedAction => ({ kind: "create_followup", key, title: `Do ${key}`, category: "concrete_bug", why: `${key} fails.`, description: `Why ${key}.`, relation: "related" });
 
 test("an issue reassigned or undelegated after the turn's snapshot gets no new start and no merge", async () => {
   const start: ProposedAction = { kind: "start_worker", objective: "Do UNF-1.", repositories: [pr.repo] };
@@ -206,60 +86,6 @@ test("a snapshot pairing the old conversation with the live revision cannot merg
   expect(merged).toEqual([]);
 });
 
-test("two start_worker proposals in one turn start exactly one worker", async () => {
-  const start: ProposedAction = { kind: "start_worker", objective: "Do UNF-1.", repositories: [pr.repo] };
-  const reasoner = { turn: async () => ({ output: { summary: "s", actions: [start, start] }, model: "m", promptVersion: "p" }) };
-  const { p, started } = ports();
-  const { outcomes } = await takeTurn({ ...situation, runs: [] }, { ...p, reasoner });
-  expect(started).toHaveLength(1);
-  expect(outcomes[1]).toMatchObject({ status: "denied", rule: "R4" });
-});
-
-// TECH-4947: a started worker makes the issue visibly In Progress, best effort. The move runs after
-// the start is a done fact, only for a worker, and a failed status write never fails or blocks the start.
-test("start_worker moves the issue to In Progress, and a failed move still leaves the start done", async () => {
-  const start: ProposedAction = { kind: "start_worker", objective: "Do UNF-1.", repositories: [pr.repo] };
-  const ok = ports();
-  expect(await execute(start, { ...situation, runs: [] }, ok.p)).toMatchObject({ status: "done" });
-  expect([ok.started.length, ok.moved]).toEqual([1, ["i1"]]);
-
-  const failing = ports({ moveFails: true });
-  expect(await execute(start, { ...situation, runs: [] }, failing.p)).toMatchObject({ status: "done" });
-  expect([failing.started.length, failing.moved]).toEqual([1, ["i1"]]);
-
-  // A reviewer start never moves the issue: In Progress belongs to the worker starting.
-  const review: ProposedAction = { kind: "start_reviewer", subject: [{ repo: pr.repo, number: 7, headSha: head }] };
-  const rv = ports();
-  expect(await execute(review, { ...situation, runs: [] }, rv.p)).toMatchObject({ status: "done" });
-  expect([rv.started.length, rv.moved]).toEqual([1, []]);
-});
-
-test("send_run to a run outside this task is refused before the runner", async () => {
-  const { p, sent } = ports();
-  const send = { kind: "send_run", runId: "run_foreign", message: "change course" } as const;
-  expect(await execute(send, situation, p)).toMatchObject({ status: "denied", rule: "S1" });
-  expect(sent).toEqual([]);
-});
-
-// UNF-729: a key reasoning repeats, in the same turn or a later one, files nothing new. There is no
-// per-task count (TECH-5186). The filed issue opens with the follow-up's category and why.
-test("a repeated follow-up key files one issue", async () => {
-  const actions = [followup("a"), followup("a"), followup("b")];
-  const reasoner = { turn: async () => ({ output: { summary: "s", actions }, model: "m", promptVersion: "p" }) };
-  const { p, filed } = ports();
-  const { outcomes } = await takeTurn(situation, { ...p, reasoner });
-  expect(filed.map((f) => f.key)).toEqual(["followup:tsk_1:a", "followup:tsk_1:b"]);
-  expect(filed[0]).toMatchObject({ originIssueId: "i1", relation: "related", description: expect.stringContaining(conversation.issue.url) });
-  expect(filed[0]?.description).toMatch(/^\*\*Why a follow-up \(a concrete bug\):\*\* a fails\.\n\nWhy a\./);
-  expect(outcomes.map((o) => o.status)).toEqual(["done", "done", "done"]);
-  expect(outcomes[1]).toMatchObject({ followup: { key: "a", identifier: "UNF-101" } });
-
-  // A later turn shown the filed follow-up gets it back without a second issue.
-  const later = await execute(followup("a"), { ...situation, followups: [{ key: "a", title: "Do a", identifier: "UNF-101", url: "https://linear.app/x/issue/UNF-101" }] }, p);
-  expect(later).toMatchObject({ status: "done", followup: { identifier: "UNF-101" } });
-  expect(filed).toHaveLength(2);
-});
-
 // UNF-733: a merge ends the task. A turn that also starts work, before or after the merge, must not
 // leave a live run on a merged task, and nothing is filed after the merge.
 test("a merge in a turn with a start leaves no live run, and nothing runs after it", async () => {
@@ -282,40 +108,6 @@ test("a merge in a turn with a start leaves no live run, and nothing runs after 
 
   const followupFirst = await turnOf([followup("a"), merge]);
   expect(followupFirst.outcomes.map((o) => o.status)).toEqual(["done", "done"]);
-});
-
-// TECH-4990: the reviewer's brief shows the humans' feedback on its PRs, read live as it starts, so a
-// change a human requested after the deciding turn's snapshot still reaches the reviewer.
-test("a reviewer starts with the live human feedback on its subject PRs, not the snapshot's", async () => {
-  const requested = {
-    id: "review:9", kind: "review" as const, author: "ada", state: "CHANGES_REQUESTED" as const, body: "Rename it.",
-    path: null, line: null, commitId: head, createdAt: "2026-10-02T06:01:00.000Z", updatedAt: "2026-10-02T06:01:00.000Z", url: `${pr.url}#pullrequestreview-9`,
-  };
-  const { p } = ports({ pr: { humanFeedback: [requested] } });
-  const specs: Parameters<Ports["runner"]["start"]>[0][] = [];
-  p.runner.start = async (spec) => void specs.push(spec);
-  const review: ProposedAction = { kind: "start_reviewer", subject: [{ repo: pr.repo, number: 7, headSha: head }] };
-  expect(await execute(review, { ...situation, runs: [] }, p)).toMatchObject({ status: "done" });
-  expect(specs).toMatchObject([{ role: "reviewer", pullRequests: [{ repo: pr.repo, number: 7, humanFeedback: [requested] }] }]);
-});
-
-// TECH-5179: the owner's episode is reread from Linear's history at the effect, not only each poll.
-test("a newer or someone else's delegation since the poll starts no run and records the handoff; unreadable history starts nothing", async () => {
-  const start: ProposedAction = { kind: "start_worker", repositories: [pr.repo], objective: "o" };
-  const again = ports({ taskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" }, delegatedAt: "2026-10-04T01:00:00.000Z" }) });
-  expect(await execute(start, situation, again.p)).toMatchObject({ status: "denied", rule: "O1" });
-  expect(again.started).toEqual([]);
-  expect(again.handoffs).toEqual([expect.stringMatching(/delegated to Sergeant again/)]);
-
-  const bob = ports({ taskOwner: async () => ({ refused: "delegator_differs", assignee: { id: "user-ann", name: "Ann" }, delegator: { id: "user-bob", name: "Bob" } }) });
-  expect(await execute(start, situation, bob.p)).toMatchObject({ status: "denied", rule: "O1" });
-  expect(bob.started).toEqual([]);
-  expect(bob.handoffs).toHaveLength(1);
-
-  const unreadable = ports({ taskOwner: async () => Promise.reject(new Error("Linear down")) });
-  expect(await execute(start, situation, unreadable.p)).toMatchObject({ status: "failed" });
-  expect(unreadable.started).toEqual([]);
-  expect(unreadable.handoffs).toEqual([]);
 });
 
 test("the live merge preflight refuses a reassigned issue or a newer delegation and records the handoff, keeping the PR", async () => {

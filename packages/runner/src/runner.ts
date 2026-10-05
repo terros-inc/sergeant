@@ -1,25 +1,23 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   issueRevision,
   parseReport,
-  ProviderChoice,
   ReviewReport,
-  RunAccount,
   RunRecord,
   WorkerReport,
-  type RunId,
   type RunnerPort,
   type RunSpec,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
 import { failingReset, pickAccount, runAccount, setAside } from "./accounts.ts";
-import { AGENTS, ADAPTERS, type Adapter } from "./agents.ts";
+import { AGENTS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
+import { recorded, runFiles, type RunMeta } from "./run-files.ts";
 
 export type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
 
@@ -29,32 +27,6 @@ const DEFAULT_LIMITS: Record<Role, Limits> = {
   worker: { maxWallSeconds: 3_600, maxCostUsd: 10 },
   reviewer: { maxWallSeconds: 1_800, maxCostUsd: 5 },
 };
-
-const RunMeta = z.object({
-  runId: z.string(),
-  role: z.enum(["worker", "reviewer"]),
-  /** Absent in a run started before TECH-5009, which was Claude Code's. */
-  adapter: z.enum(ADAPTERS).default("claude-code-local"),
-  model: z.string(),
-  repositories: z.array(z.string()),
-  container: z.string(),
-  startedAt: z.string(),
-  /** The issue text the run started from; every record of the run carries it (M13). */
-  issueRevision: z.string().optional(),
-  /** The provider chosen from quota and the readings behind it (TECH-5117); every record of the run carries it. */
-  providerChoice: ProviderChoice.optional(),
-  /** The task owner's model account it runs on and why (TECH-5179); every record of the run carries them. */
-  account: RunAccount.optional(),
-  accountReason: z.string().optional(),
-  /** The task owner's Linear user id, whose accounts the run's is among (TECH-5213). */
-  ownerId: z.string().optional(),
-});
-type RunMeta = z.infer<typeof RunMeta>;
-const recorded = ({ issueRevision, providerChoice, account, accountReason }: RunMeta) => ({
-  ...(issueRevision !== undefined && { issueRevision }),
-  ...(providerChoice && { providerChoice }),
-  ...(account && { account, ...(accountReason && { accountReason }) }),
-});
 
 /**
  * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
@@ -85,24 +57,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       .object({ html_url: z.string(), title: z.string(), body: z.string().nullable(), base: z.object({ ref: z.string() }) })
       .parse(await res.json());
   };
-  const paths = (runId: string) => {
-    const dir = join(root, runId);
-    return { dir, workspace: join(dir, "workspace"), meta: join(dir, "run.json"), record: join(dir, "record.json") };
-  };
-  const readMeta = async (runId: RunId) => RunMeta.parse(JSON.parse(await readFile(paths(runId).meta, "utf8")));
-  const readRecord = async (runId: RunId) => {
-    try {
-      const record = JSON.parse(await readFile(paths(runId).record, "utf8"));
-      // run.json is authoritative for launch-time facts. Keep serving them even for a terminal
-      // record written without the newer optional fields (for example, across a host update). They
-      // are extra detail only: a missing or unreadable run.json leaves the record as written.
-      const meta = await readMeta(runId).catch(() => undefined);
-      return RunRecord.parse({ ...record, ...(meta && recorded(meta)) });
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw e;
-    }
-  };
+  const { paths, readMeta, readRecord, priorReports } = runFiles(root);
 
   async function finish(meta: RunMeta, record: RunRecord, agent: unknown) {
     const p = paths(meta.runId);
@@ -152,30 +107,6 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     await writeFile(join(p.dir, "report.md"), markdown);
     const parsed = meta.role === "reviewer" ? parseReport(markdown, ReviewReport) : parseReport(markdown, WorkerReport);
     return parsed.ok ? { report: parsed.report } : { report: null, reportError: parsed.error };
-  }
-
-  /**
-   * Earlier runs naming these PRs: the worker reports are the implementer's claims a reviewer checks,
-   * and earlier reviews are the findings it checks were addressed (06 §2). The latest such worker's
-   * adapter is the one a reviewer should not share (TECH-5117).
-   */
-  async function priorReports(subjects: { repo: string; number: number }[]) {
-    const names = (pr: { repo: string; number: number }) => subjects.some((s) => s.repo === pr.repo && s.number === pr.number);
-    const claims: string[] = [];
-    const reviews: ReviewReport[] = [];
-    let worker: RunMeta | undefined;
-    for (const runId of await readdir(root)) {
-      const record = await readRecord(runId).catch(() => undefined);
-      if (!record?.report) continue;
-      if (record.role === "reviewer") {
-        if (record.report.reviewed.some(names)) reviews.push(record.report);
-      } else if (record.report.pullRequests.some(names)) {
-        claims.push(await readFile(join(paths(runId).dir, "report.md"), "utf8"));
-        const meta = await readMeta(runId).catch(() => undefined);
-        if (meta && (!worker || meta.startedAt > worker.startedAt)) worker = meta;
-      }
-    }
-    return { claims, reviews, workerAdapter: worker?.adapter };
   }
 
   /** The task owner's account for a launch, from quota read now (accounts.ts). */

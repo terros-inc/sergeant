@@ -1,20 +1,18 @@
-import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { apiHandler } from "./api.ts";
-import { heldAcceptances } from "./accepted.ts";
 import { isLoopbackHost } from "./auth.ts";
-import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
-import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
-import { setAsideCompleted } from "./task-state.ts";
+import { driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
+import { runLoop, type LoopResult } from "./loop.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { retroEvery } from "./retro.ts";
 import { startFeedbackLoop } from "./service-feedback.ts";
+import { newWork, resumableTasks } from "./service-intake.ts";
 import { lockStateDir } from "./service-lock.ts";
 import { createServiceServer } from "./service-http.ts";
 import type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
+import { serviceWebhooks } from "./service-webhooks.ts";
 import { Wake } from "./wake.ts";
-import { webhookHandler, type Nudge } from "./webhooks.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
@@ -56,7 +54,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   // Each open delegated issue's place in admission order; a task Linear no longer lists goes last.
   let rank = new Map<string, number>();
   // Each Todo issue a blocker held up at the last intake, and the line logged for it: logged again only when it changes.
-  let blocked = new Map<string, string>();
+  const blocked = new Map<string, string>();
   const byRank = (a: string, b: string) => (rank.get(a) ?? rank.size) - (rank.get(b) ?? rank.size);
   const wakes = new Map<string, Wake>();
   const wakeOf = (issueId: string) => {
@@ -183,41 +181,13 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     // Every task under way locally resumes, whether or not Linear lists it, taking free slots in
     // admission order; one past them runs its live checks with no slot. One seen through after its
     // merge does not resume. An unreadable `state.json` holds up no other task, nor discovery.
-    const resumable: string[] = [];
-    for (const ref of await readdir(join(opts.stateDir, "tasks")).catch(() => [])) {
-      if (active.has(ref)) continue;
-      const task = await readTaskState(join(taskDir(opts.stateDir, ref), "state.json")).catch((e: Error) => log(`${ref}: not resumed: ${e.message}`));
-      if (task && !task.merged?.completedAt) resumable.push(ref);
-    }
+    const resumable = await resumableTasks(opts.stateDir, active, log);
     // A loop that already ended resumes cheaply and asks for a slot only if its live checks find work.
     // This leaves the same intake free to admit newly listed Todo work instead of letting unchanged
     // local tasks reclaim every slot on each periodic intake.
     for (const ref of resumable.sort(byRank)) admit(ref, ended.has(ref) || freeSlots() <= 0);
     if (failed) throw failed;
-    // New work: a delegated issue in Todo, not one whose stop is still under way, one a human accepted
-    // as it is and has not touched since (accepted.ts, TECH-5118), nor one a Linear "blocked by" issue
-    // still holds up (TECH-5066); it starts at the first intake after its last blocker is completed or
-    // canceled. A task already under way resumes above, blocked or not.
-    const accepted = await heldAcceptances(opts.stateDir, listed ?? [], (ref) => wakes.get(ref)?.pending === true, log);
-    const loggedBefore = blocked;
-    blocked = new Map();
-    const todo = (listed ?? []).filter((issue) => {
-      if (issue.state.type !== "unstarted" || accepted.has(issue.identifier)) return false;
-      if (issue.blockedBy.length === 0) return true;
-      const line = `${issue.identifier} waiting on blocker ${issue.blockedBy.join(", ")}`;
-      if (loggedBefore.get(issue.identifier) !== line) log(line);
-      blocked.set(issue.identifier, line);
-      return false;
-    });
-    const issues = await Promise.all(
-      todo.map(async (issue) => {
-        const dir = taskDir(opts.stateDir, issue.identifier);
-        if (await cancelPending(dir)) return [];
-        if (!active.has(issue.identifier) && (await setAsideCompleted(dir))) log(`${issue.identifier}: reopened after its task was seen through: a new task`);
-        return [issue];
-      }),
-    );
-    ordered = issues.flat();
+    ordered = await newWork(opts.stateDir, listed, { blocked, active, woken: (ref) => wakes.get(ref)?.pending === true }, log);
     delegated = ordered.map((issue) => issue.identifier);
     intakeStartedAt = startedAt;
     schedule(ordered);
@@ -277,28 +247,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     ...(opts.enrollment && { enrollment: opts.enrollment }),
     ...(deps.retro && { requestRetro: () => retroWake.request() }),
   });
-  // A webhook ends the wait of each loop watching what it names, and runs an intake for a task or a
-  // delegated issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
-  // most once per `webhookGapSeconds`. An issue or PR no task knows is ignored; the polls cover it.
-  const gapMs = (opts.webhookGapSeconds ?? 5) * 1000;
-  const nudge = ({ keys, intake }: Nudge) => {
-    const named = new Set(keys);
-    let admit = intake;
-    for (const [issueId, wake] of wakes) {
-      if (!named.has(issueId) && !wake.watched.some((k) => named.has(k))) continue;
-      if (active.has(issueId)) wake.nudge(gapMs);
-      else admit = true;
-    }
-    if (delegated.some((id) => named.has(id) && !active.has(id))) admit = true;
-    if (admit) intakeWake.nudge(gapMs);
-  };
-  const webhooks = webhookHandler({
-    secrets: opts.webhookSecrets ?? {},
-    agentUserId: deps.agentUserId,
-    enrolledRepositories: opts.enrolledRepositories,
-    nudge,
-    log,
-  });
+  const webhooks = serviceWebhooks(opts, deps, log, { wakes, active, delegated: () => delegated, intakeWake });
   const server =
     opts.port === undefined
       ? undefined

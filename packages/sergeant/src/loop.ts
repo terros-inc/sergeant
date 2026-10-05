@@ -1,20 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { conversationRevision, linearUploads, issueRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
+import { conversationRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { driveMerged, exists, mergedOf } from "./after-merge.ts";
 import { acceptedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
-import { cancelPending, driveCancel, recordStop } from "./cancel.ts";
+import { cancelPending, recordStop } from "./cancel.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
+import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
+import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
 import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
-import { cancelRuns, describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
+import { describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
 import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
@@ -120,28 +122,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
   };
 
-  // A run whose status cannot be read is unknown, never stopped (04 §6).
-  const readRuns = async () => {
-    const read = await Promise.all(state.runIds.map((id) => deps.runner.status(id).catch((e: Error) => ({ unknown: id, error: e.message }))));
-    return { runs: read.filter((r): r is RunRecord => !("unknown" in r)), unknown: read.filter((r) => "unknown" in r) };
-  };
   const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
     budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
-
-  // The task's durable stop (cancel.ts), driven under the task's lock every poll until the runner
-  // confirms each run stopped, its open PRs are closed, and the issue is told. Whichever of this loop,
-  // `serve`'s intake, or the API drives it to the end, the loop then ends: an issue moved back to Todo
-  // meanwhile is a fresh task for intake to start, never this one continued.
-  const driveStop = async (reason: string): Promise<LoopResult | undefined> => {
-    const exclusive = deps.exclusive ?? ((step) => step());
-    const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
-    const progress = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
-    if (progress?.stopping.length !== 0) {
-      log(`stopping (${reason}): retrying cancellation`);
-      return undefined;
-    }
-    return { outcome: "stopped", detail: reason };
-  };
 
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };
@@ -150,26 +132,12 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // A stop another driver (the API, intake) finished set the task aside: it is over.
     if (!stopping && !(await exists(files.state))) return { outcome: "stopped", detail: "the task was stopped" };
     if (stopping) {
-      // A stop holds no task slot: new work may start while the runner confirms this one's runs.
-      if (opts.slot && !opts.slot.released) {
-        Object.assign(opts.slot, { released: true, wanted: false, waitingSince: undefined });
-        opts.slot.changed();
-      }
-      const stopped = await driveStop(stopping);
+      const stopped = await driveStop(stopping, opts, deps, log);
       if (stopped) return stopped;
       await wait(pollMs);
       continue;
     }
-    // A start never seen through: the runner either knows the run, or confirms it stopped or never
-    // started, which drops it. Until then it stays in `runIds`, unknown, so it is canceled like any
-    // other run on an undelegation or an exhausted budget.
-    for (const runId of state.unconfirmedStarts) {
-      const known = await deps.runner.status(runId).then(() => true, () => false);
-      if (!known && (await cancelRuns([runId], deps, log)) > 0) continue;
-      state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== runId);
-      if (!known) state.runIds = state.runIds.filter((id) => id !== runId);
-      await save();
-    }
+    await confirmStarts(state, deps, log, save);
 
     if (state.accepted) {
       // TECH-5118: a human accepted the work as it is in reply to the budget question, so the task ends
@@ -188,7 +156,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
 
-    const { runs, unknown } = await readRuns();
+    const { runs, unknown } = await readRuns(state, deps);
     await recordReviews(runs);
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
     const conversation = await deps.linear.readConversation(opts.issueId);
@@ -241,21 +209,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
       continue;
     }
-    let situation = SituationReport.parse({
-      taskId: `canary_${conversation.issue.identifier}`,
-      generatedAt: new Date().toISOString(),
-      conversationRevision: conversationRevision(conversation, pullRequests),
-      conversation,
-      uploads: linearUploads(conversation),
-      issueRevision: issueRevision(conversation.issue),
-      enrolledRepositories: opts.enrolledRepositories,
-      pullRequests,
-      runs,
-      followups: state.followups,
-      refusedMerges: state.refusedMerges,
-      budget,
-      recentTurns: state.recentTurns,
-    });
+    let situation = situationOf(conversation, pullRequests, runs, budget, state, opts);
     let fingerprint = fingerprintOf(situation);
     if (reconcileMergeRetries(state, fingerprint)) {
       await save();
