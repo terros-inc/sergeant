@@ -7,11 +7,13 @@ import { rereviewKey } from "./rereview.ts";
 // opens a fresh window from the review, exactly as an answer does. Both are read from GitHub and Linear
 // every poll; nothing new is stored.
 
+/** The human reviews and inline review comments on the task's PRs: each may have opened a window. */
+export const humanReviews = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] =>
+  pullRequests.flatMap((p) => p.humanFeedback).filter((f) => f.kind === "review" || f.kind === "review_comment");
+
 /** The newest human review or inline review comment on the task's PRs: what opens a fresh window. */
 export function latestHumanReview(pullRequests: PullRequestFacts[]): HumanPullRequestFeedback | undefined {
-  return pullRequests
-    .flatMap((p) => p.humanFeedback)
-    .filter((f) => f.kind === "review" || f.kind === "review_comment")
+  return humanReviews(pullRequests)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
 }

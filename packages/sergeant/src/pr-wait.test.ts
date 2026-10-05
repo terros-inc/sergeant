@@ -1,8 +1,9 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { commentIdFor, type AgentComment, type HumanPullRequestFeedback, type PullRequestFacts, type RefusedMerge } from "@terros/sergeant-contracts";
-import { cleanup, dir, issue, pr, saved, scenario, turnOf } from "./budget-scenario.ts";
+import { commentIdFor, QUESTION_HEADING, type AgentComment, type HumanPullRequestFeedback, type PullRequestFacts, type RefusedMerge } from "@terros/sergeant-contracts";
+import { budgetQuestionKey } from "./budget.ts";
+import { cleanup, dir, human, issue, pr, saved, scenario, turnOf } from "./budget-scenario.ts";
 import { handoffKey } from "./handoff.ts";
 import { rereviewKey } from "./rereview.ts";
 
@@ -83,4 +84,22 @@ test("a task waiting on no human PR action still asks the budget question when i
 
   expect(turns).toBe(1);
   expect(posted).toEqual([expect.stringMatching(/budget is exhausted \(wall time exhausted at /)]);
+});
+
+test("an accept-as-is reply to a budget question asked in a window a review opened ends the task", async () => {
+  // The owner approved 250 minutes ago, opening a window that ran out; its budget question, keyed by
+  // the review's time, was answered "Accept as-is". TECH-5118 must know that window's start.
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const approval = review("captain", "APPROVED", ago(250));
+  const asked = { ...comment(budgetQuestionKey(issue.id, approval.createdAt), ago(60)), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted (wall time exhausted). Continue?` };
+  const { result } = await scenario({
+    state: { startedAt: ago(300), runIds: [], turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: approval.createdAt, priorRuns: [] } },
+    conversation: { agentComments: [asked], humanComments: [human("c1", ago(1), "2")] },
+    runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
+    reasoner: async () => turnOf([{ kind: "accept_as_is" }]),
+    pullRequest: (): PullRequestFacts => ({ ...pr, humanFeedback: [approval] }),
+    onPoll: (_poll, live) => live,
+  });
+
+  expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
 });
