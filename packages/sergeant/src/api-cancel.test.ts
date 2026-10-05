@@ -149,3 +149,52 @@ test("a task cancel stops a run whose start had already passed the delegation ch
   expect(runs).toEqual([expect.objectContaining({ status: "canceled" })]);
 }, 30_000);
 
+// TECH-5006: a cancel answered while a run is still stopping closes the task's PRs later, from serve's
+// intake, and the intent that listed them is removed then. `sgt task show` must still name them, across
+// a restart too, when only the stop's record is left of the task.
+test("the PRs a stop closed after the cancel answered stay listed by task show once the stop is done", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
+  const f = fakes([{ runId: "run_w1", role: "worker", status: "running", provider: "p", model: "m", report: null }]);
+  const url = "https://github.com/o/r/pull/7";
+  let prState: "open" | "closed" = "open";
+  f.conversation.issue.linkedPullRequests = [{ repo: "o/r", number: 7 }];
+  f.deps.github.readPullRequest = async (repo, number) => ({
+    repo, number, url, author: "sergeant-worker[bot]", state: prState, draft: false, headSha: "a".repeat(40), mergedSha: null, baseRef: "main",
+    body: "Fixes UNF-1", mergeable: true, checks: { sha: "a".repeat(40), required: [] }, humanFeedback: [],
+  });
+  f.deps.github.closePullRequest = async () => void (prState = "closed");
+  // The runner cannot confirm a cancel until the restart, so the API answers before the PR is closed.
+  const cancel = f.deps.runner.cancel;
+  let confirms = false;
+  f.deps.runner.cancel = async (runId) => {
+    if (!confirms) throw new Error("docker stop timed out");
+    await cancel(runId);
+  };
+  const task = join(dir, "tasks", "UNF-1");
+  await mkdir(task, { recursive: true });
+  const state = { issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_w1"], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 } } };
+  await writeFile(join(task, "state.json"), JSON.stringify(state));
+  let port = await start(f.deps, { trustLoopback: true, intakeSeconds: 3600 });
+
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach", requestId: "req-1" })).json).toEqual({
+    ref: "UNF-1", undelegated: true, stopping: ["run_w1"], closedPullRequests: [],
+  });
+  const reason = "the task was canceled by an operator on the Sergeant host: wrong approach";
+  expect((await call(port, "GET", "/v1/tasks/UNF-1")).json.stop).toEqual({ reason, at: expect.any(String), done: false, closedPullRequests: [] });
+
+  // A restart's intake finishes the stop: the PR is closed and the intent removed.
+  await service?.stop();
+  confirms = true;
+  port = await start(f.deps);
+  await vi.waitFor(async () => expect(await exists(join(task, "cancel.json"))).toBe(false), { timeout: 5_000 });
+  expect(prState).toBe("closed");
+  const done = { reason, at: expect.any(String), done: true, closedPullRequests: [{ repo: "o/r", number: 7, url }] };
+  expect((await call(port, "GET", "/v1/tasks/UNF-1")).json.stop).toEqual(done);
+  // A repeat cancel finds no stop to drive, so answers none, while task show keeps them.
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "again" })).json.closedPullRequests).toEqual([]);
+
+  // Another restart: the issue is undelegated and `state.json` set aside, so only the stop's record names the task.
+  await service?.stop();
+  port = await start(f.deps, { trustLoopback: true, intakeSeconds: 3600 });
+  expect(await call(port, "GET", "/v1/tasks/UNF-1")).toMatchObject({ status: 200, json: { stop: done } });
+}, 30_000);

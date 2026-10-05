@@ -74,7 +74,7 @@ Tasks are named by their Linear issue identifier, such as `TECH-123`.
 
 ```sh
 sgt task list                                  # every task, with status, turns, runs, last summary
-sgt task show TECH-123                         # the issue, budget, runs, and recent turns
+sgt task show TECH-123                         # the issue, budget, runs, recent turns, and its last stop with the PRs it closed
 sgt task wake TECH-123 --reason "PR updated"   # ask Sergeant to take a turn now (--reason optional)
 sgt task cancel TECH-123 --reason "not needed" # stop it: removes Sergeant's delegation, cancels its runs
 sgt run list --task TECH-123                   # the task's runs, with their ids

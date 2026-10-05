@@ -23,7 +23,8 @@ import type { ApiControl } from "./api.ts";
 import { parse, Refusal } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
 import { budgetStatus } from "./budget.ts";
-import { CancelConflict, cancelRun, runIdsOf } from "./cancel.ts";
+import { CancelConflict, cancelRun, runIdsOf, taskDir } from "./cancel.ts";
+import { readIntent, readStopRecord } from "./cancel-intent.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
 
 // `/v1/tasks` and `/v1/runs` (11 §2, UNF-713): what api.ts routes there. Reads come from each task's
@@ -44,8 +45,18 @@ async function allTasks(ctl: ApiControl): Promise<Task[]> {
 
 async function findTask(ctl: ApiControl, ref: TaskRef): Promise<Task> {
   const state = await readTaskState(stateFile(ctl, ref));
-  if (!state && !ctl.known().includes(ref)) throw new Refusal(404, "not_found", `Sergeant has no task for ${ref}`);
+  // A task stopped before this process started is known only by its stop's record (TECH-5006).
+  if (!state && !ctl.known().includes(ref) && !(await lastStop(ctl, ref))) throw new Refusal(404, "not_found", `Sergeant has no task for ${ref}`);
   return { ref, state };
+}
+
+/** The task's stop under way, else its last finished one. */
+async function lastStop(ctl: ApiControl, ref: TaskRef): Promise<TaskDetail["stop"]> {
+  const dir = taskDir(ctl.stateDir, ref);
+  const pending = await readIntent(dir);
+  if (pending) return { reason: pending.reason, at: pending.at, done: false, closedPullRequests: pending.closed };
+  const done = await readStopRecord(dir);
+  return done && { reason: done.reason, at: done.at, done: true, closedPullRequests: done.closed };
 }
 
 const byRef = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
@@ -74,7 +85,7 @@ export async function listTasks(ctl: ApiControl): Promise<TaskList> {
 
 export async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetail> {
   const task = await findTask(ctl, ref);
-  const [records, issue] = await Promise.all([
+  const [records, issue, stop] = await Promise.all([
     readRuns(ctl, runIdsOf(task.state)),
     ctl.deps.linear.readConversation(ref).then(
       ({ issue: i }) => ({
@@ -86,6 +97,7 @@ export async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetai
       }),
       (e: Error) => ({ error: e.message }),
     ),
+    lastStop(ctl, ref),
   ]);
   const known = records.flatMap((r) => (r.record ? [r.record] : []));
   const state = task.state;
@@ -98,6 +110,7 @@ export async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetai
     runs: records.map((r) => runSummary(ref, r)),
     recentTurns: state?.recentTurns.slice(-5) ?? [],
     followups: state?.followups ?? [],
+    stop,
   };
 }
 

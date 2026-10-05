@@ -54,6 +54,11 @@ export function showTask(d: TaskDetail): string {
     lines.push("recent turns:");
     for (const t of d.recentTurns) lines.push(`  ${minute(t.at)}  ${clip(t.summary, 100)}`, ...t.outcomes.map((o) => `    ${clip(o, 100)}`));
   }
+  if (d.stop) {
+    const prs = d.stop.closedPullRequests.map((p) => `  closed ${p.repo}#${p.number}  ${p.url}`);
+    const closed = prs.length ? prs : [d.stop.done ? "  no worker PR closed" : "  no worker PR closed yet: open ones are closed once its runs stop"];
+    lines.push(`${d.stop.done ? "stopped" : "stopping"}, recorded ${minute(d.stop.at)}: ${clip(d.stop.reason, 100)}`, ...closed);
+  }
   if (d.followups.length) lines.push("follow-ups:", ...d.followups.map((f) => `  ${f.identifier}  ${clip(f.title, 60)}  ${f.url}`));
   return lines.join("\n");
 }

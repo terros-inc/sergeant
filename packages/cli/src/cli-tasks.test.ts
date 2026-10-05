@@ -32,6 +32,20 @@ test("task show prints the facts an operator acts on, and --json is the API's an
   expect(JSON.parse(json.out)).toEqual(detail);
 });
 
+// TECH-5006: the PRs a stop closed, those closed after the cancel answered included, show without Linear.
+test("task show lists the PRs the task's stop closed", async () => {
+  const stop = { reason: "the task was canceled by Ada: wrong approach", at: "2026-10-02T11:00:00.000Z", done: true, closedPullRequests: [{ repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7" }] };
+  const { api } = await fakeApi({
+    "GET /v1/tasks/UNF-12": { json: { ...detail, stop } },
+    "GET /v1/tasks/UNF-14": { json: { ...detail, stop: { ...stop, done: false, closedPullRequests: [] } } },
+  });
+
+  const done = await sgt(api, "task", "show", "UNF-12");
+  expect(done.out).toContain("stopped, recorded 2026-10-02 11:00Z: the task was canceled by Ada: wrong approach\n  closed o/r#7  https://github.com/o/r/pull/7\n");
+  const stopping = await sgt(api, "task", "show", "UNF-14");
+  expect(stopping.out).toContain("stopping, recorded 2026-10-02 11:00Z: the task was canceled by Ada: wrong approach\n  no worker PR closed yet: open ones are closed once its runs stop\n");
+});
+
 test("task cancel requires a reason before calling the API, then posts it as JSON with a request id", async () => {
   const { api, seen } = await fakeApi({ "POST /v1/tasks/UNF-12/cancel": { json: { ref: "UNF-12", undelegated: true, stopping: [], closedPullRequests: [] } } });
 
