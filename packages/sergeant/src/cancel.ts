@@ -5,6 +5,7 @@ import { checkDelegation, STOP_STATE_TYPES, type ClosedPullRequest, type Convers
 import { exists, postFeedbackComment } from "./after-merge.ts";
 import { intentFile, readIntent, writeIntent, type CancelIntent, type Handoff } from "./cancel-intent.ts";
 import { handOff, handoffComment, stalledStopComment, stopComment } from "./cancel-linear.ts";
+import { costTotal, taskTurnCost } from "./cost.ts";
 import type { Ports } from "./execute.ts";
 import { feedbackComment, workerFeedback } from "./outcome.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
@@ -183,9 +184,14 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   const { issue } = await deps.linear.readConversation(ref);
   const prs = await taskPullRequests(issue.linkedPullRequests, runs, enrolled, deps);
   const open = prs.filter((p) => p.state === "open");
+  // TECH-5227: the comment that ends the task ends with its total cost; `state.json` is set aside only after it.
+  const state = await readTaskState(join(dir, "state.json")).catch(() => undefined);
+  const turnCostUsd = state ? await taskTurnCost(join(dir, "turns.jsonl"), state.startedAt) : 0;
+  const cost = costTotal({ runs, unknownRuns: unreadablePastGrace.length, turnCostUsd, startedAt: state?.startedAt });
   if (intent.handoff) {
     const done = await handOff(issue, intent.handoff, deps, log);
-    await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: handoffComment(intent.reason, issue, prs, done, unreadablePastGrace) });
+    const body = `${handoffComment(intent.reason, issue, prs, done, unreadablePastGrace)}\n\n${cost}`;
+    await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body });
   }
   for (const pr of intent.handoff ? [] : open.filter((p) => p.author === deps.workerLogin)) {
     const key = prCloseKey(pr);
@@ -198,7 +204,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     await writeIntent(dir, intent);
     log(`${ref}: closed ${pr.url}`);
   }
-  if (!intent.handoff) await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: stopComment(intent, unreadablePastGrace) });
+  if (!intent.handoff) await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: `${stopComment(intent, unreadablePastGrace)}\n\n${cost}` });
   // TECH-5186: an issue completed in Linear, still Sergeant's, without a recognized closing merge gets
   // its feedback like a merged one, once under the stop's key. A failed comment or label throws before
   // `state.json` is set aside and the intent removed, so the next drive retries it.

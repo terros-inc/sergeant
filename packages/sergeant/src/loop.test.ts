@@ -42,7 +42,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
   const labels: string[] = [];
 
   const run = () => runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, progressComments: false, log: () => {} },
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",

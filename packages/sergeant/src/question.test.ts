@@ -85,7 +85,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   let onWait = async (_n: number) => {};
 
   const run = () => runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, idleMinutes: 0, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, idleMinutes: 0, progressComments: false, log: () => {} },
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",

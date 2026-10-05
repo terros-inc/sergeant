@@ -110,6 +110,7 @@ const service = await startService(
     pollSeconds: count(values["poll-seconds"], "--poll-seconds", 1),
     budget: taskBudget(config),
     auditSampleRate: config.review.auditSampleRate,
+    progressComments: config.review.progressComments,
     webhookSecrets: installation.webhookSecrets,
     trustLoopback: values["trust-loopback"],
     accounts: accounts.registry,

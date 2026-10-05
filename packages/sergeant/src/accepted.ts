@@ -24,10 +24,10 @@ const markerFile = (dir: string) => join(dir, "accepted.json");
 export const acceptedKey = (issueId: string, replyId: string) => `accepted:${issueId}:${replyId}`;
 
 /** The one line that tells the human Sergeant has stopped and what is left is theirs. */
-export function acceptedComment(pullRequests: Pick<PullRequestFacts, "repo" | "number" | "url" | "state">[]): string {
+export function acceptedComment(pullRequests: Pick<PullRequestFacts, "repo" | "number" | "url" | "state">[], cost?: string): string {
   const open = pullRequests.filter((p) => p.state === "open").map((p) => `[${p.repo}#${p.number}](${p.url})`);
   const left = open.length > 0 ? `${open.join(", ")} and this issue are` : "This issue is";
-  return `Sergeant has stopped: the work was accepted as it is. ${left} yours to merge or close.`;
+  return `Sergeant has stopped: the work was accepted as it is. ${left} yours to merge or close.${cost ? `\n\n${cost}` : ""}`;
 }
 
 /** Posts the acceptance's comment; a Linear failure throws, so the loop fails and its ending is replayed. */

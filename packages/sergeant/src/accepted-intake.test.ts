@@ -67,7 +67,7 @@ test("a task accepted while its issue is in Todo is not started again until a hu
     await sleep(200);
     expect(turns).toEqual(["accept"]);
     expect(started).toEqual([]);
-    expect(posted).toEqual(["Sergeant has stopped: the work was accepted as it is. This issue is yours to merge or close."]);
+    expect(posted).toEqual([expect.stringMatching(/^Sergeant has stopped: the work was accepted as it is\. This issue is yours to merge or close\.\n\nCost: /)]);
     expect(await readdir(task)).not.toContain("state.json");
 
     // A human moves the issue out of Todo and back: a deliberate re-trigger starts a fresh task.

@@ -18,6 +18,8 @@ import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./me
 import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
 import { describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
 import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
+import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
+import { postProgress } from "./progress.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
@@ -158,6 +160,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     const { runs, unknown } = await readRuns(state, deps);
     await recordReviews(runs);
+    // TECH-5227: what the task has cost, read when a comment says so (cost.ts), with Sergeant's turns over
+    // the whole task: `state.turnCostUsd` is only the current budget window's.
+    const spent = (turnCostUsd: number) => ({ runs, unknownRuns: unknown.length, turnCostUsd, startedAt: state.startedAt });
+    const turnsSoFar = () => taskTurnCost(files.turns, state.startedAt);
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
     const conversation = await deps.linear.readConversation(opts.issueId);
     // What a webhook names to end this loop's wait (webhooks.ts): the issue, its PRs, and their heads.
@@ -204,7 +210,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // a fact for the next turn.
     const landed = landedOf(pullRequests, runs, deps.workerLogin);
     if (landed?.mergedSha) {
-      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue);
+      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue, costTotal(spent(await turnsSoFar())));
       await save();
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
       continue;
@@ -253,6 +259,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     if (opts.wake) opts.wake.pending = false;
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);
+    const earlierTurns = await turnsSoFar();
     const { turn, outcomes } = await takeTurn(situation, ports);
     const at = new Date().toISOString();
     const described = outcomes.map(describeOutcome);
@@ -267,13 +274,17 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
     const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
-    applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed }, log);
+    const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
+    applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
     const reply = accepted ? latestAnswer(conversation) : undefined;
-    if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests) };
+    if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests, costTotal({ ...spent(taskTurnCostUsd), at })) };
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
+    // TECH-5227: each finished review round not yet told gets its own short comment (progress.ts), with
+    // the cost recorded up to this turn. The one switch.
+    if (opts.progressComments !== false) await postProgress(opts.issueId, situation, costSoFar(spent(earlierTurns)), outcomes, deps, log);
     await postHandoffs(conversation.issue.id);
   }
 }

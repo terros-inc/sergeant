@@ -15,6 +15,8 @@ export function outcomeComment(
   runs: RunRecord[],
   followups: FiledFollowup[],
   issue: Pick<Conversation["issue"], "title" | "description">,
+  /** TECH-5227: the task's total cost line (cost.ts). */
+  cost?: string,
 ): string {
   const head = pr.headSha;
   const covers = (r: { repo: string; number: number }) => r.repo === pr.repo && r.number === pr.number;
@@ -41,6 +43,7 @@ export function outcomeComment(
     `- Validation: ${validation}.`,
     `- Known gaps: ${gaps.length > 0 ? gaps.join("; ") : "none reported"}.`,
     ...(followups.length > 0 ? [`- Follow-ups filed: ${followups.map((f) => `[${f.identifier}](${f.url}) ${f.title}`).join("; ")}.`] : []),
+    ...(cost ? [`- ${cost}`] : []),
   ].join("\n");
 }
 

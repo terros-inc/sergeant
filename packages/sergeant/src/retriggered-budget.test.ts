@@ -13,6 +13,8 @@ afterEach(cleanup);
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const acknowledged = `Sergeant has stopped: the work was accepted as it is. [${pr.repo}#${pr.number}](${pr.url}) and this issue are yours to merge or close.`;
+/** The acknowledgment, ending with the task's total cost (TECH-5227). */
+const ended = expect.stringContaining(`${acknowledged}\n\nCost: `);
 
 // The earlier task asked its budget question ten hours ago and was accepted as it is; the human then
 // re-triggered it. The fresh task started four hours ago and spent $30 of its first window.
@@ -52,7 +54,7 @@ test.each([
   // The reply to this task's question is what accepts, and the acknowledgment is this task's own.
   expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
   expect(turns).toBe(1);
-  expect(posted).toEqual([expect.stringMatching(/budget is exhausted/), acknowledged]);
+  expect(posted).toEqual([expect.stringMatching(/budget is exhausted/), ended]);
   expect(live.agentComments.map((c) => c.id)).toEqual([
     commentIdFor(earlierKey),
     commentIdFor(acceptedKey("i1", oldReply.id)),
