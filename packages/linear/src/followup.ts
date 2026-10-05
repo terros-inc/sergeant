@@ -36,6 +36,12 @@ const createRelation = `
 `;
 const relationById = `query SergeantRelationById($id: String!) { issueRelation(id: $id) { id } }`;
 const issueRef = z.object({ identifier: z.string().min(1), url: z.url() });
+// A filter, not `issue(id:)`: a missing issue is an empty list rather than an error like an outage's.
+const followupByKey = `
+  query SergeantFollowupByKey($id: ID!) {
+    issues(first: 1, includeArchived: true, filter: { id: { eq: $id } }) { nodes { identifier url title } }
+  }
+`;
 
 /** What follow-up filing needs from the Linear adapter it runs inside. */
 export type FollowupDeps = {
@@ -117,4 +123,10 @@ export function followupFiler({ request, createOnce, sergeantUsers, log }: Follo
     );
     return issue;
   };
+}
+
+/** The adapter's `findFollowupIssue`: the follow-up filed under `key`, by the id `createFollowupIssue` gives it. */
+export function followupFinder({ request }: Pick<FollowupDeps, "request">): NonNullable<LinearPort["findFollowupIssue"]> {
+  const found = z.object({ issues: z.object({ nodes: z.array(issueRef.extend({ title: z.string() })) }) });
+  return async (key) => (await request(followupByKey, { id: commentIdFor(key) }, found)).issues.nodes[0];
 }

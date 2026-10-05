@@ -1,7 +1,7 @@
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Conversation, FeedbackCase, FeedbackJudgment, HumanPullRequestFeedback, PullRequestFacts } from "@terros/sergeant-contracts";
 import { agent, pr, repo } from "./budget-scenario.ts";
 import { FEEDBACK_LIMITS, MAX_FEEDBACK_ATTEMPTS, sweepFeedback, type FeedbackDeps } from "./feedback.ts";
@@ -21,7 +21,12 @@ const onPr = (id: number, hour: number, body: string, association = "MEMBER"): H
 });
 
 let dir = "";
-afterEach(() => rm(dir, { recursive: true, force: true }));
+// The lookback counts back from now: the clock is pinned to the evening of the day these hours are on.
+beforeEach(() => void vi.useFakeTimers({ toFake: ["Date"], now: new Date(at(23)) }));
+afterEach(async () => {
+  vi.useRealTimers();
+  await rm(dir, { recursive: true, force: true });
+});
 
 type World = {
   comments?: Conversation["humanComments"];
@@ -33,11 +38,20 @@ type World = {
   closing?: Partial<PullRequestFacts>;
   since?: string;
   judge?: FeedbackDeps["judge"]["judge"];
+  /** When this host's local task record says UNF-1's closing PR merged; no record unless said. */
+  taskMergedAt?: string;
+  /** A comment Linear fails to post. */
+  commentFails?: (key: string) => boolean;
 };
 
 async function world(w: World) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-feedback-test-"));
   await writeFile(join(dir, "feedback.json"), JSON.stringify({ since: w.since ?? at(0), handled: {} }));
+  if (w.taskMergedAt) {
+    await mkdir(join(dir, "tasks", "UNF-1"), { recursive: true });
+    const merged = { repo, number: 7, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at: w.taskMergedAt };
+    await writeFile(join(dir, "tasks", "UNF-1", "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: at(0), turns: 1, runIds: [], recentTurns: [], merged }));
+  }
   const stateType = w.stateType ?? "completed";
   const posted = new Map<string, string>();
   const issue: Conversation["issue"] = {
@@ -53,12 +67,14 @@ async function world(w: World) {
   // Linear refuses a second issue under the same client-supplied id: one issue per key.
   const issues = new Map<string, Parameters<FeedbackDeps["linear"]["createFollowupIssue"]>[0]>();
   const judged: FeedbackCase[] = [];
+  const identifier = (key: string) => `UNF-${[...issues.keys()].indexOf(key) + 2}`;
+  let reads = 0;
   const deps: FeedbackDeps = {
     agentUserId: agent.id,
     workerLogin: worker,
     completedIssues: async () => (stateType === "completed" ? ["UNF-1"] : []),
     openIssues: async () => (stateType !== "completed" && w.delegate !== null ? ["UNF-1"] : []),
-    issueProgress: async () => ({ stateType, completedAt: stateType === "completed" ? "2026-10-02T06:01:00.000Z" : null }),
+    issueProgress: async () => (reads++, { stateType, completedAt: stateType === "completed" ? "2026-10-02T06:01:00.000Z" : null }),
     github: { readPullRequest: async (r, n) => (r === repo && prs[n]) || Promise.reject(new Error(`unexpected PR ${r}#${n}`)) },
     linear: {
       // Sergeant's own comments come back as the issue's agent comments, as on Linear.
@@ -67,11 +83,17 @@ async function world(w: World) {
         humanComments: w.comments ?? [],
         agentComments: [...posted.values()].map((body, i) => ({ id: `a${i}`, createdAt: at(12), body })),
       }),
-      postComment: async ({ key, body }) => void posted.set(key, body),
+      postComment: async ({ key, body }) => {
+        if (w.commentFails?.(key)) throw new Error("Linear API request failed (503)");
+        posted.set(key, body);
+      },
       createFollowupIssue: async (req) => {
         if (!issues.has(req.key)) issues.set(req.key, req);
-        const n = [...issues.keys()].indexOf(req.key) + 2;
-        return { identifier: `UNF-${n}`, url: `https://linear.app/x/issue/UNF-${n}` };
+        return { identifier: identifier(req.key), url: `https://linear.app/x/issue/${identifier(req.key)}` };
+      },
+      findFollowupIssue: async (key) => {
+        const issue = issues.get(key);
+        return issue && { identifier: identifier(key), url: `https://linear.app/x/issue/${identifier(key)}`, title: issue.title };
       },
     },
     judge: {
@@ -86,7 +108,7 @@ async function world(w: World) {
     },
   };
   const sweep = () => sweepFeedback({ stateDir: dir, enrolledRepositories: [repo], log: () => {} }, deps);
-  return { sweep, issues, posted, judged };
+  return { sweep, issues, posted, judged, reads: () => reads };
 }
 
 test("actionable feedback after the merge files one ordinary, undelegated follow-up with the delta and links, once", async () => {
@@ -122,10 +144,12 @@ test("actionable feedback after the merge files one ordinary, undelegated follow
   await sweep();
   expect(judged).toHaveLength(3);
   // Even with feedback.json lost, the follow-up's key, and so its Linear id, is the same: no second
-  // issue, and the judgment sees what was filed from Linear itself.
+  // issue. What was filed is found in Linear and not judged again; the acknowledgement is, and its
+  // judgment sees what was filed from Linear itself.
   await writeFile(join(dir, "feedback.json"), JSON.stringify({ since: at(0), handled: {} }));
   await sweep();
   expect(issues.size).toBe(2);
+  expect(judged.map((c) => c.feedback.key).slice(3)).toEqual(["linear:thanks"]);
   expect(judged.at(-1)?.filed).toHaveLength(2);
 });
 
@@ -134,6 +158,26 @@ test("feedback after the completing PR merged is filed even while the issue is n
   const { sweep, issues } = await world({ stateType: "started", comments: [human("cap", 8, "Retries should be capped at 5.")] });
   await sweep();
   expect([...issues.keys()]).toEqual(["feedback:linear:cap"]);
+});
+
+test("an open issue whose closing PR merged before the lookback is no longer read or judged; a recent one still is", async () => {
+  // TECH-5049: merged long ago and never Done, it was read on every pass for good.
+  const comments = [human("cap", 8, "Retries should be capped at 5.")];
+  const longAgo = "2026-09-01T06:00:00.000Z";
+  const known = await world({ stateType: "started", comments, closing: { mergedAt: longAgo }, taskMergedAt: longAgo });
+  await known.sweep();
+  expect([known.reads(), known.judged]).toEqual([0, []]);
+  await rm(dir, { recursive: true, force: true });
+
+  // Without this host's record of the merge, the issue is read, but its old landing is no longer watched.
+  const unknown = await world({ stateType: "started", comments, closing: { mergedAt: longAgo } });
+  await unknown.sweep();
+  expect([unknown.reads(), unknown.judged]).toEqual([1, []]);
+  await rm(dir, { recursive: true, force: true });
+
+  const recent = await world({ stateType: "started", comments, taskMergedAt: at(6) });
+  await recent.sweep();
+  expect([...recent.issues.keys()]).toEqual(["feedback:linear:cap"]);
 });
 
 test("files nothing while the task is still active, for open work a human took back, or from before the first sweep", async () => {
@@ -185,4 +229,32 @@ test("a judgment that keeps failing is given up with a comment and does not bloc
   await writeFile(join(dir, "feedback.json"), "{ not json");
   await sweep();
   expect((await readdir(dir)).some((f) => f.startsWith("feedback.json.corrupt-"))).toBe(true);
+});
+
+test("a follow-up filed before its marker comment failed gets the marker without a second judgment, and counts toward the limit", async () => {
+  // TECH-5049: judged again, the feedback could be found not actionable, leaving the follow-up uncounted
+  // and unseen by later judgments.
+  const comments = [human("c0", 8, "Change number 0.")];
+  let outage = true;
+  const { sweep, issues, judged, posted } = await world({
+    comments,
+    commentFails: (key) => outage && key.endsWith(":filed:i1"),
+    judge: async (c) => ({
+      judgment: judged.length > 1 && c.feedback.key === "linear:c0" ? { actionable: false, reason: "changed its mind" } : { actionable: true, title: c.feedback.body, delta: "Do it." },
+      model: "m",
+    }),
+  });
+  await sweep();
+  expect([issues.size, posted.size]).toEqual([1, 0]);
+
+  outage = false;
+  await sweep();
+  expect(judged).toHaveLength(1);
+  expect([...posted.values()]).toEqual([expect.stringContaining("[UNF-2](https://linear.app/x/issue/UNF-2) Change number 0.")]);
+
+  comments.push(...Array.from({ length: FEEDBACK_LIMITS.followups }, (_, i) => human(`c${i + 1}`, 9 + i, `Change number ${i + 1}.`)));
+  await sweep();
+  expect(judged[1]?.filed).toEqual([expect.stringContaining("[UNF-2]")]);
+  expect(issues.size).toBe(FEEDBACK_LIMITS.followups);
+  expect(posted.get("feedback-limit:i1")).toContain(`${FEEDBACK_LIMITS.followups} follow-ups filed`);
 });

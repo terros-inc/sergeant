@@ -62,6 +62,11 @@ export interface LinearPort {
     key: string;
   }): Promise<{ identifier: string; url: string }>;
   /**
+   * The follow-up `createFollowupIssue` filed under `key`, if any, archived included (TECH-5049): a caller
+   * can finish what a crash cut short after the filing without deciding again whether to file it.
+   */
+  findFollowupIssue?(key: string): Promise<{ identifier: string; url: string; title: string } | undefined>;
+  /**
    * Moves the issue to its team's first `started` state (lowest position) when its current state type
    * is `triage`, `backlog`, or `unstarted` — the visible "In Progress" when the first worker starts
    * (07 §5). A no-op for any other state type (already started, completed, or canceled) and when the
