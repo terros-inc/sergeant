@@ -149,8 +149,9 @@ sgt account remove claudeWork                   # remove yours, then revoke it w
   `sgt admin account remove-person <linear-user-id>` (`sgt account list --json` shows each account's
   id, `person:<linear-user-id>:<name>`). Runs already on them finish on them, and it does not revoke
   a copy: the person, or their workspace admin, revokes the credential as above.
-- The installation must be configured for registration (`registeredAccountsSecret`, deploy/README.md);
-  otherwise `register` says so.
+- The installation must be configured for registration: a hosted Sergeant is out of the box
+  (deploy/README.md), and a `serve` elsewhere needs `registeredAccountsSecret` in its config.
+  Otherwise `register` says so.
 
 ## 7. Restarting or updating Sergeant (approvers)
 
