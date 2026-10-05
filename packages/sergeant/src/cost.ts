@@ -67,10 +67,21 @@ function tally(input: CostInput) {
       : `~${usd(total)} estimated${unknown > 0 ? `, not counting ${plural(unknown, "run")} of unknown cost` : ""}`;
   const runs = plural(input.runs.length + (input.unknownRuns ?? 0), "run");
   const accounts = [...new Set(input.runs.flatMap((r) => (r.account ? [accountName(r.account)] : [])))];
-  return { estimate, runs, accounts: accounts.length > 0 ? `accounts: ${accounts.join(", ")}` : undefined, wall: wall(input) };
+  const workers = input.runs.filter((r) => r.role === "worker").length;
+  const reviews = input.runs.length - workers;
+  const roles = [...(workers ? [`${workers} worker`] : []), ...(reviews ? [`${reviews} review`] : []), ...(input.unknownRuns ? [`${input.unknownRuns} unreadable`] : [])];
+  return {
+    estimate,
+    runs: `${runs}${roles.length > 0 ? ` (${roles.join(", ")})` : ""}`,
+    accounts: accounts.length > 0 ? `accounts: ${accounts.join(", ")}` : undefined,
+    wall: wall(input),
+  };
 }
 
-/** The progress comment's last line: "Cost so far: ~$2.10 estimated · 3 runs · 18 min · accounts: claudeWork, codexWork". */
+/**
+ * The progress comment's last line, every worker and review run and Sergeant's turns so far: "Cost so
+ * far: ~$2.10 estimated · 3 runs (2 worker, 1 review) · 18 min · accounts: claudeWork, codexWork".
+ */
 export function costSoFar(input: CostInput): string {
   const t = tally(input);
   return [`Cost so far: ${t.estimate}`, t.runs, t.wall, t.accounts].filter(Boolean).join(" · ");
@@ -94,8 +105,5 @@ export function costTotal(input: CostInput): string {
     ...[...providers].map(([name, p]) => `${name} ${p.unknown > 0 && p.usd === 0 ? "unknown" : usd(p.usd)}${p.unknown > 0 && p.usd > 0 ? ` + ${p.unknown} unknown` : ""}`),
     ...(input.turnCostUsd > 0 ? [`Sergeant's turns ${usd(input.turnCostUsd)}`] : []),
   ];
-  const workers = input.runs.filter((r) => r.role === "worker").length;
-  const reviews = input.runs.length - workers;
-  const roles = [...(workers ? [`${workers} worker`] : []), ...(reviews ? [`${reviews} review`] : []), ...(input.unknownRuns ? [`${input.unknownRuns} unreadable`] : [])];
-  return [`Cost: ${t.estimate}${split.length > 0 ? ` (${split.join(" · ")})` : ""}`, `${t.runs}${roles.length > 0 ? ` (${roles.join(", ")})` : ""}`, t.wall, t.accounts].filter(Boolean).join(" · ");
+  return [`Cost: ${t.estimate}${split.length > 0 ? ` (${split.join(" · ")})` : ""}`, t.runs, t.wall, t.accounts].filter(Boolean).join(" · ");
 }

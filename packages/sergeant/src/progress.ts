@@ -1,23 +1,15 @@
-import { checkLive, commentIdFor, type Conversation, type LinearPort, type SituationReport } from "@terros/sergeant-contracts";
+import { checkDelegation, commentIdFor, reportedClosing, type LinearPort, type ReviewReport, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import type { ActionOutcome } from "./execute.ts";
 
 // TECH-5227: after each review round Sergeant says on the issue, in about five lines, what changed, the
 // review's verdict, what happens next, and the cost so far (cost.ts), so a human need not open the PR.
-// A round ends at the first turn after its reviewer finished. When that turn asks a human or makes the
-// closing merge, the summary is folded into that one comment instead (the question, or the merge's
-// outcome comment, which carries the task's total cost instead). Built only from the worker and
-// reviewer reports and the run records; nothing is stored. A round is reported once: a standalone post
-// is keyed by its review run, and a folded summary is recognized on the issue by the review run it names.
-// `review.progressComments: false` in the installation config turns all of it off (loop.ts).
+// Every finished review gets its own comment, keyed by its review run, posted after the next turn, also
+// when that turn asks a question or merges. Built only from the worker and reviewer reports and the run
+// records; nothing is stored: a round is told once because Linear keeps one comment per key.
+// `review.progressComments: false` in the installation config turns it off (loop.ts).
 
-/**
- * The round to report: its comment key, the lines that say what changed and the verdict, and whether a
- * question this turn carries them (`askHuman` sets it), so no comment of its own is posted. `cost` is
- * the cost-so-far line given this turn's own cost, which `takeTurn` sets once reasoning reports it.
- */
-export type Progress = { key: string; lines: string[]; approved: boolean; folded?: boolean; cost?: (turnCostUsd: number) => string; turnCostUsd?: number };
-
-const costLine = (progress: Progress) => (progress.cost ? [progress.cost(progress.turnCostUsd ?? 0)] : []);
+/** A round to report: its comment key, and the lines that say what changed and the verdict. */
+export type Progress = { key: string; lines: string[]; approved: boolean; cost: string };
 
 const short = (sha: string) => sha.slice(0, 12);
 const oneLine = (text: string, max: number) => {
@@ -27,22 +19,29 @@ const oneLine = (text: string, max: number) => {
 const count = (n: number, what: string) => `${n} ${what} finding${n === 1 ? "" : "s"}`;
 
 /**
- * The newest finished review's round, unless it was already reported or its PRs have moved on since
- * (a new head, a merge): a superseded round is never reported late.
+ * Every finished review not yet told on the issue whose PRs have not moved on since (a new head, a
+ * merge): a superseded round is never reported late. `cost` is the cost-so-far line each one ends with.
  */
-export function pendingProgress(
-  situation: Pick<SituationReport, "conversation" | "runs" | "pullRequests">,
-  cost?: (turnCostUsd: number) => string,
-): Progress | undefined {
+export function pendingProgress(situation: Pick<SituationReport, "conversation" | "runs" | "pullRequests">, cost: string): Progress[] {
   const { conversation, runs, pullRequests } = situation;
-  const review = runs.findLast((r) => r.role === "reviewer" && r.status === "succeeded" && r.report !== null);
-  const report = review?.role === "reviewer" ? review.report : null;
-  if (!review || !report) return undefined;
-  const heads = report.reviewed.map((h) => ({ ...h, pr: pullRequests.find((p) => p.repo === h.repo && p.number === h.number) }));
-  if (heads.some((h) => h.pr?.state !== "open" || h.pr.headSha !== h.headSha)) return undefined;
-  const key = `progress:${conversation.issue.id}:${review.runId}`;
-  if (reported(conversation, key, review.runId)) return undefined;
+  return runs.flatMap((review) => {
+    const report = review.role === "reviewer" && review.status === "succeeded" ? review.report : null;
+    if (!report) return [];
+    const key = `progress:${conversation.issue.id}:${review.runId}`;
+    if (conversation.agentComments.some((c) => c.id === commentIdFor(key))) return [];
+    const heads = report.reviewed.map((h) => ({ ...h, pr: pullRequests.find((p) => p.repo === h.repo && p.number === h.number) }));
+    if (heads.some((h) => h.pr?.state !== "open" || h.pr.headSha !== h.headSha)) return [];
+    return [roundOf(report, heads, runs, key, cost)];
+  });
+}
 
+function roundOf(
+  report: ReviewReport,
+  heads: { repo: string; number: number; headSha: string; pr?: { url: string } | undefined }[],
+  runs: RunRecord[],
+  key: string,
+  cost: string,
+): Progress {
   const atHead = (p: { repo: string; number: number; headSha: string }) => report.reviewed.some((h) => h.repo === p.repo && h.number === p.number && h.headSha === p.headSha);
   const worker = runs.findLast((r) => r.role === "worker" && r.report?.pullRequests.some(atHead));
   const summary = worker?.role === "worker" ? (worker.report?.summary.split(/(?<=[.!?])\s/)[0] ?? "") : "";
@@ -60,31 +59,22 @@ export function pendingProgress(
   return {
     key,
     approved: report.verdict === "approve",
-    ...(cost && { cost }),
+    cost,
     lines: [
       `**Progress:** ${summary.trim() ? oneLine(summary, 240) : "a review round finished"}`,
-      `Reviewed ${heads.map((h) => `[${h.repo}#${h.number}](${h.pr?.url}) at \`${short(h.headSha)}\``).join(", ")} ${byReview(review.runId)}: ${verdict}.`,
+      `Reviewed ${heads.map((h) => `[${h.repo}#${h.number}](${h.pr?.url}) at \`${short(h.headSha)}\``).join(", ")}: ${verdict}.`,
       ...findings,
     ],
   };
 }
 
-const byReview = (runId: string) => `by review \`${runId}\``;
-
-/**
- * Whether the round was already told on the issue: posted under its key, or folded into a comment that
- * names its review run. A later review of the same head (a re-review, a re-run) is its own round.
- */
-function reported(conversation: Conversation, key: string, reviewRunId: string): boolean {
-  const id = commentIdFor(key);
-  return conversation.agentComments.some((c) => c.id === id || c.body.includes(byReview(reviewRunId)));
-}
-
 /** What the round's turn did next, in one line; reasoning's own words stay in the PR and its runs. */
-export function nextStep(outcomes: ActionOutcome[], progress: Progress): string {
+export function nextStep(outcomes: ActionOutcome[], runs: RunRecord[], progress: Progress): string {
   const done = (kind: ActionOutcome["action"]["kind"]) => outcomes.some((o) => o.status === "done" && o.action.kind === kind);
   const { approved } = progress;
-  if (done("merge_pr")) return "Next: this PR is merged as part of the issue; Sergeant continues with the rest.";
+  const merged = outcomes.flatMap((o) => (o.status === "done" && o.merged ? [o.merged.pr] : []));
+  if (merged.some((pr) => reportedClosing(runs, pr) === true)) return "Next: merged; Sergeant posts the outcome and the task's total cost.";
+  if (merged.length > 0) return "Next: this PR is merged as part of the issue; Sergeant continues with the rest.";
   if (done("accept_as_is")) return "Next: nothing; the work is accepted as it is.";
   if (done("send_run") || done("start_worker")) return approved ? "Next: a worker continues the remaining work." : "Next: a worker fixes the findings.";
   if (done("start_reviewer")) return "Next: another review.";
@@ -93,30 +83,29 @@ export function nextStep(outcomes: ActionOutcome[], progress: Progress): string 
 }
 
 /**
- * Posts the round's own comment under its key, so a retry posts nothing more, and only while the issue
- * is still Sergeant's (A1, A2), read live. Never fails the turn: a failure is left to the next turn.
+ * Posts each finished round not yet told (`pendingProgress`) as its own comment under its key, so a
+ * retry posts nothing more, after the turn that follows it, whose outcomes say what happens next. Only
+ * while the issue is still delegated to Sergeant (A1), read live: a closing merge this turn may already
+ * have moved it to Done. Never fails the turn: a failure is left to the next turn.
  */
 export async function postProgress(
   issueId: string,
-  progress: Progress,
+  situation: Pick<SituationReport, "conversation" | "runs" | "pullRequests">,
+  cost: string,
   outcomes: ActionOutcome[],
   deps: { linear: Pick<LinearPort, "readConversation" | "postComment">; agentUserId: string },
   log: (line: string) => void,
 ): Promise<void> {
-  const body = [...progress.lines, nextStep(outcomes, progress), ...costLine(progress)].join("\n");
+  const rounds = pendingProgress(situation, cost);
+  if (rounds.length === 0) return;
   try {
     const { issue } = await deps.linear.readConversation(issueId);
-    if (!checkLive(issue, deps.agentUserId).allowed) return;
-    await deps.linear.postComment({ issueId: issue.id, body, key: progress.key });
-    log("posted the review round's progress comment");
+    if (!checkDelegation(issue, deps.agentUserId).allowed) return;
+    for (const round of rounds) {
+      await deps.linear.postComment({ issueId: issue.id, body: [...round.lines, nextStep(outcomes, situation.runs, round), round.cost].join("\n"), key: round.key });
+      log(`posted the progress comment ${round.key}`);
+    }
   } catch (e) {
-    log(`could not post the progress comment; the next turn tries again: ${(e as Error).message}`);
+    log(`could not post a progress comment; the next turn tries again: ${(e as Error).message}`);
   }
 }
-
-/**
- * The round's summary folded into a comment the same turn posts anyway, with its cost-so-far line
- * unless that comment carries the task's total instead (a closing merge's outcome).
- */
-export const withProgress = (body: string, progress: Progress | undefined, cost = true) =>
-  progress ? `${body}\n\n${[...progress.lines, ...(cost ? costLine(progress) : [])].join("\n")}` : body;

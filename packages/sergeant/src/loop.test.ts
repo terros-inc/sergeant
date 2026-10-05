@@ -42,7 +42,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
   const labels: string[] = [];
 
   const run = () => runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, progressComments: false, log: () => {} },
     {
       agentUserId: agent.id,
       workerLogin: "sergeant-worker[bot]",
@@ -86,9 +86,7 @@ test("a human comment landing before the merge denies it and wakes a turn that s
   expect(filed).toEqual(["followup:canary_UNF-1:retry-jitter"]);
   expect(seen[1]?.followups).toMatchObject([{ key: "retry-jitter", identifier: "UNF-2" }]);
 
-  // The review round's progress comment from the denied turn (TECH-5227), then one evidence-bearing
-  // outcome and one feedback comment and label, and running it again posts nothing more.
-  expect(comments.shift()?.key).toBe("progress:i1:run_review");
+  // One evidence-bearing outcome, one feedback comment and label, and running it again posts nothing more.
   expect(comments.map((c) => c.body.split(":")[0])).toEqual(["**Merged** [o/canary#7](https", "**Sergeant feedback"]);
   expect(comments[1]?.body).toBe("**Sergeant feedback:** CI took 20 minutes to start.");
   expect(comments[0]?.body).toContain(pr.url);

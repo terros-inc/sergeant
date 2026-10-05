@@ -30,7 +30,7 @@ test("known costs are summed per provider, and runs without one are counted as u
   expect(costTotal(input)).toBe(
     "Cost: ~$4.00 estimated, not counting 2 runs of unknown cost (Claude $2.90 · Codex $0.50 + 1 unknown · Sergeant's turns $0.60) · 5 runs (2 worker, 2 review, 1 unreadable) · 1 h 21 min · accounts: claudeWork, codexWork",
   );
-  expect(costSoFar(input)).toBe("Cost so far: ~$4.00 estimated, not counting 2 runs of unknown cost · 5 runs · 1 h 21 min · accounts: claudeWork, codexWork");
+  expect(costSoFar(input)).toBe("Cost so far: ~$4.00 estimated, not counting 2 runs of unknown cost · 5 runs (2 worker, 2 review, 1 unreadable) · 1 h 21 min · accounts: claudeWork, codexWork");
   expect(costSoFar({ ...input, unknownRuns: 0, runs: input.runs.filter((r) => r.costUsd !== undefined) })).not.toContain("unknown");
 });
 
