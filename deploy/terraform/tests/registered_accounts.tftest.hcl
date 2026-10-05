@@ -122,6 +122,13 @@ run "existing_secret_is_adopted_by_exact_arn" {
 run "host_reads_and_writes_only_that_secret" {
   command = plan
 
+  override_data {
+    target = data.aws_secretsmanager_secrets.registered_accounts
+    values = {
+      arns = []
+    }
+  }
+
   assert {
     condition = [
       for s in data.aws_iam_policy_document.host.statement : s.resources
