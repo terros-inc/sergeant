@@ -51,7 +51,9 @@ test("a Codex run records its summed tokens and no cost; a Claude run its report
 // These are Codex 0.160.0's own messages. In particular, reuse is how a disposable container's
 // stored ChatGPT credential fails after another run rotated the refresh token (TECH-5020).
 test.each([
+  "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.",
   "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+  "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
   "Your access token could not be refreshed. Please log out and sign in again.",
   "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
 ])("a Codex refresh failure is recorded as authentication: %s", async (message) => {
@@ -64,6 +66,27 @@ test.each([
     failureReason: "authentication",
     reportError: expect.stringContaining("replace the account's Codex credential"),
   });
+});
+
+// A reused refresh token on Codex 0.160.0 fails as this structured turn.failed, so it is the main
+// detection path (TECH-5020). The provider's error text, with any key or token it quotes, never
+// reaches the run record: the alert names the fix instead.
+test("a Codex turn.failed 401 is recorded as authentication and keeps no key or token", async () => {
+  const message = "workspace routing discovery unauthorized (401): Incorrect API key provided: sk-proj***abcd, token codex-test-token";
+  const run = await ended({ adapters: { worker: "codex-local" } }, JSON.stringify({ type: "turn.failed", error: { message } }), "");
+
+  expect(run).toMatchObject({ status: "failed", failureReason: "authentication", reportError: expect.stringContaining("replace the account's Codex credential") });
+  for (const fragment of ["sk-", "abcd", "codex-test-token", "workspace routing"]) expect(JSON.stringify(run)).not.toContain(fragment);
+});
+
+// Any other Codex failure keeps its message for the record, but with a quoted key redacted.
+test("a non-auth Codex failure redacts the key it quotes", async () => {
+  const message = "Model gpt-5 is not available for key sk-proj-AbC123_xyz.9";
+  const run = await ended({ adapters: { worker: "codex-local" } }, JSON.stringify({ type: "turn.failed", error: { message } }), "");
+
+  expect(run).toMatchObject({ status: "failed", reportError: expect.stringContaining("Model gpt-5 is not available for key sk-[redacted]") });
+  expect(run.failureReason).toBeUndefined();
+  for (const fragment of ["sk-proj", "AbC123", "xyz"]) expect(JSON.stringify(run)).not.toContain(fragment);
 });
 
 test("non-auth Codex failures and unrelated stderr do not report authentication", async () => {
