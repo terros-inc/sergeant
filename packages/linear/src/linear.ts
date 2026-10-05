@@ -52,6 +52,11 @@ export type LinearAdapterOptions = {
   apiKey: string;
   /** User ids that act for Sergeant but might not have Linear's `botActor` marker. */
   sergeantUserIds: readonly string[];
+  /**
+   * Linear app ids (`botActor.id`) trusted to delegate or create an issue for the user they act for,
+   * matched to the assignee by display name (TECH-5192). Any other app's delegation is not the assignee's.
+   */
+  delegatingAppIds?: readonly string[];
   apiUrl?: string;
   fetch?: typeof globalThis.fetch;
   /** Where the adapter's warnings go; defaults to the console, timestamped like the service's log. */
@@ -211,7 +216,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       return "resolved";
     },
 
-    readTaskOwner: taskOwnerReader(request, sergeantUsers),
+    readTaskOwner: taskOwnerReader(request, sergeantUsers, new Set(options.delegatingAppIds)),
 
     createFollowupIssue: followupFiler({ request, createOnce, sergeantUsers, log }),
 
