@@ -114,12 +114,12 @@ data "aws_iam_policy_document" "host" {
   }
 
   # AmazonSSMManagedInstanceCore allows ssm:GetParameter(s) on every parameter in the account; this
-  # host reads only its config.
+  # host reads only its config and its Fargate settings (fargate.tf).
   statement {
     sid           = "NoOtherParameters"
     effect        = "Deny"
     actions       = ["ssm:GetParameter", "ssm:GetParameters"]
-    not_resources = [local.config_parameter]
+    not_resources = [local.config_parameter, local.fargate_settings]
   }
 
   statement {

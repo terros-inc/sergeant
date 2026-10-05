@@ -14,7 +14,10 @@ export const RunMeta = z.object({
   adapter: z.enum(ADAPTERS).default("claude-code-local"),
   model: z.string(),
   repositories: z.array(z.string()),
+  /** The Docker container's name; for a Fargate run, its task's container name. */
   container: z.string(),
+  /** Set for a run on ECS Fargate (TECH-5237), whose task and secret are in its `launch.json`. */
+  backend: z.literal("fargate").optional(),
   startedAt: z.string(),
   /** The issue text the run started from; every record of the run carries it (M13). */
   issueRevision: z.string().optional(),

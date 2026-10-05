@@ -122,8 +122,15 @@ export const InstallationConfig = z.strictObject({
   maxTasks: z.number().int().positive().optional(),
   /** Minutes a waiting task keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */
   waitingGraceMinutes: z.number().nonnegative().optional(),
-  /** The agent CLI each role runs (TECH-5009). A role not named runs Claude Code, as it always has. */
-  runners: z.strictObject({ worker: z.enum(ADAPTERS).optional(), reviewer: z.enum(ADAPTERS).optional() }).optional(),
+  /**
+   * The agent CLI each role runs (TECH-5009). A role not named runs Claude Code, as it always has.
+   * `workerBackend` is where workers run (TECH-5237): `local`, the default, in a container on this
+   * host; `fargate`, one ECS Fargate task each, on what Terraform made (deploy/README.md, "Workers on
+   * Fargate"). Reviewers always run on this host.
+   */
+  runners: z
+    .strictObject({ worker: z.enum(ADAPTERS).optional(), reviewer: z.enum(ADAPTERS).optional(), workerBackend: z.enum(["local", "fargate"]).optional() })
+    .optional(),
   /**
    * The model Codex runs for a Codex role, unless `serve`/`canary` names that role's model. Required when
    * `runners` names `codex-local`; without it nobody can register a Codex account. The credential is
@@ -150,7 +157,7 @@ export const InstallationConfig = z.strictObject({
    */
   registeredAccountsSecret: SecretRef.optional(),
 })
-  .refine((c) => c.codex || !Object.values(c.runners ?? {}).includes("codex-local"), {
+  .refine((c) => c.codex || ![c.runners?.worker, c.runners?.reviewer].includes("codex-local"), {
     message: "a codex-local runner needs the codex config, for its model",
     path: ["codex"],
   });

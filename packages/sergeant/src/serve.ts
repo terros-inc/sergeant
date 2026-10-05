@@ -3,7 +3,7 @@
 // and writes live Linear and GitHub, launches real model sessions, and costs money. From
 // packages/sergeant, after building the runner image (`docker build -t sergeant-runner:local ../runner/container`):
 //
-//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2] [--waiting-grace-minutes 15] [--config-parameter <SSM name>] [--trust-loopback]
+//   node src/serve.ts --config <installation.json> --state-dir <dir> [--port 8080] [--host 127.0.0.1] [--max-tasks 2] [--waiting-grace-minutes 15] [--config-parameter <SSM name>] [--fargate-runner <file>] [--trust-loopback]
 //
 // Every repository in the installation config is enrolled. With `--config-parameter` (else the host's
 // `SERGEANT_CONFIG_PARAMETER`), the installation-config SSM parameter `--config` was installed from, the
@@ -24,10 +24,10 @@ import { RepoSlug } from "@terros/sergeant-contracts";
 import { sergeantVersion } from "@terros/sergeant-contracts/version";
 import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliFeedbackJudge, claudeCliReasoner, claudeCliRetro } from "@terros/sergeant-reasoning";
-import { containerRunner, pruneWorkspaces, reasoningFiles, runsUsage } from "@terros/sergeant-runner";
+import { byRole, containerRunner, fargateRunner, pruneWorkspaces, reasoningFiles, runsUsage, setAside } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
 import { linearCallers } from "./auth.ts";
-import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { connect, fargateSettings, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { decimalFlag, integerFlag } from "./cli-numbers.ts";
 import { appsReach, configParameter, enrolledIn, enrollment } from "./enrollment.ts";
 import { startService } from "./service.ts";
@@ -46,6 +46,7 @@ const { values } = parseArgs({
     "worker-model": { type: "string" },
     "reviewer-model": { type: "string" },
     "config-parameter": { type: "string" },
+    "fargate-runner": { type: "string", default: "/etc/sergeant/fargate-runner.json" },
     "trust-loopback": { type: "boolean", default: false },
   },
 });
@@ -69,6 +70,24 @@ const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(
 const installation = await connect(config, repositories);
 // People's registered model accounts: a task's runs use only its owner's (TECH-5179).
 const accounts = modelAccounts(config, log);
+// Workers on Fargate when the config says so (TECH-5237); reviewers always on this host. Both runners
+// share the runs directory and the accounts set aside after a failure.
+const fargate = await fargateSettings(config, values["fargate-runner"]);
+const runnerOptions = {
+  rootDir: runsDir,
+  ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
+  ...accounts.runner,
+  gitIdentity: config.gitIdentity,
+  githubTokens: installation.githubTokens,
+  fetchUpload: installation.linear.fetchUpload,
+  asides: setAside(),
+};
+const runner = byRole(runsDir, {
+  local: containerRunner(runnerOptions),
+  fargate: fargate && fargateRunner({ ...runnerOptions, settings: fargate }),
+  workerBackend: config.runners?.workerBackend ?? "local",
+});
+if (fargate) log(`workers run ${config.runners?.workerBackend === "fargate" ? "on Fargate" : "on this host"}; Fargate image ${fargate.image}`);
 // The reasoning CLI inherits this process's environment: with the token set it authenticates as
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;
@@ -138,14 +157,7 @@ const service = await startService(
     workerLogin: installation.workerLogin,
     linearProfileForGitHubLogin: reviewerProfileLookup(config),
     github: installation.github,
-    runner: containerRunner({
-      rootDir: runsDir,
-      ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
-      ...accounts.runner,
-      gitIdentity: config.gitIdentity,
-      githubTokens: installation.githubTokens,
-      fetchUpload: installation.linear.fetchUpload,
-    }),
+    runner,
     reasoner: claudeCliReasoner({
       model: values["reasoning-model"],
       files: (s) => reasoningFiles(s.conversation, { fetchUpload: installation.linear.fetchUpload }),

@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { Adapter } from "../agents.ts";
 
-// TECH-5231 spike: `cli.ts start`, resumable at each of its three external effects (the run's secret,
-// its task definition, its task). The local record (`launch.json`) names each effect before it can
-// exist, so a rerun of `start` adopts it, and a failure that is definitely before the task started
-// deletes the secret and the definition, so no credentials are stranded. docs/spikes/tech-5231-fargate.md §4.
+// A Fargate run's start (TECH-5231's fix, TECH-5237), resumable at each of its three external effects
+// (the run's secret, its task definition, its task). The run's record (`launch.json`) names each effect
+// before it can exist, so a resumed start adopts it, and a failure that is definitely before the task
+// started deletes the secret and the definition, so no credentials are stranded.
+// docs/spikes/tech-5231-fargate.md §4.
 
-/** The AWS calls `start` makes; `cli.ts` implements them with the `aws` CLI, the tests with a fake. */
+/** The AWS calls a start makes; `aws.ts` implements them with the AWS SDK, the tests with a fake. */
 export type LaunchAws = {
   /** Returns the secret's ARN. */
   createSecret(name: string, secretString: string): Promise<string>;
@@ -16,7 +17,7 @@ export type LaunchAws = {
   /** Returns the new revision's ARN. */
   registerTaskDefinition(def: unknown): Promise<string>;
   deregisterTaskDefinition(arn: string): Promise<void>;
-  runTask(r: { taskDefinitionArn: string; command: string[]; network: string; clientToken: string; startedBy: string }): Promise<{ taskArn?: string; failures?: unknown }>;
+  runTask(r: { taskDefinitionArn: string; clientToken: string; startedBy: string }): Promise<{ taskArn?: string | undefined; failures?: unknown }>;
   /** A task, running or stopped, that RunTask started with this `startedBy`. */
   findTask(startedBy: string): Promise<string | undefined>;
 };
@@ -30,9 +31,6 @@ export type Launch = {
   nonce: string;
   /** Kept for the life of the record, so a retried RunTask is the same idempotent request. */
   clientToken: string;
-  /** The task's command and network, kept so a retried RunTask repeats them exactly. */
-  command: string[];
-  network: string;
   /** Recorded before the secret is created. */
   secretName: string;
   secretArn?: string;
@@ -43,16 +41,36 @@ export type Launch = {
   launchedAt: string;
 };
 
-export type StartInput = Pick<Launch, "runId" | "adapter" | "model" | "command" | "network">;
+export type StartInput = Pick<Launch, "runId" | "adapter" | "model">;
 
-/** The error code in an `aws` CLI failure ("An error occurred (Code) when calling ..."). */
-export const awsErrorCode = (e: unknown) => /An error occurred \((\w+)\)/.exec(String((e as Error)?.message ?? e))?.[1];
+/** Each run's secret is named under this prefix, the only one the execution role can read. */
+export const SECRET_PREFIX = "sergeant/runs/";
+
+/** An AWS service error's code (the SDK's error `name`); undefined for a network or other failure. */
+export const awsErrorCode = (e: unknown) => {
+  const err = e as { name?: string; $metadata?: unknown } | undefined;
+  return err?.$metadata !== undefined && err.name ? err.name : undefined;
+};
 
 /** RunTask errors that mean ECS rejected the request, so no task was started. Anything else is ambiguous. */
 const RUN_TASK_REJECTED = new Set([
   "AccessDeniedException", "BlockedException", "ClientException", "ClusterNotFoundException", "InvalidParameterException",
   "PlatformTaskDefinitionIncompatibilityException", "PlatformUnknownException", "UnsupportedFeatureException",
 ]);
+
+/**
+ * Deletes what a start that never got a task made: the secret, by name since a CreateSecret whose
+ * answer was lost may have made it without a recorded ARN, then the definition, then the record.
+ */
+export async function discard(l: Launch, aws: LaunchAws, store: LaunchStore) {
+  await aws.deleteSecret(l.secretName).catch((err: unknown) => {
+    if (awsErrorCode(err) !== "ResourceNotFoundException") throw err;
+  });
+  const { secretArn: _deleted, ...rest } = l;
+  await store.write(rest);
+  if (l.taskDefinitionArn) await aws.deregisterTaskDefinition(l.taskDefinitionArn);
+  await store.remove();
+}
 
 const token = () => randomBytes(12).toString("hex");
 
@@ -73,23 +91,14 @@ export async function startRun(
     await store.write(l);
   };
   if (!l) {
-    const { runId, adapter, model, command, network } = i;
-    l = { runId, adapter, model, command, network, nonce: token(), clientToken: token(), secretName: `sergeant/fargate-spike/${runId}`, launchedAt: new Date().toISOString() };
+    const { runId, adapter, model } = i;
+    l = { runId, adapter, model, nonce: token(), clientToken: token(), secretName: `${SECRET_PREFIX}${runId}`, launchedAt: new Date().toISOString() };
     await store.write(l);
   }
 
   // Definitely before any task: on a failure, delete what exists and forget the record.
   const abandon = async (e: unknown): Promise<never> => {
-    const cur = l as Launch;
-    // By name: a create-secret whose answer was lost may have made it without a recorded ARN.
-    await aws.deleteSecret(cur.secretName).catch((err: unknown) => {
-      if (awsErrorCode(err) !== "ResourceNotFoundException") throw err;
-    });
-    const { secretArn: _deleted, ...rest } = cur;
-    l = rest;
-    await store.write(l);
-    if (cur.taskDefinitionArn) await aws.deregisterTaskDefinition(cur.taskDefinitionArn);
-    await store.remove();
+    await discard(l as Launch, aws, store);
     throw e;
   };
 
@@ -122,10 +131,10 @@ export async function startRun(
   await save({ runTaskSentAt: new Date().toISOString() });
   let ran: Awaited<ReturnType<LaunchAws["runTask"]>>;
   try {
-    ran = await aws.runTask({ taskDefinitionArn: l.taskDefinitionArn as string, command: l.command, network: l.network, clientToken: l.clientToken, startedBy: l.runId });
+    ran = await aws.runTask({ taskDefinitionArn: l.taskDefinitionArn as string, clientToken: l.clientToken, startedBy: l.runId });
   } catch (e) {
     if (RUN_TASK_REJECTED.has(awsErrorCode(e) ?? "")) return abandon(e);
-    throw new Error(`RunTask's outcome is unknown; the run's secret and task definition are kept. Rerun start to look the task up or retry it: ${(e as Error).message}`);
+    throw new Error(`RunTask's outcome is unknown; the run's secret and task definition are kept. The run's status looks the task up or retries it: ${(e as Error).message}`);
   }
   if (!ran.taskArn) return abandon(new Error(`run-task started nothing: ${JSON.stringify(ran.failures)}`));
   await save({ taskArn: ran.taskArn });

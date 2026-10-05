@@ -5,7 +5,8 @@ type Step = "createSecret" | "registerTaskDefinition" | "runTask";
 /** How a call fails: ECS/Secrets Manager rejects it, or it takes effect and its answer is lost. */
 type Fault = { rejected: string } | { lost: true };
 
-const awsError = (code: string) => new Error(`aws exited 254: An error occurred (${code}) when calling the operation`);
+/** An AWS service error as the SDK throws it: its code is its name. */
+const awsError = (code: string) => Object.assign(new Error(`${code}: the service said no`), { name: code, $metadata: { httpStatusCode: 400 } });
 
 /** An in-memory AWS honoring what `start` relies on: unique secret names, RunTask's clientToken, startedBy. */
 function fakeAws() {
@@ -20,7 +21,7 @@ function fakeAws() {
     delete faults[step];
     if (f && "rejected" in f) throw awsError(f.rejected);
     const out = effect();
-    if (f) throw new Error("aws exited 255: Read timeout on endpoint URL");
+    if (f) throw Object.assign(new Error("socket hang up"), { name: "TimeoutError" });
     return out;
   };
   const aws: LaunchAws = {
@@ -67,7 +68,7 @@ function memoryStore(): LaunchStore & { launch?: Launch } {
   return s;
 }
 
-const run = { runId: "run_1", adapter: "claude-code-local" as const, model: "m", command: ["sh"], network: "net" };
+const run = { runId: "run_1", adapter: "claude-code-local" as const, model: "m" };
 const input = {
   ...run,
   secretString: async () => '{"GH_TOKEN":"t"}',
@@ -109,10 +110,10 @@ describe("startRun", () => {
   it("adopts the run's secret when an earlier start created it but recorded no ARN", async () => {
     const f = fakeAws();
     const store = memoryStore();
-    f.secrets.set("sergeant/fargate-spike/run_1", "stale");
-    store.launch = { ...run, nonce: "n", clientToken: "c", secretName: "sergeant/fargate-spike/run_1", launchedAt: "t" };
+    f.secrets.set("sergeant/runs/run_1", "stale");
+    store.launch = { ...run, nonce: "n", clientToken: "c", secretName: "sergeant/runs/run_1", launchedAt: "t" };
     await startRun(input, f.aws, store);
-    expect([...f.secrets]).toEqual([["sergeant/fargate-spike/run_1", '{"GH_TOKEN":"t"}']]);
+    expect([...f.secrets]).toEqual([["sergeant/runs/run_1", '{"GH_TOKEN":"t"}']]);
     expect(f.tasks).toHaveLength(1);
   });
 

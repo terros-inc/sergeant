@@ -11,23 +11,19 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
-import { failingReset, hasCodexLabel, pickAccount, runAccount, setAside } from "./accounts.ts";
+import { hasCodexLabel, pickAccount, runAccount, setAside } from "./accounts.ts";
 import { AGENTS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
-import { CODEX_PRICES, estimateCodexCost } from "./codex-prices.ts";
+import { CODEX_PRICES } from "./codex-prices.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
+import { agentFields, setAsideOnFailure } from "./ended.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
-import type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
+import { DEFAULT_LIMITS, type ContainerRunnerOptions, type Role } from "./options.ts";
 import { recorded, runFiles, type RunMeta } from "./run-files.ts";
 
 export type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
 
 export const PROVIDER = AGENTS["claude-code-local"].provider;
-
-const DEFAULT_LIMITS: Record<Role, Limits> = {
-  worker: { maxWallSeconds: 3_600, maxCostUsd: 10 },
-  reviewer: { maxWallSeconds: 1_800, maxCostUsd: 5 },
-};
 
 /**
  * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
@@ -41,7 +37,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   const root = resolve(opts.rootDir);
   const image = opts.image ?? "sergeant-runner:local";
   const adapterOf = (role: Role): Adapter => opts.adapters?.[role] ?? "claude-code-local";
-  const asides = setAside();
+  const asides = opts.asides ?? setAside();
   const codexPrices = { ...CODEX_PRICES, ...opts.codexPrices };
   const exec = opts.exec ?? hostExec;
   const execOk = checked(exec);
@@ -74,36 +70,13 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   async function finalize(meta: RunMeta, exitCode: number): Promise<RunRecord> {
     const logs = await exec("docker", ["logs", meta.container]);
     const agent = AGENTS[meta.adapter].parse(logs.stdout, logs.stderr);
-    // TECH-5021: Codex reports only tokens; its model's list price makes them an estimated cost.
-    const price = meta.adapter === "codex-local" ? codexPrices[meta.model] : undefined;
-    const estimated = agent.costUsd === undefined && agent.tokens && price ? estimateCodexCost(agent.tokens, price) : undefined;
-    const base = {
-      runId: meta.runId,
-      status: exitCode === 0 && agent.ok ? "succeeded" : "failed",
-      provider: AGENTS[meta.adapter].provider,
-      model: agent.models.length ? agent.models.join(",") : meta.model,
-      ...recorded(meta),
-      ...(agent.costUsd !== undefined && { costUsd: agent.costUsd }),
-      ...(estimated !== undefined && { costUsd: estimated, costBasis: "estimated" }),
-      ...(agent.tokens && { tokens: agent.tokens }),
-      ...(agent.failureReason && { failureReason: agent.failureReason }),
-    } as const;
-    // The next launch takes the next account (TECH-5113); this one is back when the window it ran out of resets, if within the hour.
-    if (agent.failureReason && meta.account) {
-      asides.add(meta.account.id, failingReset(await readNow(meta)));
-    }
+    const base = agentFields(meta, agent, exitCode === 0, codexPrices);
+    await setAsideOnFailure(meta, agent, asides, opts);
     const why = exitCode === 124 ? "wall-time limit reached" : `agent exited ${exitCode}${agent.detail ? ` (${agent.detail})` : ""}`;
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
     const written = await agentReport(meta);
     return finish(meta, RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: `no report written; ${why}` }) }), facts);
-  }
-
-  /** The run's account's quota read again as it fails, past the launch cache, to see which window ran out; undefined when it cannot be read. */
-  async function readNow(meta: RunMeta) {
-    if (!opts.quota || !meta.ownerId) return undefined;
-    const account = (await opts.accounts(meta.ownerId).catch(() => [])).find((a) => a.id === meta.account?.id);
-    return account && opts.quota(account, { fresh: true }).catch(() => undefined);
   }
 
   /** The report the agent wrote in its workspace, if any: copied out as `report.md` and parsed for its role. */

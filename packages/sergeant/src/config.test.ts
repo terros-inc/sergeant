@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { InstallationConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { fargateSettings, InstallationConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const config = (controlPlaneAppId: number | string, workerAppId: number | string) => ({
@@ -92,4 +92,25 @@ test("each role runs Claude Code unless the config selects Codex for it, with th
   // TECH-5021: the config's Codex prices reach the runner, which estimates a priced model's cost.
   const prices = { "gpt-5.5-codex": { input: 1.25, cachedInput: 0.125, output: 10 } };
   expect(runnerRoles(InstallationConfig.parse({ ...codexReviewer, codex: { model: "gpt-5.5-codex", prices } }), none).codexPrices).toEqual(prices);
+});
+
+// TECH-5237: workers stay on the host unless the config says fargate, and a host without Terraform's
+// Fargate resources must refuse to start rather than fail every worker it launches.
+test("Fargate settings are required only when workers run on Fargate", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sergeant-fargate-settings-"));
+  const missing = join(dir, "missing.json");
+  const local = InstallationConfig.parse(config(1, 2));
+  const onFargate = InstallationConfig.parse({ ...config(1, 2), runners: { workerBackend: "fargate" } });
+  expect(local.runners?.workerBackend).toBeUndefined();
+  expect(await fargateSettings(local, missing)).toBeUndefined();
+  await expect(fargateSettings(onFargate, missing)).rejects.toThrow(/workerBackend is fargate/);
+
+  const file = join(dir, "fargate-runner.json");
+  const settings = {
+    region: "us-west-2", cluster: "c", subnets: ["subnet-1"], securityGroup: "sg-1", executionRoleArn: "arn:role",
+    logGroup: "/g", taskFamily: "f", image: "repo:abc",
+  };
+  await writeFile(file, JSON.stringify(settings));
+  expect(await fargateSettings(onFargate, file)).toMatchObject({ ...settings, cpu: "2048", memory: "8192" });
+  await rm(dir, { recursive: true });
 });

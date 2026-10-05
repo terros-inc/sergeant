@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import type { GitHubPort, RepoSlug, RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
 import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
 import { createLinearPort } from "@terros/sergeant-linear";
-import type { Adapter } from "@terros/sergeant-runner";
+import { FargateSettings, type Adapter } from "@terros/sergeant-runner";
 import type { z } from "zod";
 import type { BudgetWindow } from "./budget.ts";
 import { type GitHubAppRef, InstallationConfig } from "./config-schema.ts";
@@ -33,6 +33,20 @@ export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role,
     models: { worker: models("worker"), reviewer: models("reviewer") },
     ...(config.codex?.prices && { codexPrices: config.codex.prices }),
   };
+}
+
+/**
+ * Where the Fargate runner's tasks run, from the file install.sh writes (deploy/host/install.sh), when
+ * `runners.workerBackend` is `fargate`, or when the file exists, so runs started on Fargate before the
+ * setting changed back are still read and collected there. Undefined when neither.
+ */
+export async function fargateSettings(config: InstallationConfig, file: string): Promise<FargateSettings | undefined> {
+  const required = config.runners?.workerBackend === "fargate";
+  const text = await readFile(file, "utf8").catch((e: NodeJS.ErrnoException) => {
+    if (e.code === "ENOENT" && !required) return undefined;
+    throw new Error(`runners.workerBackend is fargate, but ${file} cannot be read (deploy/README.md, "Workers on Fargate"): ${e.message}`);
+  });
+  return text === undefined ? undefined : FargateSettings.parse(JSON.parse(text));
 }
 
 /** The config's `budget` as a loop's budget option: a task started from now on gets it; a running one keeps its own. */
