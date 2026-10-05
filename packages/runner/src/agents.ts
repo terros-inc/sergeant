@@ -78,7 +78,8 @@ exec timeout "$wall" claude -p "${PROMPT}" \\
 /**
  * The `codex exec --json` events read here (checked against Codex CLI 0.160.0 and its SDK's
  * `ThreadEvent` types): the thread id, each turn's token usage, and a failed turn's error. Codex
- * reports no dollar figure and no resolved model, so a Codex run's cost is unknown.
+ * reports no dollar figure and no resolved model; the runner estimates a cost from the tokens at the
+ * configured model's list price (`codex-prices.ts`, TECH-5021).
  */
 const CodexEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("thread.started"), thread_id: z.string() }),

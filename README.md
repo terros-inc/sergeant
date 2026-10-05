@@ -89,7 +89,10 @@ Automatic updates).
 Optional `runners` chooses each role's agent (TECH-5009): `{ "reviewer": "codex-local" }` runs reviewers
 on the Codex CLI; a role not named runs Claude Code, as before. A `codex-local` role needs `codex`:
 `{ "model": "<Codex model>" }`, which also lets people register Codex accounts; each run uses its task
-owner's registered account ([`packages/runner/README.md`](packages/runner/README.md#codex-codex-local-tech-5009)).
+owner's registered account. A Codex run's cost is estimated from its tokens at OpenAI's list price for
+its model (TECH-5021); optional `codex.prices`, `{ "<model>": { "input": 1.25, "cachedInput": 0.125,
+"output": 10 } }` in USD per million tokens, adds or replaces a model's price, and a model with none
+counts as unknown cost ([`packages/runner/README.md`](packages/runner/README.md#codex-codex-local-tech-5009)).
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs
 contents and pull requests write, checks and commit statuses read, and metadata read. The worker App

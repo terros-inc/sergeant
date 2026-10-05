@@ -222,7 +222,7 @@ This is not a capability broker: every worker gets the same development authorit
 | Adapter | Execution | Expected capabilities | Notes |
 |---|---|---|---|
 | `claude-code-local` | Claude Code headless in the runner zone on the Sergeant host (or in a container on the captain's laptop during the trial) | liveUsage (token counts × pricing), messaging (a steering file read at turn boundaries, modeled on Firstmate's inbox), resume, freshSubagents, list | first adapter; subscription profiles and account selection inside it |
-| `codex-local` | Codex CLI (`codex exec`) in the same zone | usage reporting (tokens, `costBasis: unknown`) | second adapter; a different-provider reviewer (built, TECH-5009) |
+| `codex-local` | Codex CLI (`codex exec`) in the same zone | usage reporting (tokens; `costBasis: estimated` at a configured list price, TECH-5021) | second adapter; a different-provider reviewer (built, TECH-5009) |
 | `cloud-…` | provider cloud agents | varies | allowed when its identity meets §9's hard boundary |
 | `fake` | in-process script | all, configurable | tests only; never launches real processes (S1 UNF-383) |
 
@@ -233,9 +233,15 @@ model credential differs (the task owner's registered Codex account, in place of
 account; TECH-5179, TECH-5184). Checked against Codex CLI 0.160.0:
 
 - **Usage**: `codex exec --json` reports tokens per turn (`turn.completed.usage`: input, cached input,
-  output, reasoning output) and no dollar figure. The run record keeps the summed tokens and no
-  `costUsd`, so the budget counts the run's cost as unknown; nothing estimates one. Codex has no spend
-  cap like `--max-budget-usd`, so the wall-time limit is a Codex run's only backstop.
+  output, reasoning output) and no dollar figure. The run record keeps the summed tokens and, when
+  the run's model has a price, `costUsd` with `costBasis: estimated` (TECH-5021): the tokens times
+  OpenAI's published API list price for the model (`packages/runner/src/codex-prices.ts`; the
+  config's `codex.prices` adds to or replaces it). That is the same "what the API would charge" basis
+  Claude Code reports, so both count alike against the budget. It is a runaway guard, not accounting:
+  standard tier, short context, no per-account subscription math. A model with no price keeps no
+  `costUsd`, and the budget counts it as unknown. Codex has no spend cap like `--max-budget-usd`, so
+  the wall-time limit is still a Codex run's only hard backstop; an estimated cost stops further runs
+  once the budget is spent.
 - **Resume**: the CLI supports it (`codex exec resume <thread id>`), but its sessions live in the run's
   container, which is removed when the run ends, and the local runner resumes neither adapter. The
   fallback is a fresh run from pushed branches and the earlier runs' reports in the brief (05 §2), as

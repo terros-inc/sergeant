@@ -27,25 +27,42 @@ test("a codex-local run gets only the Codex credential in place of the Claude to
 });
 
 
-// The budget adds `costUsd` and counts a run without one as unknown. Codex reports tokens, never
-// dollars: a guessed figure would understate or overstate spend, so its cost stays absent.
-test("a Codex run records its summed tokens and no cost; a Claude run its reported cost", async () => {
-  const codexLogs = [
-    '{"type":"thread.started","thread_id":"t-1"}',
-    "Reading prompt from stdin...",
-    '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50,"reasoning_output_tokens":20}}',
-    '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}',
-  ].join("\n");
+// The budget adds `costUsd` and counts a run without one as unknown. Codex reports tokens, never dollars
+// (TECH-5021): a priced model's tokens become an estimated cost at its list price, so the run counts
+// against the budget like a Claude run's reported cost; any other model's cost stays unknown.
+const codexLogs = [
+  '{"type":"thread.started","thread_id":"t-1"}',
+  "Reading prompt from stdin...",
+  '{"type":"turn.completed","usage":{"input_tokens":1000000,"cached_input_tokens":400000,"output_tokens":50000,"reasoning_output_tokens":20000}}',
+  '{"type":"turn.completed","usage":{"input_tokens":10000,"cached_input_tokens":0,"output_tokens":5000,"reasoning_output_tokens":0}}',
+].join("\n");
+
+test("a Codex run on a priced model records its tokens and an estimated cost; a Claude run its reported cost", async () => {
   const codex = await ended({ adapters: { worker: "codex-local" } }, codexLogs);
   // M13 skips a record without `issueRevision`, so a Codex run must carry it like a Claude run (TECH-5045).
   expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "gpt-5", issueRevision: issueRevision(spec.conversation.issue) });
-  expect(codex.tokens).toEqual({ input: 1010, cachedInput: 400, output: 55, reasoningOutput: 20 });
-  expect(codex.costUsd).toBeUndefined();
+  expect(codex.tokens).toEqual({ input: 1_010_000, cachedInput: 400_000, output: 55_000, reasoningOutput: 20_000 });
+  // gpt-5: 610k uncached input at $1.25/M, 400k cached at $0.125/M, 55k output (reasoning included) at $10/M.
+  expect(codex.costBasis).toBe("estimated");
+  expect(codex.costUsd).toBeCloseTo(0.7625 + 0.05 + 0.55, 6);
   expect(codex.report).not.toBeNull();
 
   const claude = await ended({}, '{"is_error":false,"session_id":"s","total_cost_usd":1.25,"modelUsage":{"claude-sonnet-5-5":{}}}');
   expect(claude).toMatchObject({ status: "succeeded", provider: "anthropic/claude-code", model: "claude-sonnet-5-5", costUsd: 1.25 });
   expect(claude.tokens).toBeUndefined();
+  expect(claude.costBasis).toBeUndefined();
+});
+
+test("the config's Codex prices replace or add a model's; an unpriced model's cost stays unknown", async () => {
+  const models = { worker: { "claude-code-local": "sonnet", "codex-local": "in-house" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } };
+  const unpriced = await ended({ adapters: { worker: "codex-local" }, models }, codexLogs);
+  expect(unpriced.tokens).toBeDefined();
+  expect(unpriced.costUsd).toBeUndefined();
+  expect(unpriced.costBasis).toBeUndefined();
+
+  const priced = await ended({ adapters: { worker: "codex-local" }, models, codexPrices: { "in-house": { input: 1, output: 2 } } }, codexLogs);
+  // No cached-input price: cached input is charged as input.
+  expect(priced).toMatchObject({ costBasis: "estimated", costUsd: expect.closeTo(1.01 + 0.11, 6) });
 });
 
 // These are Codex 0.160.0's own messages. In particular, reuse is how a disposable container's
