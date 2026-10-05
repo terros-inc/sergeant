@@ -17,7 +17,7 @@ import { InstallationConfig, run } from "./config.ts";
 // approvers, and the release channel stay AWS-only, and none of them is ever in an answer or a log.
 //
 // TECH-5205: serve keeps the parameter's version it has, the one it started with and then each version
-// its own change wrote over the one it had, so `sgt admin status` can say when someone changed the
+// its own change wrote directly over the one it had, so `sgt admin status` can say when someone changed the
 // parameter in AWS since, which only a restart rereads.
 //
 // TECH-5209: `sgt admin restart` and `update` poll that status every 5 seconds for up to 45 minutes, so
@@ -113,7 +113,8 @@ export function enrollment(opts: {
       if (what) {
         const written = await aws(parameter.write(JSON.stringify(config, null, 2), what), "write", opts.log);
         // Over a version serve does not have, the write carries that version's other changes, which serve still lacks.
-        if (version === loaded) loaded = written;
+        // TECH-5208: one landing past the version after the one read went over a write serve never saw.
+        if (version === loaded && written === version + 1) loaded = written;
         current = undefined;
       }
       for (const r of Object.keys(opts.configs)) delete opts.configs[r];
