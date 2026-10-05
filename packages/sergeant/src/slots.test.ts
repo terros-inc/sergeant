@@ -98,7 +98,7 @@ test("post-merge effects wait for a task slot", async () => {
 });
 
 test("a merged task with its outcome posted and audit drawn ends without asking for a slot", async () => {
-  // TECH-5127: intake resumes a merged task whose issue never reaches Done (canceled after the merge,
+  // TECH-5127: intake resumes a merged task whose issue never reaches Done (left In Progress after the merge,
   // say) every time. With nothing left to post or draw, it must not queue ahead of fresh work.
   const f = fakes([issue("HOLDS", "In Progress", 1, "2026-10-03T00:00:00.000Z")]);
   const logs: string[] = [];
