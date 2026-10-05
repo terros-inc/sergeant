@@ -61,6 +61,12 @@ export function reviewerProfileLookup(config: InstallationConfig): (login: strin
   return (login) => profiles.get(login.toLowerCase());
 }
 
+/** The reverse lookup (TECH-5244): the GitHub login whose configured Linear profile URL this is. */
+export function githubLoginLookup(config: InstallationConfig): (profileUrl: string) => string | undefined {
+  const logins = new Map(Object.entries(config.linear.reviewerProfiles).map(([login, url]) => [url.toLowerCase(), login]));
+  return (profileUrl) => logins.get(profileUrl.toLowerCase());
+}
+
 export async function loadConfig(file: string): Promise<InstallationConfig> {
   return InstallationConfig.parse(JSON.parse(await readFile(file, "utf8")));
 }

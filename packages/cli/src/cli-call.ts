@@ -31,7 +31,7 @@ export type Io = {
   sleep?: (ms: number) => Promise<void>;
 };
 
-export type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined; "merge-method"?: string | undefined };
+export type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined; "merge-method"?: string | undefined; "merge-policy"?: string | undefined };
 /**
  * `token`: the Linear access token sent as the caller's bearer, when signed in. `warned`: whether this
  * invocation has said its server is older than it, shared by every copy of the context.

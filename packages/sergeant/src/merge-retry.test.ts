@@ -87,7 +87,7 @@ async function fixture(waitingGraceMinutes = 0, refuse = false) {
       github: {
         closePullRequest: async () => {},
         readPullRequest: async () => livePr,
-        mergePullRequest: async () => {
+        mergePolicy: () => "sergeant", mergePullRequest: async () => {
           attempts++;
           if (attempts <= failures && refuse) return { refused: "Waiting on code owner review from terros-inc/owners." };
           if (attempts <= failures) throw new Error("GitHub 405: Pull Request is not mergeable");

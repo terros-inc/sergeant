@@ -24,6 +24,12 @@ export const RefusedMerge = z.object({
   reason: z.string(),
   /** The merge call failed (a network error, a temporary 405) rather than GitHub refusing it by policy. */
   temporary: z.literal(true).optional(),
+  /**
+   * TECH-5244: no merge was tried: the repository's `mergePolicy` is `human`, so the gated head was
+   * handed to a human instead, with review requested from these GitHub logins or teams (none when
+   * nobody could be asked) and the review summary posted on the PR, and posted on the issue with it.
+   */
+  human: z.object({ requested: z.array(z.string()), summary: z.string() }).optional(),
   at: z.iso.datetime({ offset: true }),
 });
 export type RefusedMerge = z.infer<typeof RefusedMerge>;

@@ -110,7 +110,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
         readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
         moveIssueToStarted: async () => ({ moved: false as const }),
       },
-      github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); } },
+      github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => { throw new Error("unused"); } },
       runner: { start: async () => {}, status: async (id) => records.find((r) => r.runId === id) ?? Promise.reject(new Error("unknown")), cancel: async () => {} },
       reasoner: {
         async turn() {

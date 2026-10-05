@@ -67,7 +67,7 @@ test("GET /v1/runs/:id through serve's containerRunner and the typed client keep
       postComment: async () => {},
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner,
     reasoner: { turn: async () => ({ output: { summary: "nothing to do yet", actions: [] }, model: "m", promptVersion: "p" }) },
   };

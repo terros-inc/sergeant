@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mergeRefusal, reportedClosing, type PullRequestFacts, type PullRequestRef, type RepoSlug, type RunId, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { mergeRefusal, reportedClosing, type PullRequestFacts, type PullRequestRef, type RefusedMerge, type RepoSlug, type RunId, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import type { ActionOutcome, Ports } from "./execute.ts";
 
 // What the loop reads and compares on each poll (loop.ts).
@@ -22,8 +22,8 @@ export function unsettledMerges(outcomes: ActionOutcome[], situation: SituationR
   });
 }
 
-/** Merge calls that reached GitHub but did not happen: faults and explicit repository refusals. */
-export function failedMerges(outcomes: ActionOutcome[], situation: SituationReport) {
+/** Merge calls that reached GitHub but did not happen: faults, explicit repository refusals, and human-merge handoffs. */
+export function failedMerges(outcomes: ActionOutcome[], situation: SituationReport): RefusedMerge[] {
   return outcomes.flatMap((o) => {
     const action = o.action;
     if (action.kind !== "merge_pr") return [];

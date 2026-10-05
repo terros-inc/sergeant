@@ -134,7 +134,7 @@ RepositoryEnrollment {
   slug: RepoSlug
   purpose                       // one or two sentences; reasoning uses it to choose the repo set
   enabled                       // disabled: never added to a new repo set, dropped from credentials
-  mergePolicy: sergeant | human // who performs the merge (08 §7)
+  mergePolicy: sergeant | human // who performs the merge (08 §7); unset is human (TECH-5244)
   mergeMethod: squash | merge | rebase
   alwaysReviewPaths: Glob[]     // optional; a "not required" disposition is refused if the PR touches these
 }

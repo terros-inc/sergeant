@@ -56,9 +56,11 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      With nothing to install, it says if the config needs a restart
   admin status                       the host's release, when serve started, the last restart or update,
                                      and whether the installation config changed since serve started
-  admin repo add <owner/name> [--merge-method squash|merge|rebase]
-                                     an approver's enrollment (default squash), once both GitHub
-                                     Apps reach it; serve takes it at once, no host update
+  admin repo add <owner/name> [--merge-method squash|merge|rebase] [--merge-policy sergeant|human]
+                                     an approver's enrollment (default squash, human), once both GitHub
+                                     Apps reach it; serve takes it at once, no host update. In a human
+                                     repository Sergeant never approves or merges; a human merges.
+                                     --merge-policy on an enrolled repository sets its policy
   admin repo remove <owner/name>     an approver's removal: Sergeant stops working in it at once
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host); the hosted API
@@ -145,6 +147,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         reason: { type: "string" },
         task: { type: "string" },
         "merge-method": { type: "string" },
+        "merge-policy": { type: "string" },
         version: { type: "boolean", short: "v" },
         help: { type: "boolean", short: "h" },
       },
@@ -170,7 +173,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"] };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"] };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

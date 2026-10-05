@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { RepoSlug, Sha } from "./conversation.ts";
 
+/**
+ * Who merges in an enrolled repository (08 §2, TECH-5244): `sergeant` approves and merges a gated
+ * head; in a `human` repository Sergeant never approves or merges, and hands the ready PR to a human.
+ * A repository enrolled without one is `human`, so it fails safe.
+ */
+export const MergePolicy = z.enum(["sergeant", "human"]);
+export type MergePolicy = z.infer<typeof MergePolicy>;
+
 /** Required-check state on one exact commit, as GitHub reports it. */
 export const CheckSummary = z.object({
   sha: Sha,

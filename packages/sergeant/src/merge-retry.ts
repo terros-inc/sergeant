@@ -34,7 +34,8 @@ export function recordMergeRetries(
   state.mergeRetries = state.mergeRetries.filter((r) => !due.has(keyOf(r)));
   for (const failure of failedMerges(outcomes, situation)) {
     const others = <T extends { repo: string; number: number }>(list: T[]) => list.filter((r) => r.repo !== failure.repo || r.number !== failure.number);
-    if (pending.has(keyOf(failure))) {
+    // A human-merge handoff (TECH-5244) is no failure to re-check: it waits for a human at once.
+    if (failure.human || pending.has(keyOf(failure))) {
       state.mergeRetries = others(state.mergeRetries);
       state.refusedMerges = [...others(state.refusedMerges), { ...failure, fingerprint }];
     } else {

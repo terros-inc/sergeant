@@ -67,7 +67,7 @@ export function fakes(live: { conversation: Conversation }) {
         const closed = seen.closed.some((c) => c.number === number);
         return { ...pr(number, number === 8 ? "a-human" : undefined), state: closed ? "closed" : "open" };
       },
-      mergePullRequest: async () => Promise.reject(new Error("no merge after a stop")),
+      mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no merge after a stop")),
       closePullRequest: async ({ number, comment }) => void seen.closed.push({ number, comment }),
     },
     runner: {

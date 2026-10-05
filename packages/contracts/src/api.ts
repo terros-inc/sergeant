@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BudgetStatus } from "./budget.ts";
 import { RepoSlug } from "./conversation.ts";
+import { MergePolicy } from "./github.ts";
 import { QuotaReading, QuotaWindowName, RunAccount, RunId, RunRecord } from "./runs.ts";
 import { FiledFollowup } from "./situation.ts";
 
@@ -234,11 +235,15 @@ export type RemovePersonAccountsResponse = z.infer<typeof RemovePersonAccountsRe
 export const MergeMethod = z.enum(["merge", "squash", "rebase"]);
 
 /** Every signed-in user may list them; `whoami` already names them. */
-export const RepositoryList = z.object({ repositories: z.array(z.object({ repo: RepoSlug, mergeMethod: MergeMethod })) });
+export const RepositoryList = z.object({ repositories: z.array(z.object({ repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy })) });
 export type RepositoryList = z.infer<typeof RepositoryList>;
 
-/** An approver's change to the enrolled list: written to the installation's config in AWS, taken by serve in place. */
-export const AddRepositoryRequest = z.strictObject({ repo: RepoSlug, mergeMethod: MergeMethod.default("squash") });
+/**
+ * An approver's change to the enrolled list: written to the installation's config in AWS, taken by serve
+ * in place. A new repository's `mergePolicy` is `human` unless given (TECH-5244); given for one already
+ * enrolled, it sets that repository's policy.
+ */
+export const AddRepositoryRequest = z.strictObject({ repo: RepoSlug, mergeMethod: MergeMethod.default("squash"), mergePolicy: MergePolicy.optional() });
 export const RemoveRepositoryRequest = z.strictObject({ repo: RepoSlug });
 /**
  * The repository as enrolled, whether this call changed the installation's config (false: it already

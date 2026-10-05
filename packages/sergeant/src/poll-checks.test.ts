@@ -84,7 +84,7 @@ test("a recorded run whose status rejects holds the loop as unknown", async () =
       github: {
         readPullRequest: async () => { throw new Error("unused"); },
         closePullRequest: async () => {},
-        mergePullRequest: async () => { throw new Error("unused"); },
+        mergePolicy: () => "sergeant", mergePullRequest: async () => { throw new Error("unused"); },
       },
       runner: {
         start: async () => {},

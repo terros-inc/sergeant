@@ -57,8 +57,13 @@ export type MergeFacts = Ownership & {
   agentComments: AgentComment[];
   enrolledRepositories: RepoSlug[];
   runs: RunRecord[];
-  /** Merges GitHub refused by repository policy, from the task's record. */
+  /** Merges GitHub refused by repository policy, and heads handed to a human (TECH-5244), from the task's record. */
   refusedMerges: RefusedMerge[];
+  /**
+   * TECH-5244: the head is checked to be handed to a human in a `human` repository, never merged, and
+   * that handoff marks a draft ready for review itself, so M7 lets a draft through.
+   */
+  handToHuman?: boolean;
 };
 
 /**
@@ -174,7 +179,7 @@ export function checkMerge(
   if (unasked.length > 0) return deny("M14", `a run could not read ${unasked.join(", ")}; ask a human (ask_human naming each) before merging`);
 
   // M7: GitHub must say the PR can merge.
-  const unmergeable = mergeRefusal(pr);
+  const unmergeable = facts.handToHuman && pr.mergeableState === "draft" && pr.mergeable === true ? null : mergeRefusal(pr);
   if (unmergeable) return deny("M7", unmergeable);
 
   // M9: the PR body agrees with the worker's report on whether this merge completes the issue
@@ -195,6 +200,7 @@ export function checkMerge(
 
   const refused = facts.refusedMerges.find((r) => r.repo === repo && r.number === number && r.headSha === sha);
   if (refused?.conversationRevision === facts.liveConversationRevision) {
+    if (refused.human) return deny("M12", `this head was handed to a human to merge (${refused.reason}) and nothing has changed since; a human merges it`);
     return deny("M12", `GitHub did not merge this head after its bounded attempts (${refused.reason}) and nothing has changed since; a human merges it`);
   }
 

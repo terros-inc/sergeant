@@ -87,7 +87,7 @@ test("a blocking finding and then a red check each get a pushed fix on the same 
       linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async () => pr,
-        closePullRequest: async () => {}, mergePullRequest: async (req) => {
+        closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => {
           merged.push(req);
           pr = { ...pr, state: "merged", mergedSha: "c".repeat(40) };
           live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };

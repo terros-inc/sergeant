@@ -60,7 +60,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
       postComment: async () => {},
       createFollowupIssue: async () => ({ identifier: "UNF-9", url: "https://linear.app/x/issue/UNF-9" }),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
@@ -117,7 +117,7 @@ function oneIssue(ids: string[], turnMs: number) {
     workerLogin: "sergeant-worker[bot]",
     delegatedIssues: async () => ids.map(todo),
     linear: { readConversation: async () => conversation, postComment: async () => {}, createFollowupIssue: async () => Promise.reject(new Error("unused")), moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn() {

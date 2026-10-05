@@ -59,11 +59,20 @@ Linear, or Claude login is used. Its shape is `InstallationConfig` in
     "controlPlaneApp": { "appId": 1, "installationId": 2, "privateKeySecret": "<secret id>" },
     "workerApp": { "appId": 3, "installationId": 4, "privateKeySecret": "<secret id>" }
   },
-  "repositories": { "owner/name": { "mergeMethod": "squash" } },
+  "repositories": { "owner/name": { "mergeMethod": "squash", "mergePolicy": "sergeant" } },
   "modelTokenSecret": "<Sergeant model token secret id>",
   "gitIdentity": { "name": "<human name>", "email": "<human email>" }
 }
 ```
+
+Each repository's `mergePolicy` says who merges in it (TECH-5244): `sergeant` approves and merges a
+gated head; `human` never does, and a repository without one is `human`, so it fails safe. In a
+`human` repository the same merge checks decide when a head is ready, and Sergeant then hands it to a
+human instead: it marks the PR ready, requests review from the code owners GitHub asked or else the
+issue's assignee (their Linear profile in `linear.reviewerProfiles`), posts the review summary on the
+PR and the issue, and waits. A human's review or comment is feedback as always; their merge finishes
+the task as Sergeant's own would. The GitHub adapter rereads the live policy before any approval or
+merge call and refuses in a `human` repository whatever asked it to merge.
 
 The Linear token must act as `agentUserId` (checked at startup); every Linear read and write uses it.
 Optional `linear.otherAgentUserIds` lists other agents' users (V1's) whose comments are not human

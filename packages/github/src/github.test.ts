@@ -26,7 +26,7 @@ const json = (value: unknown, status = 200, headers?: HeadersInit) =>
 const noFeedback = (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) =>
   /\/(reviews|comments|commits)\?per_page=100&page=1$/.test(String(input)) && !init?.method ? fetch(input, init).catch(() => json([])) : fetch(input, init);
 const adapter = (fetch: typeof globalThis.fetch, observedChecksFallback = false) =>
-  createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash", observedChecksFallback } }, fetch: noFeedback(fetch) });
+  createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash", mergePolicy: "sergeant", observedChecksFallback } }, fetch: noFeedback(fetch) });
 
 // Treating observed checks as required cannot know a check that has not appeared yet, so a base
 // with no declared required checks must yield none (M5 then refuses the merge), never whatever

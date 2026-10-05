@@ -12,7 +12,7 @@
     "webhookSecret": "sergeant/example/github-webhook-secret"
   },
   "repositories": {
-    "example-org/example-repo": { "mergeMethod": "squash" }
+    "example-org/example-repo": { "mergeMethod": "squash", "mergePolicy": "sergeant" }
   },
   "modelTokenSecret": "sergeant/example/model-token",
   "gitIdentity": { "name": "Example Human", "email": "human@example.com" },

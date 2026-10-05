@@ -55,7 +55,7 @@ async function scenario(duringTurn: (live: Conversation, turn: number) => Conver
       github: {
         readPullRequest: async () => pr,
         closePullRequest: async ({ number, comment }) => void closed.push({ number, comment }),
-        mergePullRequest: async (req) => {
+        mergePolicy: () => "sergeant", mergePullRequest: async (req) => {
           merged.push(req);
           live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
           return { mergedSha: "c".repeat(40) };
@@ -132,7 +132,7 @@ test("a PR Linear links with no worker report is still polled, and its checks ch
       linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async (r, n) => (read.push(`${r}#${n}`), n === 7 ? { ...pr, checks } : other),
-        closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("unused"); },
+        closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => { throw new Error("unused"); },
       },
       runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
       reasoner: {

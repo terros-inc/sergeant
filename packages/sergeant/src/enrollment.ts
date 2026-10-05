@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { RepoSlug, safeJson, type RepositoryChange } from "@terros/sergeant-contracts";
+import { RepoSlug, safeJson, type MergePolicy, type RepositoryChange } from "@terros/sergeant-contracts";
 import type { GitHubApp } from "@terros/sergeant-github";
 import { z } from "zod";
 import { InstallationConfig, run } from "./config.ts";
@@ -164,19 +164,25 @@ export function enrollment(opts: {
       return { loaded, current: await current.version };
     },
 
-    list: () => Object.entries(opts.configs).map(([repo, c]) => ({ repo, mergeMethod: c.mergeMethod })),
+    list: () => Object.entries(opts.configs).map(([repo, c]) => ({ repo, mergeMethod: c.mergeMethod, mergePolicy: c.mergePolicy })),
 
-    /** Enrolls `repo` once both GitHub Apps reach it; one already enrolled stays as it is. */
-    async add(repo: RepoSlug, mergeMethod: MergeMethod, by: string): Promise<RepositoryChange> {
+    /**
+     * Enrolls `repo` once both GitHub Apps reach it, `human`-merged unless `mergePolicy` says otherwise
+     * (TECH-5244). One already enrolled stays as it is, except that a `mergePolicy` given sets its policy.
+     */
+    async add(repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy | undefined, by: string): Promise<RepositoryChange> {
       let own = await opts.reach(repo);
       const changed = await change((current) => {
         const enrolled = keyOf(current, own);
         if (enrolled) {
           own = enrolled;
-          return undefined;
+          const settings = current[enrolled] as { mergePolicy?: MergePolicy };
+          if (!mergePolicy || mergePolicy === (settings.mergePolicy ?? "human")) return undefined;
+          settings.mergePolicy = mergePolicy;
+          return `${by} set ${own}'s merge policy to ${mergePolicy}`;
         }
-        current[own] = { mergeMethod };
-        return `${by} enrolled ${own} (${mergeMethod})`;
+        current[own] = { mergeMethod, mergePolicy: mergePolicy ?? "human" };
+        return `${by} enrolled ${own} (${mergeMethod}, merged by ${mergePolicy ?? "human"})`;
       });
       return { repo: own, changed, repositories: [...opts.repositories] };
     },
