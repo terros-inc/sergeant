@@ -160,7 +160,7 @@ test("the PRs a stop closed after the cancel answered stay listed by task show o
   f.conversation.issue.linkedPullRequests = [{ repo: "o/r", number: 7 }];
   f.deps.github.readPullRequest = async (repo, number) => ({
     repo, number, url, author: "sergeant-worker[bot]", state: prState, draft: false, headSha: "a".repeat(40), mergedSha: null, baseRef: "main",
-    body: "Fixes UNF-1", mergeable: true, checks: { sha: "a".repeat(40), required: [] }, humanFeedback: [],
+    body: "Fixes UNF-1", mergeable: true, mergeableState: "clean", checks: { sha: "a".repeat(40), required: [] }, humanFeedback: [],
   });
   f.deps.github.closePullRequest = async () => void (prState = "closed");
   // The runner cannot confirm a cancel until the restart, so the API answers before the PR is closed.
