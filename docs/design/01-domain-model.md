@@ -487,7 +487,7 @@ The reviewer rules (06 §4) require an unmet or contradicted outcome to be repor
 finding with category `acceptance`. If a report gives such a verdict without a matching finding, the
 parser adds one with id `acceptance-<n>` (n = its position in `acceptance`), so every unmet outcome can
 be referred to, fixed, or disputed (fixes the scenario-15 type error). This is a parse step, not a
-stored criterion record.
+stored criterion record. It is not built yet: today's `ReviewReport` has no `acceptance` array (06 §4).
 
 ## ReviewDisposition
 
