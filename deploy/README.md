@@ -215,8 +215,10 @@ issue saying what to do, and nothing starts.
      `sergeant/terros/registered-accounts`) is adopted, not recreated: with `registered_accounts_secret`
      naming it, the next plan shows it imported (its description and tags updated in place) and a
      `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` or leave it.
-   - **Another name, later**: the host keeps the name from its first boot (Apply below), so also set
-     `registeredAccountsSecret` in the installation config and update.
+   - **Another name, later, is unsupported.** Changing `registered_accounts_secret` would replace the
+     secret, which holds every registered credential, so its `prevent_destroy` makes the plan fail
+     and nothing changes. Keep the name the first apply used. On the host, leave the installation
+     config's `registeredAccountsSecret` unset or equal to it: the role may write no other secret.
 2. **Check.** Someone in `humans.teams` runs `sgt account register claude` (or `codex`), which signs
    them in with the provider's own CLI: it answers with the quota it read with the credential, and
    `sgt account list` shows the account as theirs. They remove it with `sgt account remove claude`. The secret then holds every registered credential:
