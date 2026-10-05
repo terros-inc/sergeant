@@ -1,8 +1,9 @@
 # Onboarding: delegating work to Sergeant
 
 This page takes you from nothing to a Linear issue Sergeant is working on. It links to the reference
-instead of repeating it: [`sgt.md`](sgt.md) is the `sgt` user guide. If something here needs an
-approver or operator, they follow [`onboarding-admin.md`](onboarding-admin.md).
+instead of repeating it: [`sgt.md`](sgt.md) is the `sgt` user guide. Already set up? Go to
+[Delegate an issue to Sergeant in Linear](#4-delegate-an-issue-to-sergeant-in-linear). If something
+here needs an approver or operator, they follow [`onboarding-admin.md`](onboarding-admin.md).
 
 ## 1. Before you start
 
@@ -42,21 +43,35 @@ sgt account list               # yours shows up under your name
 Read [`sgt.md` §6](sgt.md#6-model-accounts) once first: how Sergeant picks among your accounts, that
 the credential is used inside run containers, and how to remove and revoke it.
 
-## 4. Delegate an issue
+## 4. Delegate an issue to Sergeant in Linear
 
-1. **Check the repository is enrolled**, and who merges there, with `sgt repo list`. In a `sergeant`
-   repository Sergeant merges once its Gate passes. In a `human` one it never approves or merges: it
-   gets the PR green and reviewed, marks it ready, requests review (from the code owners, else you if an approver mapped your GitHub login),
-   and posts **Ready for a human to merge** on the PR and the issue. You merge it, and Sergeant then
-   finishes the task. A repository not listed needs an approver to enroll it.
-2. **Write the issue** so it stands on its own: what to change, in which repository, and how to tell it
-   is done.
-3. **Assign it to yourself and delegate it to Sergeant yourself**, in Linear. The assignee is the owner
-   whose accounts pay, and Sergeant starts only if Linear shows that same person delegated it. If
-   someone else delegates an issue assigned to you, Sergeant refuses with a comment.
-4. **Put it in Todo.** Sergeant starts only from Todo, and moves the issue to In Progress when it does.
-   Backlog and Triage never start, and a Todo issue with an unfinished Linear "blocked by" issue waits
-   for it.
+1. **Check the repository.** `sgt repo list` shows the repositories Sergeant works in and who merges in
+   each. In a `sergeant` repository Sergeant merges once its Gate passes. In a `human` one it never
+   approves or merges: it gets the PR green and reviewed, marks it ready, requests review (from the
+   code owners, else you if an approver mapped your GitHub login), and posts **Ready for a human to
+   merge** on the PR and the issue; you merge it, and Sergeant then finishes the task. A repository not
+   listed needs an approver to enroll it.
+2. **Open or create the issue** in your installation's Linear workspace. Write it so it stands on its
+   own: what to change, in which repository, and how to tell it is done.
+3. **Assign it to yourself.** The assignee is the task's owner: their model accounts pay for it, and
+   reassigning the issue later hands the task off.
+4. **Delegate it to Sergeant yourself.** In the issue's properties sidebar, open the assignee menu and
+   pick your installation's Sergeant agent. Linear records an agent as the issue's **delegate** and
+   keeps you as its assignee. Creating the issue already delegated counts too, when you are its creator.
+5. **Move it to Todo.** Sergeant starts work only from Todo. Triage and Backlog never start, and a Todo
+   issue with an unfinished Linear "blocked by" issue waits until that one is done or canceled.
+
+**What happens next.** Within a couple of minutes (or at once, when webhooks are set up) Sergeant moves
+the issue to In Progress and, usually, starts a worker (it may ask a question first). The worker opens a
+PR, which Linear links on the issue. Questions come as comments on the issue (below). After the
+merge, Sergeant posts one outcome comment.
+
+**When it refuses.** Sergeant starts only when Linear's history shows the assignee delegated the issue
+themselves. If the issue has no human assignee, or someone else delegated it, or an app did it on your
+behalf (such as an MCP connector, unless the installation allowlists that app in
+`linear.delegatingAppIds`), Sergeant posts one comment on the issue saying so, and nothing starts.
+Remove the delegate and delegate it again yourself in Linear. With no usable model account
+registered, it says that instead (step 3).
 
 **Budget.** Each task gets a budget window (`sgt task show` prints it). When it runs out, Sergeant
 stops its runs and asks a **Question for you** with the options to extend or accept the work as it is.
