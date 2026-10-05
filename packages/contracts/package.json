@@ -5,7 +5,9 @@
   "description": "Zod schemas, ports, the pure Gate, and the typed API client shared by every Sergeant 2 package. Depends on no internal package.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./credentials": "./src/credentials.ts",
+    "./version": "./src/version.ts"
   },
   "scripts": {
     "lint": "oxlint",

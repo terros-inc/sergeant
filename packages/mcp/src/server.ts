@@ -6,16 +6,16 @@ import {
   type ApiResult,
   apiClient,
   CLI_VERSION_HEADER,
-  currentToken,
   RunDetail,
   RunId,
   RunList,
   safeJson,
-  sergeantVersion,
   TaskDetail,
   TaskList,
   TaskRef,
 } from "@terros/sergeant-contracts";
+import { currentToken } from "@terros/sergeant-contracts/credentials";
+import { sergeantVersion } from "@terros/sergeant-contracts/version";
 import { z } from "zod";
 
 // `sgt-mcp` (TECH-4940): Sergeant for MCP clients such as ChatGPT and Firstmate, the read-only half

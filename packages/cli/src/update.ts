@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sergeantVersion } from "@terros/sergeant-contracts";
+import { sergeantVersion } from "@terros/sergeant-contracts/version";
 
 // `sgt update` (TECH-5185): brings the checkout `sgt` runs from (`pnpm install-sgt`'s wrapper runs it
 // in place) to origin's main and installs its dependencies, so the next `sgt` is the current CLI. It

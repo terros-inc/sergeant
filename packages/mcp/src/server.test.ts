@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { saveCredential } from "@terros/sergeant-contracts";
+import { saveCredential } from "@terros/sergeant-contracts/credentials";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 
 // The real `sgt-mcp` process over stdio, as an MCP client starts it, against a fake Sergeant API:

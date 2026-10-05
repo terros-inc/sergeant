@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { chmod, open, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MIN_CLI_HEADER, MIN_CLI_VERSION, TOKEN_URL } from "@terros/sergeant-contracts";
+import { MIN_CLI_HEADER, MIN_CLI_VERSION } from "@terros/sergeant-contracts";
+import { TOKEN_URL } from "@terros/sergeant-contracts/credentials";
 import { expect, test } from "vitest";
 import { USAGE } from "./cli.ts";
 import { config, fakeApi, sgt, sgtWith } from "./fake-api.ts";

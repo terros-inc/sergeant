@@ -6,9 +6,9 @@ import {
   MIN_CLI_VERSION,
   type Provider,
   safeJson,
-  sergeantVersion,
   type WhoAmI,
 } from "@terros/sergeant-contracts";
+import { sergeantVersion } from "@terros/sergeant-contracts/version";
 import type { z } from "zod";
 
 // The plumbing every `sgt` command shares (cli.ts): one API call per request, sent with the caller's

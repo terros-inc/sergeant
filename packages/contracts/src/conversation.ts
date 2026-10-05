@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+import { sha256 } from "./sha256.ts";
 
 export const RepoSlug = z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/name");
 export type RepoSlug = z.infer<typeof RepoSlug>;
@@ -105,8 +105,6 @@ export type Conversation = z.infer<typeof Conversation>;
 
 export const ConversationRevision = z.string().regex(/^[0-9a-f]{64}$/);
 export type ConversationRevision = z.infer<typeof ConversationRevision>;
-
-const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /**
  * Linear's client-supplied comment id for an idempotency key: a UUID v4-shaped digest of the key. A

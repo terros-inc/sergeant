@@ -11,6 +11,4 @@ export * from "./ports.ts";
 export * from "./retro.ts";
 export * from "./runs.ts";
 export * from "./situation.ts";
-export * from "./version.ts";
 export * from "./min-cli.ts";
-export * from "./credentials.ts";
