@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { RepoSlug, safeJson, type RepositoryChange } from "@terros/sergeant-contracts";
 import type { GitHubApp } from "@terros/sergeant-github";
 import { z } from "zod";
@@ -23,6 +24,11 @@ import { InstallationConfig, run } from "./config.ts";
 // TECH-5209: `sgt admin restart` and `update` poll that status every 5 seconds for up to 45 minutes, so
 // the version now is read at most once every VERSION_MS, every read is cut off after READ_TIMEOUT_MS,
 // and a failing read is logged once, when it starts failing, not on every poll.
+//
+// TECH-5206: serve runs the host's copy of the parameter from its last install, which systemd may
+// restart after a crash long after the parameter changed. So serve starts with the parameter's version
+// only when that copy matches it apart from `repositories`, which serve takes from the parameter
+// anyway; otherwise it has the version install.sh recorded with the copy.
 
 /** How long `sgt admin status` may show the parameter's version now from an earlier read. */
 export const VERSION_MS = 30_000;
@@ -40,10 +46,22 @@ export type ConfigParameter = {
 /** A change refused for a reason the caller can act on. */
 export class EnrollmentRefused extends Error {}
 
-/** The parameter's `repositories`, validated with the rest of it, and its version: what `serve` starts with. */
-export async function enrolledIn(parameter: ConfigParameter, log: (line: string) => void): Promise<{ repositories: InstallationConfig["repositories"]; version: number }> {
+/**
+ * The parameter's `repositories`, validated with the rest of it, and the version `serve` has: the
+ * parameter's when `installed`, the host's copy serve runs, matches it but for `repositories`; else the
+ * version installed with that copy, 0 when none was recorded.
+ */
+export async function enrolledIn(
+  parameter: ConfigParameter,
+  log: (line: string) => void,
+  installed?: { config: unknown; version: number | undefined },
+): Promise<{ repositories: InstallationConfig["repositories"]; version: number }> {
   const { config, version } = await readConfig(parameter, log);
-  return { repositories: InstallationConfig.parse(config).repositories, version };
+  const repositories = InstallationConfig.parse(config).repositories;
+  if (!installed || isDeepStrictEqual({ ...(installed.config as object), repositories: {} }, { ...config, repositories: {} })) return { repositories, version };
+  const loaded = installed.version ?? 0;
+  log(`the installation config serve runs is version ${loaded}, not the parameter's version ${version}: \`sgt admin restart\` installs it`);
+  return { repositories, version: loaded };
 }
 
 /** The parameter's raw JSON, valid as an installation config, and its version. A failure's message never quotes it. */

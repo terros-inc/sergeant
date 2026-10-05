@@ -221,6 +221,35 @@ test("serve's own change keeps the version it has only when no other write came 
   expect(await enrolled.versions()).toEqual({ loaded: 2, current: 4 });
 });
 
+// TECH-5206: systemd restarts serve after a crash on the host's copy from its last install, not on the
+// parameter now. A change made in AWS before the crash must still show, and only one serve lacks.
+test("serve restarted on an older installed copy has that copy's version, and one that differs only in repositories has the parameter's", async () => {
+  const { call, parameter } = await serve();
+  const installed = { config: CONFIG, version: 1 };
+  const restarted = async (copy: { config: unknown; version: number | undefined }) => {
+    const logs: string[] = [];
+    const started = await enrolledIn(parameter, (line) => logs.push(line), copy);
+    const versions = await enrollment({ repositories: [], configs: {}, parameter, version: started.version, reach: async (r) => r, log: () => {} }).versions();
+    return { repositories: Object.keys(started.repositories), versions, logs };
+  };
+
+  // An approver's `sgt admin repo add`: serve takes repositories from the parameter, so it has all of it.
+  await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two" });
+  expect(await restarted(installed)).toEqual({ repositories: ["terros-inc/one", "terros-inc/two"], versions: { loaded: 2, current: 2 }, logs: [] });
+
+  // A budget change in AWS, then a crash: serve still runs the installed copy's budget.
+  parameter.value = JSON.stringify({ ...JSON.parse(parameter.value), budget: { usd: 20 } });
+  parameter.version += 1;
+  const stale = await restarted(installed);
+  expect(stale.versions).toEqual({ loaded: 1, current: 3 });
+  expect(stale.logs).toEqual(["the installation config serve runs is version 1, not the parameter's version 3: `sgt admin restart` installs it"]);
+  // A copy installed before install.sh recorded versions is still flagged.
+  expect((await restarted({ config: CONFIG, version: undefined })).versions).toEqual({ loaded: 0, current: 3 });
+
+  // Once install.sh has installed the parameter, it is current again.
+  expect((await restarted({ config: JSON.parse(parameter.value), version: 3 })).versions).toEqual({ loaded: 3, current: 3 });
+});
+
 // TECH-5209: `sgt admin restart` and `update` read the status every 5 seconds for up to 45 minutes. A
 // slow or failing AWS must neither run the AWS CLI on every poll nor add a serve.log line to each.
 test("the version now is read at most once a while, and a failing read is logged once until one succeeds", async () => {

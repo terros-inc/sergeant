@@ -310,8 +310,10 @@ sgt admin status           # the release, when serve started, the last restart o
 `restart` and `update` each print the outcome when the host has one, including why it failed, waiting
 out serve's restart (up to 45 minutes). `status` compares the installation-config parameter's version
 `serve` has (the one it started with, moved on only by its own `sgt admin repo` changes) with the
-parameter's version now; when they differ, the config changed in AWS since serve started, and it says
-to run `sgt admin restart`. An `update` with nothing newer to install leaves serve running on its old
+parameter's version now; when they differ, the config changed in AWS since serve's last install, and
+it says to run `sgt admin restart`. Serve runs `/etc/sergeant/installation.json` from that install, so
+one systemd restarts (after a crash, say) has the version install.sh recorded beside it in
+`installation.json.version`, unless that copy matches the parameter but for `repositories`. An `update` with nothing newer to install leaves serve running on its old
 config, and says the same. `serve` runs nothing privileged: it logs who asked and leaves
 one request, `/var/lib/sergeant/state/admin-request.json`. One action at a time: another request is
 refused (409) while that one waits or the host's latest outcome is still running (an outcome left

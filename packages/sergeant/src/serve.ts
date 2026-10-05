@@ -17,6 +17,7 @@
 // API admits the Linear users the config's `humans` names (auth.ts); `--trust-loopback` also admits an
 // operator on this host with no login, for development, and is refused unless `--host` is 127.0.0.1 or ::1.
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
@@ -47,12 +48,14 @@ const { values } = parseArgs({
   },
 });
 
-const config = await loadConfig(values.config ?? fail("--config is required"));
+const configFile = values.config ?? fail("--config is required");
+const config = await loadConfig(configFile);
 const configParameterName = values["config-parameter"] ?? process.env.SERGEANT_CONFIG_PARAMETER;
 const parameter = configParameterName ? configParameter(config, configParameterName) : undefined;
 const log = (line: string) => console.log(`[${new Date().toISOString()}] ${line}`);
 // The parameter is the only record of an approver's change: a restart before the next update keeps it.
-const started = parameter && (await enrolledIn(parameter, log));
+// Its version serve has is the one install.sh recorded with `--config` unless that copy is current (TECH-5206).
+const started = parameter && (await enrolledIn(parameter, log, { config: JSON.parse(await readFile(configFile, "utf8")), version: await installedVersion(configFile) }));
 if (started) config.repositories = started.repositories;
 const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"));
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
@@ -165,6 +168,12 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => process.exit(1));
     void service.stop().then(() => process.exit(0));
   });
+}
+
+/** The parameter's version install.sh recorded beside `file` when it installed it; undefined when there is none. */
+async function installedVersion(file: string): Promise<number | undefined> {
+  const n = Number((await readFile(`${file}.version`, "utf8").catch(() => "")).trim());
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 function count(value: string, flag: string, min: number): number {
