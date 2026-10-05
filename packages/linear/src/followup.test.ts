@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { commentIdFor } from "@terros/sergeant-contracts";
 import { createLinearPort } from "./linear.ts";
 
 const at = (minute: number) => `2026-10-02T06:${String(minute).padStart(2, "0")}:00.000Z`;
@@ -124,4 +125,24 @@ test("createFollowupIssue files in Backlog, assigned to the origin's owner, and 
     expect(warning).toMatch(/^warning: delegation history of origin-1 unreadable, follow-up left unassigned: /);
     expect(warning).toMatch(error);
   }
+});
+
+// TECH-5049: the feedback sweep finds a follow-up it filed before a crash by the id it was filed under;
+// none is an answer, while an outage must stay an error, never "not filed".
+test("findFollowupIssue finds the follow-up by the id createFollowupIssue files it under", async () => {
+  const ids: unknown[] = [];
+  let outage = false;
+  const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    const { variables } = JSON.parse(String(init?.body)) as { variables: { id: string } };
+    ids.push(variables.id);
+    if (outage) return new Response("unavailable", { status: 503 });
+    const nodes = variables.id === commentIdFor("feedback:linear:c1") ? [{ identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2", title: "Cap retries" }] : [];
+    return Response.json({ data: { issues: { nodes } } });
+  };
+  const linear = createLinearPort({ apiKey: "test", sergeantUserIds: [], fetch });
+  expect(await linear.findFollowupIssue("feedback:linear:c1")).toEqual({ identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2", title: "Cap retries" });
+  expect(await linear.findFollowupIssue("feedback:linear:c2")).toBeUndefined();
+  outage = true;
+  await expect(linear.findFollowupIssue("feedback:linear:c1")).rejects.toThrow(/503/);
+  expect(ids[0]).toBe(commentIdFor("feedback:linear:c1"));
 });

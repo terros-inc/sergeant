@@ -2,7 +2,7 @@ import { commentIdFor, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { conversationReader } from "./conversation.ts";
 import { taskOwnerReader } from "./delegation.ts";
-import { followupFiler } from "./followup.ts";
+import { followupFiler, followupFinder } from "./followup.ts";
 import { labeler } from "./label.ts";
 import { retroLinear, type RetroLinear } from "./retro.ts";
 import {
@@ -67,6 +67,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   undelegate(issueId: string): Promise<void>;
   moveIssueToTodo(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
   addLabel: NonNullable<LinearPort["addLabel"]>;
+  findFollowupIssue: NonNullable<LinearPort["findFollowupIssue"]>;
   /** The retro's reads and writes (TECH-5187, retro.ts). */
   retro: RetroLinear;
 } {
@@ -142,6 +143,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     readTaskOwner: taskOwnerReader(request, sergeantUsers, new Set(options.delegatingAppIds)),
 
     createFollowupIssue: followupFiler({ request, createOnce, sergeantUsers, log }),
+
+    findFollowupIssue: followupFinder({ request }),
 
     addLabel: labeler({ request }),
 

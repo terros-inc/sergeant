@@ -27,9 +27,10 @@ import { pause } from "./wake.ts";
 //
 // One follow-up per feedback item at most: its issue id is derived from the feedback's key, so a
 // repeated sweep, a crash, or a lost `feedback.json` files nothing twice, and Sergeant's comment on the
-// origin for each filed follow-up tells later judgments what was already filed. `feedback.json` only
-// spares a second judgment of what was judged, counts failed attempts, and holds `since`, so feedback
-// that predates the first sweep (the rollout) is not acted on.
+// origin for each filed follow-up tells later judgments what was already filed. A follow-up whose marker
+// a crash or a failed comment kept off the origin gets it on a later pass, without a second judgment that
+// could decline it (TECH-5049). `feedback.json` only spares a second judgment of what was judged, counts
+// failed attempts, and holds `since`, so feedback that predates the first sweep is not acted on.
 
 /** Per origin issue: follow-ups filed from its feedback, and pieces of feedback judged (each a paid model call). */
 export const FEEDBACK_LIMITS = { followups: 3, judgments: 10 };
@@ -59,7 +60,7 @@ const FeedbackRecord = z.object({
 type FeedbackRecord = z.infer<typeof FeedbackRecord>;
 
 export type FeedbackDeps = {
-  linear: Pick<LinearPort, "readConversation" | "postComment" | "createFollowupIssue">;
+  linear: Pick<LinearPort, "readConversation" | "postComment" | "createFollowupIssue" | "findFollowupIssue">;
   github: Pick<GitHubPort, "readPullRequest">;
   /** Issues delegated to the V2 agent that reached a completed state after `since`. */
   completedIssues(since: string): Promise<string[]>;
@@ -74,7 +75,7 @@ export type FeedbackDeps = {
 export type FeedbackOptions = {
   stateDir: string;
   enrolledRepositories: RepoSlug[];
-  /** How long after work lands its feedback is still watched (default 14 days). */
+  /** How long after work lands, its closing PR's merge or Done, its feedback is still watched (default 14 days). */
   lookbackDays?: number;
   log: (line: string) => void;
   /** The service stopping: the sweep ends before its next judgment. */
@@ -101,15 +102,20 @@ export async function sweepFeedback(opts: FeedbackOptions, deps: FeedbackDeps): 
   await save();
   const lookback = new Date(Date.now() - (opts.lookbackDays ?? 14) * 86_400_000).toISOString();
   // Linear says which issues are Sergeant's while they stay delegated; the local task records also
-  // cover one undelegated after its merge.
-  const candidates = new Set([...(await deps.completedIssues(lookback)), ...(await deps.openIssues()), ...(await mergedTasks(opts.stateDir, lookback))]);
+  // cover one undelegated after its merge. TECH-5049: an open one whose task this host saw merge before
+  // the lookback is not read at all; sweepIssue applies the lookback to the rest.
+  const tasks = await localMerges(opts.stateDir);
+  const recent = tasks.filter((t) => [t.merged, ...t.episodes].some((at) => at !== undefined && at > lookback)).map((t) => t.issueId);
+  const landedBefore = new Set(tasks.filter((t) => t.merged !== undefined && t.merged <= lookback).map((t) => t.issueId));
+  const open = (await deps.openIssues()).filter((id) => !landedBefore.has(id));
+  const candidates = new Set([...(await deps.completedIssues(lookback)), ...open, ...recent]);
   for (const issueId of candidates) {
     if (opts.signal?.aborted) return;
-    await sweepIssue(issueId, record, save, opts, deps).catch((e: Error) => opts.log(`feedback on ${issueId}: not swept, retrying next pass: ${e.message}`));
+    await sweepIssue(issueId, Date.parse(lookback), record, save, opts, deps).catch((e: Error) => opts.log(`feedback on ${issueId}: not swept, retrying next pass: ${e.message}`));
   }
 }
 
-async function sweepIssue(issueId: string, record: FeedbackRecord, save: () => Promise<void>, opts: FeedbackOptions, deps: FeedbackDeps): Promise<void> {
+async function sweepIssue(issueId: string, lookback: number, record: FeedbackRecord, save: () => Promise<void>, opts: FeedbackOptions, deps: FeedbackDeps): Promise<void> {
   const progress = await deps.issueProgress(issueId);
   if (progress.stateType === "canceled") return;
   const done = progress.stateType === "completed";
@@ -131,6 +137,8 @@ async function sweepIssue(issueId: string, record: FeedbackRecord, save: () => P
     // A PR of the task still open: the task is active, and its loop reads the conversation.
     if (!done && prs.some((p) => p.state === "open")) return undefined;
     const closingMerges = merged.filter((p) => !episodeOf(p) && hasClosingReference(p.body, origin.issue.identifier)).map((p) => Date.parse(p.mergedAt));
+    // Work that landed before the lookback is no longer watched, Done or not (Done work is not swept then).
+    if (!done && closingMerges.length > 0 && Math.max(...closingMerges) <= lookback) return undefined;
     // Landed: the completing PR merged, or the issue reached Done, whichever came first.
     const marks = [...(done && progress.completedAt ? [Date.parse(progress.completedAt)] : []), ...(closingMerges.length > 0 ? [Math.max(...closingMerges)] : [])];
     return marks.length === 0 ? undefined : Math.max(Math.min(...marks), since);
@@ -152,48 +160,52 @@ async function sweepIssue(issueId: string, record: FeedbackRecord, save: () => P
   ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   const filed = origin.agentComments.filter((c) => c.body.startsWith(FILED_MARKER)).map((c) => c.body);
+  // Each follow-up counts once: its marker may be on the origin already (a crash before save(), a lost feedback.json).
+  const markFiled = (identifier: string, comment: string) => void (filed.some((c) => c.includes(`[${identifier}](`)) || filed.push(comment));
   for (const item of feedback) {
     if (record.handled[item.key]) continue;
     if (opts.signal?.aborted) return;
     const at = new Date().toISOString();
     const judged = Object.values(record.handled).filter((h) => h.issue === origin.issue.id && h.judged).length;
-    if (filed.length >= FEEDBACK_LIMITS.followups || judged >= FEEDBACK_LIMITS.judgments) {
+    // Filed already, its marker cut short: the marker now, so it counts and later judgments see it.
+    const existing = await deps.linear.findFollowupIssue?.(followupKey(item));
+    if (existing) {
+      markFiled(existing.identifier, await postFiled(deps, origin, item, existing));
+      record.handled[item.key] = { issue: origin.issue.id, at, judged: false, filed: existing.identifier };
+      opts.log(`feedback ${item.key} on ${origin.issue.identifier}: ${existing.identifier} was filed for it already; marked it filed`);
+    } else if (filed.length >= FEEDBACK_LIMITS.followups || judged >= FEEDBACK_LIMITS.judgments) {
       const reason = `${origin.issue.identifier} reached its feedback limit (${filed.length} follow-ups filed, ${judged} pieces of feedback judged)`;
-      await deps.linear.postComment({
-        issueId: origin.issue.id,
-        key: `feedback-limit:${origin.issue.id}`,
-        body: `Sergeant stopped reading feedback on this issue: ${reason}. Feedback from here on, starting with ${item.author}'s (${where(item)}), is not turned into follow-ups; file one by hand if it needs one.`,
-      });
+      const body = `Sergeant stopped reading feedback on this issue: ${reason}. Feedback from here on, starting with ${item.author}'s (${where(item)}), is not turned into follow-ups; file one by hand if it needs one.`;
+      await deps.linear.postComment({ issueId: origin.issue.id, key: `feedback-limit:${origin.issue.id}`, body });
       opts.log(`feedback ${item.key}: not judged: ${reason}`);
       record.handled[item.key] = { issue: origin.issue.id, at, judged: false, reason };
-      await save();
-      continue;
-    }
-    try {
-      const outcome = await handle(item, origin, merged, filed, deps);
-      if ("comment" in outcome) {
-        record.handled[item.key] = { issue: origin.issue.id, at, judged: true, filed: outcome.filed };
-        filed.push(outcome.comment);
-        opts.log(`feedback ${item.key} on ${origin.issue.identifier}: filed ${outcome.filed} (Backlog, not delegated)`);
-      } else {
-        record.handled[item.key] = { issue: origin.issue.id, at, judged: true, reason: outcome.reason };
-        opts.log(`feedback ${item.key} on ${origin.issue.identifier}: not actionable: ${outcome.reason}`);
-      }
-    } catch (e) {
-      const attempts = (record.failures[item.key] ?? 0) + 1;
-      const error = (e as Error).message;
-      if (attempts < MAX_FEEDBACK_ATTEMPTS) {
-        record.failures[item.key] = attempts;
-        opts.log(`feedback ${item.key} on ${origin.issue.identifier}: attempt ${attempts} failed, retrying next pass: ${error}`);
-      } else {
-        // Given up, and said so where the human looks, so the feedback is not silently lost.
-        await deps.linear.postComment({
-          issueId: origin.issue.id,
-          key: `feedback-failed:${item.key}`,
-          body: `Sergeant could not act on ${item.author}'s feedback (${where(item)}) after ${attempts} attempts (${error.slice(0, 500)}). File a follow-up by hand if it needs one.`,
-        });
-        record.handled[item.key] = { issue: origin.issue.id, at, judged: true, reason: `gave up after ${attempts} attempts: ${error}` };
-        opts.log(`feedback ${item.key} on ${origin.issue.identifier}: gave up after ${attempts} attempts: ${error}`);
+    } else {
+      try {
+        const outcome = await handle(item, origin, merged, filed, deps);
+        if ("comment" in outcome) {
+          record.handled[item.key] = { issue: origin.issue.id, at, judged: true, filed: outcome.filed };
+          markFiled(outcome.filed, outcome.comment);
+          opts.log(`feedback ${item.key} on ${origin.issue.identifier}: filed ${outcome.filed} (Backlog, not delegated)`);
+        } else {
+          record.handled[item.key] = { issue: origin.issue.id, at, judged: true, reason: outcome.reason };
+          opts.log(`feedback ${item.key} on ${origin.issue.identifier}: not actionable: ${outcome.reason}`);
+        }
+      } catch (e) {
+        const attempts = (record.failures[item.key] ?? 0) + 1;
+        const error = (e as Error).message;
+        if (attempts < MAX_FEEDBACK_ATTEMPTS) {
+          record.failures[item.key] = attempts;
+          opts.log(`feedback ${item.key} on ${origin.issue.identifier}: attempt ${attempts} failed, retrying next pass: ${error}`);
+        } else {
+          // Given up, and said so where the human looks, so the feedback is not silently lost.
+          await deps.linear.postComment({
+            issueId: origin.issue.id,
+            key: `feedback-failed:${item.key}`,
+            body: `Sergeant could not act on ${item.author}'s feedback (${where(item)}) after ${attempts} attempts (${error.slice(0, 500)}). File a follow-up by hand if it needs one.`,
+          });
+          record.handled[item.key] = { issue: origin.issue.id, at, judged: true, reason: `gave up after ${attempts} attempts: ${error}` };
+          opts.log(`feedback ${item.key} on ${origin.issue.identifier}: gave up after ${attempts} attempts: ${error}`);
+        }
       }
     }
     if (record.handled[item.key]) delete record.failures[item.key];
@@ -212,19 +224,25 @@ async function handle(
   const mergedPullRequests = merged.map((p) => ({ url: p.url, body: p.body }));
   const { judgment } = await deps.judge.judge({ origin, mergedPullRequests, feedback: item, filed: [...filed] });
   if (!judgment.actionable) return { reason: judgment.reason };
-  // Keyed by the feedback alone, never by the pass or the origin: the same feedback files one issue,
-  // even a PR comment on a PR linked to two issues.
-  const key = `feedback:${item.key}`;
   const issue = await deps.linear.createFollowupIssue({
     originIssueId: origin.issue.id,
     title: judgment.title,
     description: followupDescription(origin, merged, item, judgment.delta),
     relation: "related",
-    key,
+    key: followupKey(item),
   });
-  const comment = `${FILED_MARKER} [${issue.identifier}](${issue.url}) ${judgment.title}, for ${item.author}'s feedback (${where(item)}). It is in Backlog and not delegated; move it to Todo and delegate it to Sergeant to have it done.`;
-  await deps.linear.postComment({ issueId: origin.issue.id, key: `${key}:filed:${origin.issue.id}`, body: comment });
-  return { filed: issue.identifier, comment };
+  return { filed: issue.identifier, comment: await postFiled(deps, origin, item, { ...issue, title: judgment.title }) };
+}
+
+// Keyed by the feedback alone, never by the pass or the origin: the same feedback files one issue,
+// even a PR comment on a PR linked to two issues.
+const followupKey = (item: Feedback) => `feedback:${item.key}`;
+
+/** Says on the origin that `issue` was filed for `item`, once; returns the comment. */
+async function postFiled(deps: FeedbackDeps, origin: Conversation, item: Feedback, issue: { identifier: string; url: string; title: string }): Promise<string> {
+  const comment = `${FILED_MARKER} [${issue.identifier}](${issue.url}) ${issue.title}, for ${item.author}'s feedback (${where(item)}). It is in Backlog and not delegated; move it to Todo and delegate it to Sergeant to have it done.`;
+  await deps.linear.postComment({ issueId: origin.issue.id, key: `${followupKey(item)}:filed:${origin.issue.id}`, body: comment });
+  return comment;
 }
 
 /** The follow-up's description: reasoning's delta, then the feedback verbatim and links back. */
@@ -251,25 +269,19 @@ const fromPullRequest = (p: PullRequestFacts, f: HumanPullRequestFeedback): Feed
   url: f.url,
 });
 
-const where = (item: Feedback) =>
-  ({
-    linear_comment: `[a comment](${item.url})`,
-    pr_comment: `[a PR comment](${item.url})`,
-    pr_review_comment: `[a review comment](${item.url})`,
-    pr_review: `[a review](${item.url})`,
-  })[item.source];
+const NOUNS = { linear_comment: "a comment", pr_comment: "a PR comment", pr_review_comment: "a review comment", pr_review: "a review" };
+const where = (item: Feedback) => `[${NOUNS[item.source]}](${item.url})`;
 
-/** Tasks this host ran whose completing PR merged after `since`: `state.json`'s `merged`, or a set-aside episode's. */
-async function mergedTasks(stateDir: string, since: string): Promise<string[]> {
+/** When each task this host ran merged: its current episode (`state.json`'s `merged`), and its set-aside episodes. */
+async function localMerges(stateDir: string): Promise<{ issueId: string; merged?: string; episodes: string[] }[]> {
   const dirs = await readdir(join(stateDir, "tasks")).catch(() => []);
-  const tasks = await Promise.all(
+  return Promise.all(
     dirs.map(async (id) => {
       const state = await readTaskState(join(stateDir, "tasks", id, "state.json")).catch(() => undefined);
-      if (state?.merged && state.merged.at > since) return [state.issueId];
-      return (await completedEpisodes(join(stateDir, "tasks", id))).some((e) => e.mergedAt > since) ? [id] : [];
+      const episodes = (await completedEpisodes(join(stateDir, "tasks", id))).map((e) => e.mergedAt);
+      return { issueId: state?.issueId ?? id, ...(state?.merged && { merged: state.merged.at }), episodes };
     }),
   );
-  return tasks.flat();
 }
 
 /** The record, or a fresh one from now: a corrupt file is set aside rather than failing every sweep. */
