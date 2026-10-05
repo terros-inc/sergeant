@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
+import type { RunRecord } from "@terros/sergeant-contracts";
 import { cleanup, dir, fakes, issue, start, underway } from "./slots-scenario.ts";
 
 // TECH-5015: a task waiting, on a human, on CI, on a refused merge, or on a budget answer, must not keep
@@ -131,7 +132,7 @@ test("an unanswered budget question releases its slot and is never ended by the 
 
 // TECH-5104: after the merge the loop polls Linear for Done for up to `completionWaitMinutes` (10). It
 // waits on no question, so it keeps its slot only for the grace from the merge, like any other wait.
-const mergedTwoMinutesAgo = async () => {
+const mergedTwoMinutesAgo = async (more: { audit?: { runId: string }; outcomePosted?: true } = {}) => {
   const at = new Date(Date.now() - 2 * 60_000).toISOString();
   await mkdir(join(dir, "tasks", "MERGED"), { recursive: true });
   await writeFile(join(dir, "tasks", "MERGED", "state.json"), JSON.stringify({
@@ -141,7 +142,7 @@ const mergedTwoMinutesAgo = async () => {
     runIds: [],
     recentTurns: [],
     budget: { window: { wallMinutes: 120, costUsd: 25 }, grants: [] },
-    merged: { repo: "o/r", number: 1, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at, outcome: "Merged.", auditDrawnAt: at },
+    merged: { repo: "o/r", number: 1, headSha: "a".repeat(40), mergedSha: "b".repeat(40), at, outcome: "Merged.", auditDrawnAt: at, audit: more.audit, outcomePostedAt: more.outcomePosted && at },
   }));
 };
 
@@ -174,4 +175,19 @@ test("with the default grace the post-merge Done poll keeps its slot until the i
   f.complete("MERGED");
   await vi.waitFor(() => expect(logs.some((l) => l.startsWith("MERGED: loop ended done"))).toBe(true), { timeout: 5_000 });
   await vi.waitFor(() => expect(f.turns).toEqual(["NEXT"]), { timeout: 5_000 });
+});
+
+// TECH-5233: GitHub-to-Linear automation may move the issue to Done before the first poll. The loop then
+// waits on the audit with no Done poll in between, so the wait must be marked from the merge first.
+test("an issue already Done on the first poll frees the slot while its audit runs past the grace", async () => {
+  const f = fakes([issue("MERGED", "In Progress", 1, "2026-09-01T00:00:00.000Z"), issue("NEXT", "Todo", 3, "2026-10-03T00:00:00.000Z")]);
+  f.complete("MERGED");
+  const audit: RunRecord = { runId: "run_audit-x", role: "reviewer", status: "running", provider: "p", model: "m", report: null };
+  f.deps.runner = { ...f.deps.runner, status: async (id) => (id === audit.runId ? audit : Promise.reject(new Error("no run"))) };
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 1 }, logs, () => mergedTwoMinutesAgo({ audit: { runId: audit.runId }, outcomePosted: true }));
+  await vi.waitFor(() => expect(logs).toContainEqual(expect.stringContaining("MERGED: waiting: review run_audit-x running")), { timeout: 5_000 });
+  await vi.waitFor(() => expect(f.turns).toEqual(["NEXT"]), { timeout: 5_000 });
+  expect(logs).toContainEqual("MERGED: waiting past the grace; its task slot is free until it has work again");
+  expect(logs.some((l) => l.startsWith("MERGED: loop ended"))).toBe(false);
 });
