@@ -136,7 +136,9 @@ Rule ids refer to §7, `06` §6, and `08` §7.
 
 **`start_reviewer(subject: [{repo, number, headSha}], focus?, profile?, limits?, purpose)`** → `{ runId }`
 - Builds a `ReviewBrief` (06 §2) with `trigger = required` and starts a reviewer run with its own
-  fresh session and workspace and read-only GitHub access. Audit reviews are started by a guardrail (06 §8).
+  fresh session and workspace. The reviewer has no GitHub, AWS, or Linear credentials: the PR's exact head
+  is checked out for it locally, and Sergeant reads the human PR feedback into its brief as the run starts.
+  Audit reviews are started by a guardrail (06 §8).
 - Gate: G1–G4, B1–B3, R2, R3, R4, V1. Key: `start:<runId>`.
 
 **`send_run(runId, message)`** → `{ messageId, delivery: delivered | queued }`

@@ -329,7 +329,7 @@ RunSpec {
 CredentialGrant {
   vendingUrl                    // Sergeant's runner API on loopback (11 §4)
   runToken                      // run-scoped; stops working when the run ends
-  github: write | read          // worker App token scoped to the task's RepositorySet
+  github: write | none          // worker App token scoped to the task's RepositorySet; none for reviewers
   aws: dev | none
   modelCredentials              // adapter-provided
 }
@@ -395,7 +395,7 @@ WorkerBrief {
 EnvironmentNote {
   repositories: [{ slug, purpose, mergePolicy }]   // the task's RepositorySet
   otherEnrolledRepositories: [{ slug, purpose }]   // names only; ask to add one
-  access: { github: write | read, aws: dev | none, tools: string[] }
+  access: { github: write | none, aws: dev | none, tools: string[] }
   notAvailable: string[]
 }
 ```
@@ -414,7 +414,7 @@ ReviewBrief {
   }
   implementerClaims: [{ fromRunId, summary, decisionsMade[], knownGaps[], validation[] }]
   focus?
-  environment: EnvironmentNote  // github: read
+  environment: EnvironmentNote  // no GitHub, AWS, or Linear credentials; the PRs are checked out locally
   limits, rulesVersion
   reportContract: "s2-review-report/1"
 }

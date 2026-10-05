@@ -29,7 +29,7 @@ the post-merge audit reviewer included.
 |---|---|---|---|
 | **Control plane** | Sergeant's deterministic core (daemon) | Linear agent OAuth credential; control-plane GitHub App key; worker App key (used only to mint scoped tokens); ledger; installation config read access; the ability to assume the runner dev role for vending; S3 artifact write | production credentials; IAM/org/billing admin; personal human credentials |
 | **Sergeant's reasoning** | the model session, inside the control plane | nothing directly; it can only call tools, and every action passes the Gate | any credential, shell, filesystem, or network access |
-| **Runner zone** (development) | the primary worker, its subagents, and reviewer runs, all tasks together | worker App tokens for each run's repository set (write for workers, read for reviewers); dev/stage AWS credentials (short-lived); each run's model credential, one its task owner registered (§3a); engineering tools | Linear; control-plane GitHub App; Sergeant's ledger, config, or secrets; production; IAM/org/billing; any other personal credential |
+| **Runner zone** (development) | the primary worker, its subagents, and reviewer runs, all tasks together | worker App write tokens for each worker's repository set (reviewers get none); dev/stage AWS credentials (short-lived); each run's model credential, one its task owner registered (§3a); engineering tools | Linear; control-plane GitHub App; Sergeant's ledger, config, or secrets; production; IAM/org/billing; any other personal credential |
 | **Humans** | team members via Linear and `sgt` | their own identities | — |
 
 ## 3. How each hard exclusion is enforced
