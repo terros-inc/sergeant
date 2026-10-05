@@ -45,3 +45,18 @@ export async function postAuthAlerts(
     );
   }
 }
+
+/**
+ * TECH-5082: after the merge no poll reads the conversation, so the alerts reread it, only when a run
+ * failed authentication.
+ */
+export async function alertAfterMerge(
+  issueId: string,
+  runs: RunRecord[],
+  linear: Pick<LinearPort, "readConversation" | "postComment">,
+  log: (line: string) => void,
+): Promise<void> {
+  if (!runs.some((run) => run.failureReason === "authentication")) return;
+  const conversation = await linear.readConversation(issueId).catch((e: Error) => void log(`model authentication alerts not posted: ${e.message}`));
+  if (conversation) await postAuthAlerts(conversation.issue.id, runs, conversation.agentComments, linear, log);
+}

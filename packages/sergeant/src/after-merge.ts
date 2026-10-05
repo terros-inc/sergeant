@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { checkDelegation, FEEDBACK_LABEL, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunId, type RunRecord } from "@terros/sergeant-contracts";
 import { drawAudit, mergedHead } from "./audit.ts";
+import { alertAfterMerge } from "./auth-alert.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import { feedbackComment, outcomeComment, workerFeedback } from "./outcome.ts";
 import { cancelRuns } from "./poll.ts";
@@ -54,6 +55,10 @@ export async function driveMerged(
   },
 ): Promise<LoopResult | undefined> {
   const { opts, deps, log, save } = ctx;
+  // TECH-5082: a run that fails model authentication after the merge (a review, the audit) is alerted
+  // like one before it, on every pass whatever else waits; a run unreadable now is read next pass.
+  const read = await Promise.all(runIdsOf(merged, ctx.runIds).map((id) => deps.runner.status(id).catch(() => undefined)));
+  await alertAfterMerge(opts.issueId, read.filter((r): r is RunRecord => r !== undefined), deps.linear, log);
   const effects = (merged.outcome && !merged.outcomePostedAt) || (merged.feedback && !merged.feedbackPostedAt) || !merged.auditDrawnAt;
   if (effects && opts.slot && !opts.slot.work()) {
     log("queued: waiting for a free task slot");
@@ -170,10 +175,11 @@ export async function finishReviews(
   result: LoopResult,
   ctx: { runIds: RunId[]; recordReviews: (runs: RunRecord[]) => Promise<void>; stop: string; opts: LoopOptions; deps: Ports; log: (line: string) => void },
 ): Promise<LoopResult> {
-  const ids = merged.audit ? [...ctx.runIds, merged.audit.runId] : ctx.runIds;
+  const ids = runIdsOf(merged, ctx.runIds);
   for (;;) {
     const runs = await Promise.all(ids.map((id) => ctx.deps.runner.status(id)));
     await ctx.recordReviews(runs);
+    await alertAfterMerge(ctx.opts.issueId, runs, ctx.deps.linear, ctx.log);
     const running = runs.filter((r) => r.role === "reviewer" && r.status === "running").map((r) => r.runId);
     const audit = runs.find((r) => r.runId === merged.audit?.runId);
     if (running.length === 0) {
@@ -195,6 +201,9 @@ export async function finishReviews(
     await pause((ctx.opts.pollSeconds ?? 60) * 1000, ctx.opts.signal);
   }
 }
+
+/** The task's runs, the sampled audit included. */
+const runIdsOf = (merged: Merged, runIds: RunId[]) => (merged.audit ? [...runIds, merged.audit.runId] : runIds);
 
 /** Why the merged task's issue is no longer its owner's (owner.ts), read live; undefined while it is or unreadable. */
 async function movedFromOwner(opts: LoopOptions, deps: Ports, log: (line: string) => void): Promise<string | undefined> {
