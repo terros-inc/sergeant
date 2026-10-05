@@ -22,7 +22,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { answeredBudgetQuestion } from "./budget.ts";
-import { accountRefusal, notOwned, type TaskOwner } from "./owner.ts";
+import { accountQuestion, notOwned, type TaskOwner } from "./owner.ts";
 import { ownQuestion, questionComment, questionKey } from "./question.ts";
 
 export type Ports = {
@@ -91,8 +91,8 @@ export type ActionOutcome =
       action: ProposedAction;
       status: "failed";
       error: string;
-      /** A refusal comment Linear did not accept: the loop posts it again every poll until it does. */
-      unposted?: { issueId: string; key: string; body: string };
+      /** A question Linear did not accept: the loop asks it again every poll until it does. */
+      unposted?: Extract<ProposedAction, { kind: "ask_human" }>;
     };
 
 /**
@@ -186,17 +186,16 @@ export async function execute(action: ProposedAction, situation: SituationReport
           }
           return { action, status: "done", result: { runId }, started };
         }).catch(async (e: unknown) => {
-          // Nothing started: the owner is told once per condition what to fix (owner.ts), retried until
-          // Linear accepts it.
+          // Nothing started: the owner is asked, through the ordinary question path, to register or fix
+          // an account (TECH-5217). The loop then waits for their reply, which opens a fresh budget window
+          // (TECH-5059) and wakes a turn that may start the run again. Keyed like any question, so one
+          // wait asks once; a failed post is retried every poll until Linear shows it.
           if (!(e instanceof NoModelAccount)) throw e;
-          const refusal = accountRefusal(conversation.issue.id, owner, e);
-          const comment = { issueId: conversation.issue.id, ...refusal };
-          const unposted = await ports.linear.postComment(comment).then(
-            () => undefined,
-            (p: Error) => p,
-          );
-          if (unposted) return { action, status: "failed", error: `${e.message}; its refusal comment was not posted: ${unposted.message}`, unposted: comment };
-          return denied({ rule: "O2", reason: e.message });
+          const ask = accountQuestion(owner, e);
+          const asked = await askHuman(ask, situation, ports, questionKey(conversation.issue.id, conversationRevision(conversation)));
+          if (asked.status === "failed") return { action, status: "failed", error: `${e.message}; the question to ${owner.name} was not posted: ${asked.error}`, unposted: ask };
+          if (asked.status === "denied") return asked;
+          return denied({ rule: "O2", reason: `${e.message}; asked ${owner.name} to register or fix a model account` });
         });
       }
       case "send_run": {

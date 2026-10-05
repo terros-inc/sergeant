@@ -263,7 +263,9 @@ history, stickiness, or round-robin. No low-quota warning is posted. A run that 
 on the account's quota or authentication (`failureReason`) sets the account aside for an hour, or until the window it ran out of resets if sooner, in
 memory. That window is the one at 0% in the account's quota read again, past the cache, as the run fails; with none
 known to be at 0% (an unreadable reading), the hour. Meanwhile the next launch takes another of the owner's. An owner with no account, or none usable, gets `NoModelAccount` from `start`, which
-starts nothing; the core then tells the owner on the issue. The run record's `account` says whose
+starts nothing; the core then asks the owner on the issue, as a question (07 §4), to register or fix one
+and reply: one question per wait, and the reply opens a fresh budget window in which the launch is tried
+again (TECH-5217). The run record's `account` says whose
 subscription paid, never the credential.
 
 An adapter may wrap a tiny native helper (for example a Rust binary that owns process groups and clean

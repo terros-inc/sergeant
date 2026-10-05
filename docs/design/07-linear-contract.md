@@ -122,7 +122,8 @@ A guardrail admits an issue when **all** of these hold (deterministic):
    full on every admission attempt, so a missed webhook or downtime cannot skip the check; anything it
    cannot prove refuses. Each refusal (no human assignee; someone else delegated it; the delegation is
    not attributable) is one comment saying what to do, keyed by what Linear showed, so a poll never
-   repeats it; an owner with no usable model account is told the same way when a run would start.
+   repeats it. An owner with no usable model account is asked, when a run would start, through the
+   ordinary question (§4), so their reply resumes the task in a fresh budget window (TECH-5217).
 
 Issues that fail only (5), (6), or (7) stay queued in Linear and are re-checked on every intake pass,
 highest Linear priority first, then oldest delegation. No comment is posted for queueing;
