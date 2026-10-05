@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
  * clone) or when git cannot read the checkout, it is `0.0.0+<sha>` (or `0.0.0+unknown`) and `fallback`
  * says why. `root` is the checkout's top level, which git is told to trust: on the host, serve runs as
  * the sergeant user against a root-owned checkout, which git otherwise refuses as dubious ownership.
- * `trust: false` (tests) leaves git's ownership check as is. */
+ * `trust: false` (tests) leaves git's ownership check as is. If git's top level is not `root` (a copy of
+ * sgt nested inside another repo, without its own .git), it is `0.0.0+unknown`, never that repo's tags or SHA. */
 export function sergeantVersion(
   root = fileURLToPath(new URL("../../..", import.meta.url)),
   { trust = true } = {},
@@ -25,6 +26,8 @@ export function sergeantVersion(
       .trim();
   let sha: string;
   try {
+    const toplevel = git("rev-parse", "--show-toplevel");
+    if (realOr(toplevel) !== trusted) return { version: "0.0.0+unknown", fallback: `the git checkout is ${toplevel}, not Sergeant's ${trusted}` };
     sha = git("rev-parse", "--short=7", "HEAD");
   } catch (e) {
     const err = e as { code?: string; stderr?: Buffer };
@@ -40,5 +43,14 @@ export function sergeantVersion(
   } catch {
     const shallow = git("rev-parse", "--is-shallow-repository") === "true";
     return { version: `0.0.0+${sha}`, fallback: shallow ? "shallow clone: no version tag in the fetched history" : "no vMAJOR.MINOR.PATCH tag" };
+  }
+}
+
+/** `path` with symlinks resolved, or as given when it cannot be resolved. */
+function realOr(path: string) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
   }
 }
