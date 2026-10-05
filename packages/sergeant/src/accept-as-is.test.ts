@@ -15,6 +15,8 @@ import { cleanup, dir, human, pr, saved, scenario, start, turnOf, worker } from 
 afterEach(cleanup);
 
 const acknowledged = `Sergeant has stopped: the work was accepted as it is. [${pr.repo}#${pr.number}](${pr.url}) and this issue are yours to merge or close.`;
+/** The acknowledgment, ending with the task's total cost (TECH-5227). */
+const ended = expect.stringContaining(`${acknowledged}\n\nCost: `);
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const accept: ProposedAction = { kind: "accept_as_is" };
 // A task whose first window ran out: two hours of wall time from four hours ago, and $30 spent.
@@ -52,7 +54,7 @@ test.each<[string, AgentComment[], HumanComment[]]>([
   expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
   expect(turns).toBe(1);
   expect(started).toEqual([]);
-  expect(posted).toEqual([acknowledged]);
+  expect(posted).toEqual([ended]);
   // Set aside like a stopped task's, so intake resumes it no more.
   const files = await readdir(dir);
   expect(files).not.toContain("state.json");
@@ -168,7 +170,7 @@ test.each([
   expect(started).toEqual([]);
   expect(resolved).toEqual([budgetAsked.id]);
   expect(keys).toEqual([acceptedKey("i1", reply.id), acceptedKey("i1", reply.id)]);
-  expect(live.agentComments.filter((c) => c.body === acknowledged)).toHaveLength(1);
+  expect(live.agentComments.filter((c) => c.body.startsWith(acknowledged))).toHaveLength(1);
   const files = await readdir(dir);
   expect(files).not.toContain("state.json");
   expect(files).toContain("accepted.json");
@@ -197,7 +199,7 @@ test("an accepted task resolves its budget question before saying it has stopped
   // The next pass replays the ending: no second turn, and the acknowledgment only once resolved.
   expect(events).toEqual(["turn", "resolve 1", "resolve 2", "post"]);
   expect(resolved).toEqual([budgetAsked.id]);
-  expect(posted).toEqual([acknowledged]);
+  expect(posted).toEqual([ended]);
   const files = await readdir(dir);
   expect(files).not.toContain("state.json");
   expect(files.some((f) => /^state\.accepted-.+\.json$/.test(f))).toBe(true);
@@ -246,7 +248,7 @@ test("a re-triggered task accepts a reply to its own budget question, with an ac
 
   expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
   // Not deduplicated against the earlier task's: Linear shows both acknowledgments.
-  expect(live.agentComments.filter((c) => c.body === acknowledged).map((c) => c.id)).toEqual([
+  expect(live.agentComments.filter((c) => c.body.startsWith(acknowledged)).map((c) => c.id)).toEqual([
     commentIdFor(acceptedKey("i1", oldReply.id)),
     commentIdFor(acceptedKey("i1", reply.id)),
   ]);

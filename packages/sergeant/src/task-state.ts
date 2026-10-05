@@ -15,6 +15,7 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
+import { costTotal } from "./cost.ts";
 import type { ActionOutcome } from "./execute.ts";
 import { feedbackComment, outcomeComment } from "./outcome.ts";
 
@@ -114,7 +115,7 @@ type State = TaskState;
 /** What a turn changes in the task's state; `fingerprint` is the one to commit, if any. */
 export function applyTurn(
   state: State,
-  turn: { at: string; situation: SituationReport; summary: string; costUsd: number; outcomes: ActionOutcome[]; described: string[]; fingerprint: string | undefined },
+  turn: { at: string; situation: SituationReport; summary: string; costUsd: number; outcomes: ActionOutcome[]; described: string[]; fingerprint: string | undefined; unknownRuns?: number },
   log: (line: string) => void,
 ): void {
   const { at, situation, outcomes, described } = turn;
@@ -146,7 +147,8 @@ export function applyTurn(
         continue;
       }
       const mergedSha = Sha.parse(o.merged.mergedSha);
-      const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups, situation.conversation.issue);
+      const cost = costTotal({ runs: situation.runs, unknownRuns: turn.unknownRuns ?? 0, turnCostUsd: state.turnCostUsd, startedAt: state.startedAt, at });
+      const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups, situation.conversation.issue, cost);
       const feedback = feedbackComment(o.action.feedback);
       state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, at, outcome, ...(feedback && { feedback }) };
     }

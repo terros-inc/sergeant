@@ -25,8 +25,9 @@ export function mergedOf(
   runs: RunRecord[],
   followups: FiledFollowup[],
   issue: Pick<Conversation["issue"], "title" | "description">,
+  cost?: string,
 ): Merged {
-  const outcome = outcomeComment(pr, mergedSha, runs, followups, issue);
+  const outcome = outcomeComment(pr, mergedSha, runs, followups, issue, cost);
   const feedback = feedbackComment(workerFeedback(runs, pr));
   return { repo: pr.repo, number: pr.number, headSha: pr.headSha, mergedSha, at: new Date().toISOString(), outcome, ...(feedback && { feedback }) };
 }

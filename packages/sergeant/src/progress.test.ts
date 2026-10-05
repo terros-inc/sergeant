@@ -6,8 +6,9 @@ import { commentIdFor, QUESTION_HEADING, type Conversation, type Finding, type P
 import { runLoop, type LoopOptions } from "./loop.ts";
 
 // TECH-5227: the turn after a review finishes tells the round on the issue in about five lines: what
-// changed, the verdict, and what happens next. A question or the closing merge that same turn carries
-// it instead, so the round is still one comment, and no later turn or retry tells it again.
+// changed, the verdict, what happens next, and the cost so far. A question or the closing merge that
+// same turn carries it instead, so the round is still one comment, and no later turn or retry tells it
+// again.
 
 const repo = "o/canary";
 const head = "a".repeat(40);
@@ -19,7 +20,8 @@ const open: PullRequestFacts = {
   body: "Fixes UNF-1", mergeable: true, checks: { sha: head, required: [{ name: "validate", state: "passed" }] }, humanFeedback: [],
 };
 const worker: RunRecord = {
-  runId: "run_worker", role: "worker", status: "succeeded", provider: "p", model: "m",
+  runId: "run_worker", role: "worker", status: "succeeded", provider: "anthropic/claude-code", model: "m", costUsd: 1.5,
+  account: { id: "person:user-ann:claudeWork", group: "registered", holder: "Ann <ann@example.com>" },
   report: {
     reportVersion: "s2-worker-report/1", outcome: "completed", knownGaps: [], followups: [],
     summary: "Retries failed Linear writes with backoff. Tests cover the retry.",
@@ -28,6 +30,8 @@ const worker: RunRecord = {
 };
 const reviewed = `Reviewed [${repo}#7](${prUrl}) at \`${head.slice(0, 12)}\``;
 const changed = "**Progress:** Retries failed Linear writes with backoff.";
+const accounts = "accounts: claudeWork, codexWork";
+const soFar = `Cost so far: ~$2.10 estimated, not counting 1 run of unknown cost · 2 runs · 18 min · ${accounts}`;
 
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
@@ -35,9 +39,11 @@ afterEach(() => rm(dir, { recursive: true, force: true }));
 /** A task whose reviewer just finished; every turn proposes `actions`. Each `run()` is one loop. */
 async function round(verdict: "approve" | "changes_requested", findings: Finding[], actions: ProposedAction[], options: Partial<LoopOptions> = {}) {
   dir = await mkdtemp(join(tmpdir(), "sergeant-progress-test-"));
-  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_worker", "run_review"], recentTurns: [] }));
+  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date(Date.now() - 18 * 60_000).toISOString(), turnCostUsd: 0.6, turns: 1, runIds: ["run_worker", "run_review"], recentTurns: [] }));
   const review: RunRecord = {
-    runId: "run_review", role: "reviewer", status: "succeeded", provider: "p", model: "m",
+    // Codex reports no dollar figure (TECH-5021): its cost is unknown, never $0.
+    runId: "run_review", role: "reviewer", status: "succeeded", provider: "openai/codex", model: "m",
+    account: { id: "person:user-ann:codexWork", group: "registered", holder: "Ann <ann@example.com>" },
     report: { reportVersion: "s2-review-report/1", reviewed: [{ repo, number: 7, headSha: head }], verdict, findings, summary: "" },
   };
   const live: Conversation = {
@@ -101,7 +107,7 @@ async function round(verdict: "approve" | "changes_requested", findings: Finding
 test("an approved round gets one short comment, and later turns post nothing more", async () => {
   const { run, reply, posted, turns } = await round("approve", [], []);
   await run();
-  expect(posted).toEqual([{ issueId: "i1", key: "progress:i1:run_review", body: [changed, `${reviewed}: approved.`, "Next: merging once the PR is ready."].join("\n") }]);
+  expect(posted).toEqual([{ issueId: "i1", key: "progress:i1:run_review", body: [changed, `${reviewed}: approved.`, "Next: merging once the PR is ready.", soFar].join("\n") }]);
   reply();
   await run();
   expect([turns(), posted.length]).toEqual([2, 1]);
@@ -122,6 +128,7 @@ test("blocking and non-blocking findings are counted, the first two named, and f
       "- Blocking: A 4xx is retried forever.",
       "- Non-blocking: The retry has no jitter. (+1 more)",
       "Next: a worker fixes the findings.",
+      soFar,
     ].join("\n"),
   ]);
 });
@@ -134,20 +141,22 @@ test("a round that ends in a question is told in the question, never twice", asy
   expect(posted).toHaveLength(1);
   expect(posted[0]?.key).toMatch(/^question:/);
   expect(posted[0]?.body.startsWith(QUESTION_HEADING)).toBe(true);
-  expect(posted[0]?.body).toContain(`${changed}\n${reviewed}: approved, with 1 non-blocking finding.\n- Non-blocking: Should 429s be retried too?`);
+  expect(posted[0]?.body).toContain(`${changed}\n${reviewed}: approved, with 1 non-blocking finding.\n- Non-blocking: Should 429s be retried too?\n${soFar}`);
   // The human answers and the next turn moves on: the round is not told again on its own.
   reply();
   await run();
   expect(posted.filter((c) => c.key.startsWith("progress:"))).toEqual([]);
 });
 
-test("a round that ends in the closing merge is told in the merge's outcome comment", async () => {
+test("a round that ends in the closing merge is told in the merge's outcome comment, with the task's total cost", async () => {
   const merge: ProposedAction = { kind: "merge_pr", repo, number: 7, expectedHeadSha: head, reviewStanding: { kind: "reviewed", reviewRunId: "run_review" } };
   const { run, posted } = await round("approve", [], [merge]);
   expect((await run()).outcome).toBe("done");
   expect(posted.map((c) => c.key)).toEqual([`outcome:i1:${repo}#7:${"c".repeat(40)}`]);
   expect(posted[0]?.body).toMatch(/^\*\*Merged\*\*/);
-  expect(posted[0]?.body.endsWith(`\n\n${changed}\n${reviewed}: approved.`)).toBe(true);
+  // The total replaces the round's cost so far, so the comment says the cost once.
+  const total = `- Cost: ~$2.10 estimated, not counting 1 run of unknown cost (Claude $1.50 · Codex unknown · Sergeant's turns $0.60) · 2 runs (1 worker, 1 review) · 18 min · ${accounts}`;
+  expect(posted[0]?.body.endsWith(`\n${total}\n\n${changed}\n${reviewed}: approved.`)).toBe(true);
 });
 
 test("progressComments: false posts nothing for the round, and folds nothing into a merge", async () => {

@@ -18,6 +18,7 @@ import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./me
 import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
 import { describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
 import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
+import { costSoFar, costTotal } from "./cost.ts";
 import { pendingProgress, postProgress, withProgress, type Progress } from "./progress.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
@@ -159,6 +160,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     const { runs, unknown } = await readRuns(state, deps);
     await recordReviews(runs);
+    // TECH-5227: what the task has cost, read when a comment says so (cost.ts); the turn's own cost counts once applied.
+    const spent = () => ({ runs, unknownRuns: unknown.length, turnCostUsd: state.turnCostUsd, startedAt: state.startedAt });
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
     const conversation = await deps.linear.readConversation(opts.issueId);
     // What a webhook names to end this loop's wait (webhooks.ts): the issue, its PRs, and their heads.
@@ -205,7 +208,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // a fact for the next turn.
     const landed = landedOf(pullRequests, runs, deps.workerLogin);
     if (landed?.mergedSha) {
-      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue);
+      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue, costTotal(spent()));
       await save();
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
       continue;
@@ -255,7 +258,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);
     // TECH-5227: the review round this turn ends, told once on the issue (progress.ts). The one switch.
-    const progress = opts.progressComments === false ? undefined : pendingProgress(situation);
+    const progress = opts.progressComments === false ? undefined : pendingProgress(situation, costSoFar(spent()));
     const { turn, outcomes } = await takeTurn(situation, { ...ports, ...(progress && { progress }) });
     const at = new Date().toISOString();
     const described = outcomes.map(describeOutcome);
@@ -270,13 +273,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
     const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
-    applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed }, log);
+    applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
     const reply = accepted ? latestAnswer(conversation) : undefined;
-    if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests) };
+    if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests, costTotal({ ...spent(), at })) };
     // A closing merge tells the round in its outcome comment, posted once after this save.
     const closed = state.merged as TaskState["merged"];
-    if (progress && closed?.outcome) closed.outcome = withProgress(closed.outcome, progress);
+    if (progress && closed?.outcome) closed.outcome = withProgress(closed.outcome, progress, false);
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();

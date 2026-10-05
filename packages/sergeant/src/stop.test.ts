@@ -38,6 +38,8 @@ test("a stop the loop could not finish and serve's intake finished is said once 
   expect(await loop).toMatchObject({ outcome: "stopped" });
   expect(seen.closed).toEqual([{ number: 7, comment: "Closed: the Linear issue was canceled or moved to Backlog." }]);
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`moved to Backlog. Its runs are canceled. Closed [${repo}#7]`) }]);
+  // TECH-5227: it ends with the task's total; the canceled run reported no cost, so it is unknown, not $0.
+  expect(seen.comments[0]?.body).toMatch(/\n\nCost: unknown, no run reported one \(p unknown\) · 1 run \(1 worker\) · \d+ min$/);
   const files = await readdir(dir);
   expect(files).not.toContain("state.json");
   expect(files).not.toContain("cancel.json");

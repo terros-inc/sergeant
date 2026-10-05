@@ -2,10 +2,11 @@ import { checkLive, commentIdFor, type Conversation, type LinearPort, type Situa
 import type { ActionOutcome } from "./execute.ts";
 
 // TECH-5227: after each review round Sergeant says on the issue, in about five lines, what changed, the
-// review's verdict, and what happens next, so a human need not open the PR. A round ends at the first
-// turn after its reviewer finished. When that turn asks a human or makes the closing merge, the summary
-// is folded into that one comment instead (the question, or the merge's outcome comment). Built only
-// from the worker and reviewer reports; nothing is stored. A round is reported once: a standalone post
+// review's verdict, what happens next, and the cost so far (cost.ts), so a human need not open the PR.
+// A round ends at the first turn after its reviewer finished. When that turn asks a human or makes the
+// closing merge, the summary is folded into that one comment instead (the question, or the merge's
+// outcome comment, which carries the task's total cost instead). Built only from the worker and
+// reviewer reports and the run records; nothing is stored. A round is reported once: a standalone post
 // is keyed by its review run, and a folded summary is recognized on the issue by its reviewed heads.
 // `review.progressComments: false` in the installation config turns all of it off (loop.ts).
 
@@ -13,7 +14,7 @@ import type { ActionOutcome } from "./execute.ts";
  * The round to report: its comment key, the lines that say what changed and the verdict, and whether a
  * question this turn carries them (`askHuman` sets it), so no comment of its own is posted.
  */
-export type Progress = { key: string; lines: string[]; approved: boolean; folded?: boolean };
+export type Progress = { key: string; lines: string[]; approved: boolean; folded?: boolean; cost?: string };
 
 const short = (sha: string) => sha.slice(0, 12);
 const oneLine = (text: string, max: number) => {
@@ -26,7 +27,7 @@ const count = (n: number, what: string) => `${n} ${what} finding${n === 1 ? "" :
  * The newest finished review's round, unless it was already reported or its PRs have moved on since
  * (a new head, a merge): a superseded round is never reported late.
  */
-export function pendingProgress(situation: Pick<SituationReport, "conversation" | "runs" | "pullRequests">): Progress | undefined {
+export function pendingProgress(situation: Pick<SituationReport, "conversation" | "runs" | "pullRequests">, cost?: string): Progress | undefined {
   const { conversation, runs, pullRequests } = situation;
   const review = runs.findLast((r) => r.role === "reviewer" && r.status === "succeeded" && r.report !== null);
   const report = review?.role === "reviewer" ? review.report : null;
@@ -53,6 +54,7 @@ export function pendingProgress(situation: Pick<SituationReport, "conversation" 
   return {
     key,
     approved: report.verdict === "approve",
+    ...(cost && { cost }),
     lines: [
       `**Progress:** ${summary.trim() ? oneLine(summary, 240) : "a review round finished"}`,
       `Reviewed ${heads.map((h) => `[${h.repo}#${h.number}](${h.pr?.url}) at \`${short(h.headSha)}\``).join(", ")}: ${verdict}.`,
@@ -94,7 +96,7 @@ export async function postProgress(
   deps: { linear: Pick<LinearPort, "readConversation" | "postComment">; agentUserId: string },
   log: (line: string) => void,
 ): Promise<void> {
-  const body = [...progress.lines, nextStep(outcomes, progress)].join("\n");
+  const body = [...progress.lines, nextStep(outcomes, progress), ...(progress.cost ? [progress.cost] : [])].join("\n");
   try {
     const { issue } = await deps.linear.readConversation(issueId);
     if (!checkLive(issue, deps.agentUserId).allowed) return;
@@ -105,5 +107,9 @@ export async function postProgress(
   }
 }
 
-/** The round's summary folded into a comment the same turn posts anyway. */
-export const withProgress = (body: string, progress: Progress | undefined) => (progress ? `${body}\n\n${progress.lines.join("\n")}` : body);
+/**
+ * The round's summary folded into a comment the same turn posts anyway, with its cost-so-far line
+ * unless that comment carries the task's total instead (a closing merge's outcome).
+ */
+export const withProgress = (body: string, progress: Progress | undefined, cost = true) =>
+  progress ? `${body}\n\n${[...progress.lines, ...(cost && progress.cost ? [progress.cost] : [])].join("\n")}` : body;
