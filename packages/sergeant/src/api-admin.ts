@@ -31,6 +31,8 @@ export type HostAdmin = {
   serve: AdminStatus["serve"];
   /** The installation-config parameter's version serve has and its version now (enrollment.ts `versions`). */
   config: () => Promise<AdminStatus["config"]>;
+  /** The runs directory's size and its volume's free space (TECH-5229); null when it cannot be read. */
+  runs: () => Promise<AdminStatus["runs"]>;
 };
 
 export async function adminRoute(
@@ -79,13 +81,14 @@ async function hand(admin: HostAdmin, what: Pick<AdminRequest, "action" | "ref">
 }
 
 async function status(admin: HostAdmin): Promise<AdminStatus> {
-  const [release, pending, last, config] = await Promise.all([
+  const [release, pending, last, config, runs] = await Promise.all([
     readFile(admin.releaseFile, "utf8").then(parseRelease, () => null),
     readJson(admin.requestFile, AdminRequest),
     readJson(admin.resultFile, AdminResult),
     admin.config(),
+    admin.runs(),
   ]);
-  return { serve: admin.serve, release, pending, last, config };
+  return { serve: admin.serve, release, pending, last, config, runs };
 }
 
 /** sergeant-update's `ref=…`, `sha=…`, `at=…` lines. */

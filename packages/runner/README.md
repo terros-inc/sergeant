@@ -21,7 +21,9 @@ gone; otherwise it throws so the caller retries. Likewise `status` throws while 
 answer; a run counts as lost only when Docker says its container no longer exists. There are no leases, adoption, restart recovery, or
   `send`.
 - **State.** One directory per run under `rootDir`: `run.json`, `workspace/`, and once terminal,
-  `record.json`, `report.md`, and `agent.json`. Nothing is cleaned up automatically.
+  `record.json`, `report.md`, and `agent.json`. The workspace is removed as the run ends, once its
+  record and report are written, because nothing reads it after that (TECH-5229, `workspaces.ts`);
+  `serve` sweeps any left behind at startup. The rest of the run's directory is kept.
 
 ## Credentials
 

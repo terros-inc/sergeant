@@ -68,6 +68,9 @@ test("admin status says when the installation config changed since serve started
   expect((await sgt(api, "admin", "status")).out).toContain("config   version 4 in AWS, but serve has version 3: the installation config changed since serve started, so run `sgt admin restart` to reread it");
   next = status({ loaded: 4, current: 4 });
   expect((await sgt(api, "admin", "status")).out).toContain("config   version 4, as serve has it\n");
+  // TECH-5229: the runs directory's size and the data volume's free space, so growth is visible.
+  next = { json: { ...status(null).json, runs: { count: 447, bytes: 46e9, volumeFreeBytes: 48.4e9, volumeBytes: 98e9 } } };
+  expect((await sgt(api, "admin", "status")).out).toContain("runs     447 in 46.0 GB; data volume 48.4 GB free of 98.0 GB\n");
   next = status({ loaded: 4, current: null });
   expect((await sgt(api, "admin", "status")).out).toContain("config   version 4; serve cannot read the parameter now");
   next = status(null);
@@ -79,4 +82,5 @@ test("admin status says when the installation config changed since serve started
   expect(older).toMatchObject({ code: 0, err: "" });
   expect(older.out).toContain("last     no restart or update recorded");
   expect(older.out).not.toContain("config");
+  expect(older.out).not.toContain("runs");
 });
