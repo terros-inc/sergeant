@@ -10,7 +10,9 @@ import {
   apiClient,
   CancelRunResponse,
   CancelTaskResponse,
+  currentToken,
   LoginConfig,
+  loadCredential,
   type Method,
   RegisterAccountResponse,
   RemoveAccountResponse,
@@ -23,6 +25,7 @@ import {
   MIN_CLI_VERSION,
   safeJson,
   Provider,
+  saveCredential,
   sergeantVersion,
   TaskDetail,
   TaskList,
@@ -32,7 +35,7 @@ import {
 import type { z } from "zod";
 import { showOutcome, showStatus, staleConfig, waitForOutcome } from "./admin.ts";
 import { accountRow, quotaLeft, runRow, showRun, showTask, table, taskRow } from "./format.ts";
-import { currentToken, linearLogin, loadCredential, saveCredential } from "./login.ts";
+import { linearLogin } from "./login.ts";
 import { providerEmail, registeredLine, registeringFor, registrationRefusal, strandedNotice } from "./register.ts";
 import { CHECKOUT, update } from "./update.ts";
 
