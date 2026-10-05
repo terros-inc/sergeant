@@ -354,6 +354,8 @@ history pointers to older comments, review dispositions, and actions.
 - The first human answer after any Sergeant question opens a fresh window from the answer, with zero
   spend and the installation's current budget. Continuing after a budget question needs no separate
   action or approval rule.
+- A human's review of the task's PR opens a fresh window from the review too, and waiting on a human's
+  merge or re-review spends none of the window (TECH-5218, 07 §6).
 - Over the soft threshold, turns run normally and the Situation Report says so.
 - After exhaustion, turns run while spend < limit + `reasoningReserveUsd`, so reasoning can write a
   useful ask (S1 retro F5). Beyond the reserve, turns run only for `linear_comment` and `human_cli`
@@ -467,7 +469,7 @@ Product content, versioned and iterated with evals. Required content:
 | Merge without green required checks on the exact head | M5, and GitHub branch protection |
 | Merge of a head with no fresh-review standing | M6 + D1–D6 |
 | Merge or completion that overtakes a comment or issue edit made since the proposing turn's snapshot | M10, X5 (re-read Linear; refuse on a changed conversation revision; a fresh turn decides) |
-| Runaway time or concurrency; spend past budget where usage is observable | BudgetMeter, B1–B3, R1–R3, `enforce_budget`; every fresh window requires a human answer to a Sergeant question |
+| Runaway time or concurrency; spend past budget where usage is observable | BudgetMeter, B1–B3, R1–R3, `enforce_budget`; every fresh window requires a human answer to a Sergeant question or a human review of the task's PR (TECH-5218) |
 | A human comment or question silently dropped | §5: every Linear change wakes a turn that sees every comment; `HumanWait`; M10, X4, X5 |
 | Two implementation workers on one task | R1 (an unreachable worker may be replaced only after its cancellation was requested) |
 | A worker reaching production, admin, personal, or control-plane authority | the runner zone holds none of it (09 §3), except the run's selected model credential, an accepted exception to the personal-credential boundary (09 §3a) |

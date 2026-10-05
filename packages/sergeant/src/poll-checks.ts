@@ -1,10 +1,22 @@
-import { checkBudget, checkLive, commentIdFor, type AgentComment, type BudgetStatus, type Conversation, type GateVerdict, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import {
+  checkBudget,
+  checkLive,
+  commentIdFor,
+  type AgentComment,
+  type BudgetStatus,
+  type Conversation,
+  type GateVerdict,
+  type PullRequestFacts,
+  type RunRecord,
+  type SituationReport,
+} from "@terros/sergeant-contracts";
 import { budgetQuestion, budgetQuestionKey, openWindow, type BudgetWindow } from "./budget.ts";
 import { recordStop, stopReason } from "./cancel.ts";
 import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
 import { reassigned, redelegated } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
+import { latestHumanReview } from "./pr-wait.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -128,14 +140,37 @@ export async function checkHolds(
   return { budget, exhausted, budgetKey, budgetAsked };
 }
 
-/** Whether the loop holds for the budget question: asking it, or waiting for a human's reply. */
-export async function holdForBudget(situation: SituationReport, conversation: Conversation, check: BudgetCheck, { opts, deps, log }: PollContext): Promise<boolean> {
+/**
+ * TECH-5218: a human's review of the task's PR (an approval, a change request, or a review comment)
+ * opens a fresh window from the review, exactly as an answer does (above). Only a review newer than the
+ * window's start does, so it opens one window once, across restarts too. Returns whether it opened one.
+ */
+export async function openReviewWindow(pullRequests: PullRequestFacts[], configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
+  const review = latestHumanReview(pullRequests);
+  if (!review || Date.parse(review.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
+  openWindow(state, review.createdAt, configured);
+  await save();
+  log(`${review.author} reviewed (${review.url}): a fresh budget window of ${JSON.stringify(configured)} from ${review.createdAt}`);
+  return true;
+}
+
+/**
+ * Whether the loop holds for the budget question: asking it, or waiting for a human's reply. Not while
+ * Sergeant waits on a human PR action (`humanWait`, pr-wait.ts): that is a human wait, like a question.
+ */
+export async function holdForBudget(
+  situation: SituationReport,
+  conversation: Conversation,
+  check: BudgetCheck,
+  { opts, deps, log }: PollContext,
+  humanWait?: string,
+): Promise<boolean> {
   const { exhausted, budgetAsked } = check;
   // One question per exhausted window, posted like any question but under a key of the task and the
   // window, and retried every poll until Linear shows it. Until a human replies after it, nothing
   // happens and no runaway guard ends the wait (UNF-727); the reply opens a fresh window (above) and
   // wakes a turn that reads it.
-  if (!exhausted.allowed && !budgetAsked) {
+  if (!exhausted.allowed && !budgetAsked && !humanWait) {
     const asked = await askHuman(budgetQuestion(situation, exhausted.reason), situation, deps, check.budgetKey);
     log(`budget exhausted (${exhausted.reason}): asking whether to continue: ${describeOutcome(asked)}`);
     return true;
