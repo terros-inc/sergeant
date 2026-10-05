@@ -89,15 +89,21 @@ sed "s#__LOG_GROUP__#$SERGEANT_LOG_GROUP#" "$here/cloudwatch-agent.json" >/opt/a
 amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/sergeant.json >/dev/null
 
 # --- The installation config (identifiers and secret references only) from its SSM parameter. A
-# config that does not parse never replaces the running service's. ---
+# config that does not parse never replaces the running service's. Its version goes beside it, read in
+# the same call, so a serve systemd restarts later can tell which version it runs (TECH-5206). ---
 aws ssm get-parameter --region "$AWS_REGION" --name "$SERGEANT_CONFIG_PARAMETER" \
-  --query Parameter.Value --output text >/tmp/installation.json
+  --query 'Parameter.{value: Value, version: Version}' --output json >/tmp/installation-parameter.json
+jq -r .value /tmp/installation-parameter.json >/tmp/installation.json
+installed_version=$(jq -r .version /tmp/installation-parameter.json)
+rm -f /tmp/installation-parameter.json
 if ! (cd "$repo/packages/sergeant" &&
   node --input-type=module -e 'await (await import("./src/config.ts")).loadConfig(process.argv[1])' /tmp/installation.json); then
   echo "$SERGEANT_CONFIG_PARAMETER is not a valid installation config; serve was not restarted" >&2
   exit 1
 fi
+# The config first: a serve restarted between the two finds it current, as it is.
 install -m 0644 /tmp/installation.json /etc/sergeant/installation.json
+echo "$installed_version" >/etc/sergeant/installation.json.version
 rm -f /tmp/installation.json
 
 # --- Restart serve. SIGTERM lets each task end at its next poll; running workers keep running and
