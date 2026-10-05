@@ -19,7 +19,8 @@ type Role = RunSpec["role"];
 /**
  * Each role's configured adapter, and its model on each adapter, for `containerRunner` (TECH-5009). A
  * role's model flag is for its configured adapter; otherwise Codex runs `codex.model` and Claude Code
- * "opus", today's default. With a Codex credential, quota may run a role on the other adapter (TECH-5117).
+ * "opus", today's default. When the owner has an account for the other provider, quota may run a role
+ * on the other adapter (TECH-5117).
  */
 export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role, string | undefined>) {
   const adapter = (role: Role): Adapter => config.runners?.[role] ?? "claude-code-local";
@@ -77,8 +78,6 @@ export type Installation = {
   workerApp: GitHubApp;
   githubTokens: RunGitHubTokens;
   modelToken: string;
-  /** The Codex credential, when the config has one. */
-  codexCredential?: string;
   /** Webhook signing secrets, for the sources the config gives one. */
   webhookSecrets: { linear?: string; github?: string };
   /** The enrolled repositories' settings `github` reads at each call: changed in place with `repositories` (enrollment.ts). */
@@ -95,14 +94,13 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
   if (unknown.length > 0) throw new Error(`not enrolled in the installation config: ${unknown.join(", ")}`);
   const secret = secretResolver(config);
   const optional = (ref: string | undefined) => (ref === undefined ? undefined : secret(ref));
-  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook, codexCredential] = await Promise.all([
+  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook] = await Promise.all([
     secret(config.linear.tokenSecret),
     secret(config.github.controlPlaneApp.privateKeySecret),
     secret(config.github.workerApp.privateKeySecret),
     secret(config.modelTokenSecret),
     optional(config.linear.webhookSecret),
     optional(config.github.webhookSecret),
-    optional(config.codex?.credentialSecret),
   ]);
   const app = (ref: z.infer<typeof GitHubAppRef>, privateKey: string) =>
     githubApp({ appId: ref.appId, installationId: ref.installationId, privateKey });
@@ -138,7 +136,6 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     workerApp,
     githubTokens: runTokens(workerApp),
     modelToken,
-    ...(codexCredential !== undefined && { codexCredential }),
     webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },
     repositoryConfigs,
   };

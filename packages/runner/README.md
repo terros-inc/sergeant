@@ -54,32 +54,22 @@ so repository-provided hooks run normally. The brief tells agents not to add age
 The installation config chooses the agent per role: `"runners": { "reviewer": "codex-local" }` makes
 reviews come from a different provider than the Claude Code worker. A role not named runs Claude Code,
 exactly as before. The earlier blocker, that the only Codex login was personal (UNF-710), is gone:
-Terros now has its own Codex Team account, and nothing personal is ever used.
+each run uses an account its task's owner registered for Sergeant to use.
 
-- **Credential.** One Secrets Manager secret per installation, named by the config's
-  `codex.credentialSecret` (for example `sergeant/<installation>/codex-credential`), never in source.
-  Its value is either the JSON of the `auth.json` that `codex login` writes after signing in as the
-  installation's Codex Team account (`{"auth_mode":"chatgpt","tokens":{…},"last_refresh":…}`), or an
-  OpenAI API key (`sk-…`) of a project the installation owns. Create it from a throwaway Codex home, so
-  no personal login is touched:
-
-  ```sh
-  export CODEX_HOME=$(mktemp -d)
-  codex login --device-auth              # sign in as the installation's Team account
-  aws secretsmanager create-secret --name sergeant/<installation>/codex-credential \
-    --secret-string "file://$CODEX_HOME/auth.json"     # or put-secret-value to replace it
-  rm -rf "$CODEX_HOME"
-  ```
+- **Credential.** Only the task owner's registered Codex account (Model accounts below), which they
+  register with `sgt account register codex` (`docs/sgt.md`); the installation has none (TECH-5184).
+  Its value is either the JSON of the `auth.json` that `codex login` writes after signing in to
+  ChatGPT (`{"auth_mode":"chatgpt","tokens":{…},"last_refresh":…}`), or an OpenAI API key (`sk-…`).
 
   Codex refreshes a ChatGPT login's tokens as they age and writes them to `auth.json`; in a run that
-  is the container's own copy, discarded at the end, so the secret keeps the tokens it was given.
+  is the container's own copy, discarded at the end, so the registered account keeps the tokens it was given.
   Sergeant detects structured Codex authentication failures and Codex's specific refresh failures:
   expired, revoked, or already-used refresh tokens; a login changed to another account; and a generic
   failure to refresh the access token. It records the run's distinct `failureReason` as
   `authentication` and posts an idempotent alert on the Linear issue during an active pre-merge poll.
-  The alert tells an operator to sign in again and replace the configured Secrets Manager secret, or
-  switch to an OpenAI API key. It never includes provider error text or token values. An API key does
-  not age this way, but bills that API project per token instead of the Team plan.
+  The alert tells the account's holder to register it again or remove it. It never includes provider
+  error text or token values. An API key does not age this way, but bills that API project per token
+  instead of a ChatGPT plan.
 - **Model.** `codex.model` in the config, unless `serve`/`canary` gets `--worker-model`/`--reviewer-model`.
 - **Usage.** `codex exec --json` reports tokens, not dollars. The run record keeps `tokens` (input,
   cached input, output, reasoning output) and no `costUsd`, so the task budget counts the run as
@@ -128,8 +118,5 @@ docker build -t sergeant-runner:local container
 node src/live-check.ts                          # Claude Code
 node src/live-check.ts --adapter codex-local    # Codex: only CODEX_CREDENTIAL and GH_TOKEN enter
 ```
-
-With a real Codex credential, `packages/sergeant/src/live-check.ts` (for a config that selects
-`codex-local`) logs Codex in inside the image as a run does and checks it reads the login.
 
 Real worker and reviewer runs are exercised by the canary (`packages/sergeant`).

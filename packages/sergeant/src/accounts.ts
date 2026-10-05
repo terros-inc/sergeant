@@ -151,7 +151,6 @@ export function accountRegistry(opts: {
 /** The runner's model accounts and the registry behind `/v1/accounts`, from the installation (serve, canary). */
 export function modelAccounts(config: InstallationConfig, log: (line: string) => void) {
   const readQuota = accountQuota();
-  if (config.modelAccounts.length > 0) log(`ignoring the config's modelAccounts: since TECH-5179 runs use only their task owner's registered accounts`);
   const registry = accountRegistry({
     secret: config.registeredAccountsSecret,
     readSecret: secretResolver(config),

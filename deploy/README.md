@@ -11,7 +11,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 
 | Path | What it is |
 |---|---|
-| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or up to twelve with the webhook signing secrets, the Codex credential, and model accounts); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
+| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or six with the webhook signing secrets, plus an adopted registered-accounts secret if it stays listed); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
@@ -70,8 +70,8 @@ anything, and the state backend and the provider refuse any other account.
    ```
 
    The state bucket already exists; this configuration never creates it. `secret_names` lists every
-   secret the config refers to, and nothing else: four literal names, or up to seven with the webhook
-   signing secrets (Webhooks below) and the Codex credential (A Codex reviewer below), which Terraform enforces.
+   secret the config refers to, and nothing else: four literal names, or up to six with the webhook
+   signing secrets (Webhooks below), and seven if an adopted registered-accounts secret stays listed, which Terraform enforces. Codex needs no secret here (A Codex reviewer below).
    The registered-accounts secret is not one of them: Terraform creates it (Model accounts below).
    To change an input later, put the parameter again and rerun `./init.sh`.
 2. **Secrets** exist in Secrets Manager under those names: both GitHub Apps' private keys, the Linear
@@ -170,20 +170,17 @@ installation, in this order, and expect deliveries made in between to fail harml
 
 ### A Codex reviewer
 
-Reviews can come from Codex while workers stay on Claude Code (TECH-5009; details and the secret's
-format in `packages/runner/README.md`, under Codex):
+Reviews can come from Codex while workers stay on Claude Code (TECH-5009; details in
+`packages/runner/README.md`, under Codex). Codex runs, like every run, use only the task owner's
+registered accounts (Model accounts below); the installation has no Codex credential (TECH-5184).
 
-1. **Secret.** Store the installation's Codex Team login (or a Terros-owned OpenAI API key) in a new
-   Secrets Manager secret, for example `sergeant/<installation>/codex-credential`.
-2. **Terraform.** Add its name to `secret_names` in the infrastructure-config parameter, then
-   `./init.sh`, plan, and apply: only the instance role's secrets policy changes.
-3. **Installation config.** Add `"runners": { "reviewer": "codex-local" }` and
-   `"codex": { "credentialSecret": "<the secret name>", "model": "<Codex model>" }`, put the parameter,
-   then Update: it rebuilds the runner image, which carries the Codex CLI, and restarts `serve`.
-4. **Check** on the host (Live check on the host below): `node src/live-check.ts --config … --repo …`
-   in `packages/sergeant` now ends with `PASS codex reads the installation's credential`, and
-   `node src/live-check.ts --adapter codex-local` in `packages/runner` shows only `CODEX_CREDENTIAL`
-   and `GH_TOKEN` entering. Then let one controlled task reach review: its reviewer run's record
+1. **Installation config.** Add `"runners": { "reviewer": "codex-local" }` and
+   `"codex": { "model": "<Codex model>" }`, put the parameter, then Update: it rebuilds the runner
+   image, which carries the Codex CLI, and restarts `serve`. `codex` also lets people register Codex
+   accounts (`sgt account register`).
+2. **Check** on the host (Live check on the host below): `node src/live-check.ts --adapter codex-local`
+   in `packages/runner` shows only `CODEX_CREDENTIAL` and `GH_TOKEN` entering. Then let one controlled
+   task whose owner registered a Codex account reach review: its reviewer run's record
    (`/var/lib/sergeant/state/runs/<run>/record.json`) says `"provider": "openai/codex"` and has `tokens`.
 
 To go back, remove `runners` (or set the role to `claude-code-local`) and update.
@@ -197,9 +194,10 @@ are kept, and the issue goes back to Todo, undelegated, for the new assignee to 
 (`cancel.ts`). The model token is
 Sergeant's system account: it runs reasoning, retros, and system-health work only, never a worker or
 reviewer (not even the post-merge audit), so Sergeant can still tell an owner what is wrong when their
-accounts are spent. The config's `modelAccounts` (TECH-5113) is ignored, with a warning at startup:
-remove it, and have each person register their own subscription, personal or company-paid
-(TECH-5198). Each launch runs on the owner's usable account
+accounts are spent. Each person registers their own subscription, personal or company-paid
+(TECH-5198); the installation config has no model accounts or Codex credential of its own, and a
+config that still names `modelAccounts` or `codex.credentialSecret` does not parse (TECH-5184).
+Each launch runs on the owner's usable account
 whose quota is furthest ahead of its weekly and 5-hour reset schedule (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
 what each one paid for. An owner with no registered account, or none usable, gets a comment on the
 issue saying what to do, and nothing starts.
@@ -214,7 +212,7 @@ issue saying what to do, and nothing starts.
    - **An existing secret** (made by hand before TECH-5204; Terros:
      `sergeant/terros/registered-accounts`) is adopted, not recreated: with `registered_accounts_secret`
      naming it, the next plan shows it imported (its description and tags updated in place) and a
-     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` or leave it.
+     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` (the reason `secret_names` accepts up to seven names) or leave it: the role reads and writes it through its own grant either way.
    - **Another name, later, is unsupported.** Changing `registered_accounts_secret` would replace the
      secret, which holds every registered credential, so its `prevent_destroy` makes the plan fail
      and nothing changes. Keep the name the first apply used. On the host, leave the installation

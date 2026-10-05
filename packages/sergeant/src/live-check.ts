@@ -3,17 +3,12 @@
 // GitHub (the tokens it mints are revoked at the end), costs no model spend, and prints no secret.
 // From packages/sergeant:
 //
-//   node src/live-check.ts --config <installation.json> --repo owner/name [--issue UNF-123] [--pr 45] [--image sergeant-runner:local]
+//   node src/live-check.ts --config <installation.json> --repo owner/name [--issue UNF-123] [--pr 45]
 //
-// Each line is a named check; the exit code is nonzero if any fails. When the config runs a role on
-// `codex-local` (TECH-5009), it also logs Codex in inside the runner image exactly as a run does, with
-// the installation's credential, and checks Codex reads a login from it (`codex login status`: local,
-// no model spend; the first real Codex run is what proves OpenAI accepts it).
-import { execFile } from "node:child_process";
-import { parseArgs, promisify } from "node:util";
+// Each line is a named check; the exit code is nonzero if any fails.
+import { parseArgs } from "node:util";
 import { conversationRevision, RepoSlug } from "@terros/sergeant-contracts";
 import { RUN_PERMISSIONS } from "@terros/sergeant-github";
-import { CODEX_LOGIN } from "@terros/sergeant-runner";
 import { z } from "zod";
 import { BranchRules } from "./branch-rules.ts";
 import { connect, loadConfig } from "./config.ts";
@@ -24,7 +19,6 @@ const { values } = parseArgs({
     repo: { type: "string" },
     issue: { type: "string" },
     pr: { type: "string" },
-    image: { type: "string", default: "sergeant-runner:local" },
   },
 });
 const config = await loadConfig(values.config ?? fail("--config is required"));
@@ -120,20 +114,6 @@ for (const id of rulesetIds) {
 
 await Promise.all([control, workerInstallation, run].map((t) => github(t.token, "/installation/token", "DELETE")));
 
-// Codex: the credential enters the container by name, as in a run. `codex login status` would print
-// part of an API key, so only its first clause ("Logged in using ChatGPT", say) is shown.
-if (installation.codexCredential !== undefined) {
-  const status = await promisify(execFile)(
-    "docker",
-    ["run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--env", "CODEX_CREDENTIAL", values.image, "sh", "-c", `${CODEX_LOGIN}\ncodex login status`],
-    { env: { ...process.env, CODEX_CREDENTIAL: installation.codexCredential } },
-  ).then(
-    (r) => ({ ok: true, said: `${r.stdout}${r.stderr}` }),
-    (e: { stdout?: string; stderr?: string; message: string }) => ({ ok: false, said: `${e.stdout ?? ""}${e.stderr ?? ""}` || e.message }),
-  );
-  const said = status.said.split("\n").find((l) => /logged in|error/i.test(l))?.split(" - ")[0]?.trim() ?? "no answer";
-  check("codex reads the installation's credential", status.ok && said.startsWith("Logged in"), { runners: config.runners, model: config.codex?.model, said });
-}
 process.exit(failed > 0 ? 1 : 0);
 
 function fail(message: string): never {

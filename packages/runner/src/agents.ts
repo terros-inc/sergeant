@@ -111,12 +111,12 @@ const CODEX_AUTH_DETAIL = "Codex authentication failed; replace the account's Co
 const CODEX_QUOTA_FAILURE = /usage limit|out of credits|usage_limit_reached|insufficient_quota/i;
 
 /**
- * `CODEX_CREDENTIAL` is the installation's Codex secret: the JSON of a `codex login`'s `auth.json`
+ * `CODEX_CREDENTIAL` is the chosen Codex account's credential: the JSON of a `codex login`'s `auth.json`
  * (a ChatGPT workspace login), or an OpenAI API key. Either way it becomes the container's own
  * `~/.codex/auth.json`, outside the workspace, and the variable is unset before Codex starts.
  * The container is the sandbox, as with Claude Code's bypassPermissions.
  */
-export const CODEX_LOGIN = `
+const CODEX_LOGIN = `
 case "$CODEX_CREDENTIAL" in
   "{"*) mkdir -p "$HOME/.codex" && (umask 077 && printf '%s' "$CODEX_CREDENTIAL" > "$HOME/.codex/auth.json") ;;
   *) printf '%s' "$CODEX_CREDENTIAL" | codex login --with-api-key > /dev/null ;;
