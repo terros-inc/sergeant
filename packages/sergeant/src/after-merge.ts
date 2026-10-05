@@ -1,5 +1,5 @@
 import { appendFile, stat } from "node:fs/promises";
-import { checkBudget, checkDelegation, NoModelAccount, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { checkBudget, checkDelegation, FEEDBACK_LABEL, NoModelAccount, RunId, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import { feedbackComment, outcomeComment, workerFeedback } from "./outcome.ts";
 import { cancelRuns } from "./poll.ts";
@@ -155,9 +155,6 @@ export async function postFeedbackComment(
   await addLabel(issue.id, FEEDBACK_LABEL);
   log(`posted the Sergeant feedback comment on ${issue.identifier}`);
 }
-
-/** The label on every issue with a Sergeant feedback comment (TECH-5186, read by TECH-5187's retro). */
-export const FEEDBACK_LABEL = "sergeant-feedback";
 
 export const mergedHead = (m: Merged) => ({ repo: m.repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha });
 

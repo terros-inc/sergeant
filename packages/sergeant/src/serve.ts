@@ -21,7 +21,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
 import { linearUser } from "@terros/sergeant-linear";
-import { claudeCliFeedbackJudge, claudeCliReasoner } from "@terros/sergeant-reasoning";
+import { claudeCliFeedbackJudge, claudeCliReasoner, claudeCliRetro } from "@terros/sergeant-reasoning";
 import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
 import { linearCallers } from "./auth.ts";
@@ -146,6 +146,15 @@ const service = await startService(
       judge: claudeCliFeedbackJudge({ model: values["reasoning-model"] }),
     },
     undelegate: (issueId) => installation.linear.undelegate(issueId),
+    // Sergeant's own reasoning on its model token, on this host: never a worker's capacity (TECH-5187).
+    ...(config.retro && {
+      retro: {
+        linear: installation.linear.retro,
+        reasoning: claudeCliRetro({ model: values["reasoning-model"] }),
+        agentUserId: installation.agentUserId,
+        ...config.retro,
+      },
+    }),
   },
 );
 console.log(`Sergeant ${version}${fallback ? ` (${fallback})` : ""} serving ${repositories.join(", ")}; GET http://${values.host}:${service.port}/health`);

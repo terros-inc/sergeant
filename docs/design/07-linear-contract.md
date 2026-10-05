@@ -267,6 +267,15 @@ latest worker's `feedback`, keyed `feedback:<issue>:stop:<request>`, and adds th
 intent is removed. No custom field or other store: a retro across tasks (TECH-5187) reads these
 comments and the label.
 
+**Sergeant retro (TECH-5187).** When about 10 issues got a Sergeant feedback comment since the last
+retro, at most 2 weeks after it (if anything new happened), or on a human's `sgt retro`, reasoning on
+the control plane reads those comments and the state of every issue the agent created since, checks
+the previous retro, and answers with themes, evidence, recommendations, and rarely an issue (high bar,
+at most 3). Its issues go to the configured Sergeant project's team, in its first `backlog` state,
+unassigned and not delegated, keyed `retro:<window start>:<key>`; the retro is one Linear document in
+that project, `Sergeant retro <date>`, keyed `retro:<window start>`. The newest such document is the
+last retro: its first line names where its window ended and its "Issues filed" section what it filed.
+
 - Same team, linked to the origin (`related`, or `blocked_by` when it must wait).
 - Description: why it exists, what was learned, a link back. Written to stand alone.
 - Delegated to Sergeant only when `followups.autoDelegate` is on; otherwise a human starts it.

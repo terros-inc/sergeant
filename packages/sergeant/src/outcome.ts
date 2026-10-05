@@ -1,4 +1,4 @@
-import { issueRevision, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { FEEDBACK_MARKER, issueRevision, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { approvedHead } from "./review-quality.ts";
 
 /**
@@ -71,7 +71,7 @@ export function feedbackComment(lines: readonly string[] | undefined): string | 
     .map((l) => l.replace(/\s+/g, " ").trim())
     .filter((l) => l !== "" && !/^nothing notable\.?$/i.test(l))
     .slice(0, 3);
-  return kept.length > 0 ? kept.map((l, i) => (i === 0 ? `**Sergeant feedback:** ${l}` : l)).join("\n") : undefined;
+  return kept.length > 0 ? kept.map((l, i) => (i === 0 ? `${FEEDBACK_MARKER} ${l}` : l)).join("\n") : undefined;
 }
 
 /**

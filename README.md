@@ -168,6 +168,27 @@ notable") gets neither. A retro across tasks (TECH-5187) reads these comments; n
 them. The `sergeant-feedback` label must already exist (a workspace label, or one in the issue's team);
 Sergeant never creates it. The Linear token also needs permission to edit issue labels.
 
+A **Sergeant retro** (TECH-5187, `packages/sergeant/src/retro.ts`) sees across tasks what a single worker
+can't. With the installation config's `retro` (the Sergeant project's Linear id and the team its issues
+are filed in), serve checks hourly and runs one when about 10 tasks got a Sergeant feedback comment since
+the last retro, or at most 2 weeks after the last one if anything new happened; `sgt retro` runs one now
+(after a big architecture change, say). Nothing else schedules it, so a healthy system that leaves less
+feedback gets rarer retros. It runs on the control plane with Sergeant's own reasoning model, never a
+worker or a person's model account. It reads two inputs only: the Sergeant feedback comments posted since
+the last retro, and what became of the issues Sergeant filed in that time (done, canceled, or still
+waiting), plus the previous retro and its issues as they stand now. Reasoning first says in one paragraph
+whether the last retro's recommendations happened and their themes stopped recurring, then gives themes
+with their evidence (task ids) and a recommendation each, and rarely an issue: only for repeated evidence
+across tasks, a meaningful recurring cost or risk, a clear systemic defect, or a strong simplification,
+preferring removing complexity, then guidance, then docs or tooling, then new machinery (at most 3).
+Sergeant files those in Backlog in the Sergeant project, unassigned and not delegated, for a human to
+promote, and posts the retro as one Linear document there titled `Sergeant retro <date>`. Linear is the
+store: the newest such document is when the last window ended and what it filed. `<dir>/retro.json` only
+keeps an answer whose filing or posting failed, so the retry pays for no second answer; issue and
+document ids derive from the window, so a retry files and posts each once. A failed retro is retried a
+day later, or at the next `sgt retro`. The Linear token needs
+permission to create documents.
+
 Review quality is telemetry, never a gate (UNF-730, design 06 §8–9). Every reviewer run that
 finishes, whether or not the task ever merges, is written as a line of `<dir>/reviews.jsonl`: trigger
 (`required` or `audit`), mode (a separate fresh run), reviewer and implementer provider and model,

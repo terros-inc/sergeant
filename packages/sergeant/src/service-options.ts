@@ -8,6 +8,7 @@ import type { BudgetWindow } from "./budget.ts";
 import type { Enrollment } from "./enrollment.ts";
 import type { Ports } from "./execute.ts";
 import type { FeedbackDeps } from "./feedback.ts";
+import type { RetroDeps } from "./retro.ts";
 
 export type ServiceOptions = {
   /** Every holder reads this same array, so `enrollment` changes it in place. */
@@ -62,6 +63,8 @@ export type ServiceDeps = Ports & {
   undelegate?: (issueId: string) => Promise<void>;
   /** Reads and judgment for post-merge feedback; without them, feedback on landed work is not swept. */
   feedback?: Pick<FeedbackDeps, "completedIssues" | "issueProgress" | "judge">;
+  /** The Sergeant retro (TECH-5187, retro.ts); without it, no retro runs and `sgt retro` is refused. */
+  retro?: RetroDeps;
 };
 
 export type Service = {

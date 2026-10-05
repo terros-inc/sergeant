@@ -117,6 +117,11 @@ export const InstallationConfig = z.strictObject({
     .default({ auditSampleRate: 0.2 }),
   /** The budget window a task gets when it starts (TECH-4964); each one unset keeps its default (120 minutes, $25). */
   budget: z.strictObject({ minutes: z.number().positive().optional(), usd: z.number().positive().optional() }).optional(),
+  /**
+   * The Sergeant retro (TECH-5187, retro.ts): the Linear project it posts each retro to as a document and
+   * files its issues in, in Backlog, and the team it files them in. Absent, no retro runs.
+   */
+  retro: z.strictObject({ projectId: z.string().min(1), teamId: z.string().min(1) }).optional(),
   /** Task slots `serve` fills at once (TECH-5008, superseding TECH-4988); `serve --max-tasks` wins, and without either it is 2. */
   maxTasks: z.number().int().positive().optional(),
   /** Minutes a waiting task keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */

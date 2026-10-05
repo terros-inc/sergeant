@@ -8,6 +8,7 @@ import { cancelPending, driveCancel, pendingCancels, recordCancel, taskDir } fro
 import { readTaskState, runLoop, type LoopResult } from "./loop.ts";
 import { setAsideCompleted } from "./task-state.ts";
 import { admissionOrder, Slot } from "./slots.ts";
+import { retroEvery } from "./retro.ts";
 import { startFeedbackLoop } from "./service-feedback.ts";
 import { lockStateDir } from "./service-lock.ts";
 import { createServiceServer } from "./service-http.ts";
@@ -237,6 +238,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   })();
 
   const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal);
+  // The retro checks hourly whether one is due, and at once when a human asks (`sgt retro`).
+  const retroWake = new Wake();
+  const retroLoop = deps.retro ? retroEvery(60 * 60_000, retroWake, { stateDir: opts.stateDir, log, signal: abort.signal }, deps.retro) : Promise.resolve();
 
   const api = apiHandler({
     stateDir: opts.stateDir,
@@ -271,6 +275,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     ...(opts.accounts && { accounts: opts.accounts }),
     ...(opts.admin && { admin: opts.admin }),
     ...(opts.enrollment && { enrollment: opts.enrollment }),
+    ...(deps.retro && { requestRetro: () => retroWake.request() }),
   });
   // A webhook ends the wait of each loop watching what it names, and runs an intake for a task or a
   // delegated issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
@@ -307,6 +312,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       abort.abort();
       await intakeLoop;
       await feedbackLoop;
+      await retroLoop;
       await Promise.all(active.values());
       await Promise.allSettled(locks.values());
       if (server) await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
