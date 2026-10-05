@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { HumanPullRequestFeedback, PullRequestFacts, RunSpec } from "@terros/sergeant-contracts";
-import { reviewerBrief, type ReviewSubject } from "./brief.ts";
+import { reviewerBrief, type ReviewSubject, workerBrief } from "./brief.ts";
 
 // TECH-4990: a fresh reviewer must see the humans' feedback on the PRs it reviews, or it can approve
 // a head that ignores a human's requested change (Gate M8 would then hold the merge, but only after
@@ -102,4 +102,31 @@ test("the reviewer brief distinguishes acceptance findings from ordinary defects
   const brief = reviewerBrief(spec([pr]), [subject], []);
   expect(brief).toContain('blocking finding with `category: "acceptance"`');
   expect(brief).toContain("Omit `category` from ordinary implementation defects.");
+});
+
+// TECH-5191: after a handoff or a reopen, earlier work exists that Sergeant's own records may not
+// carry. A worker has no Linear access, so the PRs Linear links to the issue reach it only here.
+test("the worker brief has the worker find and continue existing work, and lists the issue's linked PRs", () => {
+  const base = spec([]);
+  const conversation = {
+    ...base.conversation,
+    issue: { ...base.conversation.issue, linkedPullRequests: [{ repo: "o/r", number: 3 }, { repo: "o/other", number: 9 }] },
+  };
+  const brief = workerBrief(
+    { ...base, role: "worker", objective: "Continue it.", context: { pullRequests: [], runs: [] }, conversation },
+    ["o/r: sergeant/unf-1-first-try"],
+  );
+
+  expect(brief).toContain(
+    "- Pull requests Linear links to this issue:\n  - https://github.com/o/r/pull/3\n  - https://github.com/o/other/pull/9\n",
+  );
+  const rule = brief.slice(brief.indexOf("3. Before you change anything"), brief.indexOf("\n4. "));
+  expect(rule).toContain('`gh pr list --state all --search "UNF-1"`');
+  expect(rule).toMatch(/whether earlier\s+feedback was addressed/);
+  expect(rule).toMatch(/replacement only for a concrete reason/);
+  expect(rule).toMatch(/rather\s+than assuming you start from scratch/);
+  // Without linked PRs the list still renders, as "(none)".
+  expect(workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, [])).toContain(
+    "- Pull requests Linear links to this issue:\n  - (none)\n",
+  );
 });
