@@ -11,8 +11,11 @@ import { containerRunner, type ContainerRunnerOptions } from "./runner.ts";
 export function fakeHost() {
   const calls: { cmd: string; args: string[]; opts: ExecOptions }[] = [];
   const docker = { reachable: true, running: true, exitCode: 0, logs: "", logErrors: "" };
+  // Holds a command back before Docker answers it, to order concurrent callers.
+  const hold = { before: undefined as ((args: string[]) => Promise<void>) | undefined };
   const exec: Exec = async (cmd, args, opts = {}) => {
     calls.push({ cmd, args, opts });
+    if (cmd === "docker") await hold.before?.(args);
     if (cmd !== "docker" || args[0] === "run" || args[0] === "rm") return { code: 0, stdout: "", stderr: "" };
     if (args[0] === "logs") return { code: 0, stdout: docker.logs, stderr: docker.logErrors };
     if (!docker.reachable) return { code: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" };
@@ -20,7 +23,7 @@ export function fakeHost() {
     const status = args.includes("{{.State.Running}}") ? String(docker.running) : `${docker.running ? "running" : "exited"} ${docker.exitCode}`;
     return { code: 0, stdout: `${status}\n`, stderr: "" };
   };
-  return { calls, docker, exec };
+  return { calls, docker, hold, exec };
 }
 
 export const TOKEN = "sk-ant-oat01-test-token";

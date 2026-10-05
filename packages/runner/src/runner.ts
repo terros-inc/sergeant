@@ -19,6 +19,7 @@ import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
 import { recorded, runFiles, type RunMeta } from "./run-files.ts";
+import { endOnce, publish } from "./terminal.ts";
 
 export type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
 
@@ -61,17 +62,23 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   };
   const { paths, readMeta, readRecord, priorReports } = runFiles(root);
 
-  async function finish(meta: RunMeta, record: RunRecord, agent: unknown) {
-    const p = paths(meta.runId);
-    await writeFile(join(p.dir, "agent.json"), JSON.stringify(agent, null, 2));
-    await writeFile(p.record, JSON.stringify(record, null, 2));
-    await exec("docker", ["rm", "-f", meta.container]);
-    // Nothing reads an ended run's workspace (workspaces.ts); a removal that fails is retried by serve's startup sweep.
-    await rm(p.workspace, { recursive: true, force: true }).catch(() => undefined);
-    return record;
+  /** Ends the run with the record `end` makes, unless another caller ends it first; either way, the run's one record (terminal.ts). */
+  function endRun(meta: RunMeta, end: () => Promise<{ record: RunRecord; agent: unknown }>) {
+    return endOnce(paths(meta.runId).dir, () => readRecord(meta.runId), async () => finish(meta, await end()));
   }
 
-  async function finalize(meta: RunMeta, exitCode: number): Promise<RunRecord> {
+  async function finish(meta: RunMeta, { record, agent }: { record: RunRecord; agent: unknown }) {
+    const p = paths(meta.runId);
+    await publish(join(p.dir, "agent.json"), JSON.stringify(agent, null, 2));
+    await publish(p.record, JSON.stringify(record, null, 2), true);
+    await exec("docker", ["rm", "-f", meta.container]);
+    // Only now, with the record and the copied report on disk: nothing reads an ended run's workspace
+    // (workspaces.ts), and a removal that fails is retried by serve's startup sweep.
+    await rm(p.workspace, { recursive: true, force: true }).catch(() => undefined);
+    return (await readRecord(meta.runId)) ?? record;
+  }
+
+  async function finalize(meta: RunMeta, exitCode: number) {
     const logs = await exec("docker", ["logs", meta.container]);
     const agent = AGENTS[meta.adapter].parse(logs.stdout, logs.stderr);
     // TECH-5021: Codex reports only tokens; its model's list price makes them an estimated cost.
@@ -96,7 +103,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
     const written = await agentReport(meta);
-    return finish(meta, RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: `no report written; ${why}` }) }), facts);
+    return { record: RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: `no report written; ${why}` }) }), agent: facts };
   }
 
   /** The run's account's quota read again as it fails, past the launch cache, to see which window ran out; undefined when it cannot be read. */
@@ -112,7 +119,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     const reportPath = await agentFile(p.workspace, "sergeant-report.md");
     const markdown = reportPath && (await readFile(reportPath, "utf8"));
     if (!markdown) return undefined;
-    await writeFile(join(p.dir, "report.md"), markdown);
+    await publish(join(p.dir, "report.md"), markdown);
     const parsed = meta.role === "reviewer" ? parseReport(markdown, ReviewReport) : parseReport(markdown, WorkerReport);
     return parsed.ok ? { report: parsed.report } : { report: null, reportError: parsed.error };
   }
@@ -230,11 +237,11 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       if (inspect.code !== 0) {
         // Unknown is not death (04 §6): only Docker saying the container does not exist is loss.
         if (!isGone(inspect)) throw new Error(`status of ${runId} unavailable: ${inspect.stderr.trim().slice(-500)}`);
-        return finish(meta, { ...base, status: "failed", reportError: "container is gone and left no result" }, {});
+        return endRun(meta, async () => ({ record: { ...base, status: "failed", reportError: "container is gone and left no result" }, agent: {} }));
       }
       const [state, code] = inspect.stdout.trim().split(" ");
       if (state !== "exited" && state !== "dead") return RunRecord.parse({ ...base, status: "running" });
-      return finalize(meta, Number(code));
+      return endRun(meta, () => finalize(meta, Number(code)));
     },
 
     async cancel(runId) {
@@ -251,7 +258,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       // A worker may have written its report, and opened PRs, before it exited or was stopped: the
       // canceled record keeps it, so a stop still finds and closes those PRs (TECH-5070).
       const base = { runId, role: meta.role, status: "canceled", provider: AGENTS[meta.adapter].provider, model: meta.model, report: null, ...recorded(meta) };
-      await finish(meta, RunRecord.parse({ ...base, ...(await agentReport(meta)) }), {});
+      await endRun(meta, async () => ({ record: RunRecord.parse({ ...base, ...(await agentReport(meta)) }), agent: {} }));
     },
 
     async report(runId) {
