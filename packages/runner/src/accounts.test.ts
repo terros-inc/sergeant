@@ -1,6 +1,6 @@
 import { NoModelAccount } from "@terros/sergeant-contracts";
 import { expect, test } from "vitest";
-import { failingReset, pickAccount, setAside, SET_ASIDE_MS, type ModelAccount } from "./accounts.ts";
+import { failingReset, hasCodexLabel, pickAccount, setAside, SET_ASIDE_MS, type ModelAccount } from "./accounts.ts";
 import type { Adapter } from "./agents.ts";
 import type { ReadQuota } from "./quota.ts";
 
@@ -28,7 +28,7 @@ const quota =
       : { adapter, account: id, readAt, error: "usage endpoint answered 401" };
   };
 const pick = (accounts: ModelAccount[], left: Record<string, [number, number]>, more: Partial<Parameters<typeof pickAccount>[0]> = {}) =>
-  pickAccount({ owner: ann, accounts, read: quota(left), isSetAside: () => false, role: "worker", configured: "codex-local", workerAdapter: undefined, now: () => NOW, ...more });
+  pickAccount({ owner: ann, accounts, read: quota(left), isSetAside: () => false, role: "worker", configured: "codex-local", workerAdapter: undefined, codexLabel: false, now: () => NOW, ...more });
 
 test("the best-paced account, never one with a known zero in either window", async () => {
   const chosen = await pick([claude, codex], { [claude.id]: [83, 90], [codex.id]: [53, 90] });
@@ -60,6 +60,34 @@ test("an account whose quota cannot be read is usable after every known one, the
   expect((await pick([claude, codex], {}, { read: partial })).account.id).toBe(codex.id);
   const spentPartial: ReadQuota = async ({ id, adapter }) => ({ adapter, account: id, readAt, ...(id === claude.id ? { weekly: { remainingPercent: 0 } } : {}) });
   expect((await pick([claude, codex], {}, { read: spentPartial, configured: "claude-code-local" })).account.id).toBe(codex.id);
+});
+
+// TECH-5084: the `sergeant:codex` label runs a task's workers on Codex even when Claude is better
+// paced, and never refuses a launch Claude could take: the fallback is the normal choice, said in the reason.
+test("a labelled worker takes the best usable Codex account, and the normal choice when there is none", async () => {
+  expect(hasCodexLabel(["Bug", "Sergeant:Codex"])).toBe(true);
+  expect(hasCodexLabel(undefined)).toBe(false);
+  const codex2 = account("codex-local", "2");
+  const left: Record<string, [number, number]> = { [claude.id]: [83, 90], [codex.id]: [30, 90], [codex2.id]: [53, 90] };
+  const labelled = await pick([claude, codex, codex2], left, { codexLabel: true });
+  expect(labelled).toMatchObject({
+    account: { id: codex2.id },
+    accountReason: `sergeant:codex: ${codex2.id}, 53% weekly, 90% 5-hour left: pace 1.06, the highest of 2 usable`,
+    providerChoice: { adapter: "codex-local", reason: expect.stringMatching(/^sergeant:codex: /) },
+  });
+  // Without the label, unchanged: the best-paced account, whatever its provider.
+  expect(await pick([claude, codex, codex2], left)).toMatchObject({ account: { id: claude.id }, accountReason: expect.stringMatching(/^person:ann:claude-code-local, 83% weekly/) });
+
+  // No usable Codex account (spent, set aside, or none registered): the normal choice, recorded as a fallback.
+  const fallback = `sergeant:codex, but no usable Codex account, so the normal choice: ${claude.id}, 83% weekly`;
+  for (const more of [
+    { accounts: [claude, codex], left: { ...left, [codex.id]: [0, 90] as [number, number] } },
+    { accounts: [claude, codex], left, isSetAside: (id: string) => id === codex.id },
+    { accounts: [claude], left },
+  ]) {
+    const chosen = await pick(more.accounts, more.left, { codexLabel: true, ...(more.isSetAside && { isSetAside: more.isSetAside }) });
+    expect(chosen).toMatchObject({ account: { id: claude.id }, accountReason: expect.stringContaining(fallback), providerChoice: { reason: expect.stringContaining(fallback) } });
+  }
 });
 
 // A run that failed on an account's quota or login moves the next launch to another of the owner's

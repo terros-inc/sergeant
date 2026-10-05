@@ -21,6 +21,7 @@ const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | nu
       state: { name: "Todo", type: "unstarted" },
       delegate: { id: "sergeant-user", name: "Sergeant" },
       assignee: { id: "user-ann", name: "Ann" },
+      labels: { nodes: [{ name: "sergeant:codex" }] },
       attachments: {
         nodes: [
           { ...attachment("a1", "https://github.com/o/canary/pull/7", "github"), creator: null },
@@ -78,7 +79,7 @@ test("reads every page, separates human-authored comments from the rest, and lin
   const conversation = await createLinearPort({ apiKey: "test", sergeantUserIds: ["sergeant-user"], fetch }).readConversation("UNF-1");
 
   expect(requests.map((r) => r.variables.after)).toEqual([null, "cursor-1"]);
-  expect(conversation.issue).toMatchObject({ state: "Todo", stateType: "unstarted", delegate: { id: "sergeant-user" }, description: "" });
+  expect(conversation.issue).toMatchObject({ state: "Todo", stateType: "unstarted", delegate: { id: "sergeant-user" }, description: "", labels: ["sergeant:codex"] });
   expect(conversation.humanComments.map((c) => c.id)).toEqual(["external-1", "human-2"]);
   expect(conversation.agentComments.map((c) => c.id)).toEqual(["bot", "sergeant"]);
   expect(conversation.issue.linkedPullRequests).toEqual([{ repo: "o/canary", number: 7 }]);

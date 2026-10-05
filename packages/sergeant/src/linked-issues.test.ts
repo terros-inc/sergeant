@@ -27,6 +27,7 @@ test("a hostile linked-issue description never reaches the reasoning prompt or a
             state: { name: "In Progress", type: "started" },
             delegate: null,
             assignee: null,
+            labels: { nodes: [] },
             attachments: { nodes: [] },
             comments: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
           },

@@ -101,7 +101,9 @@ issue's human assignee, who delegated it to Sergeant themselves. Among them Serg
 one whose quota is furthest ahead of its reset schedule (TECH-5213): for each of the weekly and 5-hour
 windows, percent left over percent of the window's time left, the tighter of the two governing, so
 quota that would otherwise expire unused is spent first. A reviewer prefers a different provider from
-its worker's when that provider's best account scores within 20% of the best. Sergeant's own system account runs
+its worker's when that provider's best account scores within 20% of the best. A task whose Linear issue has the
+`sergeant:codex` label runs its workers on your best usable Codex account, and on the usual choice when you
+have none usable, as the run's account reason says (TECH-5084); its reviewers are chosen as above. Sergeant's own system account runs
 its reasoning only, never a worker or reviewer. Register your own accounts, as many as you like, and
 remove them at any time:
 

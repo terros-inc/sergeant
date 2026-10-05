@@ -64,6 +64,7 @@ export function conversationReader({ request, sergeantUsers, log }: Omit<Followu
         delegate: first.delegate,
         assignee: first.assignee,
         linkedPullRequests: linkedPullRequests(first.attachments.nodes),
+        labels: first.labels.nodes.map((l) => l.name),
         // Only a human's: Sergeant's own, and an integration's with no creator, are not human input.
         attachments: first.attachments.nodes
           .filter((a) => a.creator && !sergeantUsers.has(a.creator.id))

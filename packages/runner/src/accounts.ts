@@ -15,6 +15,10 @@ export type ModelAccount = QuotaAccount & { holder: string };
 
 export const SET_ASIDE_MS = 60 * 60_000;
 
+/** The Linear label that runs a task's workers on the owner's best usable Codex account (TECH-5084). */
+export const CODEX_LABEL = "sergeant:codex";
+export const hasCodexLabel = (labels: readonly string[] | undefined) => (labels ?? []).some((l) => l.toLowerCase() === CODEX_LABEL);
+
 /** Accounts whose last run failed on quota or authentication, until when: `SET_ASIDE_MS`, or `resetsAt` (epoch ms) if sooner. */
 export function setAside(now: () => number = Date.now) {
   const until = new Map<string, number>();
@@ -49,7 +53,9 @@ export type AccountPick = {
 
 /**
  * The account for one launch among `accounts`, the owner's registered ones (choose.ts), passing over
- * those set aside. Throws `NoModelAccount` when the owner has none, or none usable.
+ * those set aside. A worker whose issue has `CODEX_LABEL` takes the best usable Codex account, and the
+ * normal choice when there is none, saying so in its reason; a reviewer ignores the label. Throws
+ * `NoModelAccount` when the owner has none, or none usable.
  */
 export async function pickAccount(opts: {
   owner: LinearPerson;
@@ -59,6 +65,7 @@ export async function pickAccount(opts: {
   role: Role;
   configured: Adapter;
   workerAdapter: Adapter | undefined;
+  codexLabel: boolean;
   now?: () => number;
 }): Promise<AccountPick> {
   const { owner, accounts, read } = opts;
@@ -69,7 +76,13 @@ export async function pickAccount(opts: {
     live.map(async (account) => ({ account, adapter: account.adapter, name: account.id, quota: read ? await read(account) : undefined })),
   );
   const avoid = opts.role === "reviewer" ? opts.workerAdapter : undefined;
-  const chosen = chooseAccount(candidates, { prefer: opts.configured, avoid, now: (opts.now ?? Date.now)() });
+  const now = (opts.now ?? Date.now)();
+  const choose = (among: Candidate<ModelAccount>[]) => chooseAccount(among, { prefer: opts.configured, avoid, now });
+  const labelled = opts.role === "worker" && opts.codexLabel;
+  const codex = labelled ? choose(candidates.filter((c) => c.adapter === "codex-local")) : undefined;
+  const best = codex ?? choose(candidates);
+  const label = codex ? `${CODEX_LABEL}: ` : `${CODEX_LABEL}, but no usable Codex account, so the normal choice: `;
+  const chosen = best && labelled ? { ...best, reason: `${label}${best.reason}` } : best;
   if (!chosen) {
     const why = [
       ...accounts.filter((a) => opts.isSetAside(a.id)).map((a) => `${a.id} set aside after a quota or authentication failure`),
