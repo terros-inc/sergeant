@@ -39,7 +39,7 @@ From the captain (round 1 and the 2026-10-02 clarifications):
 Built by the deterministic core from durable artifacts, never from the implementer's session:
 
 ```
-# Sergeant review brief — UNF-123 · run_rev1 · trigger: required
+# Sergeant review brief — UNF-123 · run_rev1
 
 ## Task (verbatim from Linear — the current source, not a summary)
 <identifier, title, description including any acceptance section as written>
@@ -47,23 +47,27 @@ Built by the deterministic core from durable artifacts, never from the implement
 <every human-authored comment, verbatim, bounded as in 05 §2>
 
 ## What to review
-- https://github.com/owner/repo/pull/412 — base main @ 1a2b3c4 — head 9f2c1e7 (review exactly this SHA)
-- Previous reviews of these PRs and their findings (check whether they were addressed): <...>
+- https://github.com/owner/repo/pull/412 — base `main` — head `9f2c1e7` (review exactly this SHA)
+  Checked out at `<path>` (detached at the head; `origin/main` is the base). Diff: `git diff origin/main...HEAD`
 
 ## Implementer's claims (unverified — check them, do not assume them)
 - Summary, decisions made and why, known gaps, validation reported: <from worker reports>
 
 ## Human reviews and comments on these PRs (confirm each was addressed)
-<every human review, inline comment (file:line), and PR comment, read live as the reviewer starts:
- author, review state, body; any one the head does not address is a blocking finding>
+<every human review, inline comment (file:line), and PR comment, read live by Sergeant as the reviewer
+ run starts: author, review state, body; any one the head does not address is a blocking finding>
+
+## Previous reviews of these PRs (check whether their findings were addressed)
+<earlier review reports of these PRs and their findings>
 
 ## Focus from Sergeant (optional)
 <e.g. "the token-refresh path; this repo's main deploys to staging on merge">
 
 ## Environment
-- A fresh session and workspace. Read-only GitHub access to: <repository set>. No AWS by default.
+A fresh session and workspace. You did not write this change and have no access to how it was
+produced. You have no GitHub, AWS, or Linear credentials; everything you need is checked out locally.
 
-## Rules (s2-reviewer-rules/4)   <§4>
+## Rules (s2-reviewer-rules/5)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -90,7 +94,7 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/4)
+## 4. Reviewer rules (s2-reviewer-rules/5)
 
 The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 
