@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import type { RunRecord } from "@terros/sergeant-contracts";
-import { driveCancel, recordCancel, taskDir } from "./cancel.ts";
+import { driveCancel, recordCancel, recordStop, taskDir } from "./cancel.ts";
 import { runLoop } from "./loop.ts";
 import { startService } from "./service.ts";
 import { fakes, head, issue, pr, repo, state, worker } from "./stop-fixtures.ts";
@@ -129,4 +129,31 @@ test("a human's task cancel closes only its worker's PR, and a retry never close
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.stringContaining(`the task was canceled by Ada: wrong approach. Its runs are canceled. Closed [${repo}#9]`) }]);
   // Like every stop, it sets the task aside: nothing resumes it.
   expect(await readFile(join(task, "state.json"), "utf8").catch(() => undefined)).toBeUndefined();
+});
+
+// TECH-5230: a stop deletes the branch of each PR it closed, only after the close, and never touches a
+// human's PR. The delete is tidiness: one that fails is logged, and the stop still finishes.
+test.each([[false], [true]])("a stop deletes the branch of the PR it closed after closing it (delete fails: %s)", async (fails) => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  await writeFile(join(dir, "state.json"), state(["run_w1"]));
+  const live = { conversation: issue("backlog", "Backlog") };
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }, { repo, number: 8 }];
+  const { deps } = fakes(live);
+  const events: string[] = [];
+  const close = deps.github.closePullRequest;
+  deps.github.closePullRequest = async (req) => (events.push(`close #${req.number}`), close(req));
+  deps.github.deletePullRequestBranch = async ({ number }) => {
+    events.push(`delete #${number}`);
+    if (fails) throw new Error("GitHub API request failed (422): Reference does not exist");
+    return { deleted: `sergeant/unf-1-pr-${number}` };
+  };
+  const log: string[] = [];
+  await recordStop(dir, "the Linear issue was canceled or moved to Backlog");
+
+  expect(await driveCancel(dir, "UNF-1", deps, [repo], (line) => log.push(line))).toMatchObject({ stopping: [], closedPullRequests: [{ number: 7 }] });
+  expect(events).toEqual(["close #7", "delete #7"]);
+  expect(log).toContain(
+    fails ? `UNF-1: could not delete the branch of ${pr(7).url}: GitHub API request failed (422): Reference does not exist` : `UNF-1: deleted branch sergeant/unf-1-pr-7 of ${pr(7).url}`,
+  );
+  expect(await readdir(dir)).not.toContain("cancel.json");
 });

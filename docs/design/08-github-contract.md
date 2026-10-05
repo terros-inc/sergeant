@@ -8,7 +8,7 @@ links PRs to the Linear issue, and merges under the Gate's rules.
 
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
-| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, nothing else |
+| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
 | **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, checks: read, actions: read, metadata: read. Reviewers: read-only | pushing branches, opening and updating PRs, reading CI logs |
 
 Why two: the default-branch ruleset must let Sergeant merge and must stop a worker from pushing to
@@ -49,6 +49,11 @@ Runner-owned. Convention, stated in the worker rules (05 §3):
 `sergeant/<IDENTIFIER>-<short-slug>`, one per repository per task. The convention helps humans and
 candidate discovery (§4). It is not used for authority. Workers never push to default branches
 (enforced by the ruleset) and force-push only their own branches.
+
+GitHub's "delete branch on merge" removes a merged PR's branch. When a task's stop closes a PR the
+worker App opened, Sergeant deletes its branch after the close (TECH-5230), only if it starts with
+`sergeant/`, is in the PR's own repository (not a fork), no other open PR is from or onto it, and its
+tip is still the PR's head. A failed delete is logged and never fails the stop.
 
 ## 4. Which PRs belong to a task
 
@@ -188,6 +193,6 @@ missed webhook delays a turn but loses nothing.
 
 ## 11. What Sergeant never does on GitHub
 
-Push code, create branches, open PRs, rebase, resolve conflicts, comment on PRs, approve a PR other
+Push code, create branches, delete a branch other than a closed PR's (§3), open PRs, rebase, resolve conflicts, comment on PRs, approve a PR other
 than as the first step of its gated merge (§7), change settings, rulesets, secrets, or workflows, or
 dispatch workflows.

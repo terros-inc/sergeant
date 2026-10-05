@@ -13,6 +13,14 @@ export const pullRequest = z.object({
   head: z.object({ sha: z.string() }),
   base: z.object({ ref: z.string().min(1), sha: z.string() }),
 });
+/** What a closed PR's branch delete checks (TECH-5230): its head branch, its head repository, and whether it merged. */
+export const pullRequestHead = z.object({
+  state: z.enum(["open", "closed"]),
+  merged_at: z.string().nullable(),
+  head: z.object({ ref: z.string().min(1), sha: z.string(), repo: z.object({ full_name: z.string() }).nullable() }),
+});
+export const pullRequestList = z.array(z.object({ number: z.number().int().positive() }));
+export const gitRef = z.object({ object: z.object({ sha: z.string() }) });
 export const checkRun = z.object({
   name: z.string().min(1),
   status: z.string(),
