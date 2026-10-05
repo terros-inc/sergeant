@@ -84,14 +84,15 @@ export interface GitHubPort {
    * by repository policy (405: a required review Sergeant cannot give, say) resolves to `refused` with
    * GitHub's message; any other failure rejects, a temporary 405 (base moved, mergeability still
    * being computed) included. A squash merge's commit message is always Sergeant's own (TECH-5085):
-   * the PR title and body, `Fixes <issueIdentifier>`, the plain `builtBy` line, and only human
-   * co-authors, never an AI agent's `Co-authored-by` trailer from the branch commits.
+   * the PR title and body, `Fixes <issueIdentifier>` when `closesIssue` (the worker's report, as Gate
+   * M9 checks it) and otherwise `Part of` with no closing word for the issue, the plain `builtBy`
+   * line, and only human co-authors, never an AI agent's identity from the branch commits.
    */
   mergePullRequest(req: {
     repo: RepoSlug;
     number: number;
     expectedHeadSha: Sha;
-    squash: { issueIdentifier: string; builtBy: string };
+    squash: { issueIdentifier: string; closesIssue: boolean; builtBy: string };
   }): Promise<{ mergedSha: Sha } | { refused: string }>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;

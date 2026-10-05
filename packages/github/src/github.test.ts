@@ -18,7 +18,7 @@ const pr = {
   base: { ref: "main", sha: "b".repeat(40) },
 };
 
-const merge = { repo, number: 7, expectedHeadSha: head, squash: { issueIdentifier: "TECH-1", builtBy: "Built by Sergeant (worker: Claude, review: Codex)" } };
+const merge = { repo, number: 7, expectedHeadSha: head, squash: { issueIdentifier: "TECH-1", closesIssue: true, builtBy: "Built by Sergeant (worker: Claude, review: Codex)" } };
 
 const json = (value: unknown, status = 200, headers?: HeadersInit) =>
   Response.json(value, { status, ...(headers && { headers }) });
@@ -162,17 +162,11 @@ test("approves the exact head, then merges with GitHub's expected-head guard", a
     return json({ sha: "b".repeat(40), merged: true, message: "merged" });
   };
 
-  expect(await adapter(fetch).mergePullRequest(merge)).toEqual({
-    mergedSha: "b".repeat(40),
-  });
+  expect(await adapter(fetch).mergePullRequest(merge)).toEqual({ mergedSha: "b".repeat(40) });
   expect(calls.map((call) => call.path.replace(/^.*\/pulls\/7/, ""))).toEqual(["/reviews", "", "/commits?per_page=100&page=1", "/merge"]);
   expect(calls[0]?.body).toMatchObject({ commit_id: head, event: "APPROVE" });
-  expect(calls[3]?.body).toEqual({
-    sha: head,
-    merge_method: "squash",
-    commit_title: "Fix the thing (#7)",
-    commit_message: "Does the thing.\n\nFixes TECH-1\n\nBuilt by Sergeant (worker: Claude, review: Codex)\n",
-  });
+  const message = "Does the thing.\n\nFixes TECH-1\n\nBuilt by Sergeant (worker: Claude, review: Codex)\n";
+  expect(calls[3]?.body).toEqual({ sha: head, merge_method: "squash", commit_title: "Fix the thing (#7)", commit_message: message });
 });
 
 test("a failed approval prevents the merge", async () => {

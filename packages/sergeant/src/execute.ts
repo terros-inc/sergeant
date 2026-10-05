@@ -8,6 +8,7 @@ import {
   NoModelAccount,
   conversationRevision,
   issueRevision,
+  reportedClosing,
   type FollowupCategory,
   type ProposedAction,
   type RunRecord,
@@ -187,7 +188,10 @@ export async function execute(action: ProposedAction, situation: SituationReport
           await ports.handoff?.(moved);
           return denied({ rule: "O1", reason: moved });
         }
-        const result = await ports.github.mergePullRequest({ ...action, squash: { issueIdentifier: live.issue.identifier, builtBy: builtByLine(runs) } });
+        // Whether the squash commit may close the issue is the worker's report, the one M9 just checked
+        // the body against, never a re-reading of the body (TECH-5085).
+        const squash = { issueIdentifier: live.issue.identifier, closesIssue: reportedClosing(runs, pr) === true, builtBy: builtByLine(runs) };
+        const result = await ports.github.mergePullRequest({ ...action, squash });
         if ("refused" in result) {
           // Repository policy, not a fault. The loop gives it the same one bounded re-check as a
           // failed merge call, then hands it to a human if nothing changed (TECH-5077).

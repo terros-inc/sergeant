@@ -51,8 +51,9 @@ Commits are authored and committed as `gitIdentity`, the installation's human id
 has no equivalent setting and may add its co-author trailer. The image does not set `core.hooksPath`,
 so repository-provided hooks run normally. The brief tells agents not to add agent attribution.
 Whatever the branch commits carry, Sergeant writes every squash merge's message itself (TECH-5085):
-the PR title and body, `Fixes <issue>`, a plain `Built by Sergeant (worker: …, review: …)` line,
-and only human co-authors, so no agent becomes a contributor in any enrolled repository.
+the PR title and body, `Fixes <issue>` (or `Part of`, never a closing word, for a PR that does not
+complete it), a plain `Built by Sergeant (worker: …, review: …)` line, and only human co-authors,
+agents being told by their commit identity, so no agent becomes a contributor in any enrolled repository.
 
 ## Codex (`codex-local`, TECH-5009)
 

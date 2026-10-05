@@ -12,7 +12,18 @@ import { takeTurn } from "./index.ts";
 test("an exact-head reviewed merge reaches GitHub with the expected head", async () => {
   const { p, merged } = ports();
   expect(await execute(merge, situation, p)).toMatchObject({ status: "done" });
-  expect(merged).toMatchObject([{ repo: pr.repo, number: 7, expectedHeadSha: head }]);
+  expect(merged).toMatchObject([{ repo: pr.repo, number: 7, expectedHeadSha: head, squash: { issueIdentifier: "UNF-1", closesIssue: true } }]);
+});
+
+// TECH-5085: whether the squash commit may close the issue is the worker's report, the one M9 checks,
+// so a Part-of PR, whatever its body's wording, never gets a closing word in its squash commit.
+test("a Part-of PR's merge tells GitHub it does not close the issue", async () => {
+  const runs = situation.runs.map((r) =>
+    r.role === "worker" && r.report && "pullRequests" in r.report ? { ...r, report: { ...r.report, pullRequests: r.report.pullRequests.map((x) => ({ ...x, closesIssue: false })) } } : r,
+  );
+  const { p, merged } = ports({ pr: { body: "Step one, part of UNF-1." } });
+  expect(await execute(merge, { ...situation, runs }, p)).toMatchObject({ status: "done" });
+  expect(merged).toMatchObject([{ squash: { issueIdentifier: "UNF-1", closesIssue: false } }]);
 });
 
 test("a head pushed or a human comment added after the turn's snapshot stops the merge", async () => {
