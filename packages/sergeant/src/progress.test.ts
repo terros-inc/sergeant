@@ -16,7 +16,7 @@ const owner = { id: "user-ann", name: "Ann" };
 const prUrl = `https://github.com/${repo}/pull/7`;
 const open: PullRequestFacts = {
   repo, number: 7, url: prUrl, state: "open", draft: false, author: "sergeant-worker[bot]", headSha: head, mergedSha: null, baseRef: "main",
-  body: "Fixes UNF-1", mergeable: true, checks: { sha: head, required: [{ name: "validate", state: "passed" }] }, humanFeedback: [],
+  body: "Fixes UNF-1", mergeable: true, mergeableState: "clean", checks: { sha: head, required: [{ name: "validate", state: "passed" }] }, humanFeedback: [],
 };
 const worker: RunRecord = {
   runId: "run_worker", role: "worker", status: "succeeded", provider: "anthropic/claude-code", model: "m", costUsd: 1.5,

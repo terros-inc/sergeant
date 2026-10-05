@@ -37,7 +37,7 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   f.conversation.issue.linkedPullRequests = [{ repo: "o/r", number: 7 }];
   f.deps.github.readPullRequest = async (repo, number) => ({
     repo, number, url, author: "sergeant-worker[bot]", state: prState, draft: false, headSha: "a".repeat(40), mergedSha: null, baseRef: "main",
-    body: "Fixes UNF-1", mergeable: true, checks: { sha: "a".repeat(40), required: [] }, humanFeedback: [],
+    body: "Fixes UNF-1", mergeable: true, mergeableState: "clean", checks: { sha: "a".repeat(40), required: [] }, humanFeedback: [],
   });
   f.deps.github.closePullRequest = async () => void (prState = "closed");
   // A task already under way: its loop resumes holding two running runs and waits on them.

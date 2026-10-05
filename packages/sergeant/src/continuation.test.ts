@@ -18,7 +18,7 @@ const repo = "o/canary";
 const url = `https://github.com/${repo}/pull/7`;
 const agent = { id: "agent-v2", name: "Sergeant" };
 const prAt = (headSha: string, validate: "passed" | "failed"): PullRequestFacts => ({
-  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", mergeable: true,
+  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", mergeable: true, mergeableState: "clean",
   checks: { sha: headSha, required: [{ name: "validate", state: validate }] },
   humanFeedback: [],
 });

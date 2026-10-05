@@ -131,7 +131,7 @@ function renderContext({ pullRequests, runs }: Extract<RunSpec, { role: "worker"
   const prs = pullRequests.map((p, i) => {
     const checks = p.checks.required.map((c) => `${c.name} ${c.state}`).join(", ") || "none declared";
     const human = humanFeedback[i] ?? "";
-    return `- ${p.url} — ${p.state}${p.draft ? " (draft)" : ""}, head \`${p.headSha}\`, base \`${p.baseRef}\`${p.mergeable === false ? ", has merge conflicts" : ""}
+    return `- ${p.url} — ${p.state}${p.draft ? " (draft)" : ""}, head \`${p.headSha}\`, base \`${p.baseRef}\`${p.mergeable === false ? ", has merge conflicts" : p.mergeableState === "behind" ? ", behind its base" : ""}
   Required checks on that head: ${checks}${human && `\n  Human reviews and comments on this PR, oldest first:\n${human}`}`;
   });
   const earlier = runs.map((r) => {

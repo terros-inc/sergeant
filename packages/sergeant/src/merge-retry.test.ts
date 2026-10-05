@@ -25,6 +25,7 @@ const pr: PullRequestFacts = {
   baseSha: "b".repeat(40),
   body: "Fixes UNF-1",
   mergeable: true,
+  mergeableState: "clean",
   checks: { sha: head, required: [{ name: "validate", state: "passed" }] },
   humanFeedback: [],
 };
@@ -99,7 +100,7 @@ async function fixture(waitingGraceMinutes = 0, refuse = false) {
       reasoner: {
         turn: async () => {
           turns++;
-          if (computeOnFirstTurn && turns === 1) livePr = { ...livePr, mergeable: null };
+          if (computeOnFirstTurn && turns === 1) livePr = { ...livePr, mergeable: null, mergeableState: "unknown" };
           return { output: { summary: "merge", actions: [merge] }, model: "m", promptVersion: "p" };
         },
       },
@@ -109,7 +110,8 @@ async function fixture(waitingGraceMinutes = 0, refuse = false) {
     run,
     recoverAfter(count: number) { failures = count; },
     computeOnFirst() { computeOnFirstTurn = true; },
-    settleMergeability() { livePr = { ...livePr, mergeable: true }; },
+    settleMergeability() { livePr = { ...livePr, mergeable: true, mergeableState: "clean" }; },
+    setPr(patch: Partial<PullRequestFacts>) { livePr = { ...livePr, ...patch }; },
     async matureRetry() {
       const file = join(dir, "state.json");
       const saved = JSON.parse(await readFile(file, "utf8"));
@@ -136,6 +138,21 @@ test("TECH-5062 still waits for an M7 mergeability fact change", async () => {
   f.settleMergeability();
   expect((await f.run()).outcome).toBe("done");
   expect(f.attempts()).toBe(1);
+  expect(f.turns()).toBe(2);
+});
+
+// TECH-5013: a merge M7 refuses on the state the poll already saw (behind) is no fact change, so the
+// same poll must not wake another turn; GitHub reporting it clean does.
+test("an M7 refusal the poll already saw waits for mergeable_state to change", async () => {
+  const f = await fixture();
+  f.setPr({ mergeableState: "behind" });
+  expect((await f.run()).outcome).toBe("idle");
+  expect((await f.run()).outcome).toBe("idle");
+  expect(f.attempts()).toBe(0);
+  expect(f.turns()).toBe(1);
+  f.setPr({ mergeableState: "clean" });
+  f.recoverAfter(0);
+  expect((await f.run()).outcome).toBe("done");
   expect(f.turns()).toBe(2);
 });
 

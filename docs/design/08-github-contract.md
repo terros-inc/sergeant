@@ -109,7 +109,7 @@ live GitHub and Linear facts at execution time:
 | M4 | the PR's live head SHA equals `expectedHeadSha` |
 | M5 | the base branch has at least one required check, and every required check passed on `expectedHeadSha` |
 | M6 | a `ReviewDisposition` exists for this PR at `expectedHeadSha` and still passes D1–D6 against the evidence recorded by now (06 §6) |
-| M7 | GitHub reports the PR mergeable (`clean`, or `unstable` when only non-required checks failed). Built: `mergeable` is `true`, not still being computed (`null`) or conflicting (TECH-4991); `mergeableState` is not read |
+| M7 | GitHub reports the PR mergeable: `mergeable` is `true` and `mergeableState` (GitHub's `mergeable_state`) is `clean`, `unstable` (past M5, only non-required checks failed), or `blocked`. Every PR waiting for Sergeant is `blocked`, because the ruleset's required approval is the one Sergeant gives just before merging (§2); a block that approval does not lift makes GitHub refuse the merge, which M12 hands to a human. Refused, naming the state: `unknown` or `mergeable: null` (GitHub is still computing; wait), `dirty` or `mergeable: false` (conflicts with its base; a worker rebases), `behind` (a worker rebases), `draft`, and `has_hooks`. A value GitHub adds later reads as `unknown`. None is a policy refusal: a later read that changes them wakes a turn (TECH-4991, TECH-5013) |
 | M8 | no `sergeant:hold` label on the issue or the PR, and no outstanding human "changes requested" review on the PR: no human whose latest review, at any head, is `CHANGES_REQUESTED` (a later approval by that human or a dismissal clears it; a later plain comment does not). Built: the review check (TECH-4987); the label is not |
 | M9 | if any other PR linked to the task is still open, this PR's body does not carry a closing reference to the issue |
 | M10 | re-read Linear and the PR: the current conversation revision (issue title and description, every human comment's id and `updatedAt`, and every human review and comment on the task's PRs: id, `updatedAt`, review state, and body hash) equals the `conversationRevision` the proposing turn saw. Otherwise refuse and wake the task, so a fresh turn decides with the new input in front of it (no locking; a comment arriving in the instant between this read and the merge is an accepted race) |
@@ -140,7 +140,8 @@ a new human review or comment, or a human edit on the issue lets a later turn tr
 first). After every merge attempt, whether it succeeds, fails, or is refused, the loop commits the
 turn's fingerprint; an unchanged poll therefore does not spend another reasoning turn. When M7 denies
 a merge for a PR that the turn's poll saw as mergeable, the committed fingerprint records that PR as
-`mergeable: null`, matching the merge preflight's later read. The first poll that reports definite
+`mergeable: null` and `mergeableState: unknown`, matching the merge preflight's later read; a PR the
+poll already saw M7 refuse (`behind`, say) is recorded as it was, so the same facts wake no turn. The first poll that reports definite
 mergeability again then differs and wakes exactly one turn. `baseSha` is also part of the fingerprint,
 so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` is the
 only action outcome that leaves the fingerprint uncommitted, so the question can be retried after the
@@ -152,7 +153,8 @@ says so in Linear once if useful, and waits. A human merge triggers automation a
 
 ## 8. Moved bases and conflicts
 
-Facts in the Situation Report: `behindBy`, `mergeable`, `mergeableState`, and `not_run_conflict` CI.
+Facts in the Situation Report: `mergeable` and `mergeableState` (built), `behindBy` and `not_run_conflict` CI
+(not built).
 The worker owns rebasing and conflict resolution (05 §3). Sergeant decides when it matters:
 
 - a running worker: `send_run("main moved and PR #12 now conflicts; rebase it")`;

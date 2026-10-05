@@ -1,3 +1,4 @@
+import { MergeableState } from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 export const pullRequest = z.object({
@@ -9,6 +10,8 @@ export const pullRequest = z.object({
   draft: z.boolean(),
   merged_at: z.string().nullable(),
   mergeable: z.boolean().nullable(),
+  /** A value missing, or one GitHub adds later, reads as `unknown`: M7 then waits rather than merging. */
+  mergeable_state: MergeableState.catch("unknown"),
   merge_commit_sha: z.string().nullable(),
   head: z.object({ sha: z.string() }),
   base: z.object({ ref: z.string().min(1), sha: z.string() }),

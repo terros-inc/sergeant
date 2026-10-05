@@ -28,7 +28,7 @@ const pr: PullRequestFacts = {
   mergedSha: null,
   baseRef: "main",
   body: subject.body,
-  mergeable: true,
+  mergeable: true, mergeableState: "clean",
   checks: { sha: head, required: [] },
   humanFeedback: [],
 };

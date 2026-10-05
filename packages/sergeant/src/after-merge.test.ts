@@ -41,7 +41,7 @@ const pr: PullRequestFacts = {
   mergedSha,
   baseRef: "main",
   body: "Fixes TECH-5023",
-  mergeable: null,
+  mergeable: null, mergeableState: "unknown",
   checks: { sha: headSha, required: [] },
   humanFeedback: [],
 };

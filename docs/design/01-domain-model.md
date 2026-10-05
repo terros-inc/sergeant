@@ -552,7 +552,7 @@ PullRequestFacts {
   draft, author
   headRef, headSha, baseRef, baseSha
   mergeable: true | false | unknown
-  mergeableState                // clean | dirty | blocked | behind | unstable | unknown
+  mergeableState                // clean | unstable | behind | blocked | dirty | draft | has_hooks | unknown
   behindBy?, body
   checks: CheckSummary
   githubReviews: [{ author, state }]
