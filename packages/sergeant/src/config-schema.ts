@@ -122,35 +122,12 @@ export const InstallationConfig = z.strictObject({
   waitingGraceMinutes: z.number().nonnegative().optional(),
   /** The agent CLI each role runs (TECH-5009). A role not named runs Claude Code, as it always has. */
   runners: z.strictObject({ worker: z.enum(ADAPTERS).optional(), reviewer: z.enum(ADAPTERS).optional() }).optional(),
-  /** The installation's Codex login, required when `runners` names `codex-local`. */
-  codex: z
-    .strictObject({
-      /**
-       * Secrets Manager id of the Codex credential: the JSON of the `auth.json` a `codex login` with the
-       * installation's own ChatGPT workspace account writes, or an OpenAI API key. Never a personal login.
-       */
-      credentialSecret: SecretRef,
-      /** The model Codex runs for a Codex role, unless `serve`/`canary` names that role's model. */
-      model: z.string().min(1),
-    })
-    .optional(),
   /**
-   * Ignored since TECH-5179, kept only so an existing config still loads (`serve` warns): runs use only
-   * their task owner's registered accounts, never an installation's or owner's. Each person registers
-   * their own with `sgt account register`. Was TECH-5113's owner's further accounts.
+   * The model Codex runs for a Codex role, unless `serve`/`canary` names that role's model. Required when
+   * `runners` names `codex-local`; without it nobody can register a Codex account. The credential is
+   * always the task owner's registered account (TECH-5179), never the installation's (TECH-5184).
    */
-  modelAccounts: z
-    .array(
-      z.strictObject({
-        name: z
-          .string()
-          .regex(/^[\w.-]{1,64}$/, "expected a short name: letters, digits, _ . -")
-          .refine((n) => !n.startsWith("installation-"), "installation-claude and installation-codex name the two accounts above"),
-        adapter: z.enum(ADAPTERS),
-        credentialSecret: SecretRef,
-      }),
-    )
-    .default([]),
+  codex: z.strictObject({ model: z.string().min(1) }).optional(),
   /**
    * Secrets Manager id of the one secret that holds the accounts people register with `sgt account
    * register` (TECH-5113), holding `{"accounts":[]}` at first; the host must be able to put its value.
@@ -160,15 +137,7 @@ export const InstallationConfig = z.strictObject({
   registeredAccountsSecret: SecretRef.optional(),
 })
   .refine((c) => c.codex || !Object.values(c.runners ?? {}).includes("codex-local"), {
-    message: "a codex-local runner needs the codex credential",
+    message: "a codex-local runner needs the codex config, for its model",
     path: ["codex"],
-  })
-  .refine((c) => c.codex || !c.modelAccounts.some((a) => a.adapter === "codex-local"), {
-    message: "a codex-local model account needs the codex config, for its model",
-    path: ["modelAccounts"],
-  })
-  .refine((c) => new Set(c.modelAccounts.map((a) => a.name)).size === c.modelAccounts.length, {
-    message: "model account names must be distinct",
-    path: ["modelAccounts"],
   });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;

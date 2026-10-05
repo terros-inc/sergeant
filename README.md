@@ -88,8 +88,8 @@ or `{ "channel": "soaked", "soakMinutes": 90 }`, with `"paused": true` to stop (
 Automatic updates).
 Optional `runners` chooses each role's agent (TECH-5009): `{ "reviewer": "codex-local" }` runs reviewers
 on the Codex CLI; a role not named runs Claude Code, as before. A `codex-local` role needs `codex`:
-`{ "credentialSecret": "<Codex credential secret id>", "model": "<Codex model>" }`; the secret's
-format and how to create it are in [`packages/runner/README.md`](packages/runner/README.md#codex-codex-local-tech-5009).
+`{ "model": "<Codex model>" }`, which also lets people register Codex accounts; each run uses its task
+owner's registered account ([`packages/runner/README.md`](packages/runner/README.md#codex-codex-local-tech-5009)).
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs
 contents and pull requests write, checks and commit statuses read, and metadata read. The worker App

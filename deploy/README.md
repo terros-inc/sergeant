@@ -170,20 +170,17 @@ installation, in this order, and expect deliveries made in between to fail harml
 
 ### A Codex reviewer
 
-Reviews can come from Codex while workers stay on Claude Code (TECH-5009; details and the secret's
-format in `packages/runner/README.md`, under Codex):
+Reviews can come from Codex while workers stay on Claude Code (TECH-5009; details in
+`packages/runner/README.md`, under Codex). Codex runs, like every run, use only the task owner's
+registered accounts (Model accounts below); the installation has no Codex credential (TECH-5184).
 
-1. **Secret.** Store the installation's Codex Team login (or a Terros-owned OpenAI API key) in a new
-   Secrets Manager secret, for example `sergeant/<installation>/codex-credential`.
-2. **Terraform.** Add its name to `secret_names` in the infrastructure-config parameter, then
-   `./init.sh`, plan, and apply: only the instance role's secrets policy changes.
-3. **Installation config.** Add `"runners": { "reviewer": "codex-local" }` and
-   `"codex": { "credentialSecret": "<the secret name>", "model": "<Codex model>" }`, put the parameter,
-   then Update: it rebuilds the runner image, which carries the Codex CLI, and restarts `serve`.
-4. **Check** on the host (Live check on the host below): `node src/live-check.ts --config … --repo …`
-   in `packages/sergeant` now ends with `PASS codex reads the installation's credential`, and
-   `node src/live-check.ts --adapter codex-local` in `packages/runner` shows only `CODEX_CREDENTIAL`
-   and `GH_TOKEN` entering. Then let one controlled task reach review: its reviewer run's record
+1. **Installation config.** Add `"runners": { "reviewer": "codex-local" }` and
+   `"codex": { "model": "<Codex model>" }`, put the parameter, then Update: it rebuilds the runner
+   image, which carries the Codex CLI, and restarts `serve`. `codex` also lets people register Codex
+   accounts (`sgt account register`).
+2. **Check** on the host (Live check on the host below): `node src/live-check.ts --adapter codex-local`
+   in `packages/runner` shows only `CODEX_CREDENTIAL` and `GH_TOKEN` entering. Then let one controlled
+   task whose owner registered a Codex account reach review: its reviewer run's record
    (`/var/lib/sergeant/state/runs/<run>/record.json`) says `"provider": "openai/codex"` and has `tokens`.
 
 To go back, remove `runners` (or set the role to `claude-code-local`) and update.
@@ -197,9 +194,10 @@ are kept, and the issue goes back to Todo, undelegated, for the new assignee to 
 (`cancel.ts`). The model token is
 Sergeant's system account: it runs reasoning, retros, and system-health work only, never a worker or
 reviewer (not even the post-merge audit), so Sergeant can still tell an owner what is wrong when their
-accounts are spent. The config's `modelAccounts` (TECH-5113) is ignored, with a warning at startup:
-remove it, and have each person register their own subscription, personal or company-paid
-(TECH-5198). Each launch runs on the owner's usable account
+accounts are spent. Each person registers their own subscription, personal or company-paid
+(TECH-5198); the installation config has no model accounts or Codex credential of its own, and a
+config that still names `modelAccounts` or `codex.credentialSecret` does not parse (TECH-5184).
+Each launch runs on the owner's usable account
 whose quota is furthest ahead of its weekly and 5-hour reset schedule (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
 what each one paid for. An owner with no registered account, or none usable, gets a comment on the
 issue saying what to do, and nothing starts.

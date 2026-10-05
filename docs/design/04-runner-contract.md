@@ -229,8 +229,8 @@ This is not a capability broker: every worker gets the same development authorit
 **`codex-local` (TECH-5009; resolves V6).** Installation config picks the adapter per role
 (`runners.worker`, `runners.reviewer`); a role not named runs `claude-code-local`. A Codex run uses the
 same container, workspace, worker-App token, git identity, and network as a Claude Code run; only the
-model credential differs (the installation's Codex credential in Secrets Manager, in place of the
-Claude token). Checked against Codex CLI 0.160.0:
+model credential differs (the task owner's registered Codex account, in place of their Claude
+account; TECH-5179, TECH-5184). Checked against Codex CLI 0.160.0:
 
 - **Usage**: `codex exec --json` reports tokens per turn (`turn.completed.usage`: input, cached input,
   output, reasoning output) and no dollar figure. The run record keeps the summed tokens and no
