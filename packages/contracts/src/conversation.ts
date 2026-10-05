@@ -93,6 +93,11 @@ export const Conversation = z.object({
     linkedPullRequests: z.array(PullRequestRef),
     /** Every human-added attachment (TECH-4994); part of the revision. Absent reads as none. */
     attachments: z.array(IssueAttachment).optional(),
+    /**
+     * The issue's label names (TECH-5084): settings such as `sergeant:codex`, not what humans say, so
+     * not part of the revision. Absent reads as none.
+     */
+    labels: z.array(z.string()).optional(),
   }),
   /** Every human-authored comment, oldest first. Never filtered by relevance. */
   humanComments: z.array(HumanComment),

@@ -20,6 +20,7 @@ export const issuePage = z.object({
   state: z.object({ name: z.string(), type: z.string() }),
   delegate: actor.nullable(),
   assignee: actor.nullable(),
+  labels: z.object({ nodes: z.array(z.object({ name: z.string() })) }),
   attachments: z.object({
     nodes: z.array(
       z.object({
@@ -49,6 +50,7 @@ export const issueQuery = `
       state { name type }
       delegate { id name }
       assignee { id name }
+      labels(first: 50) { nodes { name } }
       attachments(first: 100) { nodes { id title url sourceType updatedAt creator { id name } } }
       comments(first: 50, after: $after) {
         nodes {

@@ -11,7 +11,7 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
-import { failingReset, pickAccount, runAccount, setAside } from "./accounts.ts";
+import { failingReset, hasCodexLabel, pickAccount, runAccount, setAside } from "./accounts.ts";
 import { AGENTS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { CODEX_PRICES, estimateCodexCost } from "./codex-prices.ts";
@@ -120,7 +120,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   /** The task owner's account for a launch, from quota read now (accounts.ts). */
   async function chooseAccount(spec: RunSpec, workerAdapter: Adapter | undefined) {
     const accounts = await opts.accounts(spec.owner.id);
-    return pickAccount({ owner: spec.owner, accounts, read: opts.quota, isSetAside: asides.has, role: spec.role, configured: adapterOf(spec.role), workerAdapter });
+    const codexLabel = hasCodexLabel(spec.conversation.issue.labels);
+    return pickAccount({ owner: spec.owner, accounts, read: opts.quota, isSetAside: asides.has, role: spec.role, configured: adapterOf(spec.role), workerAdapter, codexLabel });
   }
 
   return {

@@ -74,6 +74,50 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
   expect(await runner.status("run_r")).toMatchObject({ provider: "openai/codex", model: "gpt-5", providerChoice: { adapter: "codex-local" } });
 });
 
+// TECH-5084: the issue's `sergeant:codex` label puts its worker on Codex though Claude is better
+// paced, and its reviewer still takes the other provider, Claude, under the diversity rule.
+test("a sergeant:codex issue's worker runs on Codex, and its reviewer on Claude", async () => {
+  const launched: string[] = [];
+  const exec: Exec = async (cmd, args) => {
+    if (cmd === "docker" && args[0] === "run") launched.push(args.join(" "));
+    if (cmd === "docker" && args[0] === "inspect") return { code: 0, stdout: "exited 0\n", stderr: "" };
+    if (cmd === "docker" && args[0] === "logs") return { code: 0, stdout: '{"is_error":false}', stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const left: Record<Adapter, number> = { "claude-code-local": 90, "codex-local": 60 };
+  const resetIn = (hours: number) => new Date(Date.now() + hours * 60 * 60_000).toISOString();
+  const rootDir = await mkdtemp(join(tmpdir(), "sergeant-codex-label-test-"));
+  const runner = containerRunner({
+    rootDir,
+    models: { worker: { "claude-code-local": "opus", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
+    accounts: async () => [annAccount("claude-code-local", "sk-ant-oat01-test"), annAccount("codex-local", '{"tokens":{"access_token":"t"}}')],
+    quota: async ({ id, adapter }) => ({
+      adapter,
+      account: id,
+      readAt: "2026-10-03T12:00:00.000Z",
+      weekly: { remainingPercent: left[adapter], resetsAt: resetIn(84) },
+      fiveHour: { remainingPercent: 100, resetsAt: resetIn(2.5) },
+    }),
+    gitIdentity: { name: "Ada Example", email: "ada@example.com" },
+    githubTokens: async () => "ghs_test",
+    exec,
+    fetch: (async () => Response.json({ html_url: "https://github.com/o/r/pull/9", title: "T", body: "", base: { ref: "main" } })) as typeof fetch,
+  });
+  const labelled = { ...conversation, issue: { ...issue, labels: ["sergeant:codex"] } };
+
+  await runner.start({ ...worker, conversation: labelled });
+  await writeFile(join(rootDir, "run_w", "workspace", "sergeant-report.md"), REPORT);
+  expect(await runner.status("run_w")).toMatchObject({ provider: "openai/codex", accountReason: expect.stringMatching(/^sergeant:codex: person:ann:codex-local/) });
+  expect(launched[0]).toContain("codex exec");
+
+  // Codex now the better paced: the label does not hold the reviewer there; Claude is within 20% of it.
+  left["claude-code-local"] = 80;
+  left["codex-local"] = 90;
+  await runner.start({ ...reviewer, conversation: labelled });
+  expect(launched[1]).toContain("claude -p");
+  expect(await runner.status("run_r")).toMatchObject({ provider: "anthropic/claude-code", accountReason: expect.stringContaining("within 20% of the best for another provider") });
+});
+
 // TECH-5179: a run spends only its task owner's quota. A run that fails on the account's quota sends
 // the next launch to another of the owner's accounts, never to anyone else's, and once none of the
 // owner's is usable nothing starts.
