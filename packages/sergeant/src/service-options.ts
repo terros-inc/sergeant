@@ -27,6 +27,8 @@ export type ServiceOptions = {
   budget?: Partial<BudgetWindow>;
   /** Each task loop's audit sample rate (loop.ts); omitted, the loop's default. */
   auditSampleRate?: number;
+  /** Whether each task loop posts a progress comment after a review round (loop.ts); omitted, it does. */
+  progressComments?: boolean;
   /** Minutes between post-merge feedback sweeps (feedback.ts), when `deps.feedback` is given. */
   feedbackSweepMinutes?: number;
   /** How long after work lands its feedback is still watched. */

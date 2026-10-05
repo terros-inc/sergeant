@@ -82,6 +82,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
         ...(opts.budget && { budget: opts.budget }),
         ...(opts.auditSampleRate !== undefined && { auditSampleRate: opts.auditSampleRate }),
+        ...(opts.progressComments !== undefined && { progressComments: opts.progressComments }),
         log: (line) => log(`${issueId}: ${line}`),
         signal: abort.signal,
         wake: wakeOf(issueId),

@@ -84,7 +84,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
   const wake = new Wake();
 
   const result = await runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, waitingGraceMinutes: 0, completionWaitMinutes: 0, wake, log: () => {} },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, waitingGraceMinutes: 0, completionWaitMinutes: 0, wake, progressComments: false, log: () => {} },
     {
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",

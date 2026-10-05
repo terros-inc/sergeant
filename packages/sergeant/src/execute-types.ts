@@ -10,6 +10,7 @@ import type {
   RunRecord,
 } from "@terros/sergeant-contracts";
 import type { TaskOwner } from "./owner.ts";
+import type { Progress } from "./progress.ts";
 
 // The ports one proposed action is performed through, and what came of it (execute.ts).
 
@@ -46,6 +47,8 @@ export type Ports = {
    * (TECH-5179); the loop's stop path then cancels its runs and keeps its PRs.
    */
   handoff?: (reason: string) => Promise<void>;
+  /** TECH-5227: the review round a question this turn asks also reports (progress.ts); marked folded once it does. */
+  progress?: Progress;
 };
 
 export type ActionOutcome =

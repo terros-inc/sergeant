@@ -1,5 +1,6 @@
 import { checkLive, commentIdFor, type ProposedAction, type SituationReport } from "@terros/sergeant-contracts";
 import type { ActionOutcome, Ports } from "./execute-types.ts";
+import { withProgress } from "./progress.ts";
 import { ownQuestion, questionComment } from "./question.ts";
 
 /**
@@ -18,7 +19,9 @@ export async function askHuman(
     if (!active.allowed) return { action, status: "denied", rule: active.rule, reason: active.reason };
     const thread = ownQuestion(situation.conversation, action.followsUp);
     const parentId = thread && (thread.parentId ?? thread.id);
-    await ports.linear.postComment({ issueId: issue.id, body: questionComment(action), key, ...(parentId && { parentId }) });
+    const { progress } = ports;
+    if (progress) progress.folded = true;
+    await ports.linear.postComment({ issueId: issue.id, body: withProgress(questionComment(action), progress), key, ...(parentId && { parentId }) });
     return { action, status: "done", result: { commentId: commentIdFor(key) } };
   } catch (e) {
     return { action, status: "failed", error: (e as Error).message };

@@ -14,6 +14,8 @@ export type LoopOptions = {
   dir: string;
   /** The fraction of merged heads that skipped fresh review which get an audit review (06 §8). */
   auditSampleRate?: number;
+  /** TECH-5227: false posts no progress comment after a review round (progress.ts); default true. */
+  progressComments?: boolean;
   pollSeconds?: number;
   /** The service's existing waiting grace; also delays the one bounded retry after a merge failure. */
   waitingGraceMinutes?: number;

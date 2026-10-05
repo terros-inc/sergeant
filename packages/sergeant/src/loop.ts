@@ -18,11 +18,12 @@ import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./me
 import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
 import { describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
 import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
+import { pendingProgress, postProgress, withProgress, type Progress } from "./progress.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { admitOwner } from "./owner.ts";
-import { applyTurn, loadState } from "./task-state.ts";
+import { applyTurn, loadState, type TaskState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
 
@@ -104,7 +105,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // A question whose post failed or was never confirmed (UNF-727). It is posted again under the same
   // key every poll until Linear shows it or a human changes the conversation, never left to an idle
   // guard. Only in memory: a restart instead finds the turn's fingerprint uncommitted and takes a turn.
-  let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
+  let unposted: { action: ProposedAction; situation: SituationReport; progress?: Progress } | undefined;
   // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
   const resolvedThreads = new Set<string>();
   const resolveDue = (conversation: Conversation) => resolveAnswered(conversation, state.actedThrough, deps.linear, resolvedThreads, log);
@@ -186,7 +187,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     const { budget } = holds;
     if (unposted && conversationRevision(unposted.situation.conversation) === conversationRevision(conversation)) {
-      const retry = await execute(unposted.action, unposted.situation, deps);
+      const retry = await execute(unposted.action, unposted.situation, { ...deps, ...(unposted.progress && { progress: unposted.progress }) });
       log(`asking again: ${describeOutcome(retry)}`);
       if (retry.status !== "failed") unposted = undefined;
       await wait(pollMs);
@@ -253,7 +254,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     if (opts.wake) opts.wake.pending = false;
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);
-    const { turn, outcomes } = await takeTurn(situation, ports);
+    // TECH-5227: the review round this turn ends, told once on the issue (progress.ts). The one switch.
+    const progress = opts.progressComments === false ? undefined : pendingProgress(situation);
+    const { turn, outcomes } = await takeTurn(situation, { ...ports, ...(progress && { progress }) });
     const at = new Date().toISOString();
     const described = outcomes.map(describeOutcome);
     log(`turn ${state.turns + 1} (${turn.model}, $${turn.costUsd ?? "?"}): ${turn.output.summary}`);
@@ -261,7 +264,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     // A start the owner has no usable model account for asks them instead (TECH-5217): retried the same way.
     const failedAsk = outcomes.flatMap((o) => (o.status !== "failed" ? [] : o.action.kind === "ask_human" ? [o.action] : o.unposted ? [o.unposted] : []))[0];
-    if (failedAsk) unposted = { action: failedAsk, situation };
+    if (failedAsk) unposted = { action: failedAsk, situation, ...(progress && { progress }) };
     const accepted = outcomes.some((o) => o.action.kind === "accept_as_is" && o.status === "done");
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
@@ -271,9 +274,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
     const reply = accepted ? latestAnswer(conversation) : undefined;
     if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests) };
+    // A closing merge tells the round in its outcome comment, posted once after this save.
+    const closed = state.merged as TaskState["merged"];
+    if (progress && closed?.outcome) closed.outcome = withProgress(closed.outcome, progress);
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
+    if (progress && !progress.folded && !closed) await postProgress(opts.issueId, progress, outcomes, deps, log);
     await postHandoffs(conversation.issue.id);
   }
 }

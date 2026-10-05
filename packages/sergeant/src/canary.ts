@@ -60,6 +60,7 @@ const result = await runLoop(
     enrolledRepositories: [repo],
     dir,
     auditSampleRate: config.review.auditSampleRate,
+    progressComments: config.review.progressComments,
     budget: {
       ...taskBudget(config),
       ...(values["budget-minutes"] !== undefined && { wallMinutes: positive(values["budget-minutes"], "--budget-minutes") }),

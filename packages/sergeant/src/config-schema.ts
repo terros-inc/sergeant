@@ -107,8 +107,10 @@ export const InstallationConfig = z.strictObject({
     .strictObject({
       /** The fraction of merged heads that skipped fresh review which get a nonblocking audit review (06 §8). */
       auditSampleRate: z.number().min(0).max(1),
+      /** TECH-5227: a short progress comment on the issue after each review round (progress.ts). */
+      progressComments: z.boolean().default(true),
     })
-    .default({ auditSampleRate: 0.2 }),
+    .default({ auditSampleRate: 0.2, progressComments: true }),
   /** The budget window a task gets when it starts (TECH-4964); each one unset keeps its default (120 minutes, $25). */
   budget: z.strictObject({ minutes: z.number().positive().optional(), usd: z.number().positive().optional() }).optional(),
   /**

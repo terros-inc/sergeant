@@ -95,7 +95,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
   const stop = new AbortController();
 
   const result = await runLoop(
-    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, log: () => {}, signal: stop.signal },
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, progressComments: false, log: () => {}, signal: stop.signal },
     {
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
