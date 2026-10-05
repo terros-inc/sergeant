@@ -27,10 +27,14 @@ jobs:
         working-directory: deploy/terraform
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: 1.16.5
-          terraform_wrapper: false
+      # hashicorp/setup-terraform is not on the org's allowed-actions list, so install the pinned release directly.
+      - name: Install Terraform 1.16.5
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/1.16.5/terraform_1.16.5_linux_amd64.zip
+          echo "2bc2fcfff033265c9e02ca0351f01794eb122f62a9b2a49a3294b9e49eaab5e4  terraform.zip" | sha256sum -c -
+          unzip -q terraform.zip terraform -d "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false -input=false
       - run: terraform validate
