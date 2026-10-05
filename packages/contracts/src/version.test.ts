@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -71,5 +71,35 @@ test("a checkout owned by another user is trusted, and a refusal is reported as 
     });
   } finally {
     for (const k of Object.keys(isolate)) delete process.env[k];
+  }
+});
+
+test("a root reached through a symlink or with a trailing slash is still Sergeant's checkout", () => {
+  const r = repo(1);
+  r.git("tag", "v2.0.0");
+  const link = join(mkdtempSync(join(tmpdir(), "sgt-link-")), "sergeant");
+  dirs.push(join(link, ".."));
+  symlinkSync(r.dir, link);
+  expect(sergeantVersion(`${link}/`)).toEqual({ version: `2.0.0+${r.sha()}` });
+});
+
+test("a copy nested inside another repo never reports that repo's tags or SHA", () => {
+  const outer = repo(3);
+  outer.git("tag", "v9.9.0");
+  const nested = join(outer.dir, "vendor", "sergeant");
+  mkdirSync(nested, { recursive: true });
+  const { version, fallback } = sergeantVersion(nested);
+  expect(version).toBe("0.0.0+unknown");
+  expect(fallback).toMatch(/^the git checkout is .+, not Sergeant's .+vendor\/sergeant$/);
+});
+
+test("without git installed it falls back to 0.0.0+unknown and says so", () => {
+  const r = repo(1);
+  const path = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    expect(sergeantVersion(r.dir)).toEqual({ version: "0.0.0+unknown", fallback: "git cannot read the checkout: git is not installed" });
+  } finally {
+    process.env.PATH = path;
   }
 });
