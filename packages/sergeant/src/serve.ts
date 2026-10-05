@@ -23,7 +23,7 @@ import { parseArgs } from "node:util";
 import { RepoSlug, sergeantVersion } from "@terros/sergeant-contracts";
 import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliFeedbackJudge, claudeCliReasoner, claudeCliRetro } from "@terros/sergeant-reasoning";
-import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
+import { containerRunner, pruneWorkspaces, reasoningFiles, runsUsage } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
 import { linearCallers } from "./auth.ts";
 import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
@@ -62,6 +62,7 @@ const log = (line: string) => console.log(`[${new Date().toISOString()}] ${line}
 const started = parameter && (await enrolledIn(parameter, log, { config: JSON.parse(await readFile(configFile, "utf8")), version: await installedVersion(configFile) }));
 if (started) config.repositories = started.repositories;
 const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"));
+const runsDir = join(stateDir, "runs");
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
 
 const installation = await connect(config, repositories);
@@ -95,6 +96,7 @@ const admin = existsSync(release)
       releaseFile: release,
       serve: { version, startedAt: new Date().toISOString() },
       config: enrolled.versions,
+      runs: () => runsUsage(runsDir).catch(() => null),
     }
   : undefined;
 
@@ -135,7 +137,7 @@ const service = await startService(
     linearProfileForGitHubLogin: reviewerProfileLookup(config),
     github: installation.github,
     runner: containerRunner({
-      rootDir: join(stateDir, "runs"),
+      rootDir: runsDir,
       ...runnerRoles(config, { worker: values["worker-model"], reviewer: values["reviewer-model"] }),
       ...accounts.runner,
       gitIdentity: config.gitIdentity,
@@ -163,6 +165,15 @@ const service = await startService(
       },
     }),
   },
+);
+// TECH-5229: ended runs' workspaces an older serve kept, or a crash left, are removed in the background:
+// a large backlog must not hold up startup and its health check. Live runs are never touched.
+void pruneWorkspaces(runsDir).then(
+  ({ pruned, failed }) => {
+    if (pruned) log(`removed ${pruned} ended runs' workspaces`);
+    for (const why of failed) log(`could not remove an ended run's workspace, retried at the next start: ${why}`);
+  },
+  (e: Error) => log(`sweeping ended runs' workspaces failed: ${e.message}`),
 );
 console.log(`Sergeant ${version}${fallback ? ` (${fallback})` : ""} serving ${repositories.join(", ")}; GET http://${values.host}:${service.port}/health`);
 

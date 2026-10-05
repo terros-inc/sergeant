@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   issueRevision,
@@ -64,6 +64,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     await writeFile(join(p.dir, "agent.json"), JSON.stringify(agent, null, 2));
     await writeFile(p.record, JSON.stringify(record, null, 2));
     await exec("docker", ["rm", "-f", meta.container]);
+    // Nothing reads an ended run's workspace (workspaces.ts); a removal that fails is retried by serve's startup sweep.
+    await rm(p.workspace, { recursive: true, force: true }).catch(() => undefined);
     return record;
   }
 

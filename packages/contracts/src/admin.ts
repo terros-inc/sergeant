@@ -68,6 +68,14 @@ export const AdminStatus = z.object({
    * older than TECH-5205, which a newer `sgt` reads as null (TECH-5209).
    */
   config: z.object({ loaded: z.number().int(), current: z.number().int().nullable() }).nullable().default(null),
+  /**
+   * The runs directory (TECH-5229): its run directories, the bytes they take on disk, and the space on
+   * the data volume it is on. Null when serve cannot read it, and absent from a serve older than TECH-5229.
+   */
+  runs: z
+    .object({ count: z.number().int(), bytes: z.number(), volumeFreeBytes: z.number(), volumeBytes: z.number() })
+    .nullable()
+    .default(null),
 });
 export type AdminStatus = z.infer<typeof AdminStatus>;
 

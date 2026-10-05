@@ -31,7 +31,10 @@ How it fits together:
   container, one hop further away, cannot get instance credentials. A run's container still gets only
   its task owner's registered model credential and, for a worker, its scoped worker-App token.
 - **State is on the data volume** (`/var/lib/sergeant/state`: `tasks/`, `runs/`, `service.lock`). It
-  survives an instance replacement and Terraform refuses to destroy it (`prevent_destroy`).
+  survives an instance replacement and Terraform refuses to destroy it (`prevent_destroy`). A run's
+  `workspace/` checkout is removed when the run ends, and `serve` removes any ended run's workspace
+  left behind each time it starts (TECH-5229); the run's records and report stay. `sgt admin status`
+  shows the `runs/` directory's size and the volume's free space.
 - **Only `/health`, `/v1`, and the two webhook endpoints are public.** `serve` listens on
   `127.0.0.1:8080`; Caddy terminates HTTPS for the hostname (Let's Encrypt over HTTP-01) and proxies
   `/v1` without granting trust to the proxy. `serve` checks a person's Linear bearer on every

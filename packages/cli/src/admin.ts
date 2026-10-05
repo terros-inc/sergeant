@@ -62,9 +62,12 @@ export function showStatus(s: AdminStatus): string {
     lines.push("last     no restart or update recorded");
   }
   const config = s.config;
+  if (s.runs) lines.push(`runs     ${s.runs.count} in ${gb(s.runs.bytes)}; data volume ${gb(s.runs.volumeFreeBytes)} free of ${gb(s.runs.volumeBytes)}`);
   if (config) lines.push(`config   ${staleConfig(s) ?? (config.current === null ? `version ${config.loaded}; serve cannot read the parameter now (serve.log says why)` : `version ${config.loaded}, as serve has it`)}`);
   return lines.join("\n");
 }
+
+const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
 /** TECH-5205: what to do when the installation-config parameter changed since serve started; undefined when it did not. */
 export function staleConfig(s: AdminStatus): string | undefined {
