@@ -143,5 +143,5 @@ test("a blocking finding and then a red check each get a pushed fix on the same 
   // The H1 review could not carry H3; only the fresh review of H3 did.
   expect(outcomes[2]).toEqual([expect.stringMatching(/denied by M6 .*did not review head/), expect.stringMatching(/^start_reviewer: done/)]);
   expect(reviewer).toMatchObject({ role: "reviewer", subject: [{ repo, number: 7, headSha: H3 }] });
-  expect(merged).toEqual([{ kind: "merge_pr", repo, number: 7, expectedHeadSha: H3, reviewStanding: { kind: "reviewed", reviewRunId: reviewer?.runId } }]);
+  expect(merged).toEqual([{ kind: "merge_pr", repo, number: 7, expectedHeadSha: H3, reviewStanding: { kind: "reviewed", reviewRunId: reviewer?.runId }, squash: { issueIdentifier: "UNF-1", builtBy: "Built by Sergeant (worker: p, review: p)" } }]);
 });

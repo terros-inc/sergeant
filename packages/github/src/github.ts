@@ -1,7 +1,8 @@
 import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
-import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
+import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestCommits, pullRequestHead, pullRequestList, pullRequestText, repositoryConfig, requiredRule } from "./schemas.ts";
+import { squashMessage } from "./squash-message.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
 type ObservedCheck = { name: string; appId?: number; state: Exclude<CheckState, "missing"> };
@@ -168,6 +169,25 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     return { mergedSha: Sha.parse(live.merge_commit_sha) };
   };
 
+  const squashMessageFor = async (repo: string, number: number, squash: { issueIdentifier: string; builtBy: string }) => {
+    const live = pullRequestText.parse(await request(`/repos/${repo}/pulls/${number}`));
+    const commits: z.infer<typeof pullRequestCommits> = [];
+    // GitHub lists at most 250 commits of a PR.
+    for (let page = 1; page <= 3; page++) {
+      const batch = pullRequestCommits.parse(await request(`/repos/${repo}/pulls/${number}/commits?per_page=100&page=${page}`));
+      commits.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return squashMessage({
+      number,
+      title: live.title,
+      body: live.body ?? "",
+      ...squash,
+      // The squash commit is the PR author's, so only another author is a co-author, as in GitHub's default.
+      commits: commits.map((c) => ({ message: c.commit.message, ...(c.author?.login !== live.user.login && c.commit.author && { author: c.commit.author }) })),
+    });
+  };
+
   return {
     async readPullRequest(repo, number) {
       const { config } = configFor(repo);
@@ -212,7 +232,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       });
     },
 
-    async mergePullRequest({ repo, number, expectedHeadSha }) {
+    async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);
       // The ruleset requires one approving review, which the worker App cannot give its own PR, so
       // only this approval (after every Gate check) lets the merge through. A failed approval must
@@ -230,12 +250,14 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       } catch (error) {
         return alreadyMerged(repo, number, expectedHeadSha, error);
       }
+      // A squash's message is always Sergeant's own (TECH-5085), never GitHub's copy of the branch commits.
+      const message = config.mergeMethod === "squash" ? await squashMessageFor(repo, number, squash) : {};
       try {
         const result = mergeResponse.parse(
           await request(`/repos/${repo}/pulls/${number}/merge`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sha: expectedHeadSha, merge_method: config.mergeMethod }),
+            body: JSON.stringify({ sha: expectedHeadSha, merge_method: config.mergeMethod, ...message }),
           }),
         );
         if (!result.merged) return { refused: result.message };

@@ -83,9 +83,16 @@ export interface GitHubPort {
    * Merges only if the head is still `expectedHeadSha` (GitHub's `sha` guard). A merge GitHub refuses
    * by repository policy (405: a required review Sergeant cannot give, say) resolves to `refused` with
    * GitHub's message; any other failure rejects, a temporary 405 (base moved, mergeability still
-   * being computed) included.
+   * being computed) included. A squash merge's commit message is always Sergeant's own (TECH-5085):
+   * the PR title and body, `Fixes <issueIdentifier>`, the plain `builtBy` line, and only human
+   * co-authors, never an AI agent's `Co-authored-by` trailer from the branch commits.
    */
-  mergePullRequest(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<{ mergedSha: Sha } | { refused: string }>;
+  mergePullRequest(req: {
+    repo: RepoSlug;
+    number: number;
+    expectedHeadSha: Sha;
+    squash: { issueIdentifier: string; builtBy: string };
+  }): Promise<{ mergedSha: Sha } | { refused: string }>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**

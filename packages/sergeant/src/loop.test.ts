@@ -80,7 +80,7 @@ test("a human comment landing before the merge denies it and wakes a turn that s
 
   expect(seen.map((s) => s.conversation.humanComments.length)).toEqual([0, 1]);
   expect(seen[1]?.recentTurns[0]?.outcomes[0]).toMatch(/denied by M10/);
-  expect(merged).toEqual([{ ...merge }]);
+  expect(merged).toEqual([{ ...merge, squash: { issueIdentifier: "UNF-1", builtBy: "Built by Sergeant (worker: p, review: p)" } }]);
   expect(result.outcome).toBe("done");
   // Filed in the first turn; the second turn's identical proposal files nothing new.
   expect(filed).toEqual(["followup:canary_UNF-1:retry-jitter"]);

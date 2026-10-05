@@ -15,6 +15,7 @@ import {
 } from "@terros/sergeant-contracts";
 import { askHuman } from "./ask-human.ts";
 import { answeredBudgetQuestion } from "./budget.ts";
+import { builtByLine } from "./built-by.ts";
 import type { ActionOutcome, Ports } from "./execute-types.ts";
 import { accountQuestion, notOwned } from "./owner.ts";
 import { questionKey } from "./question.ts";
@@ -186,7 +187,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
           await ports.handoff?.(moved);
           return denied({ rule: "O1", reason: moved });
         }
-        const result = await ports.github.mergePullRequest(action);
+        const result = await ports.github.mergePullRequest({ ...action, squash: { issueIdentifier: live.issue.identifier, builtBy: builtByLine(runs) } });
         if ("refused" in result) {
           // Repository policy, not a fault. The loop gives it the same one bounded re-check as a
           // failed merge call, then hands it to a human if nothing changed (TECH-5077).
