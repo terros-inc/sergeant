@@ -7,6 +7,7 @@ import type { RefusedMerge } from "./situation.ts";
 import { checkLive, isOwned, type GateVerdict, type Ownership } from "./action-gate.ts";
 
 export {
+  checkClose,
   checkDelegation,
   checkIssueState,
   checkLive,

@@ -97,6 +97,8 @@ const TaskState = z.looseObject({
       replyId: z.string().optional(),
       /** The acknowledgment, built from the PRs the accepting turn saw. */
       comment: z.string(),
+      /** TECH-5232: the turn closed the issue itself, nothing to change; `comment` is its evidence. */
+      close: z.enum(["done", "canceled"]).optional(),
     })
     .optional(),
   /**

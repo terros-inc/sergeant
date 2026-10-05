@@ -93,6 +93,7 @@ export async function scenario(opts: {
   const replies: { body: string; parentId: string }[] = [];
   const resolved: string[] = [];
   const merged: unknown[] = [];
+  const closed: string[] = [];
   let polls = 0;
   const result = await runLoop(
     { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, idleMinutes: 0, budget: { wallMinutes: 120, costUsd: 25 }, log: () => {}, ...opts.loop },
@@ -113,13 +114,19 @@ export async function scenario(opts: {
         },
         resolveThread: async (id) => (await opts.beforeResolve?.(id), resolved.push(id), "resolved" as const),
         createFollowupIssue: async () => { throw new Error("unused"); },
+        async closeIssue(_id, as) {
+          closed.push(as);
+          const to = as === "done" ? { state: "Done", stateType: "completed" } : { state: "Canceled", stateType: "canceled" };
+          live = { ...live, issue: { ...live.issue, ...to } };
+          return { moved: true as const, from: "In Progress", to: to.state };
+        },
       },
       github: { readPullRequest: async () => opts.pullRequest?.() ?? pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
       runner: opts.runner,
       reasoner: { turn: opts.reasoner },
     },
   );
-  return { result, posted, replies, resolved, merged, live };
+  return { result, posted, replies, resolved, merged, closed, live };
 }
 
 export type Saved = { runIds: string[]; budget: { window: unknown; since?: string; priorRuns: string[] }; recentTurns: { outcomes: string[] }[] };

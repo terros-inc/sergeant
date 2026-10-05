@@ -70,6 +70,19 @@ export const AskHuman = z.object({
 export const AcceptAsIs = z.object({ kind: z.literal("accept_as_is") });
 
 /**
+ * TECH-5232: the task's own verification shows nothing to change, so Sergeant closes the issue itself:
+ * `done` when main already covers it, `canceled` when it is obsolete. The evidence (the commit, files,
+ * or tests that cover it, or what superseded it) is posted as one comment a human can reopen from.
+ * Allowed only while the issue is delegated to Sergeant and no PR is in the task.
+ */
+export const CloseIssue = z.object({
+  kind: z.literal("close_issue"),
+  state: z.enum(["done", "canceled"]),
+  evidence: z.string().min(1).max(4_000),
+});
+export type CloseIssue = z.infer<typeof CloseIssue>;
+
+/**
  * A Linear issue for a concrete bug, required unfinished work from this task's scope, a real blocker,
  * or a current operational or security problem (07 §11, TECH-5186); never a review's non-blocking
  * notes. Filed in the task's team and project, linked to the task's issue, and delegated to nobody.
@@ -96,6 +109,7 @@ export const ProposedAction = z.discriminatedUnion("kind", [
   MergePr,
   AskHuman,
   AcceptAsIs,
+  CloseIssue,
   CreateFollowup,
 ]);
 export type ProposedAction = z.infer<typeof ProposedAction>;

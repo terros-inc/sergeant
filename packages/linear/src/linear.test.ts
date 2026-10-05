@@ -129,6 +129,7 @@ const workflow = [
   { id: "s-review", name: "In Review", type: "started", position: 5 },
   { id: "s-progress", name: "In Progress", type: "started", position: 4 },
   { id: "s-done", name: "Done", type: "completed", position: 6 },
+  { id: "s-canceled", name: "Canceled", type: "canceled", position: 7 },
 ];
 
 // TECH-4947: the first worker starting must make the issue visibly In Progress, moving it to the
@@ -178,6 +179,17 @@ test("moveIssueToStarted moves an unstarted issue to the first started state and
   updates.length = 0;
   for (const current of [{ name: "Todo", type: "unstarted" }, { name: "Backlog", type: "backlog" }, { name: "Done", type: "completed" }, { name: "Canceled", type: "canceled" }]) {
     expect(await portFor(current).moveIssueToTodo("UNF-1")).toEqual({ moved: false });
+  }
+  expect(updates).toEqual([]);
+
+  // TECH-5232: Sergeant closing an issue moves it to Done or Canceled, never over a closed state, so a
+  // replayed close, or a human's own close since, is left as it is.
+  expect(await portFor({ name: "Todo", type: "unstarted" }).closeIssue("UNF-1", "done")).toEqual({ moved: true, from: "Todo", to: "Done" });
+  expect(await portFor({ name: "In Progress", type: "started" }).closeIssue("UNF-1", "canceled")).toEqual({ moved: true, from: "In Progress", to: "Canceled" });
+  expect(updates).toEqual([{ id: "UNF-1", stateId: "s-done" }, { id: "UNF-1", stateId: "s-canceled" }]);
+  updates.length = 0;
+  for (const current of [{ name: "Done", type: "completed" }, { name: "Canceled", type: "canceled" }]) {
+    expect(await portFor(current).closeIssue("UNF-1", "canceled")).toEqual({ moved: false });
   }
   expect(updates).toEqual([]);
 });

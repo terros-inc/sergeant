@@ -1,6 +1,6 @@
 import { readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Conversation, LinearPort, PullRequestFacts } from "@terros/sergeant-contracts";
+import { checkDelegation, type CloseIssue, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { LoopResult } from "./loop-options.ts";
 import type { TaskState } from "./task-state.ts";
@@ -30,6 +30,19 @@ export function acceptedComment(pullRequests: Pick<PullRequestFacts, "repo" | "n
   return `Sergeant has stopped: the work was accepted as it is. ${left} yours to merge or close.${cost ? `\n\n${cost}` : ""}`;
 }
 
+/** TECH-5232: once per closing turn, so a replayed close posts its evidence once. */
+export const closedKey = (issueId: string, at: string) => `closed:${issueId}:${at}`;
+
+/** The one comment a close posts: what Sergeant did, the evidence, and how a human undoes it. */
+export function closedComment(close: Pick<CloseIssue, "state" | "evidence">, cost?: string): string {
+  const what =
+    close.state === "done"
+      ? "Sergeant closed this issue as Done: its verification found nothing to change, since main already covers it."
+      : "Sergeant canceled this issue: its verification found it obsolete, with nothing to change.";
+  const reopen = "If this is wrong, move the issue back to Todo, delegated to Sergeant, and it starts afresh.";
+  return `${what}\n\n**Evidence:** ${close.evidence.trim()}\n\n${reopen}${cost ? `\n\n${cost}` : ""}`;
+}
+
 /** Posts the acceptance's comment; a Linear failure throws, so the loop fails and its ending is replayed. */
 export async function postAccepted(issueId: string, replyId: string, body: string, linear: Pick<LinearPort, "postComment">): Promise<void> {
   await linear.postComment({ issueId, key: acceptedKey(issueId, replyId), body });
@@ -45,22 +58,35 @@ export const markAccepted = (dir: string, at: string) => writeFile(markerFile(di
  * no more; its PRs and the issue are left for a human. The marker keeps intake from starting it afresh
  * while the issue stays in Todo. A failed resolve returns nothing, so the loop waits for the next pass;
  * a failed post throws, so the loop fails and the resumed task replays the ending under the same key.
- * Either way the acknowledgment appears only on a task that is ending.
+ * Either way the acknowledgment appears only on a task that is ending. TECH-5232: a turn that closed
+ * the issue itself ends the same way, its evidence comment and the close in place of the acknowledgment.
  */
 export async function endAccepted(
   accepted: NonNullable<TaskState["accepted"]>,
   dir: string,
   issueId: string,
-  linear: Pick<LinearPort, "readConversation" | "postComment">,
+  linear: Pick<LinearPort, "readConversation" | "postComment" | "closeIssue">,
   resolveDue: (conversation: Conversation) => Promise<boolean>,
+  agentUserId: string,
 ): Promise<LoopResult | undefined> {
-  const { at, replyId, comment } = accepted;
+  const { at, replyId, comment, close } = accepted;
   const conversation = await linear.readConversation(issueId);
   if (!(await resolveDue(conversation))) return undefined;
   if (replyId) await postAccepted(conversation.issue.id, replyId, comment, linear);
-  await markAccepted(dir, at);
+  // TECH-5232: a close posts its evidence, then closes the issue, both safe to replay. An issue no longer
+  // Sergeant's by the replay (A1) is left as it is.
+  const ours = checkDelegation(conversation.issue, agentUserId).allowed;
+  if (close && ours) {
+    if (!linear.closeIssue) throw new Error("this Sergeant cannot close an issue");
+    await linear.postComment({ issueId: conversation.issue.id, key: closedKey(conversation.issue.id, at), body: comment });
+    await linear.closeIssue(conversation.issue.id, close);
+  }
+  // A closed issue is not in Todo, so it needs no marker: reopened to Todo, it starts afresh at once.
+  if (!close) await markAccepted(dir, at);
   await rename(join(dir, "state.json"), join(dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
-  return { outcome: "accepted", detail: "a human accepted the work as it is" };
+  if (!close) return { outcome: "accepted", detail: "a human accepted the work as it is" };
+  const as = close === "done" ? "Done" : "Canceled";
+  return { outcome: "accepted", detail: ours ? `Sergeant closed the issue as ${as}: nothing to change` : `the issue was no longer Sergeant's to close as ${as}` };
 }
 
 /**

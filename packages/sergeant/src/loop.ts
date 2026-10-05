@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { conversationRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { driveMerged, exists, mergedOf } from "./after-merge.ts";
-import { acceptedComment, endAccepted } from "./accepted.ts";
+import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
@@ -144,7 +144,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     if (state.accepted) {
       // TECH-5118: a human accepted the work as it is in reply to the budget question, so the task ends
       // with no fresh window and nothing more asked, its saved ending replayed (accepted.ts).
-      const ended = await endAccepted(state.accepted, opts.dir, opts.issueId, deps.linear, resolveDue);
+      // TECH-5232: so does a task that closed its issue itself, nothing to change.
+      const ended = await endAccepted(state.accepted, opts.dir, opts.issueId, deps.linear, resolveDue, deps.agentUserId);
       if (ended) return ended;
       await wait(pollMs);
       continue;
@@ -280,6 +281,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
     const reply = accepted ? latestAnswer(conversation) : undefined;
     if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests, costTotal({ ...spent(taskTurnCostUsd), at })) };
+    const close = outcomes.flatMap((o) => (o.status === "done" && o.action.kind === "close_issue" ? [o.action] : []))[0];
+    if (close) state.accepted = { at, close: close.state, comment: closedComment(close, costTotal({ ...spent(taskTurnCostUsd), at })) };
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
