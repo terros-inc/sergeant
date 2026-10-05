@@ -37,9 +37,9 @@ import { providerEmail, registeredLine, registeringFor, registrationRefusal, str
 import { CHECKOUT, update } from "./update.ts";
 
 // `sgt`, a thin client of the Sergeant 2 API (11 §7, UNF-714): it sends one request per command and
-// prints the answer, concise by default and the API's own JSON with `--json`. Every decision is the
-// server's. `sgt login` signs the human in with their own Linear login (login.ts), kept per API URL and
-// sent as a bearer on every call; the server checks it against Linear and refuses anything else.
+// prints the answer, concise by default and as JSON with `--json` (USAGE says which shape). Every
+// decision is the server's. `sgt login` signs the human in with their own Linear login (login.ts), kept
+// per API URL and sent as a bearer on every call; the server checks it against Linear and refuses anything else.
 // There is no compatibility between versions of sgt and the API (contracts' min-cli.ts): every call
 // names this sgt's version, the server refuses one older than it supports before acting and says to run
 // `sgt update`, and an sgt newer than its server warns once.
@@ -85,8 +85,11 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   admin repo remove <owner/name>     an approver's removal: Sergeant stops working in it at once
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
-one through an SSM port-forward). Each API URL has its own login. --json prints the API's JSON
-unchanged, errors included. -v/--version prints Sergeant's version (from git) and exits without an API call.`;
+one through an SSM port-forward). Each API URL has its own login. --json prints JSON for scripts:
+the API's answer for most commands, but {"report"} (the Markdown) for run report, {"api","signedOut"}
+for logout, {"version"} for update and --version, {"request","outcome"} for admin restart and admin
+update, and errors as {"error":{"code","message"}}. -v/--version prints Sergeant's version (from git)
+and exits without an API call.`;
 
 export type Io = {
   env: Record<string, string | undefined>;

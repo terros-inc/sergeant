@@ -5,12 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MIN_CLI_HEADER, MIN_CLI_VERSION, type WhoAmI } from "@terros/sergeant-contracts";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { main, type Io } from "./cli.ts";
+import { main, USAGE, type Io } from "./cli.ts";
 import { quotaLeft } from "./format.ts";
 import { TOKEN_URL } from "./login.ts";
 
 // `sgt` against a fake Sergeant API: what it sends, what it prints for a human, and that `--json` is
-// the API's own answer, errors included, so Firstmate tooling can parse every outcome.
+// the API's own answer, or the shape USAGE names where sgt builds it, errors included, so Firstmate
+// tooling can parse every outcome.
 
 type Seen = { method: string; url: string; body: string; contentType: string | undefined; authorization: string | undefined; version?: string | string[] | undefined };
 let server: Server | undefined;
@@ -259,6 +260,15 @@ test("-v and --version print Sergeant's git version and exit 0 without touching 
     const parsed = JSON.parse(json.out);
     expect(parsed).toEqual({ version: expect.stringMatching(/^\d+\.\d+\.\d+\+([0-9a-f]{7,}|unknown)$/) });
   }
+});
+
+// TECH-5126: these answers are not the API's JSON, so --help names each shape; scripts rely on it.
+test("--json wraps run report's Markdown as {report} and says what logout did as {api, signedOut}", async () => {
+  const markdown = "# Report\n\nDone.";
+  const { api } = await fakeApi({ "GET /v1/runs/run_w1/report": { text: markdown } });
+  expect(JSON.parse((await sgt(api, "--json", "run", "report", "run_w1")).out)).toEqual({ report: markdown });
+  expect(JSON.parse((await sgt(api, "--json", "logout")).out)).toEqual({ api, signedOut: false });
+  for (const shape of ['{"report"}', '{"api","signedOut"}', '{"version"}', '{"request","outcome"}']) expect(USAGE).toContain(shape);
 });
 
 // TECH-5113: a credential is read from stdin, never an argument a shell history or process list keeps,
