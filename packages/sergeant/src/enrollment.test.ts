@@ -1,11 +1,15 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { CLI_VERSION_HEADER, MIN_CLI_VERSION, type RepoSlug } from "@terros/sergeant-contracts";
 import type { InstallationToken } from "@terros/sergeant-github";
 import { apiHandler, type ApiControl } from "./api.ts";
 import type { Caller } from "./auth.ts";
-import { appsReach, enrolledIn, EnrollmentRefused, enrollment } from "./enrollment.ts";
+import { InstallationConfig } from "./config.ts";
+import { appsReach, configParameter, enrolledIn, EnrollmentRefused, enrollment, VERSION_MS } from "./enrollment.ts";
 
 // TECH-5193: an approver enrolls and removes repositories with their Linear login. The parameter is
 // the only record, so it gets the change first and only its `repositories`; the running service
@@ -65,6 +69,7 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
     "terros-inc/one": { mergeMethod: "squash", observedChecksFallback: false },
   };
   const logs: string[] = [];
+  const clock = { ms: 0 };
   const enrolled = enrollment({
     repositories,
     configs,
@@ -73,6 +78,7 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
     // GitHub's own name for the repository; `unreachable` is on no installation.
     reach: async (repo) => (repo.includes("unreachable") ? Promise.reject(new EnrollmentRefused(`the worker GitHub App cannot reach ${repo}`)) : (repo.toLowerCase() as RepoSlug)),
     log: (line) => logs.push(line),
+    now: () => clock.ms,
   });
   const ctl = {
     stateDir: "/nonexistent",
@@ -97,7 +103,7 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
       req.on("error", reject);
       req.end(body === undefined ? undefined : JSON.stringify(body));
     });
-  return { call, parameter, repositories, configs, logs, enrolled };
+  return { call, parameter, repositories, configs, logs, enrolled, clock };
 }
 
 test("an approver's add and remove change only the parameter's repositories, then the live list", async () => {
@@ -178,7 +184,7 @@ test("a repository is reachable only when both Apps' installations hold it under
 // TECH-5205: `sgt admin status` says the config changed since serve started only when someone else changed
 // the parameter: serve's own changes, which it takes in place, keep it current, and never hide another's.
 test("serve's own changes keep the version it has; a change made in AWS stays one serve lacks", async () => {
-  const { call, parameter, enrolled } = await serve();
+  const { call, parameter, enrolled, clock } = await serve();
   expect(await enrolled.versions()).toEqual({ loaded: 1, current: 1 });
   await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two" });
   expect(await enrolled.versions()).toEqual({ loaded: 2, current: 2 });
@@ -186,11 +192,58 @@ test("serve's own changes keep the version it has; a change made in AWS stays on
   // Someone changes the budget in AWS; serve's next change writes over that version and still lacks it.
   parameter.value = JSON.stringify({ ...JSON.parse(parameter.value), budget: { usd: 20 } });
   parameter.version += 1;
+  clock.ms += VERSION_MS;
   expect(await enrolled.versions()).toEqual({ loaded: 2, current: 3 });
   await call("POST", "/v1/repositories/remove", "grace", { repo: "terros-inc/two" });
   expect(await enrolled.versions()).toEqual({ loaded: 2, current: 4 });
-
-  parameter.read = () => Promise.reject(Object.assign(new Error("Command failed"), { stderr: "Read timeout" }));
-  expect(await enrolled.versions()).toEqual({ loaded: 2, current: null });
   expect(await enrollment({ repositories: [], configs: {}, parameter: undefined, reach: async (r) => r, log: () => {} }).versions()).toBeNull();
+});
+
+// TECH-5209: `sgt admin restart` and `update` read the status every 5 seconds for up to 45 minutes. A
+// slow or failing AWS must neither run the AWS CLI on every poll nor add a serve.log line to each.
+test("the version now is read at most once a while, and a failing read is logged once until one succeeds", async () => {
+  const { parameter, enrolled, clock, logs } = await serve();
+  const read = parameter.read;
+  let reads = 0;
+  parameter.read = () => (reads++, read());
+  const polls = () => Promise.all([enrolled.versions(), enrolled.versions()]);
+  expect(await polls()).toEqual([{ loaded: 1, current: 1 }, { loaded: 1, current: 1 }]);
+  clock.ms += VERSION_MS - 1;
+  parameter.version += 1;
+  expect(await enrolled.versions()).toEqual({ loaded: 1, current: 1 });
+  expect(reads).toBe(1);
+
+  parameter.read = () => (reads++, Promise.reject(Object.assign(new Error("Command failed: aws ssm get-parameter --name secret-name"), { stderr: "\nRead timeout on endpoint URL\n" })));
+  for (let poll = 0; poll < 3; poll++) {
+    clock.ms += VERSION_MS;
+    expect(await enrolled.versions()).toEqual({ loaded: 1, current: null });
+  }
+  expect(reads).toBe(4);
+  expect(logs).toEqual(["could not read the installation-config parameter: Read timeout on endpoint URL (logged once until a read succeeds)"]);
+
+  // Once a read succeeds, the next failure is news again.
+  parameter.read = read;
+  clock.ms += VERSION_MS;
+  expect(await enrolled.versions()).toEqual({ loaded: 1, current: 2 });
+  parameter.read = () => Promise.reject(Object.assign(new Error("Command failed"), { killed: true, signal: "SIGTERM", stderr: "" }));
+  clock.ms += VERSION_MS;
+  expect(await enrolled.versions()).toEqual({ loaded: 1, current: null });
+  expect(logs.at(-1)).toBe("could not read the installation-config parameter: the AWS CLI took too long and was stopped (logged once until a read succeeds)");
+  expect(logs).toHaveLength(2);
+});
+
+// The real AWS CLI, stood in for by one that never answers: the read is stopped, not left to hang a status answer.
+test("a read of the parameter that takes too long is stopped", async () => {
+  const bin = await mkdtemp(join(tmpdir(), "sergeant-fake-aws-"));
+  const path = process.env.PATH;
+  try {
+    await writeFile(join(bin, "aws"), "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+    process.env.PATH = `${bin}:${path}`;
+    const started = Date.now();
+    await expect(configParameter(InstallationConfig.parse(CONFIG), "sergeant-config", 200).read()).rejects.toMatchObject({ killed: true });
+    expect(Date.now() - started).toBeLessThan(5000);
+  } finally {
+    process.env.PATH = path;
+    await rm(bin, { recursive: true, force: true });
+  }
 });
