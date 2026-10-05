@@ -96,7 +96,7 @@ test("an unassigned issue stops its task before anything more starts", async () 
   expect(t.starts).toHaveLength(1);
 });
 
-test("an owner with no usable account starts nothing and is told what to fix, once, retried until Linear accepts it", async () => {
+test("an owner with no usable account starts nothing and is asked to fix it, once, retried until Linear accepts it", async () => {
   const t = await task(
     () => ({ owner: ann }),
     async (spec) => {
@@ -109,7 +109,7 @@ test("an owner with no usable account starts nothing and is told what to fix, on
   expect(await t.loop(0)).toMatchObject({ outcome: "idle" });
   expect(failures).toBeLessThan(0);
   expect(t.seen.comments.map((c) => c.body)).toEqual([
-    "Sergeant needs one of Ann's model accounts before it can start. Ann: register one with `sgt account register claude` (or `codex`), then comment here, or run `sgt task wake`, so Sergeant tries again.",
+    expect.stringContaining("Sergeant cannot start a run: Ann has no model account registered. Ann: register or fix a model account (`sgt account register claude|codex --name <name>`), then reply here."),
   ]);
   const { runIds } = JSON.parse(await readFile(join(t.dir, "state.json"), "utf8")) as { runIds: string[] };
   expect(runIds).toEqual([]);

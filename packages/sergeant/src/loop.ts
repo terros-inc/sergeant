@@ -102,9 +102,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // key every poll until Linear shows it or a human changes the conversation, never left to an idle
   // guard. Only in memory: a restart instead finds the turn's fingerprint uncommitted and takes a turn.
   let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
-  // So is the refusal of a start the owner has no usable model account for (TECH-5179), until Linear
-  // accepts it; the turn after that may start the run, or refuse it again under the same key.
-  let refusal: { issueId: string; key: string; body: string } | undefined;
   // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
   const resolvedThreads = new Set<string>();
   const resolveDue = (conversation: Conversation) => resolveAnswered(conversation, state.actedThrough, deps.linear, resolvedThreads, log);
@@ -219,15 +216,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     const { budget } = holds;
-    if (refusal) {
-      const posted = await deps.linear.postComment(refusal).then(
-        () => true,
-        (e: Error) => (log(`model-account refusal still not posted: ${e.message}`), false),
-      );
-      if (posted) refusal = undefined;
-      await wait(pollMs);
-      continue;
-    }
     if (unposted && conversationRevision(unposted.situation.conversation) === conversationRevision(conversation)) {
       const retry = await execute(unposted.action, unposted.situation, deps);
       log(`asking again: ${describeOutcome(retry)}`);
@@ -308,14 +296,14 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     log(`turn ${state.turns + 1} (${turn.model}, $${turn.costUsd ?? "?"}): ${turn.output.summary}`);
     for (const line of described) log(`  ${line}`);
 
-    const failedAsk = outcomes.find((o) => o.action.kind === "ask_human" && o.status === "failed");
-    refusal = outcomes.flatMap((o) => (o.status === "failed" && o.unposted ? [o.unposted] : []))[0];
-    if (failedAsk) unposted = { action: failedAsk.action, situation };
+    // A start the owner has no usable model account for asks them instead (TECH-5217): retried the same way.
+    const failedAsk = outcomes.flatMap((o) => (o.status !== "failed" ? [] : o.action.kind === "ask_human" ? [o.action] : o.unposted ? [o.unposted] : []))[0];
+    if (failedAsk) unposted = { action: failedAsk, situation };
     const accepted = outcomes.some((o) => o.action.kind === "accept_as_is" && o.status === "done");
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
-    const committed = failedAsk || refusal ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
+    const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
     const reply = accepted ? latestAnswer(conversation) : undefined;

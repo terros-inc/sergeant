@@ -1,4 +1,4 @@
-import type { Conversation, LinearPerson, LinearPort, NoModelAccount, TaskOwnerCheck } from "@terros/sergeant-contracts";
+import type { Conversation, LinearPerson, LinearPort, NoModelAccount, ProposedAction, TaskOwnerCheck } from "@terros/sergeant-contracts";
 
 // Who pays for a task's model usage (TECH-5179). A task belongs to one human: the issue's assignee,
 // admitted only when Linear's history shows that same person most recently delegated it to Sergeant,
@@ -94,7 +94,19 @@ export async function admitOwner(issueId: string, deps: { linear: LinearPort; ag
   return { refused: `not started: no owner (${check.refused})` };
 }
 
-/** What Sergeant says when the owner has no model account a run may use; one comment per condition. */
+/**
+ * What Sergeant asks the owner when a run would start and they have no model account it may use
+ * (TECH-5217): a question, so their reply resumes the task in a fresh budget window.
+ */
+export function accountQuestion(owner: TaskOwner, e: NoModelAccount): Extract<ProposedAction, { kind: "ask_human" }> {
+  const why = e.kind === "none_registered" ? `${owner.name} has no model account registered` : e.message;
+  return {
+    kind: "ask_human",
+    question: `Sergeant cannot start a run: ${why}. ${owner.name}: register or fix a model account (\`sgt account register claude|codex --name <name>\`), then reply here.`,
+  };
+}
+
+/** What Sergeant says when a sampled audit's owner has no model account a run may use; one comment per condition. */
 export function accountRefusal(issueId: string, owner: TaskOwner, e: NoModelAccount): { key: string; body: string } {
   const key = `owner-accounts:${issueId}:${owner.id}:${owner.admittedAt}:${e.kind}:${e.accountIds.join(",")}`;
   const wake = "then comment here, or run `sgt task wake`, so Sergeant tries again";
