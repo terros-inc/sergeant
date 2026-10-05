@@ -10,17 +10,18 @@ const agent = { id: "agent-v2", name: "Sergeant" };
 const ann = { id: "ann", name: "Ann" };
 const bob = { id: "bob", name: "Bob" };
 const at = (minute: number) => `2026-10-04T06:${String(minute).padStart(2, "0")}:00.000Z`;
-type Entry = { createdAt: string; actor: { id: string; name: string } | null; toDelegate: { id: string } | null };
+type Entry = { createdAt: string; actor: { id: string; name: string } | null; toDelegate: { id: string } | null; fromDelegate?: { id: string } | null };
 const delegated = (actor: Entry["actor"], minute: number, to = agent): Entry => ({ createdAt: at(minute), actor, toDelegate: { id: to.id } });
 
-function linear(issue: { assignee: { id: string; name: string } | null; delegate: { id: string; name: string } | null }, pages: Entry[][] | Response) {
+type Issue = { assignee: { id: string; name: string } | null; delegate: { id: string; name: string } | null; creator?: { id: string; name: string } | null };
+function linear({ creator = null, ...issue }: Issue, pages: Entry[][] | Response) {
   const reads: (string | null)[] = [];
   const port = createLinearPort({
     apiKey: "test",
     sergeantUserIds: [agent.id, "agent-v1"],
     fetch: async (_i, init) => {
       const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { after?: string | null } };
-      if (query.includes("SergeantIssueOwnership")) return Response.json({ data: { issue: { id: "issue-1", ...issue } } });
+      if (query.includes("SergeantIssueOwnership")) return Response.json({ data: { issue: { id: "issue-1", createdAt: at(0), creator, ...issue } } });
       if (pages instanceof Response) return pages;
       reads.push(variables.after ?? null);
       const n = variables.after ? Number(variables.after) : 0;
@@ -52,12 +53,23 @@ test("an issue with no human assignee is refused", async () => {
 });
 
 test("a delegation the history cannot attribute to a human fails closed", async () => {
-  // None at all; the latest by an automation, though Ann delegated earlier; by Sergeant's own user; only to another agent.
+  // None at all, on an issue created by an integration; the latest by an automation, though Ann delegated earlier; by Sergeant's own user; only to another agent.
   const histories: Entry[][] = [[], [delegated(ann, 1), delegated(null, 4)], [delegated({ id: "agent-v1", name: "V1" }, 2)], [delegated(ann, 3, { id: "agent-v1", name: "V1" })]];
   for (const history of histories) {
     const result = await linear({ assignee: ann, delegate: agent }, [history]).check();
     expect(result).toMatchObject({ refused: "delegator_unknown", assignee: ann });
     expect(result).not.toHaveProperty("delegator");
+  }
+});
+
+test("an issue created already delegated is delegated by its creator, only while its history shows no delegation", async () => {
+  // TECH-5192: Linear's history has no delegation entry for a delegate set at creation.
+  expect(await linear({ assignee: ann, delegate: agent, creator: ann }, [[]]).check()).toEqual({ owner: ann, delegatedAt: at(0) });
+  expect(await linear({ assignee: ann, delegate: agent, creator: bob }, [[]]).check()).toEqual({ refused: "delegator_differs", assignee: ann, delegator: bob, delegatedAt: at(0) });
+  // Once the history shows Sergeant delegated or undelegated, the creator no longer counts.
+  const undelegated: Entry = { createdAt: at(3), actor: ann, toDelegate: null, fromDelegate: { id: agent.id } };
+  for (const history of [[delegated(null, 2)], [undelegated]]) {
+    expect(await linear({ assignee: ann, delegate: agent, creator: ann }, [history]).check()).toMatchObject({ refused: "delegator_unknown" });
   }
 });
 
