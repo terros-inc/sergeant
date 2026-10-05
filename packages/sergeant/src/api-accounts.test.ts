@@ -7,6 +7,7 @@ import { afterEach, expect, test } from "vitest";
 import { CLI_VERSION_HEADER, MIN_CLI_VERSION, type QuotaReading, type RunRecord } from "@terros/sergeant-contracts";
 import type { QuotaAccount } from "@terros/sergeant-runner";
 import { accountRegistry } from "./accounts.ts";
+import { exposureNotice } from "./api-accounts.ts";
 import { apiHandler, type ApiControl } from "./api.ts";
 import type { Caller } from "./auth.ts";
 
@@ -203,4 +204,14 @@ test("an approver removes every account a person registered, and only theirs", a
   expect(await call("POST", "/v1/accounts/remove-person", "grace", { userId: "u-ada" })).toMatchObject({ status: 200, json: { removed: [] } });
   expect(await call("POST", "/v1/accounts/remove-person", undefined, { userId: "u-bob" })).toMatchObject({ status: 200, json: { removed: [{ id: "person:u-bob:claude" }] } });
   expect(stored()).toEqual([]);
+});
+
+// TECH-5200: the Codex notice gives the sessions page as the revoke step, with Log out of all devices as
+// the fallback. This checks wording only; it is not evidence that the logout revokes anything.
+test("the Codex notice says to log out the sign-in's session, with Log out of all devices as the fallback", () => {
+  const notice = exposureNotice("codex-local", "codex");
+  expect(notice).toContain("To revoke a Codex login, open https://chatgpt.com/settings/security?view=sessions and log out the session its sign-in created");
+  expect(notice).toContain("If you cannot tell which it is, use Log out of all devices on that page.");
+  expect(notice).not.toMatch(/documents no way|does not manage/);
+  expect(notice).toContain("`sgt account register codex --name codex` registers a new one in its place.");
 });

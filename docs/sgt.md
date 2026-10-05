@@ -128,13 +128,15 @@ sgt account remove claudeWork                   # remove yours, then revoke it w
   Sergeant checks it by reading its quota before storing it.
 - **Your credential is used inside Sergeant's worker and reviewer containers** while a run works on it,
   so a compromised or prompt-injected run could copy it. `sgt account remove` stops Sergeant using it
-  (runs already on it finish on it) but does not revoke a copy, so it tells you where to revoke it: for
+  (runs already on it finish on it) but does not revoke a copy, so it tells you how to revoke it. For
   Claude, open https://claude.ai/new#settings/claude-code and, under Authorization tokens, delete the
-  user:inference-scoped token `claude setup-token` made, matching it by its Connected time; for Codex, open
-  https://chatgpt.com/settings/security?view=sessions and log out the session sgt's sign-in created
-  (Log out of all devices only if you cannot tell which it is). Then
-  register a new one if you want. `register` warns about this each time. This risk is accepted on
-  purpose until runs move to per-user isolation (design/09-security.md §3a).
+  user:inference-scoped token `claude setup-token` made, matching it by its Connected time. For Codex,
+  open https://chatgpt.com/settings/security?view=sessions, where each Codex CLI login is its own
+  session, and log out the one sgt's sign-in created, matching it by its time (Log out of all devices
+  if you cannot tell which it is). Then register a new one if you want.
+  `register` warns about this each time. This risk is accepted on purpose (design/09-security.md §3a):
+  per-user isolation would keep it from colleagues' runs, but your own runs still hold it until the
+  token is kept outside the run.
 - You can only register or remove your own account. `sgt run show <run>` says which account a run used.
 - **Only your own tasks spend it** (TECH-5179): an issue assigned to you that you delegated to Sergeant
   yourself. Someone else delegating an issue assigned to you is refused with a comment; assign it to
@@ -143,7 +145,7 @@ sgt account remove claudeWork                   # remove yours, then revoke it w
 - **Offboarding.** An approver removes every account a person registered with
   `sgt admin account remove-person <linear-user-id>` (`sgt account list --json` shows each account's
   id, `person:<linear-user-id>:<name>`). Runs already on them finish on them, and it does not revoke
-  a copy: the person, or their workspace admin, rotates the credential as above.
+  a copy: the person, or their workspace admin, revokes the credential as above.
 - The installation must be configured for registration (`registeredAccountsSecret`, deploy/README.md);
   otherwise `register` says so.
 

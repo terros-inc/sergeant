@@ -8,8 +8,9 @@ credentials exist in which zone, never by prompt instructions. Everything inside
 zone (all enrolled repositories granted to runs, and dev/stage systems) is within the accepted blast
 radius (§9). One kind of credential deliberately crosses into that zone: the **model credential** a run
 works on: a Claude or Codex subscription token its task's owner registered (TECH-5179), personal or
-company-paid. It is in the run's container for the run's duration, an accepted risk until runs move to
-per-user isolation (§3a). Sergeant's own system model account (the installation's model token) is
+company-paid. It is in the run's container for the run's duration, an accepted risk (§3a): per-user
+isolation would end cross-user exposure, and only keeping the bearer outside the run would stop the
+owner's own run copying it. Sergeant's own system model account (the installation's model token) is
 control plane only: it runs reasoning, retros, and system-health work, and never a worker or reviewer,
 the post-merge audit reviewer included.
 
@@ -57,7 +58,7 @@ its refresh token) for the run's duration, because the agent CLI needs it to cal
 running in that container, including a prompt-injected or compromised agent, can read it and copy it
 out. Sergeant does not see such a copy, and it does not end with the run: removing a person's account
 (`sgt account remove`) or the person only stops Sergeant from using it for new runs; a copied token
-keeps working until its holder revokes or rotates it with the provider.
+keeps working until its holder revokes it with the provider (below) or it expires.
 
 **Guardrails that remain.**
 
@@ -68,12 +69,14 @@ keeps working until its holder revokes or rotates it with the provider.
 - A token is used only for runs of tasks its owner was assigned and delegated themselves (TECH-5179),
   so a compromised run exposes the token of the person whose work it is, never a colleague's.
 - Removal means revocation: `sgt account remove` tells the person that removal does not revoke a copy,
-  and where to revoke the token with the provider (for Claude, the user:inference-scoped `claude setup-token`
-  token under Authorization tokens at https://claude.ai/new#settings/claude-code; for Codex, the session
-  sgt's sign-in created at https://chatgpt.com/settings/security?view=sessions, with Log out of all
-  devices only as the fallback). Neither
-  provider documents a revoke Sergeant could call with the stored credential, so Sergeant reminds and
-  does not revoke it itself.
+  and how to revoke the token with the provider (contracts' `REVOKE`). For Claude, that is deleting the
+  user:inference-scoped `claude setup-token` token under Authorization tokens at
+  https://claude.ai/new#settings/claude-code. For Codex, it is logging out, at
+  https://chatgpt.com/settings/security?view=sessions, the session the sign-in created, with Log out of
+  all devices as the fallback (TECH-5200). Every Codex CLI login shows up there as its own session; the
+  issue owner logged out a single one on 2026-10-04, superseding the OpenAI help article's indexed text
+  that Active sessions does not manage Codex CLI sessions. Neither provider documents a revoke Sergeant
+  could call with the stored credential, so Sergeant reminds and does not revoke it itself.
 
 **Why it is accepted.** The installation serves a small team of known teammates who register their own
 subscriptions knowingly, and a leaked model credential costs subscription quota or a provider account's
@@ -82,7 +85,7 @@ container (a proxy that holds the token and forwards model calls) is disproporti
 both agent CLIs expect to hold their own login, and the broker would be new deterministic machinery to
 build, secure, and keep working as the CLIs change. Instead, registration says plainly that the
 credential is used inside worker containers, can be exposed if a run is compromised, and how to remove
-it and rotate the token (11, `sgt account register`), and removal says again where to revoke it.
+it and how to revoke the token (11, `sgt account register`), and removal says again how to revoke it.
 
 **End state.** Two steps, with different effects:
 
@@ -210,6 +213,7 @@ column.
 - Rotate the control-plane App key, worker App key, or Linear OAuth secret in Secrets Manager; the
   daemon re-reads references.
 - A model credential a compromised run may have copied: remove it from Sergeant (`sgt account remove`,
-  which says where to revoke it), then revoke it with the provider and, if wanted, register a new one.
-  Removal alone does not invalidate a copy (§3a).
+  which says how to revoke it), then revoke it with the provider and, if wanted, register a new one.
+  For a Codex login, log out its session at https://chatgpt.com/settings/security?view=sessions, or Log
+  out of all devices there. Removal alone does not invalidate a copy (§3a).
 - The audit trail (`actions`, `turns`, run briefs and reports in S3) says who decided what and why.

@@ -65,19 +65,15 @@ export async function accountsRoute(
 // The accepted risk (09 §3a), told at registration and again at removal: a run's model credential is in
 // its container, so a compromised run can copy it, and removing it from Sergeant does not revoke a copy.
 // Neither provider documents a revoke Sergeant could call with the stored credential (TECH-5198), so
-// removal tells the person where to revoke it themselves (contracts' REVOKE).
-const RENEW: Record<AccountAdapter, string> = {
-  "claude-code-local": "make a new one with `claude setup-token`",
-  "codex-local": "`codex login` again",
-};
-
+// the notices say how the person revokes it themselves (contracts' REVOKE, TECH-5200).
 export const exposureNotice = (adapter: AccountAdapter, name: string): string =>
   `Your credential is used inside Sergeant's worker and reviewer containers while runs work on it, so it could be exposed if a run is compromised, for example by prompt injection. ` +
-  `To stop Sergeant using it, run \`sgt account remove ${name}\`. That does not revoke a copy: to rotate it, ${REVOKE[providerOf(adapter)]}, and ${RENEW[adapter]}.`;
+  `To stop Sergeant using it, run \`sgt account remove ${name}\`. That does not revoke a copy a run took. ${REVOKE[providerOf(adapter)]} ` +
+  `\`sgt account register ${providerOf(adapter)} --name ${name}\` registers a new one in its place.`;
 
 const removalNotice = (adapter: AccountAdapter, name: string): string =>
-  `Sergeant starts no new run on ${name}; runs already on it finish on it. A run could have copied it, and removing it here does not revoke that copy: ` +
-  `revoke it with the provider now: ${REVOKE[providerOf(adapter)]}.`;
+  `Sergeant starts no new run on ${name}; runs already on it finish on it. A run could have copied it, and removing it here does not revoke that copy. ` +
+  REVOKE[providerOf(adapter)];
 
 const refusing = <T>(p: Promise<T>): Promise<T> =>
   p.catch((e: Error) => {
