@@ -173,6 +173,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       opts.wake.watched = [conversation.issue.id, ...keys];
     };
     watch(conversation.issue.linkedPullRequests);
+    // Before the stop check (TECH-5082): a failure seen on the poll that stops the task is alerted too.
+    await postAuthAlerts(conversation.issue.id, runs, conversation.agentComments, deps.linear, log);
     const stop = await checkStop(conversation, runs, ctx);
     if (typeof stop === "object") {
       await wait(pollMs);
@@ -182,7 +184,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       stopping = stop;
       continue;
     }
-    await postAuthAlerts(conversation.issue.id, runs, conversation.agentComments, deps.linear, log);
     await resolveDue(conversation);
     const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length) }, configured, ctx);
     if (holds.hold) {
