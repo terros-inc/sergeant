@@ -27,11 +27,10 @@ import { pause } from "./wake.ts";
 //
 // One follow-up per feedback item at most: its issue id is derived from the feedback's key, so a
 // repeated sweep, a crash, or a lost `feedback.json` files nothing twice, and Sergeant's comment on the
-// origin for each filed follow-up tells later judgments what was already filed. A follow-up filed before
-// a crash or a failed comment kept its marker off the origin gets the marker on a later pass, without a
-// second judgment that could decline it (TECH-5049). `feedback.json` only
-// spares a second judgment of what was judged, counts failed attempts, and holds `since`, so feedback
-// that predates the first sweep (the rollout) is not acted on.
+// origin for each filed follow-up tells later judgments what was already filed. A follow-up whose marker
+// a crash or a failed comment kept off the origin gets it on a later pass, without a second judgment that
+// could decline it (TECH-5049). `feedback.json` only spares a second judgment of what was judged, counts
+// failed attempts, and holds `since`, so feedback that predates the first sweep is not acted on.
 
 /** Per origin issue: follow-ups filed from its feedback, and pieces of feedback judged (each a paid model call). */
 export const FEEDBACK_LIMITS = { followups: 3, judgments: 10 };
@@ -161,6 +160,8 @@ async function sweepIssue(issueId: string, lookback: number, record: FeedbackRec
   ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   const filed = origin.agentComments.filter((c) => c.body.startsWith(FILED_MARKER)).map((c) => c.body);
+  // Each follow-up counts once: its marker may be on the origin already (a crash before save(), a lost feedback.json).
+  const markFiled = (identifier: string, comment: string) => void (filed.some((c) => c.includes(`[${identifier}](`)) || filed.push(comment));
   for (const item of feedback) {
     if (record.handled[item.key]) continue;
     if (opts.signal?.aborted) return;
@@ -169,16 +170,13 @@ async function sweepIssue(issueId: string, lookback: number, record: FeedbackRec
     // Filed already, its marker cut short: the marker now, so it counts and later judgments see it.
     const existing = await deps.linear.findFollowupIssue?.(followupKey(item));
     if (existing) {
-      filed.push(await postFiled(deps, origin, item, existing));
+      markFiled(existing.identifier, await postFiled(deps, origin, item, existing));
       record.handled[item.key] = { issue: origin.issue.id, at, judged: false, filed: existing.identifier };
       opts.log(`feedback ${item.key} on ${origin.issue.identifier}: ${existing.identifier} was filed for it already; marked it filed`);
     } else if (filed.length >= FEEDBACK_LIMITS.followups || judged >= FEEDBACK_LIMITS.judgments) {
       const reason = `${origin.issue.identifier} reached its feedback limit (${filed.length} follow-ups filed, ${judged} pieces of feedback judged)`;
-      await deps.linear.postComment({
-        issueId: origin.issue.id,
-        key: `feedback-limit:${origin.issue.id}`,
-        body: `Sergeant stopped reading feedback on this issue: ${reason}. Feedback from here on, starting with ${item.author}'s (${where(item)}), is not turned into follow-ups; file one by hand if it needs one.`,
-      });
+      const body = `Sergeant stopped reading feedback on this issue: ${reason}. Feedback from here on, starting with ${item.author}'s (${where(item)}), is not turned into follow-ups; file one by hand if it needs one.`;
+      await deps.linear.postComment({ issueId: origin.issue.id, key: `feedback-limit:${origin.issue.id}`, body });
       opts.log(`feedback ${item.key}: not judged: ${reason}`);
       record.handled[item.key] = { issue: origin.issue.id, at, judged: false, reason };
     } else {
@@ -186,7 +184,7 @@ async function sweepIssue(issueId: string, lookback: number, record: FeedbackRec
         const outcome = await handle(item, origin, merged, filed, deps);
         if ("comment" in outcome) {
           record.handled[item.key] = { issue: origin.issue.id, at, judged: true, filed: outcome.filed };
-          filed.push(outcome.comment);
+          markFiled(outcome.filed, outcome.comment);
           opts.log(`feedback ${item.key} on ${origin.issue.identifier}: filed ${outcome.filed} (Backlog, not delegated)`);
         } else {
           record.handled[item.key] = { issue: origin.issue.id, at, judged: true, reason: outcome.reason };
@@ -271,13 +269,8 @@ const fromPullRequest = (p: PullRequestFacts, f: HumanPullRequestFeedback): Feed
   url: f.url,
 });
 
-const where = (item: Feedback) =>
-  ({
-    linear_comment: `[a comment](${item.url})`,
-    pr_comment: `[a PR comment](${item.url})`,
-    pr_review_comment: `[a review comment](${item.url})`,
-    pr_review: `[a review](${item.url})`,
-  })[item.source];
+const NOUNS = { linear_comment: "a comment", pr_comment: "a PR comment", pr_review_comment: "a review comment", pr_review: "a review" };
+const where = (item: Feedback) => `[${NOUNS[item.source]}](${item.url})`;
 
 /** When each task this host ran merged: its current episode (`state.json`'s `merged`), and its set-aside episodes. */
 async function localMerges(stateDir: string): Promise<{ issueId: string; merged?: string; episodes: string[] }[]> {

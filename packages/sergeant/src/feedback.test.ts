@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -257,4 +257,23 @@ test("a follow-up filed before its marker comment failed gets the marker without
   expect(judged[1]?.filed).toEqual([expect.stringContaining("[UNF-2]")]);
   expect(issues.size).toBe(FEEDBACK_LIMITS.followups);
   expect(posted.get("feedback-limit:i1")).toContain(`${FEEDBACK_LIMITS.followups} follow-ups filed`);
+});
+
+test("a follow-up whose marker was posted before a crash cut its record short counts once toward the limit", async () => {
+  // Marked on the origin, but the crash came before save(): the next pass finds the follow-up and its
+  // marker both. Counted twice, A, B, B reached the limit and stopped C with a public comment.
+  const comments = [human("a", 8, "Change A."), human("b", 9, "Change B.")];
+  const { sweep, issues, judged, posted } = await world({ comments });
+  await sweep();
+  const file = join(dir, "feedback.json");
+  const record = JSON.parse(await readFile(file, "utf8"));
+  delete record.handled["linear:b"];
+  await writeFile(file, JSON.stringify(record));
+
+  comments.push(human("c", 10, "Change C."));
+  await sweep();
+  expect(judged.map((c) => c.feedback.key)).toEqual(["linear:a", "linear:b", "linear:c"]);
+  expect(judged[2]?.filed).toEqual([expect.stringContaining("[UNF-2]"), expect.stringContaining("[UNF-3]")]);
+  expect(issues.size).toBe(3);
+  expect(posted.has("feedback-limit:i1")).toBe(false);
 });
