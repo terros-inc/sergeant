@@ -87,7 +87,7 @@ the run is terminal, which is how cancellation ends a run's authority.
 
 | Endpoint | Inputs → outputs | Side effects | Idempotency |
 |---|---|---|---|
-| `GET /runner/v1/runs/:id/credentials/github` | → `{ token, expiresAt, repositories, permissions }` | mints a worker App token scoped to the task's current repository set (read-only for reviewers); records the token for revocation | each call mints a fresh token; callers cache until near expiry |
+| `GET /runner/v1/runs/:id/credentials/github` | → `{ token, expiresAt, repositories, permissions }` | mints a worker App token scoped to the task's current repository set (workers only); records the token for revocation | each call mints a fresh token; callers cache until near expiry |
 | `GET /runner/v1/runs/:id/credentials/aws` | → `credential_process` JSON | short STS session for the runner dev role (workers only) | same |
 | `POST /runner/v1/runs/:id/progress` | `{ text, attention? }` | updates `runs.progress`; `attention` wakes Sergeant | last write wins |
 | `POST /runner/v1/runs/:id/report` | report Markdown | stores it as a new revision and parses it (05 §6); wakes Sergeant | each call is a new revision until the run is terminal; the last one then is final |

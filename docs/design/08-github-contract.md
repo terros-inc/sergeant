@@ -9,7 +9,7 @@ links PRs to the Linear issue, and merges under the Gate's rules.
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
 | **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
-| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, checks: read, actions: read, metadata: read. Reviewers: read-only | pushing branches, opening and updating PRs, reading CI logs |
+| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, checks: read, actions: read, metadata: read. Reviewers: none (the host checks out their PRs with a read-only token that never enters the run) | pushing branches, opening and updating PRs, reading CI logs |
 
 Why two: the default-branch ruleset must let Sergeant merge and must stop a worker from pushing to
 or merging into the default branch. The worker's contents write would let it merge its own green PR,

@@ -201,11 +201,12 @@ Credentials are vended per run through `/runner/v1/runs/:id/credentials/...` (11
 run token placed in the run's workspace:
 
 - **GitHub**: one-hour installation tokens of the **worker App**, scoped to the task's current repository
-  set; `contents: write`, `pull_requests: write`, `checks: read`, `actions: read` for workers, read-only
-  for reviewers. Scoping keeps each run pointed at its repositories; it is not a boundary against another
-  co-resident run.
+  set; `contents: write`, `pull_requests: write`, `checks: read`, `actions: read` for workers. Reviewers
+  get none: the host checks out a reviewer's PRs with a read-only token that never enters the run.
+  Scoping keeps each run pointed at its repositories; it is not a boundary against another co-resident
+  run.
 - **AWS dev/stage**: short STS sessions for `aws.runnerDevRoleArn`, exposed as a `credential_process`.
-  Reviewers get none by default.
+  Reviewers get none.
 - **Model credentials**: supplied by the adapter.
 - **Environment**: an explicit allow-list (UNF-650); no `SERGEANT_*` control-plane variable ever.
 - **When a run ends**: its run token stops working; GitHub tokens the daemon still holds are revoked;
