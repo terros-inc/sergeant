@@ -17,6 +17,7 @@ import {
   RemovePersonAccountsResponse,
   RepositoryChange,
   RepositoryList,
+  RetroRequestResponse,
   RunDetail,
   RunList,
   MIN_CLI_VERSION,
@@ -60,6 +61,8 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   run report <run>                   the run's raw Markdown report
   run cancel <run> [--reason …]
   repo list                          the enrolled repositories and how Sergeant merges in each
+  retro                              ask Sergeant for a retro across tasks now (after a big change, say);
+                                     it is posted as a document in the Sergeant project
   account list                       model accounts runs may use: name, provider, whose, what each paid for
   account register <claude|codex> [--name <name>]
                                      register your own subscription: signs in with \`claude setup-token\`
@@ -276,6 +279,13 @@ const commands: Record<string, Command> = {
     args: 0,
     optional: 1,
     run: (ctx, [ref]) => adminRequest(ctx, "update", ref === undefined ? {} : { ref }),
+  },
+  retro: {
+    args: 0,
+    run: async (ctx) => {
+      const res = await call(ctx, "POST", "/v1/retro", RetroRequestResponse, {});
+      print(ctx, res, () => "retro requested: Sergeant runs it now and posts it as a document in the Sergeant project");
+    },
   },
   "repo list": {
     args: 0,

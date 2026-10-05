@@ -4,6 +4,7 @@ import { taskOwnerReader } from "./delegation.ts";
 import { followupFiler } from "./followup.ts";
 import { labeler } from "./label.ts";
 import { readLinkedIssueBackground } from "./linked-issues.ts";
+import { retroLinear, type RetroLinear } from "./retro.ts";
 import {
   actor,
   clearDelegate,
@@ -84,6 +85,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   undelegate(issueId: string): Promise<void>;
   moveIssueToTodo(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
   addLabel: NonNullable<LinearPort["addLabel"]>;
+  /** The retro's reads and writes (TECH-5187, retro.ts). */
+  retro: RetroLinear;
 } {
   if (!options.apiKey) throw new Error("Linear API key is required");
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -221,6 +224,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     createFollowupIssue: followupFiler({ request, createOnce, sergeantUsers, log }),
 
     addLabel: labeler({ request }),
+
+    retro: retroLinear({ request, createOnce, sergeantUsers }),
 
     async moveIssueToStarted(issueId) {
       const { issue } = await request(issueWorkflow, { id: issueId }, issueWorkflowShape);

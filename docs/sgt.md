@@ -82,6 +82,9 @@ sgt run show <run>                             # one run: status, model, cost, o
 sgt run report <run>                           # the run's Markdown report
 ```
 
+`sgt retro` asks Sergeant for a retro across tasks now, after a big architecture change, say; it is
+posted as a `Sergeant retro <date>` document in the Sergeant project. Otherwise retros run by themselves.
+
 Approvers also have `sgt admin` (§7).
 
 - `--json` prints JSON for scripts and `jq`: the API's own JSON for most commands, `{"report": "…"}`

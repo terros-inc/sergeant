@@ -37,6 +37,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 | Reasoning | model, max turn cost and seconds, max sleep, session mode, compaction threshold | |
 | Review | audit sample rate (default 0.2), review-quality budget per day | 06; subagent reviews never count until the captain decides (06 §5) |
 | Follow-ups | max depth, auto-delegate | |
+| Retro | the Sergeant project and team its documents and issues go to; absent, no retro | TECH-5187 |
 | Human waits | remind after hours | |
 | Approvers | Linear user ids | budget grants, waivers, escalations |
 | AWS | runner dev role ARN, artifact bucket, CloudWatch log group | |

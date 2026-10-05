@@ -146,6 +146,7 @@ sgt task cancel <ref> --reason "…"                   # stop; removes delegatio
 
 sgt run list [--task <ref>] | show <run> | report <run> | transcript <run> | cancel <run>
 sgt account list | register <claude|codex> [--name <name>] | remove <name>
+sgt retro                                            # a Sergeant retro across tasks now (TECH-5187)
 
 sgt review quality [--since 30d] [--by category|provider|mode]
 

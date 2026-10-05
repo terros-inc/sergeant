@@ -17,6 +17,7 @@ import {
   type CancelRunResponse,
   type CancelTaskResponse,
   type LoginConfig,
+  type RetroRequestResponse,
   type RepoSlug,
   type RunDetail,
   type RunList,
@@ -29,7 +30,7 @@ import {
   type WakeResponse,
   type WhoAmI,
 } from "@terros/sergeant-contracts";
-import type { z } from "zod";
+import { z } from "zod";
 import type { AccountRegistry } from "./accounts.ts";
 import { adminRoute, type HostAdmin } from "./api-admin.ts";
 import { accountsRoute } from "./api-accounts.ts";
@@ -89,6 +90,8 @@ export type ApiControl = {
   admin?: HostAdmin;
   /** Lists and changes the enrolled repositories (TECH-5193, api-repositories.ts). */
   enrollment?: Enrollment;
+  /** Asks the retro loop for a retro now (TECH-5187, retro.ts); absent when this Sergeant has no retro configured. */
+  requestRetro?: () => void;
 };
 
 /** Handles `/v1/*`; anything else is a 404. */
@@ -152,6 +155,13 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
     if (verb === undefined && get) return ok(await showRun(ctl, runId));
     if (verb === "report" && get) return { status: 200, markdown: await runReport(ctl, runId) };
     if (verb === "cancel" && post) return ok(await cancelRunOf(ctl, runId, parse(CancelRunRequest, await body(req)), caller));
+  }
+  if (noun === "retro" && id === undefined && post) {
+    parse(z.strictObject({}), await body(req));
+    if (!ctl.requestRetro) throw new Refusal(404, "not_found", "this Sergeant has no retro configured (installation config `retro`)");
+    ctl.requestRetro();
+    ctl.log(`retro requested by ${callerName(caller)}`);
+    return ok({ requested: true } satisfies RetroRequestResponse);
   }
   if (noun === "admin") return adminRoute(ctl.admin, caller, req, { id, verb, pathname: url.pathname }, ctl.log);
   if (noun === "repositories") return repositoriesRoute(ctl.enrollment, caller, req, { id, verb, pathname: url.pathname });
