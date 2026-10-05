@@ -246,3 +246,51 @@ test("a run whose status reads between two unreadable spells gets a fresh grace 
   expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("could not be read") }]);
   expect(await readdir(task)).not.toContain("cancel.json");
 });
+
+// TECH-5170: any status read in a drive clears the run's first failed read, even when that drive's
+// cancel or the reread after it fails, so a later spell does not finish on the old spell's timestamp.
+async function stopUnreadableSinceT0() {
+  const { deps, seen, live, task, drive } = await stopWithFlakyStatus(0);
+  live.conversation.issue.linkedPullRequests = [{ repo, number: 7 }];
+  // Which of the next status reads succeed, and whether the next cancel fails.
+  const ctl = { reads: [] as boolean[], cancelFails: false };
+  const { status, cancel } = deps.runner;
+  deps.runner.status = async (id) => (ctl.reads.shift() ? status(id) : Promise.reject(new Error("runner unreachable")));
+  deps.runner.cancel = async (id) => (ctl.cancelFails ? Promise.reject(new Error("Docker unavailable")) : cancel(id));
+  // run_w1 was first read unreadable at T0, 16 minutes ago, on an earlier drive.
+  const file = join(task, "cancel.json");
+  const intent = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+  await writeFile(file, JSON.stringify({ ...intent, unreadableSince: { run_w1: new Date(Date.now() - 16 * 60 * 1000).toISOString() } }));
+  const since = async () => (JSON.parse(await readFile(join(task, "cancel.json"), "utf8")) as { unreadableSince: Record<string, string> }).unreadableSince;
+  const t0 = (await since()).run_w1;
+  expect(t0).toBeDefined();
+  return { seen, task, drive, ctl, since, t0 };
+}
+
+test("a run read running whose cancel then fails gets a fresh grace in its next unreadable spell", async () => {
+  const { seen, task, drive, ctl, since } = await stopUnreadableSinceT0();
+  ctl.reads = [true];
+  ctl.cancelFails = true;
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(await since()).toEqual({});
+  // Unreadable again past T0 + 15 minutes: the stop waits for its report rather than finishing.
+  ctl.cancelFails = false;
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(seen.comments).toEqual([]);
+  ctl.reads = [true];
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }, { repo, number: 9, url: pr(9).url }] });
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("could not be read") }]);
+  expect(await readdir(task)).not.toContain("cancel.json");
+});
+
+test("a run read running whose reread fails after its cancel gets a fresh grace", async () => {
+  const { seen, drive, ctl, since, t0 } = await stopUnreadableSinceT0();
+  ctl.reads = [true, false];
+  expect(await drive()).toEqual({ stopping: ["run_w1"], closedPullRequests: [] });
+  expect(Date.parse((await since()).run_w1 ?? "")).toBeGreaterThan(Date.parse(t0 ?? ""));
+  expect(seen.closed).toEqual([]);
+  expect(seen.comments).toEqual([]);
+  ctl.reads = [true];
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 7, url: pr(7).url }, { repo, number: 9, url: pr(9).url }] });
+  expect(seen.comments).toEqual([{ key: expect.stringMatching(/^cancel:i1:/), body: expect.not.stringContaining("could not be read") }]);
+});

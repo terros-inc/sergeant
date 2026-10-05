@@ -162,11 +162,8 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   const runs: RunRecord[] = [];
   for (const runId of intent.runIds) {
     let run = await deps.runner.status(runId).catch(() => undefined);
-    if (run && intent.unconfirmedStarts.includes(runId)) {
-      // The runner knows it, so it started: kept in the intent, so a later drive's failed read holds the stop.
-      intent.unconfirmedStarts = intent.unconfirmedStarts.filter((id) => id !== runId);
-      await writeIntent(dir, intent);
-    }
+    // Recorded before the cancel, so a failed cancel or reread after it does not lose this read (TECH-5170).
+    if (run) await statusRead(dir, intent, runId);
     if (!run || run.status === "running") {
       const canceled = await deps.runner.cancel(runId).then(
         () => (log(`${ref}: canceled ${runId}`), true),
@@ -185,11 +182,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     }
     if (run) {
       runs.push(run);
-      // A later unreadable spell counts its grace from its own first failed read, not this one's.
-      if (intent.unreadableSince[runId]) {
-        delete intent.unreadableSince[runId];
-        await writeIntent(dir, intent);
-      }
+      await statusRead(dir, intent, runId);
     } else {
       stopping.push(runId);
       log(`${ref}: status of ${runId} unreadable after its cancel, retrying`);
@@ -258,6 +251,18 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   });
   await rm(intentFile(dir), { force: true });
   return { stopping: [], closedPullRequests: intent.closed };
+}
+
+/**
+ * Records that a run's status read in a drive. The runner knows it, so it started: kept in the intent,
+ * so a later drive's failed read holds the stop. And a later unreadable spell counts its grace from its
+ * own first failed read, not an earlier spell's.
+ */
+async function statusRead(dir: string, intent: CancelIntent, runId: RunId): Promise<void> {
+  if (!intent.unconfirmedStarts?.includes(runId) && !intent.unreadableSince[runId]) return;
+  intent.unconfirmedStarts = intent.unconfirmedStarts?.filter((id) => id !== runId);
+  delete intent.unreadableSince[runId];
+  await writeIntent(dir, intent);
 }
 
 /** One durable close effect per PR head: a retry may close a later head, never the same one twice. */
