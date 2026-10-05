@@ -14,7 +14,7 @@
 - Strict TypeScript, oxlint for linting, Vitest for tests, Turborepo for tasks.
 - Packages live in `packages/*` and use the `@terros/` scope. Dependencies point one way, enforced
   by `turbo boundaries` through each package's `turbo.json` tag: `contracts` (Zod schemas, ports,
-  the pure Gate, the typed API client `sgt` and `sgt-mcp` share) depends on no internal package;
+  the pure Gate, the typed API client and `sgt login` credentials `sgt` and `sgt-mcp` share) depends on no internal package;
   `adapter` packages (reasoning, linear, github, runner) depend only on contracts; the `app` package
   (`@terros/sergeant`) wires them, and nothing depends on it. Packages export their TypeScript source
   directly (`.ts` imports, no build step).

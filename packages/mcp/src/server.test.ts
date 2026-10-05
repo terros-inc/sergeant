@@ -1,7 +1,11 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { saveCredential } from "@terros/sergeant-contracts";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 
 // The real `sgt-mcp` process over stdio, as an MCP client starts it, against a fake Sergeant API:
@@ -13,6 +17,10 @@ let routes: Record<string, Route> = {};
 const seen: string[] = [];
 /** Each request's `Sergeant-Cli-Version`: the version sgt-mcp names so a Sergeant can refuse it (TECH-5188). */
 const versions: (string | string[] | undefined)[] = [];
+/** Each request's `Authorization`: the `sgt login` sgt-mcp sends (TECH-5123). */
+const authorizations: (string | undefined)[] = [];
+/** sgt-mcp's own config directory, where a test saves the login `sgt login` would. */
+let config: string;
 let server: Server;
 let api: string;
 let client: Client;
@@ -21,6 +29,7 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     seen.push(`${req.method} ${req.url}`);
     versions.push(req.headers["sergeant-cli-version"]);
+    authorizations.push(req.headers.authorization);
     const route = routes[`${req.method} ${req.url}`] ?? { status: 404, json: { error: { code: "not_found", message: `no ${req.url}` } } };
     if (route.drop) return req.socket.destroy();
     res.writeHead(route.status ?? 200, { "Content-Type": route.text === undefined ? "application/json" : "text/markdown", ...route.headers });
@@ -29,24 +38,29 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   api = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+  config = await mkdtemp(join(tmpdir(), "sgt-mcp-test-"));
 
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [fileURLToPath(new URL("./sgt-mcp.ts", import.meta.url)), "--api", api],
+    env: { XDG_CONFIG_HOME: config },
   });
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(transport);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   routes = {};
   seen.length = 0;
   versions.length = 0;
+  authorizations.length = 0;
+  await saveCredential({ XDG_CONFIG_HOME: config }, api, undefined);
 });
 
 afterAll(async () => {
   await client?.close().catch(() => {});
   if (server?.listening) await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  if (config) await rm(config, { recursive: true, force: true });
 });
 
 const detail = {
@@ -134,4 +148,37 @@ test("refusals, an unreachable API, answers outside the contract, and bad refs a
   const error = JSON.parse((res.content as { text: string }[])[0]?.text ?? "").error;
   expect(error.code).toBe("unavailable");
   expect(error.message).toMatch(/cannot reach the Sergeant API/);
+});
+
+// TECH-5123: from a laptop, against the hosted API, sgt-mcp is the person whose `sgt login` is saved
+// for its API URL, read on every call so a login made or renewed after it started is used.
+test("sgt-mcp sends the saved sgt login, and a missing, refused, or expired one says to run sgt login", async () => {
+  const env = { XDG_CONFIG_HOME: config };
+  routes = { "GET /v1/tasks": { status: 401, json: { error: { code: "unauthorized", message: "the Sergeant API needs your Linear login: run `sgt login`" } } } };
+  const errorOf = async (name: string) => {
+    const res = await client.callTool({ name, arguments: {} });
+    expect(res.isError).toBe(true);
+    return JSON.parse((res.content as { text: string }[])[0]?.text ?? "").error;
+  };
+
+  expect(await errorOf("task_list")).toEqual({
+    code: "unauthorized",
+    message: `the Sergeant API needs your Linear login: run \`sgt login\` (sgt-mcp sends the login \`sgt login --api ${api}\` saved on this machine; there is none)`,
+  });
+  expect(authorizations).toEqual([undefined]);
+
+  // Saved after sgt-mcp started, as `sgt login` would, and sent as the bearer from then on.
+  await saveCredential(env, api, { clientId: "client-1", accessToken: "token-1", refreshToken: "refresh-1", expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+  routes = { "GET /v1/tasks": { json: { tasks: [detail.task] } }, "GET /v1/runs/run_w1/report": { text: "# Report\n" } };
+  expect((await client.callTool({ name: "task_list", arguments: {} })).structuredContent).toEqual({ tasks: [detail.task] });
+  expect((await client.callTool({ name: "run_report", arguments: { run: "run_w1" } })).isError).toBeFalsy();
+  expect(authorizations).toEqual([undefined, "Bearer token-1", "Bearer token-1"]);
+
+  // An expired login that cannot be renewed is refused before anything is sent.
+  await saveCredential(env, api, { clientId: "client-1", accessToken: "token-1", expiresAt: new Date(Date.now() - 60_000).toISOString() });
+  expect(await errorOf("task_list")).toEqual({
+    code: "unauthorized",
+    message: `your Linear login expired: run \`sgt login\` again (sgt-mcp sends the login \`sgt login --api ${api}\` saved on this machine)`,
+  });
+  expect(authorizations).toHaveLength(3);
 });

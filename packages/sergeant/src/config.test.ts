@@ -24,17 +24,6 @@ test("the control-plane and worker GitHub Apps must differ, however the App ID i
   expect(InstallationConfig.parse(config(42, "43")).github.workerApp.appId).toBe(43);
 });
 
-// TECH-5113: the owner's further accounts name whose subscription paid, so names must not pass for the
-// installation's own; a Codex account needs the codex config's model; a literal credential is refused.
-test("the owner's further model accounts are named secret references", () => {
-  const account = (name: string, adapter = "claude-code-local", credentialSecret = "sergeant/claude-2") => ({ ...config(1, 2), modelAccounts: [{ name, adapter, credentialSecret }] });
-  expect(InstallationConfig.parse(account("terros-claude-2")).modelAccounts).toHaveLength(1);
-  expect(InstallationConfig.parse(config(1, 2)).modelAccounts).toEqual([]);
-  expect(InstallationConfig.safeParse(account("installation-claude")).success).toBe(false);
-  expect(InstallationConfig.safeParse(account("terros-codex-2", "codex-local")).success).toBe(false);
-  expect(InstallationConfig.safeParse(account("terros-claude-2", "claude-code-local", "sk-ant-oat01-literal")).success).toBe(false);
-});
-
 test("reviewer profiles are validated and GitHub logins are matched case-insensitively", () => {
   const profile = "https://linear.app/acme/profiles/ada";
   const parsed = InstallationConfig.parse({
@@ -74,8 +63,8 @@ test("a task starts with the installation config's budget window, or the default
 });
 
 // TECH-5009: an installation that names no runner keeps today's Claude Code workers and reviewers, and
-// a Codex role can't start without the installation's own Codex credential behind it.
-test("each role runs Claude Code unless the config selects Codex for it, with the installation's credential", () => {
+// a Codex role can't start without the codex config's model.
+test("each role runs Claude Code unless the config selects Codex for it, with the config's Codex model", () => {
   const none = { worker: undefined, reviewer: undefined };
   expect(runnerRoles(InstallationConfig.parse(config(1, 2)), none)).toEqual({
     adapters: { worker: "claude-code-local", reviewer: "claude-code-local" },
@@ -84,8 +73,10 @@ test("each role runs Claude Code unless the config selects Codex for it, with th
 
   const codexReviewer = { ...config(1, 2), runners: { reviewer: "codex-local" } };
   expect(InstallationConfig.safeParse(codexReviewer).success).toBe(false);
-  expect(InstallationConfig.safeParse({ ...codexReviewer, codex: { credentialSecret: "sk-proj-abc", model: "m" } }).success).toBe(false);
-  const parsed = InstallationConfig.parse({ ...codexReviewer, codex: { credentialSecret: "sergeant/codex", model: "gpt-5.5-codex" } });
+  // TECH-5184: runs use only their owner's registered accounts, so a config still naming the installation's
+  // Codex credential is refused, and install.sh keeps serve on its previous config until it is removed.
+  expect(InstallationConfig.safeParse({ ...codexReviewer, codex: { credentialSecret: "sergeant/codex", model: "m" } }).success).toBe(false);
+  const parsed = InstallationConfig.parse({ ...codexReviewer, codex: { model: "gpt-5.5-codex" } });
   expect(runnerRoles(parsed, none)).toEqual({
     adapters: { worker: "claude-code-local", reviewer: "codex-local" },
     models: {

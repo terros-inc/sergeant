@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { NoModelAccount, RunId, type BudgetStatus, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
-import { drawAudit, finishReviews } from "./after-merge.ts";
+import { finishReviews } from "./after-merge.ts";
+import { drawAudit } from "./audit.ts";
 import type { Ports } from "./execute.ts";
 import type { TaskState } from "./task-state.ts";
 

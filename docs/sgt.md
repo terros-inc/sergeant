@@ -92,8 +92,7 @@ Approvers also have `sgt admin` (§7).
   `{"request","outcome"}` for `admin restart` and `admin update`, and errors as `{"error":{"code","message"}}`.
 - `sgt --help` lists every command, including `run cancel <run> [--reason …]` and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
-- MCP: `node <repo>/packages/mcp/src/sgt-mcp.ts` is a read-only MCP server over stdio, but it sends
-  no login yet, so it only works on the Sergeant host itself ([README](../README.md#the-mcp-server)).
+- MCP: `sgt-mcp` puts the read-only commands in your AI assistant (§9).
 
 ## 6. Model accounts
 
@@ -192,3 +191,32 @@ sgt admin repo remove terros-inc/example
 A repository is enrolled only once both of Sergeant's GitHub Apps can reach it. The change is written
 to the installation's configuration in AWS, naming who made it, and the running Sergeant takes it at
 once. After a removal Sergeant stops working in that repository, tasks already started there included.
+
+## 9. Sergeant in your AI assistant (`sgt-mcp`)
+
+`sgt-mcp` gives an assistant that speaks MCP (Claude Code, Claude Desktop, Cursor, and others) the
+read-only half of `sgt`: the tools `task_list`, `task_show`, `run_list`, `run_show`, `run_report`,
+and `health`, answering what the matching `sgt` commands show. It cannot wake, cancel, or change
+anything. It runs on your laptop from the same checkout as `sgt`, and calls your installation as you,
+with the login `sgt login` saved (§4); there is nothing else to sign in to.
+
+1. Log in with `sgt login`, once, as in §4. `sgt-mcp` renews the login as `sgt` does, and reads it
+   on every call, so a later `sgt login` takes effect without restarting your assistant.
+2. Register it with your assistant as a stdio server. Give the installation with `--api`: assistants
+   usually do not start it from your shell, so `SGT_API_URL` from your profile may not reach it. For
+   Claude Code:
+
+   ```sh
+   claude mcp add sergeant -- node <repo>/packages/mcp/src/sgt-mcp.ts --api https://<your installation's hostname>
+   ```
+
+   Other assistants take the same command in their MCP configuration, typically:
+
+   ```json
+   { "mcpServers": { "sergeant": { "command": "node", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "https://<your installation's hostname>"] } } }
+   ```
+
+- `--api` must be the URL you logged in to: each URL has its own login. If you set `XDG_CONFIG_HOME`,
+  pass it to `sgt-mcp` too (most assistants take an `env` setting), since your login is kept under it.
+- A tool that answers `unauthorized` has no usable login: it names the `sgt login --api <url>` to run.
+  Run it, then ask again. `sgt update` updates `sgt-mcp` too; restart your assistant after updating.

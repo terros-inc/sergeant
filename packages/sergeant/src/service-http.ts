@@ -17,9 +17,10 @@ export function createServiceServer(input: {
   const webhookPaths = new Set<string>(Object.values(WEBHOOK_PATHS));
   const { version } = sergeantVersion();
   return createServer((req, res) => {
-    // `/health` and the webhooks are the only paths the host's proxy publishes, so `/health` says
-    // only whether serve is healthy: not stopping, and its latest intake succeeded. Task ids and
-    // intake errors are private, served on `/status` to loopback only, with Sergeant's git version.
+    // The host's proxy publishes `/health`, the user-authenticated `/v1` API, and the webhooks, so
+    // `/health` says only whether serve is healthy: not stopping, and its latest intake succeeded.
+    // Task ids and intake errors are private, served on `/status` to loopback only, with Sergeant's
+    // git version.
     // `/status` refuses any other caller as `/v1` does, so its privacy does not rest on the proxy.
     const lastIntake = input.lastIntake();
     const ok = !input.abort.signal.aborted && !lastIntake?.error;

@@ -15,13 +15,13 @@ export function authAlertComment(run: RunRecord): string {
   const fix =
     account?.group === "registered"
       ? `It is ${account.holder}'s registered account: they can register it again with \`sgt account register ${provider}${name === provider ? "" : ` --name ${name}`}\` or remove it with \`sgt account remove ${name}\`.`
-      : codex
-        ? "Log in again as the installation's ChatGPT account and replace its configured Secrets Manager secret, or switch `codex-local` to an OpenAI API key."
-        : "Create a new token with `claude setup-token` as the installation's Claude account and replace its configured Secrets Manager secret.";
+      : // Only a run recorded before TECH-5179 has no registered account; the installation has no worker or
+        // reviewer credential of its own any more (TECH-5184).
+        `Its task's owner can register their own account with \`sgt account register ${provider}\`.`;
   return [
     `**${codex ? "Codex" : "Claude"} authentication failed**`,
     "",
-    `Run \`${run.runId}\` could not authenticate with ${account ? `model account \`${account.id}\` (${account.holder})` : `the installation's ${codex ? "Codex" : "Claude"} credential`}. No token value was recorded.`,
+    `Run \`${run.runId}\` could not authenticate with ${account ? `model account \`${account.id}\` (${account.holder})` : `its ${codex ? "Codex" : "Claude"} credential`}. No token value was recorded.`,
     "",
     `${fix} Sergeant will not repair or overwrite the credential automatically; for the next hour it runs on the provider's next account, if there is one.`,
   ].join("\n");

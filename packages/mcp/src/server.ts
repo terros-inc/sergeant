@@ -1,5 +1,21 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { type ApiError, type ApiFailure, apiClient, CLI_VERSION_HEADER, RunDetail, RunId, RunList, safeJson, sergeantVersion, TaskDetail, TaskList, TaskRef } from "@terros/sergeant-contracts";
+import {
+  type ApiClient,
+  type ApiError,
+  type ApiFailure,
+  type ApiResult,
+  apiClient,
+  CLI_VERSION_HEADER,
+  currentToken,
+  RunDetail,
+  RunId,
+  RunList,
+  safeJson,
+  sergeantVersion,
+  TaskDetail,
+  TaskList,
+  TaskRef,
+} from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 // `sgt-mcp` (TECH-4940): Sergeant for MCP clients such as ChatGPT and Firstmate, the read-only half
@@ -7,9 +23,10 @@ import { z } from "zod";
 // answer validated against the API contract and returned unchanged as structured content, so it
 // carries exactly what `sgt task show` and `sgt run show` print, with ids and URLs, and no
 // transcripts. Every decision and lookup stays the server's, and it sends no POST, so it has no
-// mutation authority. It sends no Linear login yet (TECH-4938), so only a `serve --trust-loopback`
-// on its own host answers it; it runs there, over stdio. A Sergeant that supports only newer
-// clients (contracts' min-cli.ts) is a tool error.
+// mutation authority. It sends the Linear login `sgt login` saved for its API URL, as `sgt` does
+// (TECH-5123), so it works from a laptop against the hosted API; with none saved it sends none, which
+// only a `serve --trust-loopback` on its own host answers. A Sergeant that supports only newer clients
+// (contracts' min-cli.ts) is a tool error.
 
 export const DEFAULT_API = "http://127.0.0.1:8080";
 
@@ -17,17 +34,35 @@ const Health = z.object({ ok: z.boolean() });
 
 type Result = { content: { type: "text"; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 
-/** An MCP server whose tools read the Sergeant API at `api`; connect it to a transport to serve. */
-export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = globalThis.fetch): McpServer {
+/**
+ * An MCP server whose tools read the Sergeant API at `api`, as the person whose `sgt login` is saved
+ * under `env`'s config directory; connect it to a transport to serve.
+ */
+export function sergeantMcp(api: string, env: Record<string, string | undefined>, fetchFn: typeof globalThis.fetch = globalThis.fetch): McpServer {
   const { version } = sergeantVersion();
   const server = new McpServer({ name: "sergeant", version });
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
-  const client = apiClient({ api, fetch: fetchFn, version, unreachableHint: "; is serve running on this host?" });
+  /**
+   * One call as the person whose login `sgt login` saved for `api`, read afresh each time: this server
+   * outlives a token, which it renews like `sgt`. A missing, expired, or refused login is an
+   * `unauthorized` error that says which login to make.
+   */
+  async function asCaller<T>(send: (client: ApiClient) => Promise<ApiResult<T>>): Promise<ApiResult<T>> {
+    const login = `sgt-mcp sends the login \`sgt login --api ${api}\` saved on this machine`;
+    let token: string | undefined;
+    try {
+      token = await currentToken(env, api, fetchFn);
+    } catch (e) {
+      return { ok: false, error: { code: "unauthorized", message: `${(e as Error).message} (${login})` } };
+    }
+    const res = await send(apiClient({ api, fetch: fetchFn, token, version, unreachableHint: ". Is SGT_API_URL (or --api) the hosted HTTPS endpoint, or serve running on this host?" }));
+    return res.ok || res.error.code !== "unauthorized" ? res : { ok: false, error: { ...res.error, message: `${res.error.message} (${login}${token ? "" : "; there is none"})` } };
+  }
 
   /** One GET, its answer validated against `schema`; a refusal, an unreachable API, or an answer outside the contract is a tool error. */
   async function read<T extends Record<string, unknown>>(path: string, schema: z.ZodType<T>): Promise<Result> {
-    const res = await client.call("GET", path, schema);
+    const res = await asCaller((client) => client.call("GET", path, schema));
     if (!res.ok) return error(res.error);
     return { content: [{ type: "text", text: JSON.stringify(res.value) }], structuredContent: res.value };
   }
@@ -86,7 +121,7 @@ export function sergeantMcp(api: string, fetchFn: typeof globalThis.fetch = glob
       annotations: readOnly,
     },
     async ({ run }) => {
-      const res = await client.request("GET", `/v1/runs/${encodeURIComponent(run)}/report`);
+      const res = await asCaller((client) => client.request("GET", `/v1/runs/${encodeURIComponent(run)}/report`));
       return res.ok ? { content: [{ type: "text", text: res.value }] } : error(res.error);
     },
   );
