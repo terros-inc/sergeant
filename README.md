@@ -8,6 +8,9 @@ reads the issue, GitHub, and run state; briefs one primary worker to do the engi
 separate fresh-context reviewer when the change warrants it; asks a human only for genuine
 judgment; and merges through a deterministic Gate.
 
+**New to Sergeant?** [`docs/onboarding.md`](docs/onboarding.md) takes you from nothing to an issue
+Sergeant is working on: install `sgt`, sign in, register your model account, and delegate.
+
 This is Sergeant 2, a TypeScript workspace (pnpm, Turborepo, oxlint, Vitest). It is currently a
 walking skeleton:
 
