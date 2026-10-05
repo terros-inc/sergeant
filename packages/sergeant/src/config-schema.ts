@@ -1,4 +1,4 @@
-import { RepoSlug } from "@terros/sergeant-contracts";
+import { MergePolicy, RepoSlug } from "@terros/sergeant-contracts";
 import { ADAPTERS } from "@terros/sergeant-runner";
 import { z } from "zod";
 
@@ -66,6 +66,12 @@ export const InstallationConfig = z.strictObject({
     RepoSlug,
     z.strictObject({
       mergeMethod: z.enum(["merge", "squash", "rebase"]),
+      /**
+       * Who merges (TECH-5244, 08 §2): `sergeant` approves and merges a gated head; in a `human`
+       * repository Sergeant never approves or merges, and hands the ready PR to a human. Unset is
+       * `human`, so a repository enrolled without a deliberate choice fails safe.
+       */
+      mergePolicy: MergePolicy.default("human"),
       /** See `GitHubRepositoryConfig.observedChecksFallback`. Off unless set. */
       observedChecksFallback: z.boolean().default(false),
     }),

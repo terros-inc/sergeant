@@ -58,7 +58,7 @@ test("a human's requested changes on the PR wake a turn, block the merge, and re
       agentUserId: "agent-v2",
       workerLogin: "sergeant-worker[bot]",
       linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
-      github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
+      github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
       runner: {
         start: async (spec) => void started.push(spec),
         status: async (id) => records.find((r) => r.runId === id) ?? { runId: id, role: "worker", status: "succeeded", provider: "p", model: "m", report: null },

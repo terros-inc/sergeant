@@ -9,14 +9,15 @@ export const repoCommands: Record<string, Command> = {
     args: 0,
     run: async (ctx) => {
       const { repositories } = await call(ctx, "GET", "/v1/repositories", RepositoryList);
-      print(ctx, { repositories }, () => (repositories.length ? table(repositories.map((r) => [r.repo, r.mergeMethod])) : "no enrolled repositories"));
+      print(ctx, { repositories }, () => (repositories.length ? table(repositories.map((r) => [r.repo, r.mergeMethod, `merged by ${r.mergePolicy}`])) : "no enrolled repositories"));
     },
   },
   "admin repo add": {
     args: 1,
-    flags: ["merge-method"],
+    flags: ["merge-method", "merge-policy"],
     run: async (ctx, [repo]) => {
-      const res = await call(ctx, "POST", "/v1/repositories/add", RepositoryChange, { repo, mergeMethod: ctx.flags["merge-method"] });
+      const body = { repo, mergeMethod: ctx.flags["merge-method"], mergePolicy: ctx.flags["merge-policy"] };
+      const res = await call(ctx, "POST", "/v1/repositories/add", RepositoryChange, body);
       print(ctx, res, () => `${res.changed ? "enrolled" : "already enrolled:"} ${res.repo}; enrolled now: ${res.repositories.join(", ")}`);
     },
   },

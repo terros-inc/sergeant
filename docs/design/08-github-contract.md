@@ -21,7 +21,8 @@ permissions.
 
 ## 2. Repository enrollment
 
-Enrollment is configuration (`sgt config repo add <slug> --purpose ... --merge-policy ...`). Before a
+Enrollment is configuration (built: `sgt admin repo add <owner/name> [--merge-method ...] [--merge-policy
+sergeant|human]`, TECH-5193, TECH-5244; designed: `sgt config repo add <slug> --purpose ... --merge-policy ...`). Before a
 repository is enabled, the operator confirms this checklist (`sgt doctor repo <slug>` checks what it
 can through the API):
 
@@ -39,7 +40,8 @@ can through the API):
    issue (07 §7).
 6. `mergePolicy` is set deliberately: `sergeant` or `human`. **If merging to the default branch
    deploys to production, merging is a production action** and the policy is `human` (09 §5; settled,
-   `14` §A).
+   `14` §A). Built (TECH-5244): a repository enrolled or configured without one is `human`, so a
+   forgotten choice fails safe; only an explicit `sergeant` lets Sergeant approve and merge.
 7. Optionally, `alwaysReviewPaths` for paths where a skip should never be accepted (CI config,
    infrastructure, auth).
 
@@ -103,7 +105,7 @@ live GitHub and Linear facts at execution time:
 
 | Rule | Check |
 |---|---|
-| M1 | the repository is in the task's set, enrolled, enabled, and its `mergePolicy` is `sergeant` |
+| M1 | the repository is in the task's set, enrolled, enabled, and its `mergePolicy` is `sergeant`. Built (TECH-5244): in a `human` repository a `merge_pr` that passes every other rule is the human handoff below, never an approval or a merge |
 | M2 | the PR is linked to the task's issue |
 | M3 | the PR is open and not a draft |
 | M4 | the PR's live head SHA equals `expectedHeadSha` |
@@ -149,7 +151,26 @@ next poll or a restart. The Linear issue's Done state follows from automation, n
 (07 §7).
 
 Where `mergePolicy` is `human`, Sergeant gets the PR ready (green, reviewed, disposition recorded),
-says so in Linear once if useful, and waits. A human merge triggers automation as usual.
+and waits. A human merge triggers automation as usual. Built (TECH-5244, after Sergeant approved and
+merged a production change in a repository whose ruleset its own approval satisfied):
+
+- Reasoning proposes `merge_pr` as anywhere else. `execute` reads the repository's live policy, and
+  in a `human` repository applies the same preflight (A1, A2, M1–M14, B1; M7 lets a draft through,
+  since the handoff marks it ready), then hands the head to a human instead of merging: the
+  control-plane App marks the PR ready for review if it is a draft, requests review from the issue's
+  assignee (their GitHub login from `linear.reviewerProfiles`) only when GitHub shows nobody's review
+  requested (the code owners it asks come first), and posts the review summary (the approving
+  reviewer's summary, or the worker's reason no fresh review was needed) on the PR; the outcome is
+  denied as `H1`.
+- The handoff is recorded like a merge GitHub refused, without the bounded re-check: one
+  "Ready for a human to merge" comment on the issue per head, with the summary and who was asked;
+  M12 refuses another `merge_pr` at the same facts; the loop waits on the human without spending the
+  budget window (TECH-5218), and a human's review or comment is feedback as always (M8, M10).
+- Once a human merges the closing PR, the task goes on as after Sergeant's own merge: the outcome
+  comment, the audit draw, and the wait for Done that releases its slot.
+- Defense in depth: the GitHub adapter rereads the live policy as the first step of every merge, before
+  the approval and the merge calls, and refuses with no GitHub call unless it is `sergeant`, whatever
+  asked it to merge. The approval exists only inside that merge.
 
 ## 8. Moved bases and conflicts
 

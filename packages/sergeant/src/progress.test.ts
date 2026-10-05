@@ -90,7 +90,7 @@ async function round(verdict: "approve" | "changes_requested", findings: Finding
         github: {
           readPullRequest: async () => pr,
           closePullRequest: async () => {},
-          mergePullRequest: async () => {
+          mergePolicy: () => "sergeant", mergePullRequest: async () => {
             pr = { ...pr, state: "merged", mergedSha: "c".repeat(40) };
             live.issue = { ...live.issue, state: "Done", stateType: "completed" };
             return { mergedSha: "c".repeat(40) };

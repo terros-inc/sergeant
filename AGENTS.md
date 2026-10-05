@@ -18,6 +18,11 @@
   `adapter` packages (reasoning, linear, github, runner) depend only on contracts; the `app` package
   (`@terros/sergeant`) wires them, and nothing depends on it. Packages export their TypeScript source
   directly (`.ts` imports, no build step).
+- Each enrolled repository has a `mergePolicy` (TECH-5244, `docs/design/08-github-contract.md` §7):
+  `sergeant` approves and merges a gated head; in a `human` one Sergeant never approves or merges, and
+  hands the ready PR to a human. Absent means `human`, everywhere: config, enrollment, and the GitHub
+  adapter, which rereads the live policy before any approval or merge call. Keep every new path that
+  approves or merges behind that check, and never default a policy to `sergeant`.
 - Tests live next to the source they test as `*.test.ts`, never in a separate `test/` folder.
 - Keep files small: a source or test file over 300 lines is a refactor target, and over 600 lines
   fails CI (`pnpm check-file-size`, run by `turbo run lint`). Split along a natural seam; no allowlist.

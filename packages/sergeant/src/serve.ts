@@ -27,7 +27,7 @@ import { claudeCliFeedbackJudge, claudeCliReasoner, claudeCliRetro } from "@terr
 import { byRole, containerRunner, fargateRunner, pruneWorkspaces, reasoningFiles, runsUsage, setAside } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
 import { linearCallers } from "./auth.ts";
-import { connect, fargateSettings, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { connect, fargateSettings, githubLoginLookup, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { decimalFlag, integerFlag } from "./cli-numbers.ts";
 import { appsReach, configParameter, enrolledIn, enrollment } from "./enrollment.ts";
 import { startService } from "./service.ts";
@@ -156,6 +156,7 @@ const service = await startService(
     agentUserId: installation.agentUserId,
     workerLogin: installation.workerLogin,
     linearProfileForGitHubLogin: reviewerProfileLookup(config),
+    githubLoginForLinearProfile: githubLoginLookup(config),
     github: installation.github,
     runner,
     reasoner: claudeCliReasoner({

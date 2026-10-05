@@ -97,7 +97,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
       },
       github: {
         readPullRequest: async () => livePr,
-        closePullRequest: async () => {}, mergePullRequest: async () => {
+        closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => {
           attempts.push(seen.length);
           if (!livePr.humanFeedback.some((f) => f.author === "code-owner")) return { refused: "Waiting on code owner review from terros-inc/owners." };
           livePr = { ...livePr, state: "merged", mergedSha: "c".repeat(40) };

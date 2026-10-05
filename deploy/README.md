@@ -438,8 +438,12 @@ clone, no git), the version is `0.0.0+<sha>` and the update log says why; that n
 
 ### Enrolled repositories (TECH-5193)
 
-An approver runs `sgt admin repo add <owner/name> [--merge-method …]` or `sgt admin repo remove
-<owner/name>` with their own Linear login; anyone signed in runs `sgt repo list`. `serve` refuses
+An approver runs `sgt admin repo add <owner/name> [--merge-method …] [--merge-policy sergeant|human]`
+or `sgt admin repo remove <owner/name>` with their own Linear login; anyone signed in runs `sgt repo
+list`, which shows each repository's merge policy. A repository enrolled without `--merge-policy` is
+`human`: Sergeant never approves or merges in it (TECH-5244). `--merge-policy` on a repository already
+enrolled sets its policy, so an entry from before TECH-5244 (with no policy, so `human`) becomes
+Sergeant-merged only by `sgt admin repo add <owner/name> --merge-policy sergeant`. `serve` refuses
 a repository either GitHub App cannot reach, then rewrites the installation-config parameter (only its
 `repositories`; the new version's description names the approver: `aws ssm get-parameter-history`)
 and takes the list in place, without a restart; `serve.log` names the approver too. A repeated change

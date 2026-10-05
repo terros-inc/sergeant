@@ -108,7 +108,7 @@ test("a question is posted once, holds every effect until a human replies, and s
       },
       github: {
         readPullRequest: async () => pr,
-        closePullRequest: async () => {}, mergePullRequest: async (req) => {
+        closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => {
           merged.push(req);
           live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
           return { mergedSha: "c".repeat(40) };
@@ -181,7 +181,7 @@ test("a turn that asks does nothing else, whatever order reasoning proposed", as
         postComment: async () => void effects.push("ask"),
         createFollowupIssue: async () => (effects.push("followup"), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
       },
-      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async () => (effects.push("merge"), { mergedSha: head }) },
+      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => (effects.push("merge"), { mergedSha: head }) },
       runner: { start: async () => void effects.push("start"), status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: { turn: async () => ({ output: { summary: "s", actions }, model: "m", promptVersion: "p" }) },
     });
@@ -219,7 +219,7 @@ test("a question whose post failed or went unconfirmed is posted again until Lin
         },
         createFollowupIssue: async () => { throw new Error("unused"); },
       },
-      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: head }) },
+      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: head }) },
       runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: { turn: async () => (turns++, { output: { summary: "s", actions: [ask, merge] }, model: "m", promptVersion: "p" }) },
     },
@@ -268,7 +268,7 @@ test("an open question clears its stale in-memory post retry", async () => {
       github: {
         readPullRequest: async () => pr,
         closePullRequest: async () => {},
-        mergePullRequest: async () => { throw new Error("unused"); },
+        mergePolicy: () => "sergeant", mergePullRequest: async () => { throw new Error("unused"); },
       },
       runner: { start: async () => {}, status: async () => review, cancel: async () => {} },
       reasoner: {

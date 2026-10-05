@@ -33,7 +33,7 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
       linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async () => ({ ...pr, state: "merged", mergedSha }),
-        closePullRequest: async () => {}, mergePullRequest: async () => { throw new Error("already merged"); },
+        closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => { throw new Error("already merged"); },
       },
       runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: {
@@ -90,7 +90,7 @@ test.each([
       linear: { readConversation: async () => live, postComment: async (c) => void comments.push(c), createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
       github: {
         readPullRequest: async (_repo, number) => prs.get(number)!,
-        closePullRequest: async () => {}, mergePullRequest: async ({ number }) => {
+        closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async ({ number }) => {
           merges.push(number);
           const mergedSha = String(number).repeat(40);
           prs.set(number, { ...prs.get(number)!, state: "merged", mergedSha });

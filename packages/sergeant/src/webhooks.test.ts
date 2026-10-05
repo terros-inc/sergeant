@@ -77,7 +77,7 @@ async function start() {
       readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
     },
-    github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("unused")) },
+    github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("unused")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {

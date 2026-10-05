@@ -118,7 +118,10 @@ refused because the conversation changed means: read the new human input, then d
 GitHub refused by repository policy (refusedMerges: a required review Sergeant cannot give, such as a
 code owner's) means a human merges that PR: Sergeant has already told the issue it is ready. Do not
 propose it again at that head unless something changed that could let it through (a human approval,
-say); otherwise propose nothing and wait.
+say); otherwise propose nothing and wait. In a repository whose merge policy is human, Sergeant never
+approves or merges: propose merge_pr exactly as anywhere else once the head is ready, and the same checks
+then hand the PR to a human instead (refusedMerges with human: review requested, the review summary
+posted). Treat a human's review or comment on it as feedback, as always, and otherwise wait for their merge.
 
 A PR's mergeableState is GitHub's mergeable_state. M7 lets a merge through only when mergeable is true
 and the state is clean, unstable (only non-required checks failed), or blocked: every PR waiting for

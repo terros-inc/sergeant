@@ -114,7 +114,7 @@ async function scenario(opts: {
         github: {
           readPullRequest: async () => (opts.mergedOnGitHub ? { ...pr(opts.head), state: "merged", mergedSha } : pr(opts.head)),
           closePullRequest: async ({ number }) => void events.push(`close #${number}`),
-          mergePullRequest: async () => {
+          mergePolicy: () => "sergeant", mergePullRequest: async () => {
             events.push("merge");
             live.issue = { ...live.issue, ...done };
             return { mergedSha };

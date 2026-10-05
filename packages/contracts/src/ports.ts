@@ -1,6 +1,6 @@
 import type { CreateFollowup } from "./actions.ts";
 import type { Conversation, RepoSlug, Sha } from "./conversation.ts";
-import type { PullRequestFacts } from "./github.ts";
+import type { MergePolicy, PullRequestFacts } from "./github.ts";
 import type { RunId, RunRecord } from "./runs.ts";
 
 // The seams adapters implement. Adapters validate what they read with the schemas above before
@@ -104,6 +104,20 @@ export interface GitHubPort {
     expectedHeadSha: Sha;
     squash: { issueIdentifier: string; closesIssue: boolean; builtBy: string };
   }): Promise<{ mergedSha: Sha } | { refused: string }>;
+  /**
+   * The repository's live `mergePolicy` (TECH-5244). Absent, as in a fake that never merges, every
+   * repository is `human`. The adapter also refuses `mergePullRequest` itself, before any approval or
+   * merge call, unless the policy it reads then is `sergeant`.
+   */
+  mergePolicy?(repo: RepoSlug): MergePolicy;
+  /**
+   * A `human` repository's gated head, handed to a human (TECH-5244), never approved or merged: the PR
+   * marked ready for review if it is a draft; review requested from `reviewers` only when GitHub shows
+   * nobody requested (no code owner, say) and the PR is not the reviewer's own; and `comment` posted on
+   * it unless it already has it. Rejects when the head is no longer `expectedHeadSha`. Resolves with the
+   * logins and `org/team`s whose review is now requested. Safe to repeat.
+   */
+  handToHuman?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha; reviewers: string[]; comment: string }): Promise<{ requested: string[] }>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**

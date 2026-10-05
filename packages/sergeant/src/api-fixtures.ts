@@ -32,7 +32,7 @@ export function fakes(runs: RunRecord[] = []) {
       postComment: async ({ key, body }) => void comments.push({ key, body }),
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: {
       start: async () => {},
       status: async (runId) => runs.find((r) => r.runId === runId) ?? Promise.reject(new Error(`no ${runId}`)),

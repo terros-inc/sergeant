@@ -19,7 +19,8 @@ export const issuePage = z.object({
   description: z.string().nullable(),
   state: z.object({ name: z.string(), type: z.string() }),
   delegate: actor.nullable(),
-  assignee: actor.nullable(),
+  /** `url` is the assignee's Linear profile, which `reviewerProfiles` maps to a GitHub login (TECH-5244). */
+  assignee: actor.extend({ url: z.string().optional() }).nullable(),
   labels: z.object({ nodes: z.array(z.object({ name: z.string() })) }),
   attachments: z.object({
     nodes: z.array(
@@ -49,7 +50,7 @@ export const issueQuery = `
       id identifier url title description
       state { name type }
       delegate { id name }
-      assignee { id name }
+      assignee { id name url }
       labels(first: 50) { nodes { name } }
       attachments(first: 100) { nodes { id title url sourceType updatedAt creator { id name } } }
       comments(first: 50, after: $after) {

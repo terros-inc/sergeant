@@ -121,7 +121,7 @@ export async function scenario(opts: {
           return { moved: true as const, from: "In Progress", to: to.state };
         },
       },
-      github: { readPullRequest: async () => opts.pullRequest?.() ?? pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
+      github: { readPullRequest: async () => opts.pullRequest?.() ?? pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
       runner: opts.runner,
       reasoner: { turn: opts.reasoner },
     },

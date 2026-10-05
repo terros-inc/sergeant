@@ -47,7 +47,7 @@ test("a task accepted while its issue is in Todo is not started again until a hu
       resolveThread: async () => "resolved" as const,
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
     },
-    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
+    github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner: { start: async (spec) => void started.push(spec.runId), status: async () => worker("succeeded", 30), cancel: async () => {} },
     reasoner: {
       async turn() {

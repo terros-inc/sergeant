@@ -8,7 +8,7 @@ import { EnrollmentRefused, type Enrollment } from "./enrollment.ts";
 // approver's change to them (enrollment.ts), with no AWS session.
 //
 //   GET  /v1/repositories
-//   POST /v1/repositories/add      { "repo": "owner/name", "mergeMethod"?: "squash" | "merge" | "rebase" }
+//   POST /v1/repositories/add      { "repo": "owner/name", "mergeMethod"?: "squash" | "merge" | "rebase", "mergePolicy"?: "sergeant" | "human" }
 //   POST /v1/repositories/remove   { "repo": "owner/name" }
 
 export async function repositoriesRoute(
@@ -25,8 +25,8 @@ export async function repositoriesRoute(
   const request = await body(req);
   let change: Promise<RepositoryChange>;
   if (at.id === "add") {
-    const { repo, mergeMethod } = parse(AddRepositoryRequest, request);
-    change = enrollment.add(repo, mergeMethod, by);
+    const { repo, mergeMethod, mergePolicy } = parse(AddRepositoryRequest, request);
+    change = enrollment.add(repo, mergeMethod, mergePolicy, by);
   } else {
     change = enrollment.remove(parse(RemoveRepositoryRequest, request).repo, by);
   }

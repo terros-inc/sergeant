@@ -10,6 +10,19 @@ export const handoffKey = (issueId: string, r: RefusedMerge) => `merge-handoff:$
 
 export function handoffComment(r: RefusedMerge): string {
   const ready = `[${r.repo}#${r.number}](${r.url}) at head \`${r.headSha}\` is reviewed and its required checks are green`;
+  // TECH-5244: a human-merge repository's head was never approved or merged; it was handed over.
+  if (r.human) {
+    const asked = r.human.requested.length > 0 ? `Review is requested from ${r.human.requested.join(", ")}.` : "GitHub shows nobody's review requested on it.";
+    return [
+      "**Ready for a human to merge**",
+      "",
+      `${ready}. This repository's merge policy is \`human\`, so Sergeant did not approve or merge it. ${asked}`,
+      "",
+      r.human.summary,
+      "",
+      "A human merges it. Sergeant acts on a review requesting changes or a comment on the PR, and finishes the task once it is merged.",
+    ].join("\n");
+  }
   // TECH-5090: a merge call that failed twice with nothing changed is handed over too (TECH-5077); no
   // policy blocked it, so the comment must not say GitHub refused it or that the repository needs a human.
   const [why, who] = r.temporary

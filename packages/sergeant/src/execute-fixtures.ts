@@ -110,7 +110,7 @@ export function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Con
     handoff: async (reason) => void handoffs.push(reason),
     github: {
       readPullRequest: async () => ({ ...pr, ...live.pr }),
-      closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),
+      closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),
     },
     runner: {
       start: async (spec) => void started.push(spec.runId),

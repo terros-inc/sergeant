@@ -1,7 +1,8 @@
-import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergeant-contracts";
+import { PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
+import { handToHuman } from "./hand-to-human.ts";
 import { readSquashMessage } from "./squash-message.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
@@ -11,6 +12,8 @@ type RequestOptions = { allowStatuses?: number[]; failOnNextPage?: boolean };
 
 export type GitHubRepositoryConfig = {
   mergeMethod: "merge" | "squash" | "rebase";
+  /** Who merges (TECH-5244). Absent is `human`: this port approves and merges only where it is `sergeant`. */
+  mergePolicy?: MergePolicy;
   /**
    * Off by default. Only for a repository with no declared required checks: treat every check
    * observed on the exact head as required. It cannot know a check that has not appeared yet, so a
@@ -51,7 +54,10 @@ const checkRunState = (run: z.infer<typeof checkRun>): ObservedCheck["state"] =>
 const statusState = (state: z.infer<typeof commitStatus>["state"]): ObservedCheck["state"] =>
   state === "success" ? "passed" : state === "pending" ? "pending" : "failed";
 
-/** The control plane's live GitHub surface: fact reads, the SHA-guarded merge, and a canceled task's PR close and branch delete. */
+/**
+ * The control plane's live GitHub surface: fact reads, the SHA-guarded merge (only in a `sergeant`
+ * repository), a `human` repository's handoff, and a canceled task's PR close and branch delete.
+ */
 export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
   const fetchFn = options.fetch ?? globalThis.fetch;
   const apiUrl = (options.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
@@ -214,8 +220,15 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       });
     },
 
+    mergePolicy: (repo) => configFor(repo).config.mergePolicy,
+
     async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);
+      // TECH-5244, defense in depth: whatever decided to merge, the repository's live policy is read
+      // here, before the approval or the merge call, and a `human` repository gets neither.
+      if (config.mergePolicy !== "sergeant") {
+        throw new Error(`${repo} is a human-merge repository (mergePolicy ${config.mergePolicy}): Sergeant never approves or merges in it`);
+      }
       // The ruleset requires one approving review, which the worker App cannot give its own PR, so
       // only this approval (after every Gate check) lets the merge through. A failed approval must
       // never fall through to the merge. Approving again on a retry is harmless.
@@ -259,6 +272,8 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         }
       }
     },
+
+    handToHuman: (req) => (configFor(req.repo), handToHuman(request, req)),
 
     async closePullRequest({ repo, number, comment }) {
       configFor(repo);
