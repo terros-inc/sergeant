@@ -1,5 +1,6 @@
 import type { RunFailureReason, RunRecord } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { redactSecrets } from "./redact.ts";
 
 // The agent CLIs a run can use (04 §10, TECH-5009). Each runs in the same container, with the same
 // workspace, worker-App token, git identity, and network; only the model CLI and its one credential
@@ -170,11 +171,11 @@ exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-g
     const quotaFailed = !authenticationFailed && failure !== undefined && CODEX_QUOTA_FAILURE.test(failure);
     return {
       ok: tokens !== undefined && failure === undefined,
-      // OpenAI's errors quote part of an API key; a run record never holds any of it.
+      // OpenAI's errors quote part of an API key, or a ChatGPT token; a run record never holds any of it.
       ...(authenticationFailed
         ? { detail: CODEX_AUTH_DETAIL, failureReason: "authentication" as const }
         : failure !== undefined
-          ? { detail: failure.replace(/sk-[\w*.-]+/g, "sk-[redacted]").slice(0, 300), ...(quotaFailed && { failureReason: "quota" as const }) }
+          ? { detail: redactSecrets(failure).slice(0, 300), ...(quotaFailed && { failureReason: "quota" as const }) }
           : tokens === undefined && { detail: "no completed turn" }),
       ...(sessionId && { sessionId }),
       ...(tokens && { tokens }),

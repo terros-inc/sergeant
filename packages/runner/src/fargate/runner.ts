@@ -10,6 +10,7 @@ import { agentFields, setAsideOnFailure } from "../ended.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL, type Exec } from "../exec.ts";
 import { DEFAULT_LIMITS, type ContainerRunnerOptions } from "../options.ts";
 import { recorded, runFiles, type RunMeta } from "../run-files.ts";
+import { redactSecrets } from "../redact.ts";
 import { fargateAws, fargateClients, type FargateClients, type FargateSettings } from "./aws.ts";
 import { awsErrorCode, discard, startRun, type Launch, type LaunchStore } from "./launch.ts";
 import { runSecret } from "./secret.ts";
@@ -127,7 +128,7 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
       status,
       role: "worker",
       report: parsed?.ok ? parsed.report : null,
-      ...(!parsed?.ok && status !== "canceled" && { reportError: parsed ? parsed.error : `no report written; ${why}` }),
+      ...(!parsed?.ok && status !== "canceled" && { reportError: redactSecrets(parsed ? parsed.error : `no report written; ${why}`) }),
     });
     if (status !== "canceled") await setAsideOnFailure(meta, agent, asides, opts);
     await cleanUp(meta, l);
