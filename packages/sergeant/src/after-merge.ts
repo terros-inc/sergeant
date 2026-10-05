@@ -229,6 +229,10 @@ export async function observeCompletion(
   log: (line: string) => void,
 ): Promise<(LoopResult & { canceled?: true }) | { moved: string }> {
   const deadline = Date.parse(merged.at) + (opts.completionWaitMinutes ?? 10) * 60_000;
+  // A wait on no question (TECH-5015, TECH-5104): the slot is kept for the grace from the merge, then
+  // quietly freed while the poll goes on, so a grace shorter than this wait still bounds it. Marked
+  // before the first read (TECH-5233): an issue already Done goes straight on to wait on its audit.
+  opts.slot?.waiting(Date.parse(merged.at));
   let seen = "";
   for (;;) {
     const { issue } = await deps.linear.readConversation(opts.issueId);
@@ -240,9 +244,6 @@ export async function observeCompletion(
     if (issue.stateType === "canceled") return { outcome: "merged_not_done", detail, canceled: true };
     if (Date.now() > deadline) return { outcome: "merged_not_done", detail };
     if (opts.signal?.aborted) return { outcome: "stopped", detail };
-    // A wait on no question (TECH-5015, TECH-5104): the slot is kept for the grace from the merge, then
-    // quietly freed while the poll goes on, so a grace shorter than this wait still bounds it.
-    opts.slot?.waiting(Date.parse(merged.at));
     await pause(Math.min(15_000, (opts.pollSeconds ?? 60) * 1000), opts.signal);
   }
 }
