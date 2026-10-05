@@ -83,6 +83,8 @@ export async function scenario(opts: {
   beforeResolve?: (id: string) => Promise<void> | void;
   /** Runs before a comment is posted; throw to fail the post. */
   beforePost?: (req: { key: string; parentId?: string }) => void;
+  /** The PR GitHub shows now; `pr` when omitted. */
+  pullRequest?: () => PullRequestFacts;
 }) {
   dir ||= await mkdtemp(join(tmpdir(), "sergeant-budget-test-"));
   if (opts.state) await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", turns: 1, recentTurns: [], ...opts.state }));
@@ -112,7 +114,7 @@ export async function scenario(opts: {
         resolveThread: async (id) => (await opts.beforeResolve?.(id), resolved.push(id), "resolved" as const),
         createFollowupIssue: async () => { throw new Error("unused"); },
       },
-      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
+      github: { readPullRequest: async () => opts.pullRequest?.() ?? pr, closePullRequest: async () => {}, mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
       runner: opts.runner,
       reasoner: { turn: opts.reasoner },
     },

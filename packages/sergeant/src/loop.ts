@@ -13,8 +13,9 @@ import { postHandoff } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
-import { checkHolds, checkStop, holdForBudget, type PollContext } from "./poll-checks.ts";
+import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
 import { cancelRuns, describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
+import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
@@ -226,6 +227,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     unposted = undefined;
     const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
+    // A human's review opens a fresh window (TECH-5218): the next pass rereads everything under it.
+    if (await openReviewWindow(pullRequests, configured, ctx)) continue;
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
@@ -261,14 +264,20 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     await postHandoffs(conversation.issue.id);
     await postRereviewRequests(situation, deps, deps.linear, log);
-    if (await holdForBudget(situation, conversation, holds, ctx)) {
+    const retryDue = dueMergeRetries(state, retryGraceMs);
+    // TECH-5218: a window whose wall time ran out while nothing changed but Sergeant waiting on a human's
+    // merge or re-review is a human wait, like a question: no budget question and no turn. The human's
+    // review opens a fresh window (above); their merge is the task's end. Anything else that changes
+    // asks the budget question as before.
+    const idle = fingerprint === state.lastFingerprint && retryDue.length === 0;
+    const humanWait = idle && onlyWallTimeExhausted(budget, new Date()) ? awaitedHumanPrAction(situation) : undefined;
+    if (await holdForBudget(situation, conversation, holds, ctx, humanWait)) {
       await wait(pollMs);
       continue;
     }
 
-    const retryDue = dueMergeRetries(state, retryGraceMs);
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
-    if (running.length > 0 || (fingerprint === state.lastFingerprint && retryDue.length === 0 && !opts.wake?.pending)) {
+    if (running.length > 0 || humanWait || (fingerprint === state.lastFingerprint && retryDue.length === 0 && !opts.wake?.pending)) {
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
       if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
         return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMinutes)} minutes` };
@@ -277,7 +286,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       // mergeability, a human merge) keeps it for the grace from the last turn, then quietly frees it.
       if (running.length > 0) opts.slot?.work();
       else opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
-      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : "waiting: nothing changed since the last turn");
+      log(running.length > 0 ? `waiting: ${running.join(", ")} running` : humanWait ? `waiting on ${humanWait}` : "waiting: nothing changed since the last turn");
       await wait(pollMs);
       continue;
     }

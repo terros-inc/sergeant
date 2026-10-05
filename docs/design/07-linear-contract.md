@@ -152,7 +152,12 @@ Reply to extend (an approver), or say stop.
 ```
 
 A human's answer to any of Sergeant's questions, this one included, gives the task a fresh budget
-window (TECH-5059): from the answer, with zero spend and the installation's current budget. An
+window (TECH-5059): from the answer, with zero spend and the installation's current budget. So does a
+human's review of the task's PR, an approval, a change request, or a review comment, from the review
+(TECH-5218). Waiting on a human PR action is a human wait like a question: while the only thing left is
+a human's merge of a PR Sergeant said is ready for a human to merge (a required review it cannot give,
+such as a code owner's) or a human's re-review it asked for, a window whose wall time runs out asks no
+budget question and takes no turn; the review opens a fresh window, and the merge ends the task. An
 extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
 K1–K4, and `sgt task grant` in 03 §7 and 11). A reply that accepts the work as it is ends the task instead (TECH-5118): reasoning
 proposes `accept_as_is`, allowed only after a human replied to the budget question in the current budget window

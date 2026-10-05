@@ -1,4 +1,5 @@
 import { commentIdFor, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { humanReviews } from "./pr-wait.ts";
 import { latestAnswer, latestQuestion } from "./question.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
@@ -44,8 +45,8 @@ export const budgetQuestionKey = (issueId: string, windowStart: string) => `budg
 /**
  * TECH-5118: whether a human has replied to Sergeant's budget question, the question it asked last (or a
  * clarifying question in that question's thread). Read from the conversation alone, so it survives a
- * restart: a window opens at the task's start or at a later human comment's time, so every budget
- * question of this task has the key of one of those times.
+ * restart: a window opens at the task's start, at a later human comment's time, or at a later human PR
+ * review's time (TECH-5218), so every budget question of this task has the key of one of those times.
  *
  * TECH-5137: only a reply given in the current window counts. A reply to one of this task's questions
  * opens a window from itself (poll-checks.ts), so it is never older than `windowStart`; a reply from
@@ -54,14 +55,18 @@ export const budgetQuestionKey = (issueId: string, windowStart: string) => `budg
  * by that reply (accepted.ts), matched the earlier one, so Linear posted nothing. TECH-5145: nor is an
  * earlier task's budget question this task's, whatever was said after it.
  */
-export function answeredBudgetQuestion(conversation: Conversation, budget: Pick<BudgetStatus, "taskStart" | "windowStart">): boolean {
+export function answeredBudgetQuestion(
+  conversation: Conversation,
+  budget: Pick<BudgetStatus, "taskStart" | "windowStart">,
+  pullRequests: PullRequestFacts[],
+): boolean {
   const asked = latestQuestion(conversation);
   const reply = latestAnswer(conversation);
   if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(budget.windowStart)) return false;
   const { issue, humanComments } = conversation;
   const thread = asked.parentId ?? asked.id;
   const since = (at: string) => Date.parse(at) >= Date.parse(budget.taskStart);
-  const windows = [budget.taskStart, ...humanComments.map((c) => c.createdAt).filter(since)];
+  const windows = [budget.taskStart, ...[...humanComments, ...humanReviews(pullRequests)].map((c) => c.createdAt).filter(since)];
   return windows.some((windowStart) => commentIdFor(budgetQuestionKey(issue.id, windowStart)) === thread);
 }
 
