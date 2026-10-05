@@ -3,11 +3,10 @@ import { chmod, mkdtemp, open, readFile, rm, stat, writeFile } from "node:fs/pro
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MIN_CLI_HEADER, MIN_CLI_VERSION, type WhoAmI } from "@terros/sergeant-contracts";
+import { MIN_CLI_HEADER, MIN_CLI_VERSION, TOKEN_URL, type WhoAmI } from "@terros/sergeant-contracts";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { main, USAGE, type Io } from "./cli.ts";
 import { quotaLeft } from "./format.ts";
-import { TOKEN_URL } from "./login.ts";
 
 // `sgt` against a fake Sergeant API: what it sends, what it prints for a human, and that `--json` is
 // the API's own answer, or the shape USAGE names where sgt builds it, errors included, so Firstmate

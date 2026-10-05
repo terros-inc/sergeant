@@ -389,12 +389,14 @@ for rollout and unauthenticated live checks.
 `task_show(ref)`, `run_list(task?)`, `run_show(run)`, `run_report(run)`, and `health`. Each tool is
 one GET to the same client API, and returns the API's JSON unchanged as structured content (errors
 as `{"error":{"code","message"}}` tool errors). It cannot wake or cancel anything. It reaches the API
-at the same URL as `sgt` (`--api`, else `SGT_API_URL`, else `http://127.0.0.1:8080`), but sends no
-Linear login yet, so only a `serve --trust-loopback` on the same machine answers it. Register it with
-a client as a stdio server:
+at the same URL as `sgt` (`--api`, else `SGT_API_URL`, else `http://127.0.0.1:8080`), and sends the
+Linear login `sgt login` saved for that URL, read and renewed on every call as `sgt` does (TECH-5123),
+so it works from a laptop against the hosted API. With no login saved it sends none, which only a
+`serve --trust-loopback` on the same machine answers. Register it with a client as a stdio server
+([`docs/sgt.md`](docs/sgt.md) §9):
 
 ```json
-{ "mcpServers": { "sergeant": { "command": "node", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "http://127.0.0.1:18080"] } } }
+{ "mcpServers": { "sergeant": { "command": "node", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "https://<installation hostname>"] } } }
 ```
 
 ### UNF-724 live check (after UNF-720)
