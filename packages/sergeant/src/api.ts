@@ -106,6 +106,42 @@ export function apiHandler(ctl: ApiControl): (req: IncomingMessage, res: ServerR
   };
 }
 
+/**
+ * Every route route() serves, and only those: a request matching none is a 404, refused after its caller
+ * so an unauthenticated one still gets a 401. A `:name` segment stands for any one segment. A new
+ * route is unreachable until it is listed here, and once listed api-auth.test.ts checks it refuses a
+ * caller without a valid login; `GET /v1/auth/config` is the one public route (what `sgt login` needs).
+ */
+export const V1_ROUTES: readonly { method: "GET" | "POST"; path: string; public?: true }[] = [
+  { method: "GET", path: "/v1/auth/config", public: true },
+  { method: "GET", path: "/v1/whoami" },
+  { method: "GET", path: "/v1/tasks" },
+  { method: "GET", path: "/v1/tasks/:ref" },
+  { method: "POST", path: "/v1/tasks/:ref/wake" },
+  { method: "POST", path: "/v1/tasks/:ref/cancel" },
+  { method: "GET", path: "/v1/runs" },
+  { method: "GET", path: "/v1/runs/:runId" },
+  { method: "GET", path: "/v1/runs/:runId/report" },
+  { method: "POST", path: "/v1/runs/:runId/cancel" },
+  { method: "POST", path: "/v1/retro" },
+  { method: "GET", path: "/v1/admin/status" },
+  { method: "POST", path: "/v1/admin/restart" },
+  { method: "POST", path: "/v1/admin/update" },
+  { method: "GET", path: "/v1/repositories" },
+  { method: "POST", path: "/v1/repositories/add" },
+  { method: "POST", path: "/v1/repositories/remove" },
+  { method: "GET", path: "/v1/accounts" },
+  { method: "POST", path: "/v1/accounts/register" },
+  { method: "POST", path: "/v1/accounts/remove" },
+  { method: "POST", path: "/v1/accounts/remove-person" },
+];
+
+const listed = (method: string | undefined, path: string[]): boolean =>
+  V1_ROUTES.some((r) => {
+    const want = r.path.split("/").slice(1);
+    return r.method === method && want.length === path.length && want.every((s, i) => s.startsWith(":") || s === path[i]);
+  });
+
 async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname.split("/").slice(1);
@@ -114,6 +150,10 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   const post = req.method === "POST";
   const [, noun, id, verb] = path;
   if (path.length > 4 || (!get && !post)) throw notFound(url.pathname);
+  if (!listed(req.method, path)) {
+    await callerOf(req, ctl);
+    throw notFound(url.pathname);
+  }
 
   if (noun === "auth" && id === "config" && verb === undefined && get) {
     if (!ctl.linearClientId) throw new Refusal(404, "not_found", "this Sergeant has no Linear login configured (installation config `humans`)");
