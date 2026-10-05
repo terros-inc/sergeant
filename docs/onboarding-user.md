@@ -31,7 +31,7 @@ you to run it. More in [`sgt.md` §3–4](sgt.md#3-point-it-at-your-installation
 
 ## 3. Register your model account
 
-Each task's owner pays (TECH-5179): its workers and reviewers run only on accounts its owner
+Each task's owner pays: its workers and reviewers run only on accounts its owner
 registered. With none registered, Sergeant comments on your issue and nothing starts.
 
 ```sh
@@ -48,7 +48,7 @@ the credential is used inside run containers, and how to remove and revoke it.
 1. **Check the repository.** `sgt repo list` shows the repositories Sergeant works in and who merges in
    each. In a `sergeant` repository Sergeant merges once its Gate passes. In a `human` one it never
    approves or merges: it gets the PR green and reviewed, marks it ready, requests review (from the
-   code owners, else you if an approver mapped your GitHub login), and posts **Ready for a human to
+   code owners, else you if the operator configured your reviewer profile), and posts **Ready for a human to
    merge** on the PR and the issue; you merge it, and Sergeant then finishes the task. A repository not
    listed needs an approver to enroll it.
 2. **Open or create the issue** in your installation's Linear workspace. Write it so it stands on its
@@ -58,19 +58,23 @@ the credential is used inside run containers, and how to remove and revoke it.
 4. **Delegate it to Sergeant yourself.** In the issue's properties sidebar, open the assignee menu and
    pick your installation's Sergeant agent. Linear records an agent as the issue's **delegate** and
    keeps you as its assignee. Creating the issue already delegated counts too, when you are its creator.
-5. **Move it to Todo.** Sergeant starts work only from Todo. Triage and Backlog never start, and a Todo
-   issue with an unfinished Linear "blocked by" issue waits until that one is done or canceled.
+5. **Move it to your team's unstarted state** (normally Todo). Sergeant starts work only from a state
+   of Linear's type *unstarted*; Triage- and Backlog-type states never start. An unstarted issue with
+   an unfinished Linear "blocked by" issue waits until that one is done or canceled.
 
-**What happens next.** Within a couple of minutes (or at once, when webhooks are set up) Sergeant moves
-the issue to In Progress and, usually, starts a worker (it may ask a question first). The worker opens a
-PR, which Linear links on the issue. Questions come as comments on the issue (below). After the
+**What happens next.** Within a couple of minutes (or at once, when webhooks are set up) Sergeant picks
+the issue up. When its first worker starts, Sergeant moves the issue to In Progress; if it asks first
+(say, you have no usable model account), the issue waits in its unstarted state until you answer. The
+worker opens a PR, which Linear links on the issue. Questions come as comments on the issue (below). After the
 merge, Sergeant posts one outcome comment.
 
 **When it refuses.** Sergeant starts only when Linear's history shows the assignee delegated the issue
 themselves. If the issue has no human assignee, or someone else delegated it, or an app did it on your
-behalf (such as an MCP connector, unless the installation allowlists that app in
-`linear.delegatingAppIds`), Sergeant posts one comment on the issue saying so, and nothing starts.
-Remove the delegate and delegate it again yourself in Linear. With no usable model account
+behalf (such as an MCP connector), Sergeant posts one comment on the issue saying so, and nothing
+starts. An app's delegation counts as yours only when the installation lists the app in
+`linear.delegatingAppIds` and Linear names the user it acted for with exactly your display name.
+To fix any of these, assign the issue to yourself, then remove the delegate and add it again yourself
+in Linear. With no usable model account
 registered, it says that instead (step 3).
 
 **Budget.** Each task gets a budget window (`sgt task show` prints it). When it runs out, Sergeant
@@ -82,8 +86,8 @@ options, a number is fine. Any answer gives the task a fresh budget window.
 
 **Stopping it.** Undelegate the issue, move it to Backlog, Canceled, or Done, or run
 `sgt task cancel <issue> --reason "…"`. Sergeant cancels its runs, closes the PRs it opened, and says
-so on the issue. Reassigning the issue stops it too, but keeps its PRs and puts the issue back in Todo,
-undelegated, for the new assignee.
+so on the issue. Reassigning the issue stops it too, but keeps its PRs, removes Sergeant's delegation, and moves a
+started issue back to its team's unstarted state (normally Todo) for the new assignee.
 
 ## 5. Watch the work
 
