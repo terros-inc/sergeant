@@ -18,6 +18,8 @@ change `containerRunner`:
 | `task.ts` | Pure pieces: the task definition, the in-task wrapper script (`TASK_SCRIPT`), ECS task state from `describe-tasks`, the terminal status, and report extraction from log lines. |
 | `task.test.ts` | Unit tests for those pieces: loss vs unknown, cancel vs failed start, report framing, and no credential values in the task definition. |
 | `cli.ts` | Manual control-plane driver over the `aws` CLI: `start`, `status`, `cancel`, `result`. No new dependency. |
+| `launch.ts` | `start`'s steps, resumable at each AWS effect (section 4), behind a small interface `cli.ts` implements with the `aws` CLI. |
+| `launch.test.ts` | Failure tests for `start` against an in-memory AWS: a failure at each step leaves no secret and no task, and a rerun starts exactly one task. |
 | `brief.ts` | Renders the normal worker brief (`workerBrief`) from a worker RunSpec in JSON, for `start --brief`. |
 
 The runner image's `/workspace` is now created owned by `node`. The local runner bind-mounts over
@@ -30,8 +32,9 @@ How a run works:
    Secrets Manager secret per run** (`sergeant/fargate-spike/<runId>`) holding the brief and those two
    values as JSON keys. It writes the secret string to a 0600 temp file and passes it as `file://`,
    so no value is ever on a command line. It then registers a task definition whose `secrets` point at
-   those keys, records `launch.json` (record first), and calls `RunTask` with `--client-token <runId>`
-   (idempotent) and `--started-by <runId>` (findable by `list-tasks`).
+   those keys and calls `RunTask` with a client token kept in the run's record (idempotent) and
+   `--started-by <runId>` (findable by `list-tasks`). `launch.json` names each of these before it can
+   exist, so a failed `start` can be rerun (section 4).
 2. **In the task.** The same runner image runs `TASK_SCRIPT`. It writes `/workspace/sergeant-brief.md`
    from `SERGEANT_BRIEF` and unsets it, then clones the run's repositories with the worker token (the
    image's credential helper already reads `GH_TOKEN`). It runs the adapter's **unchanged** agent script
@@ -96,26 +99,44 @@ the RunnerPort contract, RunSpec, RunRecord, the brief, or the report protocol.
   and `parse`, `parseReport`, `run-files.ts` (with the task ARN, secret ARN, and nonce in `RunMeta` in
   place of the container name).
 - **`start`:** list `sergeant/*` branches with `git ls-remote` on the host (no clone needed for the
-  brief), create the per-run secret, register the definition, and `RunTask` with `clientToken = runId`.
+  brief), create the per-run secret, register the definition, and `RunTask` with a client token
+  recorded in `RunMeta`. Each step resumable, as the spike's `launch.ts` does (section 4).
   The AWS SDK (`@aws-sdk/client-ecs`, `-secrets-manager`, `-cloudwatch-logs`) would replace the CLI.
 - **`status`/`cancel`/`report`:** `taskState`, `stop-task`, and `extractReport`, as in the spike.
   `isGone` becomes `MISSING`. Collect the result within the hour before ECS forgets the task, though the
   logs outlive it.
-- **Instance role:** add `ecs:RunTask`/`StopTask`/`DescribeTasks`/`RegisterTaskDefinition`/
+- **Instance role:** add `ecs:RunTask`/`StopTask`/`DescribeTasks`/`ListTasks`/`RegisterTaskDefinition`/
   `DeregisterTaskDefinition`, `iam:PassRole` on the execution role only, Secrets Manager
-  create/delete on `sergeant/runs/*`, and `logs:GetLogEvents` on the run log group. That is all
+  create/put-value/delete on `sergeant/runs/*`, and `logs:GetLogEvents` on the run log group. That is all
   Terraform. The installation's existing secrets stay unreadable to the execution role.
 - **Image:** push the host-built image (`deploy/host/install.sh`) to ECR on each install, tagged by
   commit. This is the one new piece of deploy plumbing.
 
 ## 4. Blockers and awkward areas
 
-- **Stranded secret on a failed `start` (confirmed live).** If `start` fails after it creates the
-  per-run secret, for example at `RegisterTaskDefinition` (a bad role ARN in the live run),
-  `sergeant/fargate-spike/<runId>` is left holding both credentials, the worker token and the model
-  credential, and nothing deletes it; the operator had to delete it by hand. A production `start`
-  must delete the secret when any later step fails, or create it last. The spike driver is not
-  changed here; the owner decides separately whether to fix it.
+- **Stranded secret on a failed `start` (confirmed live, now fixed in the spike driver).** In the live
+  run, a `start` that failed at `RegisterTaskDefinition` (a bad role ARN) left
+  `sergeant/fargate-spike/<runId>` holding both credentials, the worker token and the model
+  credential, with no recorded ARN and nothing to delete it; the operator deleted it by hand. And
+  since any existing `launch.json` counted as "already launched", a `RunTask` that failed or lost its
+  answer left a run that nothing could find, cancel, or clean up. The spike's `start` (`launch.ts`)
+  is now resumable at every external effect:
+  - `launch.json` records the deterministic secret name, the nonce, the `RunTask` client token, and
+    the task's command and network before the secret is created. A rerun takes over a secret an
+    earlier `start` created but did not record (`put-secret-value`) rather than failing on the name.
+  - It records the task definition's ARN as soon as it is registered.
+  - It records that `RunTask` was sent before sending it. A `launch.json` without a `taskArn` is not
+    "already launched": a rerun looks the task up by `startedBy` (`list-tasks`, running or stopped)
+    and, if none is found, sends the same `RunTask` with the same client token, so it cannot start
+    a second task.
+  - When the failure is definitely before any task (at the secret, at the definition, or a
+    `RunTask` that ECS rejected or answered with no task), `start` deletes the secret by name,
+    deregisters the definition, and drops `launch.json`, so a rerun starts clean. After a lost or
+    ambiguous `RunTask` answer it keeps them, and says so, until a rerun's lookup settles it.
+
+  `launch.test.ts` covers a rejected and a lost answer at each step. A production `start` must do the
+  same with its RunMeta record. One leftover is harmless: a `RegisterTaskDefinition` whose answer is
+  lost leaves an unrecorded revision, which holds only a reference to the deleted secret.
 - **Workspace preparation.** Workers are fine: the task clones its own repositories with the token it
   already gets. **Reviewers are the awkward case.** Today the reviewer's read-only token checks out the
   PR *on the host* and never enters the reviewer's container (09). On Fargate either a read-only token
@@ -344,7 +365,7 @@ security group.
 - **Cost:** $0.08 of model spend per run; Fargate is negligible.
 - **Stranded secret (known issue):** a `start` that failed at `RegisterTaskDefinition` (a bad role
   ARN) left `sergeant/fargate-spike/<runId>` holding both credentials. The operator deleted it by
-  hand. See section 4.
+  hand. Fixed since in the spike driver's `start`; see section 4.
 
 Every task runs with the task definition's explicit `cpu`/`memory` on Fargate capacity (section 1),
 so the runs did not use the Sergeant EC2 host's CPU.
@@ -352,6 +373,11 @@ so the runs did not use the Sergeant EC2 host's CPU.
 **Offline, before the live run:**
 
 - `task.test.ts` passes, and the runner package's typecheck and lint pass.
+- After the live run, for the stranded-secret fix: `launch.test.ts` passes. Against the fake `aws`
+  executable, a `start` that failed at `RegisterTaskDefinition` left no secret and no `launch.json`,
+  and its rerun started one task; a `start` whose `RunTask` answer was lost kept the secret and the
+  definition, `status` said to rerun `start`, and the rerun found the task by `startedBy` without a
+  second `RunTask`. Not yet run against real AWS.
 - `result` against a fake `aws`, for a task stopped with exit 70 and no frame: it wrote a
   `RunRecord.parse`-valid failed record (`no report written; exit 70 …`), deleted the secret, and
   deregistered the definition. For exit 137 after `sergeant: workspace ready`, it asked for a retry
@@ -379,5 +405,5 @@ in an isolated Fargate task with its own CPU and memory, opened a PR, and return
 protocol carried over almost unchanged: the same image, agent scripts, parsing, brief, and report.
 Cold start was 35–38 s, with a 14 s image pull, and Fargate's cost is negligible next to model spend.
 No gap found is one that Daytona, E2B, or Runloop would close better. The real costs are the reviewer
-checkout and attachment transport, the 64 KiB secret cap, and the stranded secret on a failed
-`start` (section 4), which the production `start` must clean up.
+checkout and attachment transport, the 64 KiB secret cap, and a `start` that must be resumable at
+each AWS step so a failure strands no credentials (section 4); the spike's `start` now shows how.
