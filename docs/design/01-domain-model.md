@@ -39,7 +39,7 @@ ConversationRevision   // sha256 of the issue's normalized title + description a
 | `Task` | The ledger entry for one episode of a delegated issue | deterministic core | yes | `tasks` row; the brief lives in Linear | open → closed (`done \| canceled`) | a missing ledger starts **paused** so nothing restarts unattended; an operator decides (02 §9) |
 | `HumanWait` | "This task is waiting for the answer to this Linear question" | reasoning | yes | `tasks.human_wait` + the Linear comment | open → answered \| withdrawn | a human decision could be abandoned — guarded (02 §1) |
 | `RepositorySet` | Which enrolled repos this task's runs are given | reasoning | yes | `tasks.repositories` | edited by `set_repositories` | reasoning re-chooses next turn |
-| `Budget`, `BudgetGrant`, `Usage` | Limits, human extensions, and spend | config, approvers, runners | yes | `tasks`, `runs`, `turns` | budget fixed at admission; grants append-only; usage monotone | time and concurrency limits are re-derived; spend history is lost (accepted, rare) |
+| `Budget`, `TaskBudget`, `Usage` | Limits, the current budget window, and spend | config, core, runners | yes | `tasks`, `runs`, `turns` | a window opens at admission and again at each human answer to a Sergeant question; usage monotone | time and concurrency limits are re-derived; spend history is lost (accepted, rare) |
 | `BudgetStatus` | Used vs. limit now | BudgetMeter | no | computed | — | recomputed |
 | `Run` | One execution of the primary worker or a reviewer | core (record) / runner (execution) | yes | `runs` row + the runner | `starting → running ⇄ waiting → succeeded \| failed \| canceled` | runs cannot be canceled or accounted until found (adapters with `list` find them) |
 | `RunHandle` | Adapter's opaque pointer | runner adapter | yes | `runs.handle` | set once | as Run |
@@ -65,7 +65,8 @@ ConversationRevision   // sha256 of the issue's normalized title + description a
 | `AuditEvent` | Uniform view of what happened | core | view | `turns`, `actions`, `runs` | — | — |
 | `SystemState` | Installation-wide pause | operator | yes | `system_state` | paused ⇄ running | a missing ledger starts paused |
 
-Types deliberately **absent**: phase, wait (other than `HumanWait`), grant (other than budget),
+Types deliberately **absent**: phase, wait (other than `HumanWait`), grant (budget included: a human
+answer opens a fresh budget window, TECH-5059),
 workspace, candidate, repo scope, plan, work unit, capability, executor, fault, decision menu, choice
 id, inbox or outbox entry, acceptance-criterion record, lease, and any separate "Supervisor" actor.
 `13-s1-supersession.md` says where each went.
@@ -115,7 +116,7 @@ InstallationConfig {            // ADR-0042 mechanism; Sergeant 2 keys only
   }
   followups: { maxDepth, autoDelegate }
   humanWait: { remindAfterHours }
-  approvers: LinearUserId[]     // grant budget, waive review, receive escalations
+  approvers: LinearUserId[]     // waive review, receive escalations
   aws: { runnerDevRoleArn, artifactBucket, logGroup }
   release?: { channel: main | soaked, soakMinutes?, paused? }  // 10 §6 (TECH-4959); absent: never self-update
 }
@@ -179,8 +180,7 @@ Task {
   closedAt?, closedReason?
   repositories: RepositorySet
   humanWait?: HumanWait
-  budget: Budget
-  grants: BudgetGrant[]
+  budget: TaskBudget
   wake: { at?, reasons: WakeReason[] }
   turnClaim?: { turnId, since }
   session?: { ref: ArtifactRef, approxTokens, compactions, lastCompactedAt? }
@@ -202,6 +202,7 @@ TaskStatus (derived, display only):
 ```
 admit_task                                   → open
 last step of a closing action (03 §10)       open → closed (done | canceled)
+a human answer to a Sergeant question        open → open, with a fresh budget window
 re-delegation or reopening after close       → a new Task row with a fresh budget
 ```
 
@@ -225,12 +226,11 @@ RepositorySet = RepoSlug[]      // subset of enabled enrollments; no fixed size 
   GitHub tokens are scoped to it, which keeps workers pointed at the right code. It is not a security
   boundary between tasks: co-resident runs share one trust zone (09 §2).
 
-## Budget, BudgetGrant, Usage, BudgetStatus
+## Budget, TaskBudget, Usage, BudgetStatus
 
 ```
-Budget {
-  activeWallClockSeconds        // default 7200 (about 2h) of time with at least one active run — hard
-  costUsd                       // default 25, including reasoning turns — best-effort (below)
+Budget {                        // the installation's allowance for one window (defaults.budget)
+  window: { wallMinutes, costUsd }                 // default 120 minutes and $25: the only budget limits
   softFraction                  // default 0.8
   wrapUpGraceSeconds            // default 600
   reasoningReserveUsd           // default 2
@@ -238,12 +238,10 @@ Budget {
   maxRunStartsPerHour           // default 6
 }
 
-BudgetGrant {
-  id
-  addActiveWallClockSeconds, addCostUsd
-  grantedBy: { linearUserId, name } | { cliIdentity }
-  evidence: { commentId: LinearCommentId } | { cliActionId: ActionId }
-  at, actionId
+TaskBudget {                    // what the task row keeps
+  window: { wallMinutes, costUsd }                 // copied from config when the window opens; fixed for it
+  windowStart?                  // absent: the window opened at admission (`admittedAt`)
+  priorRunIds: RunId[]          // runs of earlier windows, which this window does not count
 }
 
 Usage {
@@ -254,18 +252,29 @@ Usage {
 }
 
 BudgetStatus {                  // computed by BudgetMeter, never stored
-  limits: { activeWallClockSeconds, costUsd }      // budget + grants
-  used:   { activeWallClockSeconds, costUsd, unknownCostRuns }
-  fractionUsed, soft, exhausted, exhaustedSince?
+  window: { wallMinutes, costUsd }
+  taskStart                     // admittedAt
+  windowStart                   // admittedAt, or the latest human answer to a Sergeant question
+  wallDeadline                  // windowStart + window.wallMinutes
+  spentUsd                      // reported cost of this window's runs and turns
+  costLimitUsd                  // window.costUsd
+  unknownCostRuns               // runs whose cost is not known yet
 }
 ```
 
-- **Hard**: active wall-clock (the union of `[startedAt, endedAt ∨ now]` over task-charged runs),
-  concurrency, and cancellation. Sergeant controls these itself.
-- **Best-effort**: cost. It is the sum of reported or estimated run and turn cost. Where a provider
-  reports usage live, BudgetMeter enforces it mid-run; otherwise it is known only when the run ends,
-  and the wall-clock limit is the backstop. Dev/stage resources, CI minutes, and tools with their own
-  billing are outside it. There is no cross-provider billing ledger (captain, 2026-10-02).
+- **A budget is wall time and money only.** No count of turns or runs ends a task (TECH-5059).
+- **Windows**: a task's first window opens at admission. The first human answer after any Sergeant
+  question, the budget question included, opens a fresh one at the answer's timestamp, with zero spend
+  and the installation's current `defaults.budget.window`; so does a human review of the task's PR (07
+  §6, TECH-5218). Opening a window sets `windowStart`, copies the window, and moves the task's runs so far
+  into `priorRunIds`. One answer opens one window, also across a restart. There is no grant record, grant
+  action, or approver check: an extension is just an answer (03 §5, §9).
+- **Hard**: wall time. No new run, message, or merge after `wallDeadline` (B1), plus concurrency and
+  cancellation. Sergeant controls these itself.
+- **Best-effort**: cost. It is the sum of reported or estimated cost of this window's runs and turns.
+  Where a provider reports usage live, BudgetMeter enforces it mid-run; otherwise it is known only when
+  the run ends, and the wall time is the backstop. Dev/stage resources, CI minutes, and tools with their
+  own billing are outside it. There is no cross-provider billing ledger (captain, 2026-10-02).
 
 ---
 
@@ -711,18 +720,18 @@ ActionKind =
     start_worker | start_reviewer | send_run | cancel_run | set_repositories
   | comment_task | ask_human | withdraw_question | create_followup_task
   | link_pr | unlink_pr | record_review_disposition | merge_pr
-  | grant_budget | escalate | mark_complete | release_task
+  | escalate | mark_complete | release_task
   // performed by guardrails (also link_pr for worker-reported PRs, 08 §4,
   // start_reviewer for sampled audits, 06 §8, and comment_task for fixed notices)
   | admit_task | close_task | enforce_budget
-  // requested by humans through sgt (also grant_budget and cancel_run)
+  // requested by humans through sgt (also cancel_run)
   | cancel_task | wake_task | pause | resume
 
 GateVerdict = { allowed: true, checkedAt } | { allowed: false, rule: RuleId, reason, checkedAt }
 ```
 
-- **One action name per effect**: `grant_budget` is the same kind whether reasoning proposes it
-  citing a comment or an approver runs `sgt task grant`; the actor differs.
+- **One action name per effect**: `cancel_run` is the same kind whether reasoning proposes it or a
+  team member runs `sgt run cancel`; the actor differs.
 - **Lifecycle**: `denied` is terminal. Allowed actions go `pending → succeeded | failed`, or
   `abandoned` when a restart finds them stale and no longer allowed. `params` and `verdict` are
   write-once.

@@ -15,7 +15,7 @@ or state-machine logic, it should not exist.
 | Kept | If we lost it | Home |
 |---|---|---|
 | Which issue episodes Sergeant accepted, and whether each is closed | A finished or stopped issue still delegated to Sergeant could be worked again | `tasks` |
-| Budget and grants; run and turn usage | Time limits and grants lost; spend history lost | `tasks.budget`, `tasks.grants`, `runs.usage`, `turns.usage` |
+| The current budget window (its start, allowance, and the earlier windows' runs); run and turn usage | A window restarts or spend is miscounted; spend history lost | `tasks.budget`, `runs.usage`, `turns.usage` |
 | The one open human question | A human decision could be abandoned | `tasks.human_wait` |
 | The task's repository set | Reasoning re-chooses next turn | `tasks.repositories` |
 | Runs Sergeant started: handle, brief, limits, role | Runs could not be canceled or accounted until found | `runs` |
@@ -43,7 +43,8 @@ it verbatim (01 `TaskExcerpt`).
 **A local PR association cache?** No. Linear attachments are the association, re-read each turn and
 before each merge. An in-memory index rebuilt at startup routes GitHub webhooks.
 
-**Phases, waits, grants, leases?** Only the human wait (P10) and budget grants (human authority). No
+**Phases, waits, grants, leases?** Only the human wait (P10). No grants: a human's answer to a Sergeant
+question opens a fresh budget window, recorded in `tasks.budget` (01 `TaskBudget`). No
 leases: one daemon per ledger, enforced with an exclusive lock (S1's UNF-567 decision).
 
 **An inbound inbox or an outbox?** No. Comments are read from Linear each turn. No per-comment
@@ -77,7 +78,7 @@ one schema type from `01`.
 | `closed_as`, `closed_reason` | text? | |
 | `repositories` | json `RepositorySet` | |
 | `human_wait` | json? `HumanWait` | |
-| `budget`, `grants` | json | |
+| `budget` | json `TaskBudget` | window, `windowStart`, `priorRunIds` |
 | `wake_at`, `wake_reasons` | time?, json | |
 | `turn_claim` | json? | cleared at startup |
 | `session` | json? | `ReasoningSession` pointer |
@@ -184,7 +185,7 @@ duplicate is accepted (captain, 2026-10-02).
 | Merge | `merge:<taskId>:<repo>#<n>:<headSha>` | Merging the wrong head. GitHub's merge with the expected SHA; "already merged at that SHA" counts as success |
 | Follow-up issue | `followup:<taskId>:<semanticKey>` | Duplicate issues for humans to clean up. Client-supplied issue id (verify V1) or a lookup by the key before creating; reasoning picks `semanticKey`, so re-proposals deduplicate |
 | Close, cancel, release, complete | `close:<taskId>` | A stopped task restarting. One closing action per task; its steps are ordered and re-driven (03 §10) |
-| Budget grant | `grant:<taskId>:<commentId>`, `grant-cli:<taskId>:<requestId>` | Double-granting one approval |
+| Budget question | `budget-question:<linearIssueId>:<windowStart>` | Asking twice in one window, or matching an earlier task's question. One per task and window; a window opens only from a human answer, so it needs no key of its own |
 | Review disposition | `disposition:<taskId>:<repo>#<n>:<headSha>` | Write-once evidence |
 | Admit | `admit:<linearIssueId>:<observedAt>` | Two episodes of one issue. Partial unique index on open tasks per issue |
 | Linear comment, question, note | `comment:<taskId>:<turnId>:<n>`, `ask:<taskId>:<turnId>:<n>` | Best-effort: a client-supplied comment id where Linear supports it (V1). A rare duplicate comment after a crash is accepted |
@@ -195,9 +196,11 @@ Proposing an action whose key exists returns the earlier verdict and result inst
 
 ## 7. Accounting and audit
 
-- **Spend** (best-effort): `sum(runs.usage.costUsd) + sum(turns.usage.costUsd)` over task-charged runs
-  and turns, from reported or estimated usage.
-- **Wall-clock** (hard): the union of task-charged run intervals.
+- **Spend** (best-effort): `sum(runs.usage.costUsd) + sum(turns.usage.costUsd)` over the current
+  window's task-charged runs and turns, from reported or estimated usage.
+- **Wall time** (hard): from `windowStart` to `wallDeadline` (`windowStart` + the window's minutes).
+- Both count only the current window: runs in `tasks.budget.priorRunIds` and turns before
+  `windowStart` belong to earlier windows (01 `TaskBudget`).
 - **Who did what**: `actions.actor`, `verdict`, `status`, `steps`.
 - **What Sergeant saw and was told**: `turns.situation_ref`, `prompt_version`; **what a run was told**:
   `runs.brief_ref`.

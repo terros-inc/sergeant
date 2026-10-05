@@ -167,7 +167,8 @@ carry instructions aimed at Sergeant. A worker with a compromised context could 
   Gate verifies against recorded reports. A worker can say review is unnecessary when it was needed
   (honestly or not); that is the accepted cost of the review-need policy (06 §1), measured by the audit
   sample, narrowed by optional `alwaysReviewPaths`, and removed entirely where `mergePolicy: human`.
-- Budget grants and review waivers need an approver's comment.
+- Review waivers need an approver's comment. A fresh budget window needs a human's answer to a
+  Sergeant question (or a human review of the task's PR); reasoning cannot open one itself.
 
 ## 7. Redaction, logs, and Linear
 
@@ -194,8 +195,8 @@ misled:
 | Compromised | Can | Cannot |
 |---|---|---|
 | **Any run in the runner zone** (worker or reviewer) | read and write non-default branches and PRs in **every enrolled repository granted to any concurrent run** (it can read sibling runs' tokens); read that code; use dev/stage AWS within the permission boundary: create, change, or delete dev resources, read dev data, run up dev/stage cost; trigger CI and call paid engineering tools whose cost is outside Sergeant's model budget; keep using a token it already holds until it expires (up to an hour); copy the model credential it runs on, its task owner's, and use it outside Sergeant until its holder revokes it with the provider (§3a); run arbitrary code on the runner host as `sergeant-runner`; mislead reasoning through its report (including a false "review not required") | touch production; administer IAM, org, or billing; push or merge to a protected default branch; change workflow files; read control-plane credentials or the ledger; post to Linear; use any human's personal credentials other than the registered model credential it runs on (§3a) |
-| **Sergeant's reasoning** (prompt-injected) | start and cancel runs within the time and concurrency limits; post comments within rate limits; ask questions; create follow-ups within limits; record dispositions the Gate's evidence rules accept, including `not_required` on a worker's word; merge PRs in `mergePolicy: sergeant` repositories whose required checks are green; release tasks | merge red heads or heads with no recorded disposition; overtake a human comment or edit no turn has seen; exceed the wall-clock or concurrency limits; grant itself budget or waive review; touch production or change enrollment |
-| **A team member's Linear account** | delegate work, answer questions, steer tasks; if an approver, grant budget and waive review | anything a run cannot do |
+| **Sergeant's reasoning** (prompt-injected) | start and cancel runs within the time and concurrency limits; post comments within rate limits; ask questions; create follow-ups within limits; record dispositions the Gate's evidence rules accept, including `not_required` on a worker's word; merge PRs in `mergePolicy: sergeant` repositories whose required checks are green; release tasks | merge red heads or heads with no recorded disposition; overtake a human comment or edit no turn has seen; exceed the wall-clock or concurrency limits; open itself a fresh budget window or waive review; touch production or change enrollment |
+| **A team member's Linear account** | delegate work, answer questions (each answer to a Sergeant question opens a fresh budget window), steer tasks; if an approver, waive review | anything a run cannot do |
 
 Accepted explicitly: everything in the runner zone's "can" column, including a copied model credential (§3a); spend beyond the model budget through
 dev/stage resources, CI, and tools; and an occasional unreviewed merge where a worker's skip was wrong and

@@ -206,7 +206,7 @@ The arrows that matter:
 | **Runner adapter** | Process, session, container, or cloud-agent mechanics and cleanup; workspaces; caches; provider accounts; optional richer capabilities | Task decisions |
 | **Linear** | The durable brief; the human-visible history; delegation; relations and follow-ups; which PRs belong to the issue (attachments); Done, via GitHub automation | Sergeant's runtime bookkeeping |
 | **GitHub** | Code, branches, PRs, CI, required checks, rulesets (the hard merge boundary) | Task state |
-| **Humans** | Delegating; answering; granting budget; cancelling; merging where a repo requires it; enrolling repos; configuring installations | Day-to-day supervision |
+| **Humans** | Delegating; answering (an answer opens a fresh budget window); cancelling; merging where a repo requires it; enrolling repos; configuring installations | Day-to-day supervision |
 
 ## 7. What is AI and what is deterministic
 

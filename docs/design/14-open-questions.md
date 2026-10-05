@@ -47,14 +47,14 @@ Captain Question.
 | Was | Answer | Why it is settled |
 |---|---|---|
 | Who merges where merging to main deploys to production | Per-repository `mergePolicy`: `human` for repositories whose default branch auto-deploys to production, `sergeant` elsewhere | The hard boundary excludes production authority; a merge that deploys is production authority |
-| Who may delegate, answer, grant budget, waive review | Anyone in the allowed Linear teams delegates and answers; configured approvers grant budget, waive review, and receive escalations | Budget and waivers are the human authorities the Gate relies on; everything else follows "Linear is the human surface" |
+| Who may delegate, answer, grant budget, waive review | Anyone in the allowed Linear teams delegates and answers; configured approvers waive review and receive escalations. Superseded for budget by TECH-5059: any human answer to a Sergeant question opens a fresh budget window, with no grant or approver check | Waivers are the human authority the Gate relies on; everything else follows "Linear is the human surface" |
 | Reasoning runtime | A plain model tool-use loop with Sergeant-defined tools and Sergeant-managed sessions, behind a thin interface so the model is swappable; a provider agent SDK only if it honors 03 §8's contract | Small auditable tool surface; provider neutrality (P12) |
 | Separating runners from the control plane | One shared runner zone: a separate OS user with the metadata endpoint blocked on the host, a container on the laptop; no per-run isolation | The captain's posture: per-task isolation is not a requirement; the control-plane boundary is |
 | Auto-delegating follow-ups | Per-installation setting: on for Personal (depth 1), off for Terros at first | The captain's UNF-625 direction ("don't make a human do bookkeeping"), bounded for fan-out |
 | Workflow-file changes | The worker App has no `workflows` permission; a needed CI change ends `blocked_by_environment` for a human | Editing a PR workflow could expose repository secrets, a production-boundary risk |
 | Paid evals (S1's persona-eval executor) | No executor; an eval-only credential, if needed, is ordinary runner-zone authority, with evidence integrity as a reviewer check | The posture: no capability mediation without a concrete material failure |
 | The laptop trial's identity | Its own installation identity (second region or account), its own Linear agent user and GitHub Apps, runs in a container | Consequences of ADR-0040 and the personal-credential boundary, not a product choice |
-| "About 2 h of task wall time" | Active time: the union of time with a run going; waiting for humans or CI does not count | S1's active budget did the same; calendar time would exhaust a task waiting on a human |
+| "About 2 h of task wall time" | Superseded by TECH-5059: wall time since the budget window opened (01 `BudgetStatus.wallDeadline`) | A human answer opens a fresh window, so a task waiting on a human gets its time back; waiting on a human merge or re-review asks nothing (07 §6) |
 
 ## Captain Questions
 
