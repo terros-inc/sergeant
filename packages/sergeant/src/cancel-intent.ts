@@ -4,7 +4,8 @@ import { ClosedPullRequest, RunId } from "@terros/sergeant-contracts";
 import { z } from "zod";
 
 // A task's recorded stop (cancel.ts): `cancel.json` in the task's directory, written before anything
-// changes and removed only once the stop is done.
+// changes and removed only once the stop is done. Its end, with the PRs it closed, is kept after it as
+// `stopped.json`, so `sgt task show` still lists them (TECH-5006).
 
 const CancelIntent = z.object({
   /** Why the task stopped, as the end of a sentence: "the issue was moved to Backlog". */
@@ -46,6 +47,24 @@ export async function writeIntent(dir: string, intent: z.input<typeof CancelInte
   await mkdir(dir, { recursive: true });
   await writeFile(intentFile(dir), JSON.stringify(intent, null, 2));
 }
+
+/** The task's last finished stop: kept once `cancel.json` is removed, replaced by the next one. */
+const StopRecord = z.object({
+  reason: z.string(),
+  /** When the stop was recorded. */
+  at: z.iso.datetime(),
+  closed: z.array(ClosedPullRequest),
+});
+export type StopRecord = z.infer<typeof StopRecord>;
+
+const stopRecordFile = (dir: string) => join(dir, "stopped.json");
+
+export async function readStopRecord(dir: string): Promise<StopRecord | undefined> {
+  const raw = await readFile(stopRecordFile(dir), "utf8").catch(() => undefined);
+  return raw === undefined ? undefined : StopRecord.parse(JSON.parse(raw));
+}
+
+export const writeStopRecord = (dir: string, record: StopRecord) => writeFile(stopRecordFile(dir), JSON.stringify(record, null, 2));
 
 /** A handoff's record of the stopped owner's delegation (TECH-5179). */
 export type Handoff = NonNullable<CancelIntent["handoff"]>;

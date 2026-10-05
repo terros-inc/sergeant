@@ -65,6 +65,10 @@ export type RunSummary = z.infer<typeof RunSummary>;
 export const TaskList = z.object({ tasks: z.array(TaskSummary) });
 export type TaskList = z.infer<typeof TaskList>;
 
+/** A worker PR a task cancel closed. */
+export const ClosedPullRequest = z.object({ repo: RepoSlug, number: z.number().int().positive(), url: z.url() });
+export type ClosedPullRequest = z.infer<typeof ClosedPullRequest>;
+
 export const TaskDetail = z.object({
   task: TaskSummary,
   /** The issue as Linear has it now, or why it could not be read. */
@@ -76,6 +80,11 @@ export const TaskDetail = z.object({
   runs: z.array(RunSummary),
   recentTurns: z.array(z.object({ at: z.string(), summary: z.string(), outcomes: z.array(z.string()) })),
   followups: z.array(FiledFollowup),
+  /**
+   * The task's last stop (TECH-5006): under way (`done` false) or finished, and the worker PRs it closed,
+   * those closed after a `sgt task cancel` answered included. Kept once it finishes, until a later stop.
+   */
+  stop: z.object({ reason: z.string(), at: z.string(), done: z.boolean(), closedPullRequests: z.array(ClosedPullRequest) }).optional(),
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
 
@@ -95,9 +104,6 @@ export const CancelTaskRequest = z.strictObject({
   /** Names this request: a retry with the same id posts no second comment. */
   requestId: z.string().regex(/^[\w-]{1,64}$/).optional(),
 });
-/** A worker PR a task cancel closed. */
-export const ClosedPullRequest = z.object({ repo: RepoSlug, number: z.number().int().positive(), url: z.url() });
-export type ClosedPullRequest = z.infer<typeof ClosedPullRequest>;
 export const CancelTaskResponse = z.object({
   ref: TaskRef,
   /** This request removed Sergeant's delegation. */

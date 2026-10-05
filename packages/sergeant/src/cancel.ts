@@ -3,7 +3,7 @@ import { readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { checkDelegation, STOP_STATE_TYPES, type ClosedPullRequest, type Conversation, type PullRequestFacts, type PullRequestRef, type RepoSlug, type RunId, type RunRecord, type TaskRef } from "@terros/sergeant-contracts";
 import { exists, postFeedbackComment } from "./after-merge.ts";
-import { intentFile, readIntent, writeIntent, type CancelIntent, type Handoff } from "./cancel-intent.ts";
+import { intentFile, readIntent, writeIntent, writeStopRecord, type CancelIntent, type Handoff } from "./cancel-intent.ts";
 import { handOff, handoffComment, stalledStopComment, stopComment } from "./cancel-linear.ts";
 import { costTotal, taskTurnCost } from "./cost.ts";
 import type { Ports } from "./execute.ts";
@@ -214,6 +214,8 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   await rename(join(dir, "state.json"), join(dir, `state.stopped-${intent.at.replace(/[:.]/g, "-")}.json`)).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "ENOENT") throw e;
   });
+  // TECH-5006: the PRs it closed outlive the intent, for `sgt task show`; rewritten whole, so a repeat is harmless.
+  await writeStopRecord(dir, { reason: intent.reason, at: intent.at, closed: intent.closed });
   await rm(intentFile(dir), { force: true });
   return { stopping: [], closedPullRequests: intent.closed };
 }
