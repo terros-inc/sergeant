@@ -138,12 +138,12 @@ export function windowEnd(content: string): string | undefined {
   return until && !Number.isNaN(Date.parse(until)) ? until : undefined;
 }
 
-/** The identifiers in a retro document's "Issues filed" section: what the previous retro filed. */
+/** The identifiers linked by a retro document's "Issues filed" list items, not those in their titles: what the previous retro filed. */
 export function filedIn(content: string): string[] {
   const start = content.indexOf(FILED_HEADING);
   if (start < 0) return [];
   const section = content.slice(start + FILED_HEADING.length).split(/\n##? /)[0] ?? "";
-  return [...new Set(section.match(/\b[A-Z][A-Z0-9]*-\d+\b/g) ?? [])];
+  return [...new Set([...section.matchAll(/^- \[([A-Z][A-Z0-9]*-\d+)\]\(/gm)].map((m) => m[1] ?? ""))];
 }
 
 const byCreated = (a: RetroFiledIssue, b: RetroFiledIssue) => a.createdAt.localeCompare(b.createdAt);

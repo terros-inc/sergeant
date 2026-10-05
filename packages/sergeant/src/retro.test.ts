@@ -79,7 +79,7 @@ test("a retro is due at about ten tasks with new feedback, never sooner unless a
 });
 
 test("two weeks after the last retro it runs on anything new, and not on nothing", async () => {
-  const content = "From 2026-10-01T09:00:00.000Z to 2026-10-05T09:00:00.000Z: 10 tasks with Sergeant feedback, 1 issues Sergeant filed.\n\n## Issues filed\n\n- [TECH-50](https://linear.app/t/issue/TECH-50) Cache CI\n- [TECH-51](https://linear.app/t/issue/TECH-51) Lint rule";
+  const content = "From 2026-10-01T09:00:00.000Z to 2026-10-05T09:00:00.000Z: 10 tasks with Sergeant feedback, 1 issues Sergeant filed.\n\n## Issues filed\n\n- [TECH-50](https://linear.app/t/issue/TECH-50) Cache CI like TECH-7 does\n- [TECH-51](https://linear.app/t/issue/TECH-51) Lint rule";
   const last = { title: "Sergeant retro 2026-10-05", content, createdAt: "2026-10-05T09:03:00.000Z" };
   const nothing = fixture({ last });
   expect(await runRetro(await options(), nothing.deps, { manual: false })).toBeUndefined();

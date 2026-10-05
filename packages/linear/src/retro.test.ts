@@ -13,9 +13,11 @@ test("feedbackTasks keeps only Sergeant's feedback comments, across pages", asyn
     { nodes: [{ identifier: "TECH-2", title: "Two", url: "https://linear.app/t/issue/TECH-2", comments: { nodes: [comment("**Sergeant feedback:** quoted by a human", "human")] } }], pageInfo: { hasNextPage: false, endCursor: null } },
   ];
   const seen: Req["variables"][] = [];
+  let query = "";
   const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
-    const { variables } = JSON.parse(String(init?.body)) as Req;
+    const { variables, ...req } = JSON.parse(String(init?.body)) as Req;
     seen.push(variables);
+    query = req.query;
     return Response.json({ data: { issues: pages[variables.after ? 1 : 0] } });
   };
   const linear = createLinearPort({ apiKey: "test", sergeantUserIds: ["agent"], fetch });
@@ -26,6 +28,17 @@ test("feedbackTasks keeps only Sergeant's feedback comments, across pages", asyn
     { label: "sergeant-feedback", since: "2026-10-05T00:00:00.000Z", after: null },
     { label: "sergeant-feedback", since: "2026-10-05T00:00:00.000Z", after: "c1" },
   ]);
+  // A page must stay under Linear's 10,000-point query cost (TECH-5066): about 2.3 points a comment.
+  const [issues, comments] = [...query.matchAll(/first: (\d+)/g)].map((m) => Number(m[1]));
+  expect((issues ?? 0) * (comments ?? 0) * 2.3).toBeLessThan(5_000);
+});
+
+test("lastRetro is the newest document titled exactly 'Sergeant retro YYYY-MM-DD'", async () => {
+  const doc = (title: string, createdAt: string) => ({ id: title, title, content: "", createdAt });
+  const nodes = [doc("Sergeant retro 2026-10-01", "2026-10-01T09:00:00.000Z"), doc("Sergeant retro notes", "2026-10-03T00:00:00.000Z"), doc("Sergeant retro 2026-10-01 (draft)", "2026-10-04T00:00:00.000Z")];
+  const fetch = async () => Response.json({ data: { documents: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } });
+  const linear = createLinearPort({ apiKey: "test", sergeantUserIds: ["agent"], fetch });
+  expect(await linear.retro.lastRetro("project-1")).toEqual({ title: "Sergeant retro 2026-10-01", content: "", createdAt: "2026-10-01T09:00:00.000Z" });
 });
 
 test("fileIssue files in the team's first Backlog state and the project, unassigned, and once per key", async () => {

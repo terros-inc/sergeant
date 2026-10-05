@@ -8,6 +8,8 @@ import { workflowState } from "./queries.ts";
 
 /** Starts the title of every retro document; the newest one in the project is the last retro. */
 export const RETRO_TITLE = "Sergeant retro";
+/** A retro document's whole title, `Sergeant retro YYYY-MM-DD`; a human's document that only starts the same is not one. */
+const retroTitle = new RegExp(`^${RETRO_TITLE} \\d{4}-\\d{2}-\\d{2}$`);
 
 const pageInfo = z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() });
 const instant = z.iso.datetime({ offset: true });
@@ -25,10 +27,13 @@ const retroDocuments = `
 const retroDocumentsPage = z.object({
   documents: z.object({ nodes: z.array(z.object({ id: z.string(), title: z.string(), content: z.string().nullable(), createdAt: instant })), pageInfo }),
 });
+// The nested comments multiply the cost (queries.ts, TECH-5066): a comment costs about 2.3 points, so an issue
+// with 50 comments about 118 and a page of 20 about 2,400 of the 10,000 points a query may cost. 50 issues
+// with 100 comments each would have cost about 11,600, which Linear rejects.
 const feedbackIssues = `
   query SergeantRetroFeedback($label: String!, $since: DateTimeOrDuration!, $after: String) {
-    issues(first: 50, after: $after, filter: { labels: { some: { name: { eqIgnoreCase: $label } } }, updatedAt: { gt: $since } }) {
-      nodes { identifier title url comments(first: 100, filter: { createdAt: { gt: $since } }) { nodes { body createdAt user { id } } } }
+    issues(first: 20, after: $after, filter: { labels: { some: { name: { eqIgnoreCase: $label } } }, updatedAt: { gt: $since } }) {
+      nodes { identifier title url comments(first: 50, filter: { createdAt: { gt: $since } }) { nodes { body createdAt user { id } } } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -90,7 +95,7 @@ export function retroLinear({ request, createOnce, sergeantUsers }: Pick<Followu
     /** The project's newest retro document, or null before the first retro. */
     async lastRetro(projectId: string): Promise<{ title: string; content: string; createdAt: string } | null> {
       const docs = await paged(async (after) => (await request(retroDocuments, { project: projectId, title: RETRO_TITLE, after }, retroDocumentsPage)).documents);
-      const last = docs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      const last = docs.filter((d) => retroTitle.test(d.title)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       return last ? { title: last.title, content: last.content ?? "", createdAt: last.createdAt } : null;
     },
 
