@@ -199,6 +199,28 @@ test("serve's own changes keep the version it has; a change made in AWS stays on
   expect(await enrollment({ repositories: [], configs: {}, parameter: undefined, reach: async (r) => r, log: () => {} }).versions()).toBeNull();
 });
 
+// TECH-5208: someone changes the parameter in AWS between serve's read and its write, which then lands
+// two versions on. Serve must not take that version as its own, or status would hide the other change.
+test("serve's own change keeps the version it has only when no other write came between its read and its write", async () => {
+  let between = false;
+  const { call, parameter, enrolled } = await serve({
+    write: () => {
+      if (between) {
+        parameter.value = JSON.stringify({ ...JSON.parse(parameter.value), budget: { usd: 20 } });
+        parameter.version += 1;
+      }
+      return "ok";
+    },
+  });
+  await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two" });
+  expect(await enrolled.versions()).toEqual({ loaded: 2, current: 2 });
+
+  between = true;
+  expect(await call("POST", "/v1/repositories/remove", "grace", { repo: "terros-inc/two" })).toMatchObject({ status: 200, json: { changed: true } });
+  expect(parameter.version).toBe(4);
+  expect(await enrolled.versions()).toEqual({ loaded: 2, current: 4 });
+});
+
 // TECH-5209: `sgt admin restart` and `update` read the status every 5 seconds for up to 45 minutes. A
 // slow or failing AWS must neither run the AWS CLI on every poll nor add a serve.log line to each.
 test("the version now is read at most once a while, and a failing read is logged once until one succeeds", async () => {
