@@ -59,12 +59,12 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      Apps reach it; serve takes it at once, no host update
   admin repo remove <owner/name>     an approver's removal: Sergeant stops working in it at once
 
-The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host, or the hosted
-one through an SSM port-forward). Each API URL has its own login. --json prints JSON for scripts:
-the API's answer for most commands, but {"report"} (the Markdown) for run report, {"api","signedOut"}
-for logout, {"version"} for update and --version, {"request","outcome"} for admin restart and admin
-update, and errors as {"error":{"code","message"}}. -v/--version prints Sergeant's version (from git)
-and exits without an API call.`;
+The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host); the hosted API
+is the installation's HTTPS endpoint, https://<hostname> (README.md). Each API URL has its own
+login. --json prints JSON for scripts: the API's answer for most commands, but {"report"} (the
+Markdown) for run report, {"api","signedOut"} for logout, {"version"} for update and --version,
+{"request","outcome"} for admin restart and admin update, and errors as {"error":{"code","message"}}.
+-v/--version prints Sergeant's version (from git) and exits without an API call.`;
 
 // Each command group has its own module (cli-tasks.ts, cli-runs.ts, cli-accounts.ts, cli-admin.ts,
 // cli-repos.ts) over the shared API-call plumbing in cli-call.ts; signing in, out, updating, and retro are here.
