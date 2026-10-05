@@ -153,6 +153,10 @@ test("a persistent 405 gets one re-check, one handoff, and no more turns", async
   expect(f.attempts()).toBe(2);
   expect(f.turns()).toBe(2);
   expect(f.handoffs()).toEqual([{ issueId: "i1", key: `merge-handoff:i1:${repo}#7:${head}`, body: expect.stringContaining("Ready for a human to merge") }]);
+  // TECH-5090: no policy blocked this merge, so the handoff must not say so.
+  const body = f.handoffs()[0]?.body;
+  expect(body).toContain("Sergeant's merge failed twice with nothing changing in between: GitHub 405: Pull Request is not mergeable");
+  expect(body).not.toMatch(/GitHub refused|This repository needs a human/);
 });
 
 test("a fact change after the handoff starts fresh and can merge", async () => {

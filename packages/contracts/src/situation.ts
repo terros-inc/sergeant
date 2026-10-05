@@ -20,8 +20,10 @@ export const RefusedMerge = z.object({
   headSha: Sha,
   /** The live revision the refused merge was checked against. */
   conversationRevision: ConversationRevision,
-  /** GitHub's own words. */
+  /** GitHub's own words, or the error of a failed merge call. */
   reason: z.string(),
+  /** The merge call failed (a network error, a temporary 405) rather than GitHub refusing it by policy. */
+  temporary: z.literal(true).optional(),
   at: z.iso.datetime({ offset: true }),
 });
 export type RefusedMerge = z.infer<typeof RefusedMerge>;

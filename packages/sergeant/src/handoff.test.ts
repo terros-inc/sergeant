@@ -132,5 +132,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
   expect(handoffs).toEqual([{ issueId: "i1", key: `merge-handoff:i1:${repo}#7:${head}`, body: expect.stringContaining("Ready for a human to merge") }]);
   expect(handoffs[0]?.body).toContain(pr.url);
   expect(handoffs[0]?.body).toContain(head);
+  expect(handoffs[0]?.body).toContain("GitHub refused Sergeant's merge: Waiting on code owner review from terros-inc/owners.");
+  expect(handoffs[0]?.body).toContain("This repository needs a human to merge it.");
   expect(comments.map((c) => c.key.split(":")[0])).toEqual(["merge-handoff", "outcome"]);
 });
