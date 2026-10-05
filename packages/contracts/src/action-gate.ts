@@ -74,6 +74,34 @@ export function checkStart(
   return allow;
 }
 
+/**
+ * TECH-5232: may Sergeant close the issue itself, as Done or Canceled, because the task's own
+ * verification shows nothing to change? Only while the issue is delegated to Sergeant and not stopped
+ * (A1, A2), with no PR in the task, linked to the issue or reported by any run (C1), with evidence
+ * (C2), after a worker finished and reported its verification and with no run still going (C3), and
+ * decided on the live conversation, since closing ends the task (C4). Whether the evidence shows
+ * nothing to change is reasoning's judgment, never this check's.
+ */
+export function checkClose(
+  action: Extract<ProposedAction, { kind: "close_issue" }>,
+  /** `issue` and `liveRevision` come from one live Linear read made for this close. */
+  facts: { issue: Conversation["issue"]; agentUserId: string; runs: RunRecord[]; turnRevision: string; liveRevision: string },
+): GateVerdict {
+  const live = checkLive(facts.issue, facts.agentUserId);
+  if (!live.allowed) return live;
+  const reported = facts.runs.flatMap((r) => (r.role === "worker" ? (r.report?.pullRequests ?? []) : []));
+  const prs = [...new Set([...facts.issue.linkedPullRequests, ...reported].map((p) => `${p.repo}#${p.number}`))];
+  if (prs.length > 0) return deny("C1", `the task has PRs (${prs.join(", ")}); a human closes the issue or they merge`);
+  if (!action.evidence.trim()) return deny("C2", "no evidence to post with the close");
+  const running = facts.runs.filter((r) => r.status === "running");
+  if (running.length > 0) return deny("C3", `runs still active: ${running.map((r) => `${r.role} ${r.runId}`).join(", ")}`);
+  if (!facts.runs.some((r) => r.role === "worker" && r.status === "succeeded" && r.report)) {
+    return deny("C3", "no worker has finished and reported its verification");
+  }
+  if (facts.liveRevision !== facts.turnRevision) return deny("C4", "the conversation changed since this turn's Situation Report; the next turn reads it");
+  return allow;
+}
+
 /** G3/S1: steering goes only to this task's running worker. */
 export function checkSend(action: Extract<ProposedAction, { kind: "send_run" }>, facts: { runs: RunRecord[] }): GateVerdict {
   const run = facts.runs.find((r) => r.runId === action.runId);

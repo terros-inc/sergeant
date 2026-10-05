@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   checkBudget,
+  checkClose,
   checkLive,
   checkMayMerge,
   checkSend,
@@ -217,6 +218,20 @@ export async function execute(action: ProposedAction, situation: SituationReport
           return denied({ rule: "Q2", reason: "the conversation changed since this turn's Situation Report; the next turn reads it" });
         }
         return { action, status: "done", result: {} };
+      }
+      case "close_issue": {
+        // No effect here: like an accept, the loop saves the ending with the turn and then replays it
+        // (accepted.ts), posting the evidence and closing the issue (TECH-5232).
+        const live = await ports.linear.readConversation(conversation.issue.id);
+        const verdict = checkClose(action, {
+          issue: live.issue,
+          agentUserId: ports.agentUserId,
+          runs,
+          turnRevision: conversationRevision(conversation),
+          liveRevision: conversationRevision(live),
+        });
+        if (!verdict.allowed) return denied(verdict);
+        return { action, status: "done", result: { state: action.state } };
       }
       case "create_followup": {
         const filed = situation.followups.find((f) => f.key === action.key);

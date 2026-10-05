@@ -236,7 +236,12 @@ accepting reply, so a retried turn posts no second one. Gate rule Q2 refuses it 
 unless the live conversation is still the one reasoning read, so a reply posted while it reasoned is
 read by the next turn instead. An `accepted.json` marker keeps intake from starting the issue afresh
 while it stays delegated and in Todo; moving the issue out of Todo (or undelegating it, or
-`sgt task wake`) clears it, so back in Todo it starts a fresh task, as after a stop. A task
+`sgt task wake`) clears it, so back in Todo it starts a fresh task, as after a stop. When a
+worker's verification shows nothing to change and the task opened no PR, reasoning proposes
+`close_issue` instead of asking (TECH-5232): the same ending posts its evidence in one comment and
+moves the issue to Done (main already covers it) or Canceled (obsolete), and the loop ends `accepted`;
+Gate rules C1–C4 refuse it with any PR in the task, without evidence, before a worker finished, or once
+the conversation changed. A task
 that runs away in its fresh window is stopped at that window's end and asked once more. The outcome comment after a merge is the one
 effect B1 does not hold back: it reports a merge that already happened, and withholding it would hide
 the merge from the human. A run's id is saved before the runner starts it, so a crash in between still

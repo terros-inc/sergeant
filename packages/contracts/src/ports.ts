@@ -80,6 +80,11 @@ export interface LinearPort {
   moveIssueToTodo?(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
   /** Removes the issue's delegate. Idempotent. */
   undelegate?(issueId: string): Promise<void>;
+  /**
+   * TECH-5232: moves the issue to its team's first `completed` (`done`) or `canceled` state, unless it
+   * is already completed or canceled, so a replay, or a state a human chose since, changes nothing.
+   */
+  closeIssue?(issueId: string, as: "done" | "canceled"): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
 }
 
 export interface GitHubPort {

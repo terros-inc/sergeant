@@ -66,6 +66,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   /** Removes the issue's delegate: a human's cancel (`sgt task cancel`) or a handoff. Idempotent. */
   undelegate(issueId: string): Promise<void>;
   moveIssueToTodo(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
+  closeIssue: NonNullable<LinearPort["closeIssue"]>;
   addLabel: NonNullable<LinearPort["addLabel"]>;
   findFollowupIssue: NonNullable<LinearPort["findFollowupIssue"]>;
   /** The retro's reads and writes (TECH-5187, retro.ts). */
@@ -173,6 +174,18 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
         .filter((s) => s.type === "unstarted")
         .sort((a, b) => a.position - b.position)[0];
       if (!target) return { moved: false };
+      const { issueUpdate } = await request(moveState, { id: issueId, stateId: target.id }, z.object({ issueUpdate: z.object({ success: z.boolean() }) }));
+      if (!issueUpdate.success) throw new Error("Linear issueUpdate did not succeed");
+      return { moved: true, from: issue.state.name, to: target.name };
+    },
+
+    async closeIssue(issueId, as) {
+      const { issue } = await request(issueWorkflow, { id: issueId }, issueWorkflowShape);
+      if (!issue) throw new Error(`Linear issue not found: ${issueId}`);
+      if (issue.state.type === "completed" || issue.state.type === "canceled") return { moved: false };
+      const type = as === "done" ? "completed" : "canceled";
+      const target = issue.team.states.nodes.filter((s) => s.type === type).sort((a, b) => a.position - b.position)[0];
+      if (!target) throw new Error(`the issue's team has no ${type} state`);
       const { issueUpdate } = await request(moveState, { id: issueId, stateId: target.id }, z.object({ issueUpdate: z.object({ success: z.boolean() }) }));
       if (!issueUpdate.success) throw new Error("Linear issueUpdate did not succeed");
       return { moved: true, from: issue.state.name, to: target.name };
