@@ -35,7 +35,8 @@ export function mergedOf(
  * One pass of the loop once the closing PR merged. Post-merge effects and an audit reviewer are task
  * work too. A resumed task that gave up its slot while waiting must be readmitted before it can post,
  * draw, or start that reviewer; until then this returns nothing and the loop waits a poll. Once both
- * are done, observing completion and waiting on a running audit need no slot (TECH-5127).
+ * are done, observing completion and waiting on a running audit need no slot (TECH-5127): the wait
+ * keeps a slot it holds only for the grace from the merge (TECH-5104).
  */
 export async function driveMerged(
   merged: Merged,
@@ -229,6 +230,9 @@ export async function observeCompletion(
     if (issue.stateType === "canceled") return { outcome: "merged_not_done", detail, canceled: true };
     if (Date.now() > deadline) return { outcome: "merged_not_done", detail };
     if (opts.signal?.aborted) return { outcome: "stopped", detail };
+    // A wait on no question (TECH-5015, TECH-5104): the slot is kept for the grace from the merge, then
+    // quietly freed while the poll goes on, so a grace shorter than this wait still bounds it.
+    opts.slot?.waiting(Date.parse(merged.at));
     await pause(Math.min(15_000, (opts.pollSeconds ?? 60) * 1000), opts.signal);
   }
 }
