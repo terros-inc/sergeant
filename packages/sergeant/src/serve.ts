@@ -27,6 +27,7 @@ import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
 import { linearCallers } from "./auth.ts";
 import { connect, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { decimalFlag, integerFlag } from "./cli-numbers.ts";
 import { appsReach, configParameter, enrolledIn, enrollment } from "./enrollment.ts";
 import { startService } from "./service.ts";
 
@@ -180,13 +181,11 @@ async function installedVersion(file: string): Promise<number | undefined> {
 }
 
 function count(value: string, flag: string, min: number): number {
-  const n = Number(value);
-  return Number.isInteger(n) && n >= min ? n : fail(`${flag} must be an integer of at least ${min}`);
+  return integerFlag(value, min) ?? fail(`${flag} must be a decimal integer of at least ${min}`);
 }
 
 function amount(value: string, flag: string, min: number): number {
-  const n = Number(value);
-  return Number.isFinite(n) && n >= min ? n : fail(`${flag} must be a number of at least ${min}`);
+  return decimalFlag(value, min) ?? fail(`${flag} must be a decimal number of at least ${min}`);
 }
 
 function fail(message: string): never {
