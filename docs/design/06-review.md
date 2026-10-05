@@ -126,9 +126,10 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 
 The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
 
-If a report has a `not_met` or `contradicted` verdict without a matching finding, the parser adds one
-(`acceptance-<n>`, 01) so it can be fixed, disputed, or answered like any other finding. That is a parse
-step, not a criterion database.
+01 designs a parse step that adds an `acceptance-<n>` finding when a report has a `not_met` or
+`contradicted` verdict without a matching finding. It is not built yet: `ReviewReport`
+(`packages/contracts/src/runs.ts`) carries no structured requirement verdicts, so the rulings live only
+in the report's prose and the reviewer's own `acceptance` findings are what the disposition reads.
 
 ## 5. Separate reviewer runs and worker subagents
 
