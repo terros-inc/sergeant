@@ -16,9 +16,9 @@ import type { ServiceDeps } from "./service.ts";
 // Done without Sergeant's merge, its delegation removed, or `sgt task cancel`. It is an ordered close
 // that survives a stop or crash (07 §8): its intent is on disk before anything changes, then every
 // recorded run not confirmed stopped is canceled through the runner, and only once each one is
-// stopped, so nothing can push to them any more, the task's open PRs are closed, the stop is said once
-// on the issue, and the task's `state.json` is set aside. The intent is removed only once all of that
-// is done; until then the loop or `serve` drives it again, at every intake too, its startup included,
+// stopped, so nothing can push to them any more, the task's open PRs are closed and their `sergeant/`
+// branches deleted (TECH-5230), the stop is said once on the issue, and the task's `state.json` is set
+// aside. The intent is removed only once all of that is done; until then the loop or `serve` drives it again, at every intake too, its startup included,
 // whatever the issue's delegation or state is by then. A run whose status cannot be read is unknown
 // and is canceled like a running one, never taken as stopped (04 §6). The stop waits through the
 // existing grace, counted from the first failed read of its final report (TECH-5070, TECH-5107), then finishes with a visible warning if the report
@@ -203,6 +203,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     }
     await writeIntent(dir, intent);
     log(`${ref}: closed ${pr.url}`);
+    await deleteBranch(pr, deps, (line) => log(`${ref}: ${line}`));
   }
   if (!intent.handoff) await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: `${stopComment(intent, unreadablePastGrace)}\n\n${cost}` });
   // TECH-5186: an issue completed in Linear, still Sergeant's, without a recognized closing merge gets
@@ -227,6 +228,19 @@ async function statusRead(dir: string, intent: CancelIntent, runId: RunId): Prom
   intent.unconfirmedStarts = intent.unconfirmedStarts?.filter((id) => id !== runId);
   delete intent.unreadableSince[runId];
   await writeIntent(dir, intent);
+}
+
+/**
+ * Deletes a PR's `sergeant/` branch once Sergeant closed the PR (TECH-5230); the adapter keeps any
+ * branch outside that prefix, a fork's, or one another open PR uses. Only tidiness, so a failure is
+ * logged and the stop goes on; the close is recorded first, so it is not retried.
+ */
+async function deleteBranch(pr: PullRequestFacts, deps: Ports, log: (line: string) => void): Promise<void> {
+  if (!deps.github.deletePullRequestBranch) return;
+  await deps.github.deletePullRequestBranch({ repo: pr.repo, number: pr.number }).then(
+    (r) => log("deleted" in r ? `deleted branch ${r.deleted} of ${pr.url}` : `kept the branch of ${pr.url}: ${r.kept}`),
+    (e: Error) => log(`could not delete the branch of ${pr.url}: ${e.message}`),
+  );
 }
 
 /** One durable close effect per PR head: a retry may close a later head, never the same one twice. */

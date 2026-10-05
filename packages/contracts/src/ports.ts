@@ -88,6 +88,13 @@ export interface GitHubPort {
   mergePullRequest(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<{ mergedSha: Sha } | { refused: string }>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
+  /**
+   * Deletes a PR's head branch once the PR is closed without merging (TECH-5230), only if it is a
+   * `sergeant/` branch in the PR's own repository (never a fork's), no other open PR is from or onto
+   * it, and its tip is still the PR's head. Otherwise it is kept and says why. Optional, like the
+   * Linear port's later methods, so a fake without it deletes nothing.
+   */
+  deletePullRequestBranch?(req: { repo: RepoSlug; number: number }): Promise<{ deleted: string } | { kept: string }>;
 }
 
 /**

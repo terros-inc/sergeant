@@ -1,7 +1,7 @@
 import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
-import { branchRules, checkRun, checkRuns, commitStatus, mergeResponse, protection, pullRequest, repositoryConfig, requiredRule } from "./schemas.ts";
+import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
 type ObservedCheck = { name: string; appId?: number; state: Exclude<CheckState, "missing"> };
@@ -26,6 +26,9 @@ export type GitHubAdapterOptions = {
   fetch?: typeof globalThis.fetch;
 };
 
+/** The worker branch convention (08 §3): Sergeant deletes no branch outside it. */
+const BRANCH_PREFIX = "sergeant/";
+
 class GitHubHttpError extends Error {
   readonly status: number;
   /** GitHub's `message`, when the response carried one. */
@@ -47,7 +50,7 @@ const checkRunState = (run: z.infer<typeof checkRun>): ObservedCheck["state"] =>
 const statusState = (state: z.infer<typeof commitStatus>["state"]): ObservedCheck["state"] =>
   state === "success" ? "passed" : state === "pending" ? "pending" : "failed";
 
-/** The control plane's live GitHub surface: fact reads, the SHA-guarded merge, and a canceled task's PR close. */
+/** The control plane's live GitHub surface: fact reads, the SHA-guarded merge, and a canceled task's PR close and branch delete. */
 export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
   const fetchFn = options.fetch ?? globalThis.fetch;
   const apiUrl = (options.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
@@ -261,6 +264,31 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         await request(`/repos/${repo}/issues/${number}/comments`, { ...json, body: JSON.stringify({ body: comment }) });
       }
       await request(`/repos/${repo}/pulls/${number}`, { ...json, method: "PATCH", body: JSON.stringify({ state: "closed" }) });
+    },
+
+    async deletePullRequestBranch({ repo, number }) {
+      configFor(repo);
+      const live = pullRequestHead.parse(await request(`/repos/${repo}/pulls/${number}`));
+      const { ref, sha } = live.head;
+      if (live.state !== "closed" || live.merged_at) return { kept: `#${number} is not closed without merging` };
+      if (live.head.repo?.full_name !== repo) return { kept: `#${number}'s head is not a branch in ${repo}` };
+      if (!ref.startsWith(BRANCH_PREFIX)) return { kept: `${ref} is not a ${BRANCH_PREFIX} branch` };
+      // An open PR from or onto the branch still uses it; GitHub would close one based on it.
+      const owner = repo.split("/")[0];
+      const using = await Promise.all(
+        [`head=${encodeURIComponent(`${owner}:${ref}`)}`, `base=${encodeURIComponent(ref)}`].map(async (filter) =>
+          pullRequestList.parse(await request(`/repos/${repo}/pulls?state=open&${filter}&per_page=100`)),
+        ),
+      );
+      const open = using.flat().filter((p) => p.number !== number);
+      if (open.length > 0) return { kept: `${ref} is used by open PR #${open[0]?.number}` };
+      const path = `/repos/${repo}/git/refs/heads/${ref.split("/").map(encodeURIComponent).join("/")}`;
+      const tip = await request(path.replace("/git/refs/", "/git/ref/"), {}, { allowStatuses: [404] });
+      if (!tip) return { kept: `${ref} is already deleted` };
+      // A commit pushed after the close is not the PR's, and deleting the branch would hide it.
+      if (gitRef.parse(tip).object.sha !== sha) return { kept: `${ref} moved past #${number}'s head` };
+      await request(path, { method: "DELETE" }, { allowStatuses: [204] });
+      return { deleted: ref };
     },
   };
 }
