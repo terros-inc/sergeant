@@ -484,11 +484,16 @@ test("admin update waits through serve's restart for the host's outcome, and a f
   expect(stale).toMatchObject({ code: 0, out: `unchanged: ${unchanged.message}\nversion 4 in AWS, but serve has version 3: the installation config changed since serve started, so run \`sgt admin restart\` to reread it\n` });
   statuses = [status(unchanged, null, { loaded: 4, current: 4 }), status(unchanged, null, { loaded: 4, current: 4 })];
   expect((await sgtWith(noWait, api, "admin", "update", "v2.1.0")).out).toBe(`unchanged: ${unchanged.message}\n`);
+
+  // TECH-5209: a serve older than TECH-5205 sends no config; this sgt still reads its outcome rather than waiting 45 minutes.
+  const { config: _, ...old } = status(unchanged).json;
+  statuses = [{ json: old }, { json: old }];
+  expect(await sgtWith(noWait, api, "admin", "update", "v2.1.0")).toMatchObject({ code: 0, out: `unchanged: ${unchanged.message}\n` });
 });
 
 test("admin status says when the installation config changed since serve started", async () => {
   const status = (config: object | null) => ({ json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T09:00:00.000Z" }, release: null, pending: null, last: null, config } });
-  let next = status({ loaded: 3, current: 4 });
+  let next: { json: object } = status({ loaded: 3, current: 4 });
   const { api } = await fakeApi({
     get "GET /v1/admin/status"() {
       return next;
@@ -501,4 +506,11 @@ test("admin status says when the installation config changed since serve started
   expect((await sgt(api, "admin", "status")).out).toContain("config   version 4; serve cannot read the parameter now");
   next = status(null);
   expect((await sgt(api, "admin", "status")).out).not.toContain("config");
+  // TECH-5209: a serve older than TECH-5205 sends no config at all.
+  const { config: _, ...old } = status(null).json;
+  next = { json: old };
+  const older = await sgt(api, "admin", "status");
+  expect(older).toMatchObject({ code: 0, err: "" });
+  expect(older.out).toContain("last     no restart or update recorded");
+  expect(older.out).not.toContain("config");
 });

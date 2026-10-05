@@ -19,6 +19,15 @@ import { InstallationConfig, run } from "./config.ts";
 // TECH-5205: serve keeps the parameter's version it has, the one it started with and then each version
 // its own change wrote over the one it had, so `sgt admin status` can say when someone changed the
 // parameter in AWS since, which only a restart rereads.
+//
+// TECH-5209: `sgt admin restart` and `update` poll that status every 5 seconds for up to 45 minutes, so
+// the version now is read at most once every VERSION_MS, every read is cut off after READ_TIMEOUT_MS,
+// and a failing read is logged once, when it starts failing, not on every poll.
+
+/** How long `sgt admin status` may show the parameter's version now from an earlier read. */
+export const VERSION_MS = 30_000;
+/** How long a read of the parameter may take before the AWS CLI is stopped and the read fails. */
+export const READ_TIMEOUT_MS = 10_000;
 
 type RepoConfig = InstallationConfig["repositories"][string];
 export type MergeMethod = RepoConfig["mergeMethod"];
@@ -47,9 +56,8 @@ async function readConfig(parameter: ConfigParameter, log: (line: string) => voi
 
 /** An AWS CLI call whose failure is logged with only the CLI's own stderr: the error's message would quote its arguments. */
 async function aws<T>(call: Promise<T>, what: "read" | "write", log: (line: string) => void): Promise<T> {
-  return call.catch((e: { stderr?: unknown }) => {
-    const stderr = typeof e.stderr === "string" ? e.stderr.trim().split("\n").at(-1)?.slice(0, 300) : undefined;
-    log(`could not ${what} the installation-config parameter: ${stderr || "no error output"}`);
+  return call.catch((e: { stderr?: unknown; killed?: unknown }) => {
+    log(`could not ${what} the installation-config parameter: ${why(e)}`);
     // A failed write may still have been stored: only a retry, which takes what the parameter has, can tell.
     throw new Error(
       what === "read"
@@ -57,6 +65,13 @@ async function aws<T>(call: Promise<T>, what: "read" | "write", log: (line: stri
         : "Sergeant could not confirm its write of the installation-config parameter (serve.log says why): retry, and it takes whatever the parameter has",
     );
   });
+}
+
+/** The AWS CLI's last line of error output, or that it was stopped for taking too long. */
+function why(e: { stderr?: unknown; killed?: unknown }): string {
+  if (e.killed === true) return "the AWS CLI took too long and was stopped";
+  const stderr = typeof e.stderr === "string" ? e.stderr.trim().split("\n").at(-1)?.slice(0, 300) : undefined;
+  return stderr || "no error output";
 }
 
 export type Enrollment = ReturnType<typeof enrollment>;
@@ -73,10 +88,15 @@ export function enrollment(opts: {
   /** The repository's own `owner/name` once both GitHub Apps reach it; throws `EnrollmentRefused` otherwise. */
   reach: (repo: RepoSlug) => Promise<RepoSlug>;
   log: (line: string) => void;
+  now?: () => number;
 }) {
+  const now = opts.now ?? Date.now;
   // One change at a time, so two cannot overwrite each other's read-modify-write.
   let changes: Promise<unknown> = Promise.resolve();
   let loaded = opts.version;
+  // The parameter's version now, as last read (or being read), and whether reads are failing.
+  let current: { at: number; version: Promise<number | null> } | undefined;
+  let failing = false;
   const keyOf = (repositories: object, repo: string) => Object.keys(repositories).find((r) => r.toLowerCase() === repo.toLowerCase());
 
   /**
@@ -94,6 +114,7 @@ export function enrollment(opts: {
         const written = await aws(parameter.write(JSON.stringify(config, null, 2), what), "write", opts.log);
         // Over a version serve does not have, the write carries that version's other changes, which serve still lacks.
         if (version === loaded) loaded = written;
+        current = undefined;
       }
       for (const r of Object.keys(opts.configs)) delete opts.configs[r];
       Object.assign(opts.configs, next);
@@ -108,12 +129,20 @@ export function enrollment(opts: {
   return {
     /** The parameter's version serve has and its version now (contracts' AdminStatus `config`); null without the parameter. */
     async versions(): Promise<{ loaded: number; current: number | null } | null> {
-      if (!opts.parameter || loaded === undefined) return null;
-      const current = await aws(opts.parameter.read(), "read", opts.log).then(
-        (r) => r.version,
-        () => null,
-      );
-      return { loaded, current };
+      const parameter = opts.parameter;
+      if (!parameter || loaded === undefined) return null;
+      if (!current || now() - current.at >= VERSION_MS) {
+        const version = parameter.read().then(
+          (r) => ((failing = false), r.version),
+          (e: { stderr?: unknown; killed?: unknown }) => {
+            if (!failing) opts.log(`could not read the installation-config parameter: ${why(e)} (logged once until a read succeeds)`);
+            failing = true;
+            return null;
+          },
+        );
+        current = { at: now(), version };
+      }
+      return { loaded, current: await current.version };
     },
 
     list: () => Object.entries(opts.configs).map(([repo, c]) => ({ repo, mergeMethod: c.mergeMethod })),
@@ -173,11 +202,12 @@ export function appsReach(apps: Record<string, Pick<GitHubApp, "mint">>): (repo:
  * The installation-config SSM parameter, read and written with the host's role. The value goes to the
  * AWS CLI in a private temporary file, never on its command line.
  */
-export function configParameter(config: InstallationConfig, name: string): ConfigParameter {
+export function configParameter(config: InstallationConfig, name: string, readTimeoutMs = READ_TIMEOUT_MS): ConfigParameter {
   const { awsRegion, awsProfile } = config.secrets;
-  const aws = (args: string[]) => run("aws", ["ssm", ...args, "--name", name, "--region", awsRegion, ...(awsProfile ? ["--profile", awsProfile] : [])]);
+  // Only a read is cut off: a write stopped midway may still be stored, and only a retry could tell.
+  const aws = (args: string[], timeout = 0) => run("aws", ["ssm", ...args, "--name", name, "--region", awsRegion, ...(awsProfile ? ["--profile", awsProfile] : [])], { timeout });
   return {
-    read: async () => ParameterAnswer.parse(safeJson((await aws(["get-parameter", "--query", "Parameter.{value: Value, version: Version}", "--output", "json"])).stdout)),
+    read: async () => ParameterAnswer.parse(safeJson((await aws(["get-parameter", "--query", "Parameter.{value: Value, version: Version}", "--output", "json"], readTimeoutMs)).stdout)),
     write: async (value, description) => {
       const dir = await mkdtemp(join(tmpdir(), "sergeant-config-"));
       const file = join(dir, "value");
