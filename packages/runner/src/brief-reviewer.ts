@@ -1,5 +1,5 @@
 import type { PullRequestFacts, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
-import { renderHumanFeedback, renderReview, renderTask } from "./brief-common.ts";
+import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-common.ts";
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
@@ -7,9 +7,9 @@ export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/6";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
+  const human = renderBoundedHumanFeedback(pullRequests);
   return pullRequests
-    .filter((p) => p.humanFeedback.length)
-    .map((p) => `- ${p.url}, oldest first:\n${p.humanFeedback.map(renderHumanFeedback).join("\n")}`)
+    .flatMap((p, i) => (human[i] ? [`- ${p.url}, oldest first:\n${human[i]}`] : []))
     .join("\n");
 }
 

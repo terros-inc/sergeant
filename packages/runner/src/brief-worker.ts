@@ -1,5 +1,5 @@
 import type { RunSpec } from "@terros/sergeant-contracts";
-import { renderHumanFeedback, renderReview, renderTask } from "./brief-common.ts";
+import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-common.ts";
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
@@ -127,9 +127,10 @@ what changed, validation, known gaps, decisions, a short Feedback section), endi
  */
 function renderContext({ pullRequests, runs }: Extract<RunSpec, { role: "worker" }>["context"]): string {
   if (pullRequests.length === 0 && runs.length === 0) return "";
-  const prs = pullRequests.map((p) => {
+  const humanFeedback = renderBoundedHumanFeedback(pullRequests);
+  const prs = pullRequests.map((p, i) => {
     const checks = p.checks.required.map((c) => `${c.name} ${c.state}`).join(", ") || "none declared";
-    const human = p.humanFeedback.map(renderHumanFeedback).join("\n");
+    const human = humanFeedback[i] ?? "";
     return `- ${p.url} — ${p.state}${p.draft ? " (draft)" : ""}, head \`${p.headSha}\`, base \`${p.baseRef}\`${p.mergeable === false ? ", has merge conflicts" : ""}
   Required checks on that head: ${checks}${human && `\n  Human reviews and comments on this PR, oldest first:\n${human}`}`;
   });

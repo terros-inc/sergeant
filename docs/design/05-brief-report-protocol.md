@@ -82,6 +82,16 @@ a requirement added mid-run is still checked.
 inline. Every older comment gets a pointer line (id, author, time, first line), and
 the complete thread is delivered beside the brief as `sergeant-thread.md` (01 `RunSpec.brief.fullThread`).
 The bound depends only on size, never on content, so nothing acceptance-bearing can be dropped.
+This bound is not built yet: the Task section is still inline in full.
+
+**Human PR feedback** (the reviews, inline comments, and PR comments a successor worker or a reviewer
+must check, TECH-4987/4990) has its own bound of 48 KB (49,152 characters) across all of a brief's
+PRs, built in TECH-5022. Under it every item is whole. Over it the newest items stay whole, the next
+older one keeps as much of its body as fits, and every older one keeps its header (author, kind and
+review state, time, link) and the start of its first line. A cut item says how many characters were
+cut and links to its full text on GitHub; there is no `sergeant-thread.md` for PR feedback. Headers
+are never dropped, so a PR with hundreds of items can still exceed the bound.
+
 Environment, Limits, Rules, Review, and Report are rendered from configuration and the ledger.
 
 **Objective, not a step list.** "Make `sgt task show UNF-404` resolve by identifier, including
