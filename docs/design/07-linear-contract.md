@@ -227,7 +227,9 @@ still delegated) or delegated again, intake admits a **new episode**: a new task
 budget. Its first turn sees the whole comment history, earlier PRs (attachments), and Sergeant's own
 earlier summaries, and continues from there.
 
-A task seen through after its merge and back in Todo, delegated, is such a reopen (TECH-5182). Intake,
+A merged task is seen through once its issue is Done, or Canceled (TECH-5132); in any other state
+intake keeps resuming it, so a later move to Done is still seen. A task seen through after its merge
+and back in Todo, delegated, is such a reopen (TECH-5182). Intake,
 including its periodic poll of Linear, sets the old `state.json` aside as
 `state.completed-<time>.json` beside it, and the new episode is admitted like any other: the owner
 check (§5) runs again on Linear's latest delegation and fails closed. A task still under way, merged

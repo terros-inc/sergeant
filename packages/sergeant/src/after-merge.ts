@@ -77,8 +77,10 @@ export async function driveMerged(
   if ("moved" in result) return handOff(result.moved);
   const finished = await finishReviews(merged, result, { runIds: ctx.runIds, recordReviews: ctx.recordReviews, stop: ctx.stop, opts, deps, log });
   if (await cancelPending(opts.dir)) return undefined;
-  // Seen through: the issue is Done and every review finished, so intake resumes it no more.
-  if (finished.outcome === "done" && !opts.signal?.aborted && !(await exists(ctx.stop))) {
+  // Seen through: the issue is Done, or Canceled (TECH-5132), and every review finished, so intake
+  // resumes it no more. Reopened and delegated again, it is a new task (TECH-5182, service-intake.ts).
+  const seenThrough = finished.outcome === "done" || result.canceled === true;
+  if (seenThrough && !opts.signal?.aborted && !(await exists(ctx.stop))) {
     merged.completedAt = new Date().toISOString();
     await save();
   }
@@ -205,14 +207,16 @@ async function movedFromOwner(opts: LoopOptions, deps: Ports, log: (line: string
 /**
  * Step 13: whether Linear reaches Done through the GitHub integration, observed, not assumed. The
  * issue reassigned or unassigned away from the task's owner meanwhile ends the wait as `moved`
- * (TECH-5179), so an audit the owner pays for stops promptly.
+ * (TECH-5179), so an audit the owner pays for stops promptly. An issue Canceled after the merge ends
+ * it as `canceled`, terminal like Done (TECH-5132); any other state is watched until the deadline, and
+ * again on every resume, so a later move to Done is still seen.
  */
 export async function observeCompletion(
   merged: Merged,
   opts: LoopOptions,
   deps: Ports,
   log: (line: string) => void,
-): Promise<LoopResult | { moved: string }> {
+): Promise<(LoopResult & { canceled?: true }) | { moved: string }> {
   const deadline = Date.parse(merged.at) + (opts.completionWaitMinutes ?? 10) * 60_000;
   let seen = "";
   for (;;) {
@@ -222,6 +226,7 @@ export async function observeCompletion(
     if (issue.state !== seen) log(`after merge: ${issue.identifier} is ${(seen = issue.state)}`);
     const detail = `${merged.repo}#${merged.number} merged as ${merged.mergedSha} at ${merged.at}; ${issue.identifier} is ${issue.state}`;
     if (issue.state === "Done") return { outcome: "done", detail };
+    if (issue.stateType === "canceled") return { outcome: "merged_not_done", detail, canceled: true };
     if (Date.now() > deadline) return { outcome: "merged_not_done", detail };
     if (opts.signal?.aborted) return { outcome: "stopped", detail };
     await pause(Math.min(15_000, (opts.pollSeconds ?? 60) * 1000), opts.signal);
