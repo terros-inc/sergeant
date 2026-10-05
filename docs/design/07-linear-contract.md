@@ -138,7 +138,7 @@ On admission the task row is created with the default budget and an empty reposi
 task is woken with `admitted`. The issue moves to the team's first `started` state when the first
 worker starts.
 
-## 6. Budget asks and grants
+## 6. Budget asks and fresh windows
 
 When the budget is exhausted, Sergeant asks (`ask_human` with `purpose: budget_extension`), or, if it
 cannot, a guardrail posts a fixed version:
@@ -148,7 +148,7 @@ cannot, a guardrail posts a fixed version:
 
 Done: <what landed or is ready>. Remaining: <what is left>. PRs: <links with CI/review state>.
 Sergeant recommends **one more window (+2h / +$25)** because <reason>.
-Reply to extend (an approver), or say stop.
+Reply to extend, or say stop.
 ```
 
 A human's answer to any of Sergeant's questions, this one included, gives the task a fresh budget

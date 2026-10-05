@@ -19,7 +19,7 @@ job) · **DELETE** · **UNDECIDED** (in `14`).
 | `TaskState` ACTIVE/WAITING/DONE/CANCELED | SIMPLIFY | open or closed; "waiting" derived from the one `HumanWait` | Waiting meant many things in S1; in S2 it means one thing (P10) |
 | `current_phase` PLANNING→…→DONE (ADR-0031) | DELETE | none | The fixed lifecycle is what Sergeant's judgment replaces. ADR-0031 even needed `phase-mismatch:` human decisions when history and phase disagreed |
 | Waits (`wait_json`: GITHUB_EVIDENCE, HUMAN_INPUT; deadlines, timeout actions) | SIMPLIFY | `HumanWait` only; GitHub "waits" are wake reasons on facts | A GitHub wait is just "wake me when CI finishes" |
-| Grants (`retry`, `fresh_run`, `rethink`, `active_budget`) | SIMPLIFY | `BudgetGrant` only | Retry, fresh run, and rethink are Sergeant's decisions; only budget is human authority |
+| Grants (`retry`, `fresh_run`, `rethink`, `active_budget`) | DELETE | none; a human answer to a Sergeant question opens a fresh budget window (TECH-5059) | Retry, fresh run, and rethink are Sergeant's decisions; budget continues through an ordinary answer |
 | Planner / simplify role (ADR-0038, UNF-341, UNF-569) | MOVE TO RUNNER, MOVE TO REASONING | the worker plans; Sergeant decides scope, repos, and decomposition | A planning run that only chooses a repo and work units is overhead for a capable worker |
 | Execution plan, work units, tiers, validation level | DELETE | none | The 2026-09-30 retro (F4) found planner tiers did not even drive model choice |
 | Implement / fix / repair roles | MOVE TO RUNNER | one primary worker, continued or succeeded | They are the same engineering job with different context |
@@ -189,7 +189,7 @@ Logical groups for the later backlog, with the contract each one provides. No ti
 | 6 | **Reasoning turns** | Situation Report assembly from 3–5; read and action tools; scheduler and wake reasons; prompt v1; turn limits; sessions and compaction (03 §8) | 2–5 |
 | 7 | **Primary-worker protocol** | brief rendering and the worker rules (05); report parsing; one primary worker (R1); `continueFrom`; handoff; repository requests | 5, 6 |
 | 8 | **Review** | review briefs and separate reviewer runs; dispositions D1–D6; audit sampling; `ReviewFacts`; `sgt review quality` | 4, 5, 7 |
-| 9 | **Budgets and operations** | BudgetMeter (hard time and concurrency, best-effort spend), `enforce_budget`, grants; pause and drain; `/health/loops`; CloudWatch; the `sgt` commands and APIs in 11 | 2, 5, 6 |
+| 9 | **Budgets and operations** | BudgetMeter (hard time and concurrency, best-effort spend), `enforce_budget`, fresh windows on a human answer; pause and drain; `/health/loops`; CloudWatch; the `sgt` commands and APIs in 11 | 2, 5, 6 |
 | 10 | **Evals** | reasoning replay evals with the fresh-start rubric (03 §8); worker evals and (manual) reviewer evals re-pointed at the S2 briefs | 6–8 |
 | 11 | **Transition** | `v1-final` tag; the laptop installation (identity, Linear agent user, Apps, container); the Personal replacement runbook and a rollback rehearsal | 1–9 |
 
@@ -211,7 +211,7 @@ path touches, and only the hard controls that path needs:
 
 **Increments** (step 5), roughly in this order, each a small change with its own scenarios: human
 questions and the `HumanWait` (8); cancellation, undelegation, and closing steps (13); budget
-enforcement and grants (10); CI repair and moving bases (5, 14); review iterations and acceptance
+enforcement and fresh windows (10); CI repair and moving bases (5, 14); review iterations and acceptance
 findings (3, 4, 15); multi-repository tasks (6); audit reviews and review telemetry (06 §8–9); restart and
 unreachable-runner cases (7, 9); distraction and security handling (11, 12). Cloud adapters, Codex, Jev,
 and anything in 06 §9's "later" come after the full suite passes.

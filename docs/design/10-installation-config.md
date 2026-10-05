@@ -39,7 +39,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 | Follow-ups | max depth, auto-delegate | |
 | Retro | the Sergeant project and team its documents and issues go to; absent, no retro | TECH-5187 |
 | Human waits | remind after hours | |
-| Approvers | Linear user ids | budget grants, waivers, escalations |
+| Approvers | Linear user ids | waivers, escalations |
 | AWS | runner dev role ARN, artifact bucket, CloudWatch log group | |
 | Release | channel (`main` or `soaked`), soak minutes, paused | absent: the host never updates itself (§6) |
 
@@ -55,7 +55,8 @@ Jev's authoritative flag. None of those concepts exist.
 
 - **Prompts and rules** (Sergeant's prompt, worker rules, reviewer rules) are code, versioned with the
   release and recorded on every turn and run.
-- **Per-task budgets** come from defaults at admission; only approver grants change them.
+- **Per-task budgets** come from defaults: each budget window (01 `TaskBudget`) copies the current
+  default when it opens, at admission or at a human answer to a Sergeant question.
 - **Repository build/test/topology**: not Sergeant's concern. Workers read each repository's own
   `AGENTS.md` and README. S1's `sergeant.toml` is not carried over (13).
 

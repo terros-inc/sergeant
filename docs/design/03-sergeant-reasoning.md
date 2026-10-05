@@ -409,7 +409,7 @@ its release is undelivered") without an outbox or a status column. Step 1 does n
 confirm; RunManager keeps retrying cancellation of any run with `cancelRequestedAt` until it reports a
 terminal state (04 §6).
 
-Single-step actions (send, comment, merge, link, grant, disposition) are idempotent by key (02 §6), and
+Single-step actions (send, comment, merge, link, disposition) are idempotent by key (02 §6), and
 stale ones are re-checked by the Gate before re-drive. Failed and abandoned actions appear in the next Situation
 Report as `unresolvedActions`.
 
