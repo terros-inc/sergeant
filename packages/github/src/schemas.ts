@@ -13,6 +13,14 @@ export const pullRequest = z.object({
   head: z.object({ sha: z.string() }),
   base: z.object({ ref: z.string().min(1), sha: z.string() }),
 });
+/** What a squash commit message is written from (TECH-5085). */
+export const pullRequestText = z.object({ title: z.string(), body: z.string().nullish(), user: z.object({ login: z.string().min(1) }) });
+export const pullRequestCommits = z.array(
+  z.object({
+    commit: z.object({ message: z.string(), author: z.object({ name: z.string(), email: z.string() }).nullable() }),
+    author: z.object({ login: z.string() }).nullable(),
+  }),
+);
 /** What a closed PR's branch delete checks (TECH-5230): its head branch, its head repository, and whether it merged. */
 export const pullRequestHead = z.object({
   state: z.enum(["open", "closed"]),

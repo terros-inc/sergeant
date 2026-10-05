@@ -7,6 +7,8 @@ const pr = {
   number: 7,
   html_url: `https://github.com/${repo}/pull/7`,
   user: { login: "sergeant-worker[bot]" },
+  title: "Fix the thing",
+  body: "Does the thing.\n\nFixes TECH-1",
   state: "open",
   draft: false,
   merged_at: null,
@@ -16,11 +18,13 @@ const pr = {
   base: { ref: "main", sha: "b".repeat(40) },
 };
 
+const merge = { repo, number: 7, expectedHeadSha: head, squash: { issueIdentifier: "TECH-1", closesIssue: true, builtBy: "Built by Sergeant (worker: Claude, review: Codex)" } };
+
 const json = (value: unknown, status = 200, headers?: HeadersInit) =>
   Response.json(value, { status, ...(headers && { headers }) });
-/** A PR's human-feedback lists are empty unless a test's `fetch` answers them. */
+/** A PR's human-feedback and commit lists are empty unless a test's `fetch` answers them. */
 const noFeedback = (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) =>
-  /\/(reviews|comments)\?per_page=100&page=1$/.test(String(input)) && !init?.method ? fetch(input, init).catch(() => json([])) : fetch(input, init);
+  /\/(reviews|comments|commits)\?per_page=100&page=1$/.test(String(input)) && !init?.method ? fetch(input, init).catch(() => json([])) : fetch(input, init);
 const adapter = (fetch: typeof globalThis.fetch, observedChecksFallback = false) =>
   createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash", observedChecksFallback } }, fetch: noFeedback(fetch) });
 
@@ -152,16 +156,17 @@ test("approves the exact head, then merges with GitHub's expected-head guard", a
     const path = String(input);
     calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (path.endsWith("/pulls/7/reviews")) return json({ id: 1 });
+    if (path.endsWith("/pulls/7")) return json(pr);
+    if (path.includes("/pulls/7/commits")) return json([]);
     expect(path).toContain("/pulls/7/merge");
     return json({ sha: "b".repeat(40), merged: true, message: "merged" });
   };
 
-  expect(await adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).toEqual({
-    mergedSha: "b".repeat(40),
-  });
-  expect(calls.map((call) => call.path.replace(/^.*\/pulls\/7/, ""))).toEqual(["/reviews", "/merge"]);
+  expect(await adapter(fetch).mergePullRequest(merge)).toEqual({ mergedSha: "b".repeat(40) });
+  expect(calls.map((call) => call.path.replace(/^.*\/pulls\/7/, ""))).toEqual(["/reviews", "", "/commits?per_page=100&page=1", "/merge"]);
   expect(calls[0]?.body).toMatchObject({ commit_id: head, event: "APPROVE" });
-  expect(calls[1]?.body).toEqual({ sha: head, merge_method: "squash" });
+  const message = "Does the thing.\n\nFixes TECH-1\n\nBuilt by Sergeant (worker: Claude, review: Codex)\n";
+  expect(calls[3]?.body).toEqual({ sha: head, merge_method: "squash", commit_title: "Fix the thing (#7)", commit_message: message });
 });
 
 test("a failed approval prevents the merge", async () => {
@@ -174,7 +179,7 @@ test("a failed approval prevents the merge", async () => {
     throw new Error(`unexpected ${path}`);
   };
 
-  await expect(adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).rejects.toThrow("(422)");
+  await expect(adapter(fetch).mergePullRequest(merge)).rejects.toThrow("(422)");
   expect(paths.some((path) => path.includes("/merge"))).toBe(false);
 });
 
@@ -235,7 +240,7 @@ test("a merge GitHub refuses by repository policy resolves to refused", async ()
     throw new Error(`unexpected ${path}`);
   };
 
-  expect(await adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).toEqual({
+  expect(await adapter(fetch).mergePullRequest(merge)).toEqual({
     refused: "Waiting on code owner review from terros-inc/owners.",
   });
 });
@@ -256,7 +261,7 @@ test.each([
     throw new Error(`unexpected ${path}`);
   };
 
-  await expect(adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).rejects.toThrow(`(${status}): ${message}`);
+  await expect(adapter(fetch).mergePullRequest(merge)).rejects.toThrow(`(${status}): ${message}`);
 });
 
 test("a 405 on a head that already merged resolves to that merge", async () => {
@@ -269,7 +274,7 @@ test("a 405 on a head that already merged resolves to that merge", async () => {
     throw new Error(`unexpected ${path}`);
   };
 
-  expect(await adapter(fetch).mergePullRequest({ repo, number: 7, expectedHeadSha: head })).toEqual({ mergedSha: "c".repeat(40) });
+  expect(await adapter(fetch).mergePullRequest(merge)).toEqual({ mergedSha: "c".repeat(40) });
 });
 
 // TECH-4989: a canceled task's PR is commented on, then closed. A close that fails is retried by the

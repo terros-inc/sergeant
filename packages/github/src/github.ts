@@ -2,6 +2,7 @@ import { PullRequestFacts, RepoSlug, Sha, type GitHubPort } from "@terros/sergea
 import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
+import { readSquashMessage } from "./squash-message.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
 type ObservedCheck = { name: string; appId?: number; state: Exclude<CheckState, "missing"> };
@@ -212,7 +213,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       });
     },
 
-    async mergePullRequest({ repo, number, expectedHeadSha }) {
+    async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);
       // The ruleset requires one approving review, which the worker App cannot give its own PR, so
       // only this approval (after every Gate check) lets the merge through. A failed approval must
@@ -230,12 +231,14 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       } catch (error) {
         return alreadyMerged(repo, number, expectedHeadSha, error);
       }
+      // A squash's message is always Sergeant's own (TECH-5085), never GitHub's copy of the branch commits.
+      const message = config.mergeMethod === "squash" ? await readSquashMessage(request, repo, number, squash) : {};
       try {
         const result = mergeResponse.parse(
           await request(`/repos/${repo}/pulls/${number}/merge`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sha: expectedHeadSha, merge_method: config.mergeMethod }),
+            body: JSON.stringify({ sha: expectedHeadSha, merge_method: config.mergeMethod, ...message }),
           }),
         );
         if (!result.merged) return { refused: result.message };
