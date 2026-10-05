@@ -12,31 +12,44 @@ import { loadState } from "./task-state.ts";
 let dir: string | undefined;
 afterEach(() => dir && rm(dir, { recursive: true, force: true }));
 
-test("a task's state keeps the keys a newer release saved, and the loop's save writes them back", async () => {
+test("a task's state keeps the keys a newer release saved, nested ones included, and the loop's save writes them back", async () => {
   dir = await mkdtemp(join(tmpdir(), "task-state-"));
   const file = join(dir, "state.json");
   const at = "2026-10-01T00:00:00.000Z";
   const sha = "a".repeat(40);
+  const refused = {
+    repo: "terros-inc/sergeant",
+    number: 2,
+    url: "https://github.com/terros-inc/sergeant/pull/2",
+    headSha: sha,
+    conversationRevision: "b".repeat(64),
+    reason: "Waiting on code owner review.",
+    at,
+    fingerprint: "fp",
+  };
+  // Every object in `state.json` carries a key this release does not know (TECH-5174).
   const stored = {
     issueId: "i1",
     startedAt: at,
+    owner: { id: "u1", name: "Owner", admittedAt: at, newer: "owner" },
     turns: 3,
     lastFingerprint: "fp",
+    seen: { revision: "c".repeat(64), issue: "rev", newer: "seen" },
     runIds: [],
-    recentTurns: [],
-    budget: { window: DEFAULT_BUDGET, newerBudgetKey: 1 },
-    merged: { repo: "terros-inc/sergeant", number: 1, headSha: sha, mergedSha: sha, at, newerMergedKey: true },
-    accepted: { at, comment: "Sergeant has stopped.", newerAcceptedKey: "x" },
+    followups: [{ key: "k", title: "T", identifier: "TECH-1", url: "https://linear.app/x/issue/TECH-1", newer: "followup" }],
+    recentTurns: [{ at, summary: "s", outcomes: [], newer: "turn" }],
+    budget: { window: { ...DEFAULT_BUDGET, newer: "window" }, newer: "budget" },
+    merged: { repo: "terros-inc/sergeant", number: 1, headSha: sha, mergedSha: sha, at, audit: { runId: "run_1", newer: "audit" }, newer: "merged" },
+    accepted: { at, comment: "Sergeant has stopped.", newer: "accepted" },
+    refusedMerges: [{ ...refused, newer: "refused" }],
+    mergeRetries: [{ ...refused, newer: "retry" }],
     newerEnding: { at, replyId: "c1" },
   };
   await writeFile(file, JSON.stringify(stored));
 
   const state = await loadState(file, "i1", DEFAULT_BUDGET);
   // What the loop's save writes (loop.ts).
-  const written = JSON.parse(JSON.stringify(state)) as typeof stored;
+  const written: unknown = JSON.parse(JSON.stringify(state));
 
-  expect(written.newerEnding).toEqual(stored.newerEnding);
-  expect(written.budget.newerBudgetKey).toBe(1);
-  expect(written.merged.newerMergedKey).toBe(true);
-  expect(written.accepted.newerAcceptedKey).toBe("x");
+  expect(written).toMatchObject(stored);
 });

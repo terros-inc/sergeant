@@ -20,8 +20,10 @@ import { feedbackComment, outcomeComment } from "./outcome.ts";
 
 // The loop's deliberately temporary local store (`state.json`), which lets a restarted loop resume;
 // Linear, GitHub, and the runner's own run records stay the authority for everything else.
-// TECH-5163: keys this code does not know, a newer release's, are kept and saved back, not dropped, so a
-// rollback (to this code or later) leaves them for the newer release to act on once the host moves forward.
+// TECH-5163, TECH-5174: keys this code does not know, a newer release's, are kept and saved back, not
+// dropped, so a rollback (to this code or later) leaves them for the newer release to act on once the host
+// moves forward. That holds at the top level and in every nested object below, including those built from
+// contracts schemas, which are loosened here; `reviewsRecorded` is a record and keeps every key anyway.
 
 const TaskState = z.looseObject({
   issueId: z.string(),
@@ -30,13 +32,13 @@ const TaskState = z.looseObject({
    * TECH-5179: who pays for this task's runs, recorded on admission and never changed for this task.
    * Absent on a task saved before it, which is admitted afresh on its next start (loop.ts).
    */
-  owner: z.object({ id: z.string().min(1), name: z.string(), admittedAt: z.iso.datetime(), delegatedAt: z.string().optional() }).optional(),
+  owner: z.looseObject({ id: z.string().min(1), name: z.string(), admittedAt: z.iso.datetime(), delegatedAt: z.string().optional() }).optional(),
   turns: z.number().int(),
   lastTurnAt: z.iso.datetime().optional(),
   /** What the last turn saw; an unchanged situation gets no new turn. */
   lastFingerprint: z.string().optional(),
   /** The Linear conversation the last turn saw, so an edit made while waiting on a reply is noticed (TECH-5034). */
-  seen: z.object({ revision: ConversationRevision, issue: z.string() }).optional(),
+  seen: z.looseObject({ revision: ConversationRevision, issue: z.string() }).optional(),
   /**
    * TECH-5057: the newest human comment (its Linear time) that a turn which asked nothing had read: the
    * task has acted on every human reply up to it. Saved with that turn, so it survives a crash.
@@ -49,14 +51,14 @@ const TaskState = z.looseObject({
    */
   unconfirmedStarts: z.array(RunId).default([]),
   /** Follow-up issues filed for this task, shown to every later turn and listed in the outcome. */
-  followups: z.array(FiledFollowup).default([]),
-  recentTurns: z.array(z.object({ at: z.iso.datetime(), summary: z.string(), outcomes: z.array(z.string()) })),
+  followups: z.array(FiledFollowup.loose()).default([]),
+  recentTurns: z.array(z.looseObject({ at: z.iso.datetime(), summary: z.string(), outcomes: z.array(z.string()) })),
   /** Reported cost of every reasoning turn; runs report their own. */
   turnCostUsd: z.number().default(0),
   budget: z
     .looseObject({
       /** Fixed when the window opens; a restart with other flags does not change it (budget.ts). */
-      window: BudgetStatus.shape.window,
+      window: BudgetStatus.shape.window.loose(),
       /** When the window opened, if not at the task's start: a human's answer (TECH-5059). */
       since: z.iso.datetime({ offset: true }).optional(),
       /** Runs of earlier windows, which this one does not count. */
@@ -78,7 +80,7 @@ const TaskState = z.looseObject({
       /** When the audit sample was drawn for the merged head; done once. */
       auditDrawnAt: z.iso.datetime().optional(),
       /** The sampled audit review of the merged head. */
-      audit: z.object({ runId: RunId }).optional(),
+      audit: z.looseObject({ runId: RunId }).optional(),
       /** When the loop saw the task through (Linear Done, reviews finished): intake no longer resumes it. */
       completedAt: z.iso.datetime().optional(),
     })
@@ -100,9 +102,9 @@ const TaskState = z.looseObject({
    * Merges whose sole re-check also failed or was refused, one per PR (the latest head), with when the
    * ready-for-human-merge comment was confirmed posted (TECH-4987, TECH-5077).
    */
-  refusedMerges: z.array(RefusedMerge.extend({ commentPostedAt: z.iso.datetime().optional(), fingerprint: z.string().optional() })).default([]),
+  refusedMerges: z.array(RefusedMerge.loose().extend({ commentPostedAt: z.iso.datetime().optional(), fingerprint: z.string().optional() })).default([]),
   /** A first failed/refused merge, eligible for its sole automatic re-check after the waiting grace. */
-  mergeRetries: z.array(RefusedMerge.extend({ fingerprint: z.string() })).default([]),
+  mergeRetries: z.array(RefusedMerge.loose().extend({ fingerprint: z.string() })).default([]),
   /** Per finished review: the later-known facts its last `reviews.jsonl` line carried. */
   reviewsRecorded: z.record(z.string(), z.string()).default({}),
 });
