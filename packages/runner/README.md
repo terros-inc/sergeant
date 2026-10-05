@@ -78,9 +78,15 @@ each run uses an account its task's owner registered for Sergeant to use.
   instead of a ChatGPT plan.
 - **Model.** `codex.model` in the config, unless `serve`/`canary` gets `--worker-model`/`--reviewer-model`.
 - **Usage.** `codex exec --json` reports tokens, not dollars. The run record keeps `tokens` (input,
-  cached input, output, reasoning output) and no `costUsd`, so the task budget counts the run as
-  unknown cost (`sgt` shows its tokens with `sgt run`); nothing guesses a price. With no spend cap, the wall-time
-  limit is the run's only backstop.
+  cached input, output, reasoning output; `sgt run` shows them) and, for a model with a price,
+  `costUsd` estimated from them with `costBasis: "estimated"` (TECH-5021). Prices are OpenAI's
+  published API list prices per model, USD per million tokens (`src/codex-prices.ts`, read
+  2026-10-05 from https://developers.openai.com/api/docs/pricing); the config's `codex.prices` adds to
+  or replaces them. Cached input is priced as cached, reasoning is counted within output, and cache
+  writes, long context and subscription limits are ignored: the figure is the same API-equivalent
+  basis as Claude Code's, a runaway guard rather than accounting. A model with no price records no
+  `costUsd`, and the task budget counts the run as unknown cost. With no spend cap, the wall-time
+  limit is the run's only hard backstop.
 - **Provider by quota (TECH-5117).** `start` reads the live quota of each of the task owner's accounts
   right before the launch (`quota.ts`: Claude's `/api/oauth/usage`, or the
   `anthropic-ratelimit-unified-*` headers of a one-token Haiku request when the token may only run

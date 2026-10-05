@@ -3,9 +3,9 @@ import type { RunRecord } from "@terros/sergeant-contracts";
 
 // TECH-5227: what a task has cost so far, in one line, from what is already recorded: each run's
 // reported `costUsd`, provider, role and model account, the reasoning turns' cost in `turns.jsonl`, and
-// the task's start. Costs are API-equivalent estimates (TECH-5021). A run with no reported cost (Codex
-// reports only tokens, a run still going, or one whose status could not be read) is counted as unknown,
-// never as $0.
+// the task's start. Costs are API-equivalent estimates (TECH-5021). A run with no cost (a Codex model
+// with no configured price, a run still going, or one whose status could not be read) is counted as
+// unknown, never as $0.
 
 export type CostInput = {
   runs: RunRecord[];

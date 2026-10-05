@@ -89,4 +89,7 @@ test("each role runs Claude Code unless the config selects Codex for it, with th
     worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5.5-codex" },
     reviewer: { "claude-code-local": "opus", "codex-local": "gpt-6" },
   });
+  // TECH-5021: the config's Codex prices reach the runner, which estimates a priced model's cost.
+  const prices = { "gpt-5.5-codex": { input: 1.25, cachedInput: 0.125, output: 10 } };
+  expect(runnerRoles(InstallationConfig.parse({ ...codexReviewer, codex: { model: "gpt-5.5-codex", prices } }), none).codexPrices).toEqual(prices);
 });

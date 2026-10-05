@@ -128,8 +128,20 @@ export const InstallationConfig = z.strictObject({
    * The model Codex runs for a Codex role, unless `serve`/`canary` names that role's model. Required when
    * `runners` names `codex-local`; without it nobody can register a Codex account. The credential is
    * always the task owner's registered account (TECH-5179), never the installation's (TECH-5184).
+   * `prices`, USD per million tokens by model, adds to or replaces the runner's built-in OpenAI list
+   * prices (`codex-prices.ts`, TECH-5021): a Codex run on a priced model records an estimated cost.
    */
-  codex: z.strictObject({ model: z.string().min(1) }).optional(),
+  codex: z
+    .strictObject({
+      model: z.string().min(1),
+      prices: z
+        .record(
+          z.string().min(1),
+          z.strictObject({ input: z.number().nonnegative(), cachedInput: z.number().nonnegative().optional(), output: z.number().nonnegative() }),
+        )
+        .optional(),
+    })
+    .optional(),
   /**
    * Secrets Manager id of the one secret that holds the accounts people register with `sgt account
    * register` (TECH-5113), holding `{"accounts":[]}` at first; the host must be able to put its value.

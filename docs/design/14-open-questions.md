@@ -117,7 +117,7 @@ mechanisms, both small.
 | V3 | Linear's agent activity panel API, for turn summaries | slice 3, optional | comments only |
 | V4 | A non-bypass GitHub App cannot merge into a protected default branch through the API; installation tokens can be scoped to repositories and permissions and revoked early | slice 4 | branch protection "restrict who can push" listing the control-plane App |
 | V5 | Claude Code headless: resume, a steering mechanism for mid-run messages, fresh subagents, usage reporting | slice 5 | the adapter declares fewer capabilities; reasoning adapts (04 §2) |
-| V6 | **Verified (TECH-5009):** Codex CLI 0.160.0 resumes (`codex exec resume <thread id>`) and reports tokens per turn, never dollars | 2026-10-03; 04 §10 | cost recorded as unknown; continuation is a fresh run (the local runner resumes no adapter) |
+| V6 | **Verified (TECH-5009):** Codex CLI 0.160.0 resumes (`codex exec resume <thread id>`) and reports tokens per turn, never dollars | 2026-10-03; 04 §10 | cost estimated from tokens at a configured list price (TECH-5021); continuation is a fresh run (the local runner resumes no adapter) |
 
 ## E. Defaults chosen without asking
 

@@ -1,6 +1,7 @@
 import type { RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
 import type { AttachmentLimits, FetchUpload } from "./attachments.ts";
 import type { Adapter } from "./agents.ts";
+import type { CodexPrice } from "./codex-prices.ts";
 import type { Exec } from "./exec.ts";
 import type { ModelAccount } from "./accounts.ts";
 import type { ReadQuota } from "./quota.ts";
@@ -45,6 +46,11 @@ export type ContainerRunnerOptions = {
    * an agent's. Set through git's environment, which overrides any `user.*` config a run sets.
    */
   gitIdentity: { name: string; email: string };
+  /**
+   * Codex list prices by model, over `CODEX_PRICES` (TECH-5021): a Codex run on a priced model records
+   * an estimated cost from its tokens; one on any other model keeps its cost unknown.
+   */
+  codexPrices?: Record<string, CodexPrice>;
   limits?: Partial<Record<Role, Limits>>;
   /** Host command runner; injected in tests so no real process is launched. */
   exec?: Exec;

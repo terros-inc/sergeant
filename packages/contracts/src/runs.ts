@@ -155,12 +155,19 @@ const RunBase = {
   status: z.enum(["running", "succeeded", "failed", "canceled"]),
   provider: z.string(),
   model: z.string(),
-  /** The model cost the run reported when it ended, in USD; absent while running or when not reported. */
+  /**
+   * The run's model cost when it ended, in USD: the agent CLI's own figure, or Sergeant's estimate (see
+   * `costBasis`). Absent while running, or when neither exists; the budget then counts it as unknown.
+   */
   costUsd: z.number().nonnegative().optional(),
   /**
+   * `estimated` when `costUsd` is the run's tokens times the configured list price of its model (04 §7,
+   * TECH-5021: a Codex run); absent when the CLI reported it (Claude Code).
+   */
+  costBasis: z.literal("estimated").optional(),
+  /**
    * The tokens the run reported when it ended, for a provider that reports no dollar figure (Codex,
-   * TECH-5009). Its `costUsd` is then absent, so the budget counts its cost as unknown; nothing
-   * estimates one from these.
+   * TECH-5009). A model with a configured price gets an estimated `costUsd` from these (TECH-5021).
    */
   tokens: z
     .object({

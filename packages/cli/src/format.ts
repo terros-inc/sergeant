@@ -59,7 +59,10 @@ export function showTask(d: TaskDetail): string {
 }
 
 export function showRun({ task, run }: RunDetail): string {
-  const cost = run.costUsd === undefined && run.tokens ? `cost unknown, ${run.tokens.input} input and ${run.tokens.output} output tokens` : usd(run.costUsd);
+  const cost =
+    run.costUsd === undefined && run.tokens
+      ? `cost unknown, ${run.tokens.input} input and ${run.tokens.output} output tokens`
+      : `${usd(run.costUsd)}${run.costBasis === "estimated" ? " estimated from tokens" : ""}`;
   const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${cost}`];
   if (run.failureReason) lines.push(`failure reason: ${run.failureReason}`);
   if (run.account) lines.push(`account: ${run.account.id} (${run.account.holder})${run.accountReason ? `, ${run.accountReason}` : ""}`);

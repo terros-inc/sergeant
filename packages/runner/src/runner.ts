@@ -14,6 +14,7 @@ import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachm
 import { failingReset, pickAccount, runAccount, setAside } from "./accounts.ts";
 import { AGENTS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
+import { CODEX_PRICES, estimateCodexCost } from "./codex-prices.ts";
 import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
@@ -41,6 +42,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   const image = opts.image ?? "sergeant-runner:local";
   const adapterOf = (role: Role): Adapter => opts.adapters?.[role] ?? "claude-code-local";
   const asides = setAside();
+  const codexPrices = { ...CODEX_PRICES, ...opts.codexPrices };
   const exec = opts.exec ?? hostExec;
   const execOk = checked(exec);
   const fetchFn = opts.fetch ?? globalThis.fetch;
@@ -72,6 +74,9 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   async function finalize(meta: RunMeta, exitCode: number): Promise<RunRecord> {
     const logs = await exec("docker", ["logs", meta.container]);
     const agent = AGENTS[meta.adapter].parse(logs.stdout, logs.stderr);
+    // TECH-5021: Codex reports only tokens; its model's list price makes them an estimated cost.
+    const price = meta.adapter === "codex-local" ? codexPrices[meta.model] : undefined;
+    const estimated = agent.costUsd === undefined && agent.tokens && price ? estimateCodexCost(agent.tokens, price) : undefined;
     const base = {
       runId: meta.runId,
       status: exitCode === 0 && agent.ok ? "succeeded" : "failed",
@@ -79,6 +84,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       model: agent.models.length ? agent.models.join(",") : meta.model,
       ...recorded(meta),
       ...(agent.costUsd !== undefined && { costUsd: agent.costUsd }),
+      ...(estimated !== undefined && { costUsd: estimated, costBasis: "estimated" }),
       ...(agent.tokens && { tokens: agent.tokens }),
       ...(agent.failureReason && { failureReason: agent.failureReason }),
     } as const;
