@@ -67,7 +67,7 @@ Built by the deterministic core from durable artifacts, never from the implement
 A fresh session and workspace. You did not write this change and have no access to how it was
 produced. You have no GitHub, AWS, or Linear credentials; everything you need is checked out locally.
 
-## Rules (s2-reviewer-rules/5)   <§4>
+## Rules (s2-reviewer-rules/6)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -94,7 +94,7 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/5)
+## 4. Reviewer rules (s2-reviewer-rules/6)
 
 The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 
@@ -126,7 +126,10 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 12. **Do not re-litigate settled trade-offs.** A design trade-off the design docs record as settled or
     accepted (such as the model-credential exposure, 09 §3a) is not a finding merely because the
     reviewer would choose differently. Do flag a change that breaks its documented assumptions, expands
-    its blast radius, or brings evidence meeting its documented revisit condition.
+    its blast radius, or brings evidence meeting its documented revisit condition. Settled means recorded
+    on the base branch or by an owner decision the issue cites. A settlement the change itself introduces,
+    such as a new entry under `docs/design` in this diff, is under review like the rest of it
+    (TECH-5167).
 
 The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
 

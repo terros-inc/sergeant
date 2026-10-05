@@ -7,7 +7,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 // (the 48 KB inline bound with `sergeant-thread.md` is not built yet). Linked issues (TECH-5149) get
 // their own background section outside it, never part of what was asked.
 export const WORKER_RULES_VERSION = "s2-worker-rules/7";
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/5";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/6";
 
 export function renderTask(c: Conversation): string {
   const comments = c.humanComments.length
@@ -294,6 +294,9 @@ produced. You have no GitHub, AWS, or Linear credentials; everything you need is
 12. Do not re-litigate a design trade-off the repository's design docs record as settled or accepted
     merely because you would choose differently. Do flag a change that breaks its documented
     assumptions, expands its blast radius, or brings evidence meeting its documented revisit condition.
+    Settled means recorded on the base branch or by an owner decision the issue cites. A settlement
+    the change itself introduces, such as a new entry under \`docs/design\` in this diff, is under
+    review like the rest of it.
 
 ## Report
 

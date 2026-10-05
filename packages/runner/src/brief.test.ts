@@ -130,3 +130,12 @@ test("the worker brief has the worker find and continue existing work, and lists
     "- Pull requests Linear links to this issue:\n  - (none)\n",
   );
 });
+
+// TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
+test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
+  const brief = reviewerBrief(spec([pr]), [subject], []);
+  expect(brief).toContain("## Rules (s2-reviewer-rules/6)");
+  const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n## Report"));
+  expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
+  expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
+});
