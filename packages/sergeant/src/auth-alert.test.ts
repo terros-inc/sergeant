@@ -29,8 +29,9 @@ test("alerts once for each Codex authentication failure with recovery instructio
   expect(posted).toEqual([
     expect.objectContaining({ issueId: "i1", key: authAlertKey("i1", "run_auth") }),
   ]);
-  expect(posted[0]?.body).toContain("replace its configured Secrets Manager secret");
-  expect(posted[0]?.body).toContain("switch `codex-local` to an OpenAI API key");
+  // A run recorded before TECH-5179 has no account; the installation has no Codex credential to replace.
+  expect(posted[0]?.body).toContain("register their own account with `sgt account register codex`");
+  expect(posted[0]?.body).not.toContain("Secrets Manager secret");
 });
 
 // TECH-5113: a registered account's failure is its person's to fix, never the installation's secret.
