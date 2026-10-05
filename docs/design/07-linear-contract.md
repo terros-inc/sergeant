@@ -110,7 +110,11 @@ A guardrail admits an issue when **all** of these hold (deterministic):
 7. the installation is not paused;
 8. it has a human assignee, and Linear's issue history shows that same person most recently
    delegated it to Sergeant (TECH-5179), or, when the history shows no delegation because the issue
-   was created already delegated, that same person created it (TECH-5192). That person is the task's **owner**, recorded with the task:
+   was created already delegated, that same person created it (TECH-5192). A delegation or
+   creation made through an app counts as that person's only when the app is in
+   `linear.delegatingAppIds` (Linear's MCP connector, so the owner's assistant can file work for
+   them) and Linear records it acting for a user with the assignee's display name; Linear gives no
+   id or email for that user, so no other app is trusted with the name. That person is the task's **owner**, recorded with the task:
    every run of it uses only their registered model accounts (04 §10). Reassigning or unassigning
    the issue while the task runs is a **handoff** (§8): token ownership never moves mid-task, nothing
    resumes on its own, and the new assignee's own delegation starts a new episode (§9), checked

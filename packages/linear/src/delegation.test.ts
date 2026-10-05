@@ -9,19 +9,22 @@ import { createLinearPort } from "./linear.ts";
 const agent = { id: "agent-v2", name: "Sergeant" };
 const ann = { id: "ann", name: "Ann" };
 const bob = { id: "bob", name: "Bob" };
+const mcp = "linear-mcp-app";
 const at = (minute: number) => `2026-10-04T06:${String(minute).padStart(2, "0")}:00.000Z`;
-type Entry = { createdAt: string; actor: { id: string; name: string } | null; toDelegate: { id: string } | null; fromDelegate?: { id: string } | null };
+type Bot = { id: string | null; userDisplayName: string | null };
+type Entry = { createdAt: string; actor: { id: string; name: string } | null; botActor?: Bot | null; toDelegate: { id: string } | null; fromDelegate?: { id: string } | null };
 const delegated = (actor: Entry["actor"], minute: number, to = agent): Entry => ({ createdAt: at(minute), actor, toDelegate: { id: to.id } });
 
-type Issue = { assignee: { id: string; name: string } | null; delegate: { id: string; name: string } | null; creator?: { id: string; name: string } | null };
-function linear({ creator = null, ...issue }: Issue, pages: Entry[][] | Response) {
+type Issue = { assignee: { id: string; name: string } | null; delegate: { id: string; name: string } | null; creator?: { id: string; name: string } | null; botActor?: Bot | null };
+function linear({ creator = null, botActor = null, assignee, ...issue }: Issue, pages: Entry[][] | Response) {
   const reads: (string | null)[] = [];
   const port = createLinearPort({
     apiKey: "test",
     sergeantUserIds: [agent.id, "agent-v1"],
+    delegatingAppIds: [mcp],
     fetch: async (_i, init) => {
       const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { after?: string | null } };
-      if (query.includes("SergeantIssueOwnership")) return Response.json({ data: { issue: { id: "issue-1", createdAt: at(0), creator, ...issue } } });
+      if (query.includes("SergeantIssueOwnership")) return Response.json({ data: { issue: { id: "issue-1", createdAt: at(0), creator, botActor, assignee: assignee && { ...assignee, displayName: assignee.name.toLowerCase() }, ...issue } } });
       if (pages instanceof Response) return pages;
       reads.push(variables.after ?? null);
       const n = variables.after ? Number(variables.after) : 0;
@@ -87,4 +90,22 @@ test("an unreadable history throws instead of admitting", async () => {
 test("a history page that claims more but gives no cursor fails closed instead of admitting from part of it", async () => {
   const page = { data: { issue: { history: { nodes: [delegated(ann, 1)], pageInfo: { hasNextPage: true, endCursor: null } } } } };
   await expect(linear({ assignee: ann, delegate: agent }, Response.json(page)).check()).rejects.toThrow(/no cursor/);
+});
+
+test("a delegation an allowlisted app made for the assignee is the assignee's own; any other app's is not", async () => {
+  // TECH-5192: Linear's MCP connector acting for Ann. Linear records whom the app acted for only by display name.
+  const appUser = { id: "mcp-app-user", name: "Linear MCP" };
+  const viaApp = (bot: Bot): Entry => ({ ...delegated(appUser, 4), botActor: bot });
+  expect(await linear({ assignee: ann, delegate: agent }, [[viaApp({ id: mcp, userDisplayName: "ann" })]]).check()).toEqual({ owner: ann, delegatedAt: at(4) });
+  // Not allowlisted (our own n8n app, say), or acting for someone other than the assignee: refused as before.
+  for (const bot of [{ id: "n8n-app", userDisplayName: "ann" }, { id: mcp, userDisplayName: "bob" }]) {
+    expect(await linear({ assignee: ann, delegate: agent }, [[viaApp(bot)]]).check()).toEqual({ refused: "delegator_differs", assignee: ann, delegator: appUser, delegatedAt: at(4) });
+  }
+});
+
+test("an issue an allowlisted app created already delegated, for the assignee, is the assignee's own", async () => {
+  const created = (bot: Bot) => linear({ assignee: ann, delegate: agent, botActor: bot }, [[]]).check();
+  expect(await created({ id: mcp, userDisplayName: "ann" })).toEqual({ owner: ann, delegatedAt: at(0) });
+  expect(await created({ id: "n8n-app", userDisplayName: "ann" })).toEqual({ refused: "delegator_unknown", assignee: ann, delegatedAt: at(0) });
+  expect(await created({ id: mcp, userDisplayName: "bob" })).toEqual({ refused: "delegator_unknown", assignee: ann, delegatedAt: at(0) });
 });

@@ -37,6 +37,12 @@ export const InstallationConfig = z.strictObject({
     agentUserId: z.string().min(1),
     /** Other Linear users that act for agents (V1's, say): their comments are not human input either. */
     otherAgentUserIds: z.array(z.string().min(1)).default([]),
+    /**
+     * Linear app ids (`botActor.id`) whose delegations count as the assignee's own when the app acted
+     * for a user with the assignee's display name: Linear's MCP connector, so issues filed for the owner
+     * through it are admitted (TECH-5192). Every other app's delegation is refused.
+     */
+    delegatingAppIds: z.array(z.string().min(1)).default([]),
     /** GitHub reviewer login to Linear profile URL; Linear renders the URL as a notifying mention. */
     reviewerProfiles: z
       .record(
@@ -264,8 +270,8 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
   // A Linear API key (`lin_api_`) is sent as is; an OAuth token, such as the V2 agent app's, as Bearer.
   const linearAuthorization = linearToken.startsWith("lin_api_") ? linearToken : `Bearer ${linearToken}`;
 
-  const { agentUserId, otherAgentUserIds } = config.linear;
-  const linear = createLinearPort({ apiKey: linearAuthorization, sergeantUserIds: [agentUserId, ...otherAgentUserIds] });
+  const { agentUserId, otherAgentUserIds, delegatingAppIds } = config.linear;
+  const linear = createLinearPort({ apiKey: linearAuthorization, sergeantUserIds: [agentUserId, ...otherAgentUserIds], delegatingAppIds });
   // Every Linear read and write uses this one token, so it must be the V2 agent: a V1 or personal
   // token would let Sergeant act as someone else.
   const viewer = await linear.viewer();

@@ -67,7 +67,9 @@ Linear, or Claude login is used. Its shape is `InstallationConfig` in
 
 The Linear token must act as `agentUserId` (checked at startup); every Linear read and write uses it.
 Optional `linear.otherAgentUserIds` lists other agents' users (V1's) whose comments are not human
-input. Optional `linear.reviewerProfiles` maps GitHub logins to Linear profile URLs. Sergeant puts
+input. Optional `linear.delegatingAppIds` lists Linear app ids (`botActor.id`), such as Linear's MCP
+connector, whose delegations count as the assignee's own when the app acted for a user with the
+assignee's display name; any other app's delegation is refused. Optional `linear.reviewerProfiles` maps GitHub logins to Linear profile URLs. Sergeant puts
 the URL in a re-review request so Linear renders a real user mention and sends an Inbox notification;
 a missing mapping or failed lookup leaves the existing plain `@github-login` text. Optional
 `review.auditSampleRate` (0 to 1, default 0.2) is the fraction of merged heads that
