@@ -4,10 +4,9 @@ Question: can Sergeant run a normal worker in an ECS Fargate task with a small, 
 boundary? Target shape if yes:
 `serve on the EC2 control plane -> ECS RunTask -> isolated Fargate worker -> PR/report -> task exits`.
 
-**Status: the spike path is built but has not run live.** The worker that wrote it had no AWS access
-(by design, a run gets none), so no Fargate task has run yet. Nothing below claims a live result.
-Section 5 is the procedure for an operator with AWS access, and section 6 lists what that run must
-record before the recommendation is final.
+**Status: done. One real worker ran end to end on Fargate.** An operator ran section 5's procedure
+live on 2026-10-04 (about 11:10 PM PT), in us-west-2 on ARM64, with this spike driver. Section 6
+has the measured results and section 7 the final recommendation: continue with Fargate.
 
 ## 1. What was built
 
@@ -74,7 +73,8 @@ How a run works:
 
 Credentials appear in no argument, no committed file, and no task definition plaintext.
 `task.test.ts` checks that the definition carries only `valueFrom` references; the fake-`aws` dry run
-below checked every argv. ECS resolves the references as the task starts and injects them as
+checked every argv, and the live run confirmed that the definition and overrides carried only secret
+references (section 6). ECS resolves the references as the task starts and injects them as
 environment variables. The secret is deleted (`--force-delete-without-recovery`) once the result is
 collected.
 
@@ -110,7 +110,12 @@ the RunnerPort contract, RunSpec, RunRecord, the brief, or the report protocol.
 
 ## 4. Blockers and awkward areas
 
-- **Live proof missing.** See section 6. Nothing here has run on AWS.
+- **Stranded secret on a failed `start` (confirmed live).** If `start` fails after it creates the
+  per-run secret, for example at `RegisterTaskDefinition` (a bad role ARN in the live run),
+  `sergeant/fargate-spike/<runId>` is left holding both credentials, the worker token and the model
+  credential, and nothing deletes it; the operator had to delete it by hand. A production `start`
+  must delete the secret when any later step fails, or create it last. The spike driver is not
+  changed here; the owner decides separately whether to fix it.
 - **Workspace preparation.** Workers are fine: the task clones its own repositories with the token it
   already gets. **Reviewers are the awkward case.** Today the reviewer's read-only token checks out the
   PR *on the host* and never enters the reviewer's container (09). On Fargate either a read-only token
@@ -128,32 +133,33 @@ the RunnerPort contract, RunSpec, RunRecord, the brief, or the report protocol.
 - **Per-run task definitions.** `secrets` cannot be overridden in `RunTask`, so each run registers a
   revision. That is cheap and fast, but it leaves INACTIVE revisions; `DeleteTaskDefinitions` can
   clean them up.
-- **Startup latency.** Fargate has no image cache. Every task pulls the full runner image (Node 24,
-  build tools, `gh`, Claude Code, and Codex: about 1 GB+), so a cold start is likely around 1–2
-  minutes, against seconds locally. This has not been measured (section 6). Possible mitigations are
-  a slimmer image, a SOCI index for lazy loading, and the same region and architecture for ECR and
-  Fargate. This is acceptable for runs that last tens of minutes.
+- **Startup latency.** Fargate has no image cache, so every task pulls the full runner image (Node 24,
+  build tools, `gh`, Claude Code, and Codex). Measured live: `secondsToRunning` 35–38 s, of which
+  `pullSeconds` was 14 s, for the full runner image. That is better than this report's earlier
+  estimate of 1–2 minutes, but still slower than seconds locally. A slimmer image or a SOCI index for
+  lazy loading could cut the pull if startup ever matters.
 - **Caching.** There is no shared dependency or git cache: every run cold-clones and cold-installs.
   For large repositories, `git clone --filter=blob:none` and the repository's own lockfile caching
   are the cheap options. A real cache (EFS, S3) is deliberately out of scope.
 - **Hardening parity.** No `no-new-privileges` on Fargate (see section 1).
 
-### Cost (list prices, not measured)
+### Cost
 
-ARM64 Fargate is about $0.032 per vCPU-hour and $0.0036 per GiB-hour. A 2 vCPU / 8 GiB task costs
-about $0.09/hour, or about 1.5¢ for a 10-minute run. Ephemeral storage above 20 GiB, the public IPv4
-address (about $0.005/hour), and log ingestion (about $0.50/GB) are small. Model spend dominates by
-orders of magnitude. The surprises to watch are the ECR data transfer if the image and the tasks are
-in different regions, and NAT costs if production uses private subnets.
+Measured live: $0.08 of model spend per run; the Fargate cost is negligible. For scale, at list
+prices ARM64 Fargate is about $0.032 per vCPU-hour and $0.0036 per GiB-hour, so a 2 vCPU / 8 GiB
+task costs about $0.09/hour. Ephemeral storage above 20 GiB, the public IPv4 address (about
+$0.005/hour), and log ingestion (about $0.50/GB) are small. The surprises to watch are the ECR data
+transfer if the image and the tasks are in different regions, and NAT costs if production uses
+private subnets.
 
 ## 5. Running the live proof (operator, outside CI)
 
-Tracked in TECH-5234. It needs someone with admin-level AWS access to the installation's account (ECR,
-ECS, IAM, EC2, Logs, Secrets Manager, and SSM read). It also needs Node 24 and `pnpm install` in a
-checkout of this repository, bash, Docker able to build arm64 images (the Sergeant host, or `buildx
---platform linux/arm64`), and `jq`, `openssl`, and `curl`. Every command below runs from the
-checkout's root unless it says otherwise. No credential is ever typed as an argument: each one goes
-from a command's output into an environment variable.
+Done once (section 6); kept so the run can be repeated. It needs someone with admin-level AWS access
+to the installation's account (ECR, ECS, IAM, EC2, Logs, Secrets Manager, and SSM read). It also
+needs Node 24 and `pnpm install` in a checkout of this repository, bash, Docker able to build arm64
+images (the Sergeant host, or `buildx --platform linux/arm64`), and `jq`, `openssl`, and `curl`.
+Every command below runs from the checkout's root unless it says otherwise. No credential is ever
+typed as an argument: each one goes from a command's output into an environment variable.
 
 ### 5.1 One-time setup
 
@@ -187,7 +193,7 @@ SUBNETS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC Name=defaul
 SG=$(aws ec2 create-security-group --group-name sergeant-fargate-spike --vpc-id $VPC \
   --description "Sergeant Fargate spike: no ingress" --query GroupId --output text)
 
-# The runner image, arm64, from this branch's Dockerfile (or main's once this PR is merged).
+# The runner image, arm64, from main's Dockerfile.
 aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR%%/*}
 docker build -t $ECR:spike packages/runner/container      # on an x86 machine: docker buildx build --platform linux/arm64 --push -t $ECR:spike packages/runner/container
 docker push $ECR:spike
@@ -311,13 +317,39 @@ aws ecs describe-task-definition --task-definition "$(jq -r .taskDefinitionArn f
 aws logs filter-log-events --log-group-name /sergeant/fargate-spike --filter-pattern '"ghs_"' --query 'events[].logStreamName'  # []
 ```
 
-Record the results in TECH-5234 against section 6's list, and the measured `secondsToRunning` and
-`pullSeconds` in sections 4 and 7. Afterwards, remove the setup: the ECR repository, the cluster, the
-log group, the role, and the security group.
+Afterwards, remove the setup: the ECR repository, the cluster, the log group, the role, and the
+security group.
 
 ## 6. Validation
 
-**Observed:**
+**Live run (operator, 2026-10-04 about 11:10 PM PT, us-west-2, ARM64, this spike driver):**
+
+- **Successful run** (`run_spike-1c`): exit 0, about 1 minute of run time. The task cloned a scratch
+  repository, ran Claude (`claude-sonnet-5-5`), and opened a PR:
+  https://github.com/trevorallred/sergeant-fargate-test/pull/1. `result` wrote a
+  `RunRecord.parse`-valid succeeded record with the report, then deleted the secret and the task
+  definition.
+- **Cold start:** `secondsToRunning` 35–38 s, of which `pullSeconds` was 14 s, for the full runner
+  image. This report had estimated 1–2 minutes.
+- **Status while running:** PENDING → RUNNING, then stopped with exit code 0. `setupSeconds` was
+  3.4–20.7 s.
+- **Cancel** (`run_spike-2`, canceled about 15 s after RUNNING): `stopCode` UserInitiated, exit 143,
+  status `canceled`, `report: false` (the agent had not written one yet). A repeated `cancel`
+  answered `alreadyEnded`, and a repeated `result` was stable.
+- **Idempotent start:** a repeated `start` for a launched run answered "already launched".
+- **Credentials:** the task definition and the overrides carried only secret references. No spike
+  secret remained afterwards.
+- **Token scoping:** a run whose GitHub token lacked write access (`run_spike-1b`) reported `blocked`
+  correctly: its push got a 403, and it did not look for other credentials.
+- **Cost:** $0.08 of model spend per run; Fargate is negligible.
+- **Stranded secret (known issue):** a `start` that failed at `RegisterTaskDefinition` (a bad role
+  ARN) left `sergeant/fargate-spike/<runId>` holding both credentials. The operator deleted it by
+  hand. See section 4.
+
+Every task runs with the task definition's explicit `cpu`/`memory` on Fargate capacity (section 1),
+so the runs did not use the Sergeant EC2 host's CPU.
+
+**Offline, before the live run:**
 
 - `task.test.ts` passes, and the runner package's typecheck and lint pass.
 - `result` against a fake `aws`, for a task stopped with exit 70 and no frame: it wrote a
@@ -339,22 +371,13 @@ log group, the role, and the security group.
   and the task definition. No secret value appeared in any `aws` argument, in the task definition, or
   in the overrides, and the temp files were removed.
 
-**Not done (needs AWS):** a live Fargate run. It must show:
-
-- a PR opened by the task;
-- `status` while RUNNING;
-- the terminal exit code;
-- a canceled run;
-- `record.json`;
-- the measured `secondsToRunning` and `pullSeconds`;
-- that the secret and the task definition contain no plaintext credentials (in the console or with
-  `describe-task-definition`).
-
 ## 7. Recommendation
 
-**Provisional: continue with Fargate.** The local runner's protocol carries over almost unchanged:
-the same image, agent scripts, parsing, brief, and report. No gap found on paper is one that
-Daytona, E2B, or Runloop would close better. The real costs are the reviewer checkout and attachment
-transport, cold-start latency without image caching, and the 64 KiB secret cap, and a hosted sandbox
-has those too. Make the recommendation final only after the live run in section 5 succeeds. If image
-pull alone takes several minutes even after slimming the image or adding a SOCI index, revisit.
+**Continue with Fargate**, now backed by a live run (us-west-2, ARM64). A real worker ran end to end
+in an isolated Fargate task with its own CPU and memory, opened a PR, and returned a
+`RunRecord.parse`-valid record, and start, status, cancel, and result all worked. The local runner's
+protocol carried over almost unchanged: the same image, agent scripts, parsing, brief, and report.
+Cold start was 35–38 s, with a 14 s image pull, and Fargate's cost is negligible next to model spend.
+No gap found is one that Daytona, E2B, or Runloop would close better. The real costs are the reviewer
+checkout and attachment transport, the 64 KiB secret cap, and the stranded secret on a failed
+`start` (section 4), which the production `start` must clean up.
