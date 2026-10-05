@@ -5,60 +5,22 @@ import {
   checkMayMerge,
   checkSend,
   checkStart,
-  commentIdFor,
   NoModelAccount,
   conversationRevision,
   issueRevision,
-  type FiledFollowup,
   type FollowupCategory,
-  type GitHubPort,
-  type LinearPort,
   type ProposedAction,
-  type PullRequestFacts,
-  type RefusedMerge,
-  type RunId,
-  type RunnerPort,
   type RunRecord,
   type SituationReport,
 } from "@terros/sergeant-contracts";
+import { askHuman } from "./ask-human.ts";
 import { answeredBudgetQuestion } from "./budget.ts";
-import { accountQuestion, notOwned, type TaskOwner } from "./owner.ts";
-import { ownQuestion, questionComment, questionKey } from "./question.ts";
+import type { ActionOutcome, Ports } from "./execute-types.ts";
+import { accountQuestion, notOwned } from "./owner.ts";
+import { questionKey } from "./question.ts";
 
-export type Ports = {
-  linear: LinearPort;
-  github: GitHubPort;
-  runner: RunnerPort;
-  /** Resolves a GitHub login to the Linear profile URL that Markdown turns into a notifying mention. */
-  linearProfileForGitHubLogin?: (login: string) => string | undefined;
-  /** The V2 agent's Linear user: every effect requires the issue to be delegated to it (A1). */
-  agentUserId: string;
-  /** The worker App's GitHub login: Sergeant reviews and merges only PRs it opened (G3, M2). */
-  workerLogin: string;
-  /**
-   * Called with a run's id before the runner is asked to start it. The loop saves the id here, so a
-   * crash between the start and the loop's save still leaves a run it can cancel (UNF-728).
-   */
-  recordRun?: (runId: RunId) => Promise<void>;
-  /**
-   * The task's start/cancel lock, held from a start's live delegation check until the runner is asked
-   * to start it. A task cancel lists the runs to stop under the same lock, so a start either sees the
-   * delegation gone or is among the runs the cancel stops, across a restart too.
-   */
-  exclusive?: <T>(step: () => Promise<T>) => Promise<T>;
-  /** Best-effort progress line (e.g. moving the issue to In Progress). No-op when absent. */
-  log?: (line: string) => void;
-  /**
-   * The task's owner (TECH-5179, owner.ts), set by the loop once the task is admitted: every run uses
-   * only their model accounts. Without one, no run starts.
-   */
-  owner?: TaskOwner;
-  /**
-   * Records the task's handoff stop (cancel.ts) when an effect finds the episode no longer its owner's
-   * (TECH-5179); the loop's stop path then cancels its runs and keeps its PRs.
-   */
-  handoff?: (reason: string) => Promise<void>;
-};
+export { askHuman } from "./ask-human.ts";
+export type { ActionOutcome, Ports } from "./execute-types.ts";
 
 /** How a follow-up's category reads on the filed issue (TECH-5186). */
 const categoryLabel: Record<FollowupCategory, string> = {
@@ -67,33 +29,6 @@ const categoryLabel: Record<FollowupCategory, string> = {
   real_blocker: "a real blocker",
   operational_or_security: "a current operational or security problem",
 };
-
-export type ActionOutcome =
-  | {
-      action: ProposedAction;
-      status: "done";
-      result: Record<string, unknown>;
-      started?: RunRecord;
-      /** The live PR facts the merge was allowed on, and its result. */
-      merged?: { pr: PullRequestFacts; mergedSha: string };
-      /** The follow-up issue filed or already on record under the action's key. */
-      followup?: FiledFollowup;
-    }
-  | {
-      action: ProposedAction;
-      status: "denied";
-      rule: string;
-      reason: string;
-      /** GitHub explicitly refused the merge by repository policy. */
-      refused?: RefusedMerge;
-    }
-  | {
-      action: ProposedAction;
-      status: "failed";
-      error: string;
-      /** A question Linear did not accept: the loop asks it again every poll until it does. */
-      unposted?: Extract<ProposedAction, { kind: "ask_human" }>;
-    };
 
 /**
  * Performs one proposed action if the Gate allows it. This is the only path from reasoning to an
@@ -298,29 +233,6 @@ export async function execute(action: ProposedAction, situation: SituationReport
         return { action, status: "done", result: { identifier: issue.identifier }, followup: { key: action.key, title: action.title, ...issue } };
       }
     }
-  } catch (e) {
-    return { action, status: "failed", error: (e as Error).message };
-  }
-}
-
-/**
- * Posts a question as the V2 agent under `key`, at most once however often it is retried. A follow-up
- * to one of Sergeant's own questions is a reply in that question's thread (TECH-5052).
- */
-export async function askHuman(
-  action: Extract<ProposedAction, { kind: "ask_human" }>,
-  situation: SituationReport,
-  ports: Ports,
-  key: string,
-): Promise<ActionOutcome> {
-  const { issue } = situation.conversation;
-  try {
-    const active = checkLive((await ports.linear.readConversation(issue.id)).issue, ports.agentUserId);
-    if (!active.allowed) return { action, status: "denied", rule: active.rule, reason: active.reason };
-    const thread = ownQuestion(situation.conversation, action.followsUp);
-    const parentId = thread && (thread.parentId ?? thread.id);
-    await ports.linear.postComment({ issueId: issue.id, body: questionComment(action), key, ...(parentId && { parentId }) });
-    return { action, status: "done", result: { commentId: commentIdFor(key) } };
   } catch (e) {
     return { action, status: "failed", error: (e as Error).message };
   }

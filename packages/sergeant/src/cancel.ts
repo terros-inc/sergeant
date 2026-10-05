@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { checkDelegation, ClosedPullRequest, RepoSlug, RunId, STOP_STATE_TYPES, type Conversation, type PullRequestFacts, type PullRequestRef, type RunRecord, type TaskRef } from "@terros/sergeant-contracts";
-import { z } from "zod";
+import { checkDelegation, STOP_STATE_TYPES, type ClosedPullRequest, type Conversation, type PullRequestFacts, type PullRequestRef, type RepoSlug, type RunId, type RunRecord, type TaskRef } from "@terros/sergeant-contracts";
 import { exists, postFeedbackComment } from "./after-merge.ts";
+import { intentFile, readIntent, writeIntent, type CancelIntent, type Handoff } from "./cancel-intent.ts";
+import { handOff, handoffComment, stalledStopComment, stopComment } from "./cancel-linear.ts";
 import type { Ports } from "./execute.ts";
 import { feedbackComment, workerFeedback } from "./outcome.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
@@ -30,42 +31,12 @@ import type { ServiceDeps } from "./service.ts";
 // delegation, unless a newer delegation is in Linear by then, and says once who can pick the work up.
 // Nothing resumes on its own: the new assignee's own delegation starts a fresh task on their accounts.
 
-const CancelIntent = z.object({
-  /** Why the task stopped, as the end of a sentence: "the issue was moved to Backlog". */
-  reason: z.string(),
-  requestId: z.string(),
-  at: z.iso.datetime(),
-  /** The task's runs when the stop was first driven: set once, before any is canceled. */
-  runIds: z.array(RunId).optional(),
-  /** Those of `runIds` whose start the runner never confirmed (loop.ts), set with them; one leaves once its status reads. */
-  unconfirmedStarts: z.array(RunId).optional(),
-  /**
-   * A handoff (TECH-5179): PRs and branches are kept and the issue goes back to Todo, undelegated.
-   * `delegatedAt` is when the stopped task's owner delegated it, so a newer delegation is left alone;
-   * `merged`, a task whose work already merged: only its audit stops, and the issue is left as it is.
-   */
-  handoff: z.object({ delegatedAt: z.string().optional(), merged: z.boolean().optional() }).optional(),
-  /** The PRs this stop closed, for the issue comment and the API's answer. */
-  closed: z.array(ClosedPullRequest).default([]),
-  /** Completed GitHub close effects, keyed per PR and exact head so a re-drive skips them. */
-  prCloseKeys: z.array(z.string()).default([]),
-  /**
-   * Whether the durable, idempotent warning about a stalled stop was posted. Despite its name it is
-   * about cancels the runner never confirmed, not unreadable statuses; renaming it would change the record.
-   */
-  unreadableStatusSurfaced: z.boolean().default(false),
-  /** When each canceled run's status was first read unreadable: its grace counts from then, not from `at`. */
-  unreadableSince: z.record(z.string(), z.iso.datetime()).default({}),
-});
-type CancelIntent = z.infer<typeof CancelIntent>;
-
 const SURFACE_STALLED_STOP_AFTER_MS = 15 * 60 * 1000;
 
 /** The request cannot be carried out as asked; nothing was recorded. */
 export class CancelConflict extends Error {}
 
 export const taskDir = (stateDir: string, ref: string) => join(stateDir, "tasks", ref);
-const intentFile = (dir: string) => join(dir, "cancel.json");
 
 /** Every run the task recorded, its sampled audit included. */
 export const runIdsOf = (state: TaskState | undefined): RunId[] =>
@@ -82,22 +53,9 @@ export async function pendingCancels(stateDir: string): Promise<string[]> {
   return pending.flat();
 }
 
-async function readIntent(dir: string): Promise<CancelIntent | undefined> {
-  const raw = await readFile(intentFile(dir), "utf8").catch(() => undefined);
-  return raw === undefined ? undefined : CancelIntent.parse(JSON.parse(raw));
-}
-
-async function writeIntent(dir: string, intent: z.input<typeof CancelIntent>): Promise<void> {
-  await mkdir(dir, { recursive: true });
-  await writeFile(intentFile(dir), JSON.stringify(intent, null, 2));
-}
-
 /** Why a task whose issue fails its live check (A1, A2) stops, for the PR and issue comments. */
 export const stopReason = (issue: Conversation["issue"]) =>
   STOP_STATE_TYPES.includes(issue.stateType) ? `the Linear issue was canceled or moved to ${issue.state}` : "the Linear issue is no longer delegated to Sergeant";
-
-/** A handoff's record of the stopped owner's delegation (TECH-5179). */
-export type Handoff = NonNullable<CancelIntent["handoff"]>;
 
 /**
  * Records the stop of the task in `dir`, if it has one under way (a `state.json`). A stop already
@@ -280,69 +238,6 @@ async function taskPullRequests(linked: PullRequestRef[], runs: RunRecord[], enr
   );
   const prs = await Promise.all([...refs.values()].map((r) => deps.github.readPullRequest(r.repo, r.number)));
   return prs;
-}
-
-/**
- * A handoff's Linear effects, decided on the issue as it is now, reread once the runs are stopped, so a
- * stop driven late never undoes a newer human action. A completed issue, or a task whose work already
- * merged, keeps its status and its delegation. Otherwise Sergeant's delegation is removed unless Linear shows a newer valid delegation
- * than the stopped owner's (the new assignee already delegated it: that is the next task), and an issue
- * in progress goes back to Todo; one a human moved anywhere else stays there. Safe to repeat.
- */
-async function handOff(issue: Conversation["issue"], handoff: Handoff, deps: Ports, log: (line: string) => void): Promise<{ completed: boolean; undelegated: boolean; newer: boolean; todo: boolean }> {
-  if (handoff.merged || issue.stateType === "completed") return { completed: true, undelegated: false, newer: false, todo: false };
-  let undelegated = false;
-  let newer = false;
-  if (issue.delegate?.id === deps.agentUserId) {
-    const check = await deps.linear.readTaskOwner(issue.id, deps.agentUserId);
-    newer = "owner" in check && check.delegatedAt !== handoff.delegatedAt;
-    if (!newer) {
-      if (!deps.linear.undelegate) throw new Error("this Sergeant cannot remove a delegation");
-      await deps.linear.undelegate(issue.id);
-      undelegated = true;
-      log(`${issue.identifier}: handoff: Sergeant's delegation removed`);
-    }
-  }
-  if (!deps.linear.moveIssueToTodo) throw new Error("this Sergeant cannot move an issue back to Todo");
-  const moved = await deps.linear.moveIssueToTodo(issue.id);
-  if (moved.moved) log(`${issue.identifier}: handoff: moved from ${moved.from} to ${moved.to}`);
-  return { completed: false, undelegated, newer, todo: moved.moved || issue.stateType === "unstarted" };
-}
-
-function handoffComment(
-  reason: string,
-  issue: Conversation["issue"],
-  prs: PullRequestFacts[],
-  done: { completed: boolean; undelegated: boolean; newer: boolean; todo: boolean },
-  unreadable: RunId[],
-): string {
-  const kept = prs.length > 0
-    ? `Its PRs and branches are kept: ${prs.map((p) => `[${p.repo}#${p.number}](${p.url})${p.state === "open" ? "" : ` (${p.state})`}`).join(", ")}.`
-    : "Its branches are kept; it has no PR.";
-  const missing = unreadable.length > 0 ? ` The final report for ${unreadable.map((id) => `run \`${id}\``).join(", ")} could not be read.` : "";
-  const stopped = `Sergeant stopped working on this issue: ${reason}. Its runs are canceled, so they spend no more of the previous owner's model quota.${missing}`;
-  if (done.completed) return `${stopped} Its work is already merged, so the issue is left as it is.`;
-  const linear = [done.todo && "back in Todo", done.undelegated && "no longer delegated to Sergeant"].filter(Boolean).join(" and ");
-  const who = issue.assignee?.name ?? "Whoever is assigned next";
-  const next = done.newer
-    ? `A newer delegation to Sergeant is in place, so it starts a fresh task on its delegator's own model accounts, with this work available.`
-    : `${who} can continue it personally, or delegate it to Sergeant, which then starts a fresh task paid only by their own model accounts, with this work available.`;
-  return `${stopped} ${kept}${linear ? ` The issue is ${linear}.` : ""}\n\n${next}`;
-}
-
-function stopComment(intent: CancelIntent, unreadable: RunId[]): string {
-  const closed = intent.closed.length > 0 ? `Closed ${intent.closed.map((p) => `[${p.repo}#${p.number}](${p.url})`).join(", ")}.` : "No open PR to close.";
-  const missing = unreadable.length > 0
-    ? ` The final report for ${unreadable.map((id) => `run \`${id}\``).join(", ")} could not be read; a human may need to close any PR Sergeant could not see.`
-    : "";
-  return `Sergeant stopped working on this issue: ${intent.reason}. Its runs are canceled.${missing} ${closed}\n\nTo start again, delegate it to Sergeant and move it to Todo: it starts as a fresh task.`;
-}
-
-function stalledStopComment(runIds: RunId[], stalledForMinutes: number, handoff: boolean): string {
-  const prs = handoff
-    ? "The stop remains pending until every run is confirmed stopped; its PRs and branches are kept"
-    : "Its PRs stay open and the stop remains pending until every run is confirmed stopped, so none can push to a PR after Sergeant closes it";
-  return `Sergeant has been trying to stop this task for over ${stalledForMinutes} minutes, but the runner has not confirmed the cancellation of ${runIds.map((id) => `run \`${id}\``).join(", ")}. ${prs}, and Sergeant will not restart this issue while it is pending. To clear it, make sure the runner can cancel those runs; Sergeant will keep retrying automatically.`;
 }
 
 /**
