@@ -25,7 +25,7 @@ const pr = (headSha: string): PullRequestFacts => ({
   mergedSha: null,
   baseRef: "main",
   body: "Fixes UNF-1",
-  mergeable: true,
+  mergeable: true, mergeableState: "clean",
   checks: { sha: headSha, required: [{ name: "validate", state: "passed" }] },
   humanFeedback: [],
 });

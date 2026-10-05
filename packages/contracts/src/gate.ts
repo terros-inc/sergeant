@@ -173,11 +173,9 @@ export function checkMerge(
   const unasked = unaskedInputs(facts.runs, facts.agentComments);
   if (unasked.length > 0) return deny("M14", `a run could not read ${unasked.join(", ")}; ask a human (ask_human naming each) before merging`);
 
-  // M7: GitHub must say the PR can merge. Still computing (null) or conflicting is not a refusal by
-  // policy: a later read that changes `mergeable` wakes a turn (TECH-4991), so wait instead of trying.
-  if (pr.mergeable !== true) {
-    return deny("M7", pr.mergeable === false ? "GitHub reports the PR not mergeable (conflicts with its base)" : "GitHub is still computing whether the PR is mergeable");
-  }
+  // M7: GitHub must say the PR can merge.
+  const unmergeable = mergeRefusal(pr);
+  if (unmergeable) return deny("M7", unmergeable);
 
   // M9: the PR body agrees with the worker's report on whether this merge completes the issue
   // (`Fixes` for the closing PR, `Part of` for the rest), and the closing PR merges last. Unknown fails closed.
@@ -204,6 +202,33 @@ export function checkMerge(
   const active = facts.runs.filter((r) => r.status === "running");
   if (active.length > 0) return deny("M11", `runs still active: ${active.map((r) => `${r.role} ${r.runId}`).join(", ")}`);
   return allow;
+}
+
+/**
+ * M7: why GitHub would not merge the PR now, or null when it would (08 §7, TECH-5013): `mergeable` is
+ * true and `mergeable_state` is `clean`, `unstable` (past M5 only non-required checks failed), or
+ * `blocked`. The ruleset's required approval comes only from the merge's own approval after this Gate,
+ * so every PR waiting for Sergeant reads `blocked`; anything else blocking it makes GitHub refuse the
+ * merge, which M12 hands to a human. The other states are not refusals by policy: a later read that
+ * changes them wakes a turn (TECH-4991), so reasoning waits, or has a worker rebase, and tries again.
+ * Every reason names the state.
+ */
+export function mergeRefusal(pr: Pick<PullRequestFacts, "mergeable" | "mergeableState">): string | null {
+  const state = `GitHub's mergeable_state is ${pr.mergeableState}`;
+  if (pr.mergeable === null || pr.mergeableState === "unknown") return `GitHub is still computing whether the PR is mergeable (${state}); wait`;
+  if (pr.mergeable === false || pr.mergeableState === "dirty") return `GitHub reports the PR not mergeable (${state}: it conflicts with its base); a worker rebases it`;
+  switch (pr.mergeableState) {
+    case "clean":
+    case "unstable":
+    case "blocked":
+      return null;
+    case "behind":
+      return `${state}: the head is behind its base; a worker rebases it`;
+    case "draft":
+      return `${state}: the PR is a draft`;
+    case "has_hooks":
+      return `${state}, not clean or unstable`;
+  }
 }
 
 /** Returns why the standing does not cover this exact head, or null when it does (06 §6). */

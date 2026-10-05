@@ -208,6 +208,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         baseSha: live.base.sha,
         body: live.body ?? "",
         mergeable: live.mergeable,
+        mergeableState: live.mergeable_state,
         checks: { sha: headSha, required },
         humanFeedback,
       });

@@ -190,7 +190,7 @@ test("each task loop audits merged heads at the service's audit sample rate, or 
     await writeFile(join(taskDir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: at, turns: 1, runIds: [], recentTurns: [], merged, owner: { id: "user-ann", name: "Ann", admittedAt: at } }));
     const { deps } = oneIssue(["UNF-1"], 0);
     const started: string[] = [];
-    const pr: PullRequestFacts = { repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", state: "merged", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: merged.mergedSha, baseRef: "main", body: "Fixes UNF-1", mergeable: null, checks: { sha: headSha, required: [] }, humanFeedback: [] };
+    const pr: PullRequestFacts = { repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", state: "merged", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: merged.mergedSha, baseRef: "main", body: "Fixes UNF-1", mergeable: null, mergeableState: "unknown", checks: { sha: headSha, required: [] }, humanFeedback: [] };
     const runner: ServiceDeps["runner"] = {
       start: async (spec) => void started.push(spec.runId),
       status: async (runId) => ({ runId, role: "reviewer", status: "running", provider: "anthropic/claude-code", model: "opus", report: null }),

@@ -20,6 +20,7 @@ const pr = (number: number, humanFeedback: HumanPullRequestFeedback[]): PullRequ
   baseRef: "main",
   body: "Fixes UNF-1",
   mergeable: true,
+  mergeableState: "clean",
   checks: { sha: head, required: [] },
   humanFeedback,
 });

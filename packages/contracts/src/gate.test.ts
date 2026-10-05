@@ -80,6 +80,8 @@ const facts = (over: Over = {}): MergePreflightFacts => ({
     baseRef: "main",
     body: "Fixes UNF-1",
     mergeable: true,
+    // What every PR waiting for Sergeant reads: only the merge's own approval satisfies the ruleset.
+    mergeableState: "blocked",
     checks: { sha: head, required: [{ name: "ci", state: "passed" }] },
     humanFeedback: [],
     ...over.pr,
@@ -106,6 +108,25 @@ const facts = (over: Over = {}): MergePreflightFacts => ({
   now,
 });
 
+// M7 (08 §7, TECH-5013): each refusal names GitHub's mergeable_state, so reasoning can tell waiting
+// from rebasing. TECH-4991: none is a policy refusal, so a later read that changes it retries.
+test.each([
+  ["clean", true, null],
+  ["unstable", true, null],
+  ["blocked", true, null],
+  ["unknown", null, "still computing whether the PR is mergeable (GitHub's mergeable_state is unknown); wait"],
+  ["unknown", true, "still computing whether the PR is mergeable (GitHub's mergeable_state is unknown); wait"],
+  ["clean", null, "still computing whether the PR is mergeable (GitHub's mergeable_state is clean); wait"],
+  ["dirty", false, "not mergeable (GitHub's mergeable_state is dirty: it conflicts with its base); a worker rebases it"],
+  ["behind", true, "GitHub's mergeable_state is behind: the head is behind its base; a worker rebases it"],
+  ["draft", true, "GitHub's mergeable_state is draft: the PR is a draft"],
+  ["has_hooks", true, "GitHub's mergeable_state is has_hooks, not clean or unstable"],
+] as const)("M7 with mergeable_state %s and mergeable %s", (mergeableState, mergeable, reason) => {
+  const verdict = checkMerge(merge, facts({ pr: { mergeable, mergeableState } }));
+  if (reason === null) expect(verdict).toEqual({ allowed: true });
+  else expect(verdict).toEqual({ allowed: false, rule: "M7", reason: expect.stringContaining(reason) });
+});
+
 test("a reviewed, green, exact-head merge against an unchanged conversation is allowed", () => {
   expect(checkMerge(merge, facts())).toEqual({ allowed: true });
   const skip = { ...merge, reviewStanding: { kind: "not_required", workerRunId: "run_worker" } } as const;
@@ -126,9 +147,6 @@ test.each([
   ["the review covered an earlier head", facts({ runs: [reviewer({ reviewed: [{ ...pr, headSha: moved }] })] }), "M6"],
   ["the reviewer requested changes", facts({ runs: [reviewer({ verdict: "changes_requested" })] }), "M6"],
   ["an approval still carries a blocking finding", facts({ runs: [reviewer({ findings: [{ id: "f1", severity: "blocking", description: "" }] })] }), "M6"],
-  // TECH-4991: GitHub still computing mergeability, or a conflict, is a wait (M7), never a policy refusal.
-  ["GitHub is still computing whether the PR can merge", facts({ pr: { mergeable: null } }), "M7"],
-  ["the PR conflicts with its base", facts({ pr: { mergeable: false } }), "M7"],
   // M9: the body must agree with the worker's closesIssue, and the closing PR merges last.
   ["the body lacks the closing reference the worker reported", facts({ pr: { body: "Part of UNF-1" } }), "M9"],
   ["a Part of PR's body carries a closing reference", facts({ runs: [reviewer(), worker(true, false)] }), "M9"],

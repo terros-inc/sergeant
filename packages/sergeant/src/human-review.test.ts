@@ -16,7 +16,7 @@ const repo = "o/sales";
 const url = `https://github.com/${repo}/pull/7`;
 const at = "2026-10-03T02:00:00.000Z";
 const pr: PullRequestFacts = {
-  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha: head, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", mergeable: true,
+  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha: head, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", mergeable: true, mergeableState: "clean",
   checks: { sha: head, required: [{ name: "validate", state: "passed" }] },
   humanFeedback: [],
 };

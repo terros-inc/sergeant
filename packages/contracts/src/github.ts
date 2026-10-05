@@ -40,6 +40,13 @@ export const HumanPullRequestFeedback = z.object({
 });
 export type HumanPullRequestFeedback = z.infer<typeof HumanPullRequestFeedback>;
 
+/**
+ * GitHub's `mergeable_state` (TECH-5013). `unknown` while GitHub is still computing it, and for any
+ * value GitHub returns that is not listed here.
+ */
+export const MergeableState = z.enum(["clean", "unstable", "behind", "blocked", "dirty", "draft", "has_hooks", "unknown"]);
+export type MergeableState = z.infer<typeof MergeableState>;
+
 /** Live PR state, re-read from GitHub whenever a decision depends on it. */
 export const PullRequestFacts = z.object({
   repo: RepoSlug,
@@ -61,6 +68,8 @@ export const PullRequestFacts = z.object({
   body: z.string(),
   /** null while GitHub has not computed mergeability yet. */
   mergeable: z.boolean().nullable(),
+  /** Why GitHub would or would not merge it now; M7 reads it. */
+  mergeableState: MergeableState,
   checks: CheckSummary,
   /** Every human review and comment on the PR, oldest first; never a bot's (Sergeant's own approval included). */
   humanFeedback: z.array(HumanPullRequestFeedback),

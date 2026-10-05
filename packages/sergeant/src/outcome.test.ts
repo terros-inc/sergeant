@@ -17,7 +17,7 @@ const pr: PullRequestFacts = {
   mergedSha: "c".repeat(40),
   baseRef: "main",
   body: "Fixes UNF-1",
-  mergeable: null,
+  mergeable: null, mergeableState: "unknown",
   checks: { sha: head, required: [{ name: "ci", state: "passed" }] },
   humanFeedback: [],
 };

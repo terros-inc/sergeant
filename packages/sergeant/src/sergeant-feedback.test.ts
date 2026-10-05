@@ -26,7 +26,7 @@ const conversation: Conversation = {
 };
 const pr: PullRequestFacts = {
   repo, number: 7, url: `https://github.com/${repo}/pull/7`, state: "merged", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha,
-  baseRef: "main", body: "Fixes UNF-1", mergeable: null, checks: { sha: headSha, required: [] }, humanFeedback: [],
+  baseRef: "main", body: "Fixes UNF-1", mergeable: null, mergeableState: "unknown", checks: { sha: headSha, required: [] }, humanFeedback: [],
 };
 const worker = (feedback: string[] | undefined): RunRecord => ({
   runId: "run_worker", role: "worker", status: "succeeded", provider: "p", model: "m",

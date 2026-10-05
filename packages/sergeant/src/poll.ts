@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { reportedClosing, type PullRequestFacts, type PullRequestRef, type RepoSlug, type RunId, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { mergeRefusal, reportedClosing, type PullRequestFacts, type PullRequestRef, type RepoSlug, type RunId, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import type { ActionOutcome, Ports } from "./execute.ts";
 
 // What the loop reads and compares on each poll (loop.ts).
@@ -7,8 +7,10 @@ import type { ActionOutcome, Ports } from "./execute.ts";
 /**
  * The PRs whose merge M7 denied though the turn's poll saw them mergeable (TECH-5062): the merge's own
  * live read found GitHub still computing, or conflicting. The turn's fingerprint records them as
- * unknown (`mergeable: null`), what GitHub last said, so a later poll's definite value is a fact change
- * that wakes exactly one turn, and polls that still show it computing wake none. Failed calls and
+ * unknown (`mergeable: null`, `mergeableState: "unknown"`), what GitHub last said, so a later poll's
+ * definite value is a fact change that wakes exactly one turn, and polls that still show it computing
+ * wake none. A PR the poll already saw M7 refuse (behind, say) is not unsettled: the same facts again
+ * must not wake a turn. Failed calls and
  * policy refusals use the separate, timestamped bounded retry in loop.ts (TECH-5077).
  */
 export function unsettledMerges(outcomes: ActionOutcome[], situation: SituationReport): string[] {
@@ -16,7 +18,7 @@ export function unsettledMerges(outcomes: ActionOutcome[], situation: SituationR
     const a = o.action;
     if (a.kind !== "merge_pr" || o.status !== "denied" || o.rule !== "M7") return [];
     const polled = situation.pullRequests.find((p) => p.repo === a.repo && p.number === a.number);
-    return polled?.mergeable === true ? [`${a.repo}#${a.number}`] : [];
+    return polled && mergeRefusal(polled) === null ? [`${a.repo}#${a.number}`] : [];
   });
 }
 
@@ -77,7 +79,10 @@ export function fingerprintOf(s: SituationReport, unsettled: string[] = []): str
     // A fresh budget window can allow what the last one refused.
     budget: s.budget.windowStart,
     // A moved base can let a merge GitHub rejected ("Base branch was modified") through.
-    prs: s.pullRequests.map((p) => [p.repo, p.number, p.state, p.draft, p.headSha, p.baseSha, unsettled.includes(`${p.repo}#${p.number}`) ? null : p.mergeable, p.checks]),
+    prs: s.pullRequests.map((p) => {
+      const settled = !unsettled.includes(`${p.repo}#${p.number}`);
+      return [p.repo, p.number, p.state, p.draft, p.headSha, p.baseSha, settled ? p.mergeable : null, settled ? p.mergeableState : "unknown", p.checks];
+    }),
   };
   return createHash("sha256").update(JSON.stringify(facts)).digest("hex");
 }
