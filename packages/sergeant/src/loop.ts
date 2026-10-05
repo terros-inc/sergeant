@@ -18,7 +18,7 @@ import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./me
 import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
 import { describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
 import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
-import { costSoFar, costTotal } from "./cost.ts";
+import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { pendingProgress, postProgress, withProgress, type Progress } from "./progress.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { postRereviewRequests } from "./rereview.ts";
@@ -160,8 +160,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     const { runs, unknown } = await readRuns(state, deps);
     await recordReviews(runs);
-    // TECH-5227: what the task has cost, read when a comment says so (cost.ts); the turn's own cost counts once applied.
-    const spent = () => ({ runs, unknownRuns: unknown.length, turnCostUsd: state.turnCostUsd, startedAt: state.startedAt });
+    // TECH-5227: what the task has cost, read when a comment says so (cost.ts), with Sergeant's turns over
+    // the whole task: `state.turnCostUsd` is only the current budget window's.
+    const spent = (turnCostUsd: number) => ({ runs, unknownRuns: unknown.length, turnCostUsd, startedAt: state.startedAt });
+    const turnsSoFar = () => taskTurnCost(files.turns, state.startedAt);
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
     const conversation = await deps.linear.readConversation(opts.issueId);
     // What a webhook names to end this loop's wait (webhooks.ts): the issue, its PRs, and their heads.
@@ -208,7 +210,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // a fact for the next turn.
     const landed = landedOf(pullRequests, runs, deps.workerLogin);
     if (landed?.mergedSha) {
-      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue, costTotal(spent()));
+      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue, costTotal(spent(await turnsSoFar())));
       await save();
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
       continue;
@@ -258,7 +260,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
     log(`turn ${state.turns + 1}: ${runs.length} runs, PRs ${pullRequests.map(describePr).join("; ") || "none"}`);
     // TECH-5227: the review round this turn ends, told once on the issue (progress.ts). The one switch.
-    const progress = opts.progressComments === false ? undefined : pendingProgress(situation, costSoFar(spent()));
+    // Its cost so far counts this turn too, once reasoning reports it (takeTurn).
+    const earlierTurns = await turnsSoFar();
+    const progress = opts.progressComments === false ? undefined : pendingProgress(situation, (thisTurn) => costSoFar(spent(earlierTurns + thisTurn)));
     const { turn, outcomes } = await takeTurn(situation, { ...ports, ...(progress && { progress }) });
     const at = new Date().toISOString();
     const described = outcomes.map(describeOutcome);
@@ -273,10 +277,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
     const committed = failedAsk ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
-    applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
+    const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
+    applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above).
     const reply = accepted ? latestAnswer(conversation) : undefined;
-    if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests, costTotal({ ...spent(), at })) };
+    if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests, costTotal({ ...spent(taskTurnCostUsd), at })) };
     // A closing merge tells the round in its outcome comment, posted once after this save.
     const closed = state.merged as TaskState["merged"];
     if (progress && closed?.outcome) closed.outcome = withProgress(closed.outcome, progress, false);

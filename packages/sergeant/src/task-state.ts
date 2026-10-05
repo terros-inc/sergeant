@@ -115,7 +115,18 @@ type State = TaskState;
 /** What a turn changes in the task's state; `fingerprint` is the one to commit, if any. */
 export function applyTurn(
   state: State,
-  turn: { at: string; situation: SituationReport; summary: string; costUsd: number; outcomes: ActionOutcome[]; described: string[]; fingerprint: string | undefined; unknownRuns?: number },
+  turn: {
+    at: string;
+    situation: SituationReport;
+    summary: string;
+    costUsd: number;
+    /** Sergeant's turns over the whole task, this one included (cost.ts `taskTurnCost`), for a closing merge's total. */
+    taskTurnCostUsd: number;
+    outcomes: ActionOutcome[];
+    described: string[];
+    fingerprint: string | undefined;
+    unknownRuns?: number;
+  },
   log: (line: string) => void,
 ): void {
   const { at, situation, outcomes, described } = turn;
@@ -147,7 +158,7 @@ export function applyTurn(
         continue;
       }
       const mergedSha = Sha.parse(o.merged.mergedSha);
-      const cost = costTotal({ runs: situation.runs, unknownRuns: turn.unknownRuns ?? 0, turnCostUsd: state.turnCostUsd, startedAt: state.startedAt, at });
+      const cost = costTotal({ runs: situation.runs, unknownRuns: turn.unknownRuns ?? 0, turnCostUsd: turn.taskTurnCostUsd, startedAt: state.startedAt, at });
       const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups, situation.conversation.issue, cost);
       const feedback = feedbackComment(o.action.feedback);
       state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, at, outcome, ...(feedback && { feedback }) };

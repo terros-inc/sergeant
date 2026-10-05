@@ -1,7 +1,8 @@
+import { readFile } from "node:fs/promises";
 import type { RunRecord } from "@terros/sergeant-contracts";
 
 // TECH-5227: what a task has cost so far, in one line, from what is already recorded: each run's
-// reported `costUsd`, provider, role and model account, the reasoning turns' cost in `state.json`, and
+// reported `costUsd`, provider, role and model account, the reasoning turns' cost in `turns.jsonl`, and
 // the task's start. Costs are API-equivalent estimates (TECH-5021). A run with no reported cost (Codex
 // reports only tokens, a run still going, or one whose status could not be read) is counted as unknown,
 // never as $0.
@@ -10,13 +11,38 @@ export type CostInput = {
   runs: RunRecord[];
   /** Runs whose status could not be read: their cost, role and account are unknown. */
   unknownRuns?: number;
-  /** Sergeant's own reasoning turns (`state.turnCostUsd`). */
+  /** Sergeant's own reasoning turns over the whole task (`taskTurnCost`). */
   turnCostUsd: number;
   /** When the task started (`state.startedAt`); absent when it cannot be read. */
   startedAt?: string | undefined;
   /** When the line is written; defaults to now. */
   at?: string;
 };
+
+/**
+ * What Sergeant's reasoning turns have cost over the whole task: every turn in `turns.jsonl` (loop.ts)
+ * since the task started. Not `state.turnCostUsd`, which holds only the current budget window's: a
+ * human's answer or review opens a fresh one at zero (budget.ts). The file outlives a stop or an
+ * accept-as-is, so turns before `startedAt` are an earlier task's. A line that does not parse counts nothing.
+ */
+export async function taskTurnCost(file: string, startedAt: string): Promise<number> {
+  const text = await readFile(file, "utf8").catch((e: NodeJS.ErrnoException) => {
+    if (e.code === "ENOENT") return "";
+    throw e;
+  });
+  const since = Date.parse(startedAt);
+  let total = 0;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const { at, turn } = JSON.parse(line) as { at?: string; turn?: { costUsd?: unknown } };
+      if (at && Date.parse(at) >= since && typeof turn?.costUsd === "number") total += turn.costUsd;
+    } catch {
+      // A line torn by a crash mid-append.
+    }
+  }
+  return total;
+}
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;

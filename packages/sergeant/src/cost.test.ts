@@ -1,6 +1,9 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { RunRecord } from "@terros/sergeant-contracts";
-import { costSoFar, costTotal } from "./cost.ts";
+import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 
 // TECH-5227: a cost line never passes a run without a reported cost off as $0, and names accounts, not emails.
 
@@ -29,4 +32,18 @@ test("known costs are summed per provider, and runs without one are counted as u
   );
   expect(costSoFar(input)).toBe("Cost so far: ~$4.00 estimated, not counting 2 runs of unknown cost · 5 runs · 1 h 21 min · accounts: claudeWork, codexWork");
   expect(costSoFar({ ...input, unknownRuns: 0, runs: input.runs.filter((r) => r.costUsd !== undefined) })).not.toContain("unknown");
+});
+
+test("Sergeant's turns are summed over the task from turns.jsonl, not an earlier task's or a torn line", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sergeant-cost-test-"));
+  try {
+    const file = join(dir, "turns.jsonl");
+    expect(await taskTurnCost(file, "2026-10-05T01:00:00.000Z")).toBe(0);
+    const line = (at: string, costUsd?: number) => JSON.stringify({ at, turn: costUsd === undefined ? {} : { costUsd } });
+    const lines = [line("2026-10-04T23:00:00.000Z", 5), line("2026-10-05T01:00:00.000Z", 0.25), line("2026-10-05T01:30:00.000Z"), line("2026-10-05T02:00:00.000Z", 0.5), '{"at":"2026-10-05T02:10'];
+    await writeFile(file, lines.join("\n"));
+    expect(await taskTurnCost(file, "2026-10-05T01:00:00.000Z")).toBe(0.75);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -18,6 +18,8 @@ export async function takeTurn(
   deps: Ports & { reasoner: Reasoner },
 ): Promise<{ turn: TurnResult; outcomes: ActionOutcome[] }> {
   const turn = await deps.reasoner.turn(situation);
+  // TECH-5227: the round this turn reports counts the turn's own cost in its cost so far (progress.ts).
+  if (deps.progress) deps.progress.turnCostUsd = turn.costUsd ?? 0;
   const outcomes: ActionOutcome[] = [];
   let current = { ...situation, budget: { ...situation.budget, spentUsd: situation.budget.spentUsd + (turn.costUsd ?? 0) } };
   let startAttempted = false;

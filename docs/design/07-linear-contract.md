@@ -37,11 +37,11 @@ access.
 | A question for a human | the question (§4) | the only kind that creates a human wait |
 | A genuine blocker Sergeant cannot resolve | what is blocked, what would unblock it | e.g. a required live check no one can run |
 | Budget exhausted | the budget ask (§6) | |
-| Outcome | 2–6 lines: what landed (PR links), known gaps, follow-ups filed, anything a human should check, and the task's total cost | posted when the work lands or for a non-code outcome; the cost line (TECH-5227, `cost.ts`) is an estimate split by provider, run counts by role, wall time and accounts, a run with no reported cost counted as unknown |
+| Outcome | 2–6 lines: what landed (PR links), known gaps, follow-ups filed, anything a human should check, and the task's total cost | posted when the work lands or for a non-code outcome; the cost line (TECH-5227, `cost.ts`) is an estimate split by provider, run counts by role, wall time and accounts, a run with no reported cost counted as unknown; Sergeant's own turns count over the whole task (`turns.jsonl`), not only the current budget window |
 | After each review round | about 5 lines: what changed (from the worker report), the PR and reviewed head, the verdict with blocking/non-blocking counts and up to two findings, what happens next, the estimated cost so far | TECH-5227, `progress.ts`; once per review run; folded into the question or the closing merge's outcome when the same turn posts one; `review.progressComments: false` turns it off |
 | Answers to human comments | when the comment asked something Sergeant can answer | |
 | Post-merge audit findings | one comment listing blocking findings and a report link (06 §8) | guardrail, rare |
-| Stopped | one line when Sergeant stops because of undelegation, cancellation, or `release_task`, listing open PRs, then the task's total cost line | an accept-as-is ending's line gets it too |
+| Stopped | two lines when Sergeant stops because of undelegation, cancellation, or `release_task`: why it stopped, listing open PRs, then the task's total cost line | an accept-as-is ending's line gets it too |
 
 Never posted: per-run or per-push updates, CI results, review start notices (a finished round gets
 only the progress comment above), raw markers,
@@ -200,7 +200,8 @@ a follow-up PR, and the probe issues were archived. No compensating completion m
   first completed state (X1, X4, X5).
 - **Issue marked Done while work remains** (a human closed it, or a closing PR merged early): the
   human's or automation's state wins. A guardrail closes the task as `done`, cancels any active runs,
-  and posts one line listing still-open linked PRs. Reopening the issue starts a new episode (§9).
+  and posts one line listing still-open linked PRs, then the task's total cost. Reopening the issue
+  starts a new episode (§9).
 
 Whether Linear moves an issue with several closing PRs only after all of them merge does not matter
 to this design, because non-final PRs never carry the closing reference.

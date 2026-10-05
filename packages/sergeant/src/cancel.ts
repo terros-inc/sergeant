@@ -5,7 +5,7 @@ import { checkDelegation, STOP_STATE_TYPES, type ClosedPullRequest, type Convers
 import { exists, postFeedbackComment } from "./after-merge.ts";
 import { intentFile, readIntent, writeIntent, type CancelIntent, type Handoff } from "./cancel-intent.ts";
 import { handOff, handoffComment, stalledStopComment, stopComment } from "./cancel-linear.ts";
-import { costTotal } from "./cost.ts";
+import { costTotal, taskTurnCost } from "./cost.ts";
 import type { Ports } from "./execute.ts";
 import { feedbackComment, workerFeedback } from "./outcome.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
@@ -186,7 +186,8 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   const open = prs.filter((p) => p.state === "open");
   // TECH-5227: the comment that ends the task ends with its total cost; `state.json` is set aside only after it.
   const state = await readTaskState(join(dir, "state.json")).catch(() => undefined);
-  const cost = costTotal({ runs, unknownRuns: unreadablePastGrace.length, turnCostUsd: state?.turnCostUsd ?? 0, startedAt: state?.startedAt });
+  const turnCostUsd = state ? await taskTurnCost(join(dir, "turns.jsonl"), state.startedAt) : 0;
+  const cost = costTotal({ runs, unknownRuns: unreadablePastGrace.length, turnCostUsd, startedAt: state?.startedAt });
   if (intent.handoff) {
     const done = await handOff(issue, intent.handoff, deps, log);
     const body = `${handoffComment(intent.reason, issue, prs, done, unreadablePastGrace)}\n\n${cost}`;
