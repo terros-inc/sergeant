@@ -111,6 +111,18 @@ test("run show prints the run's account, provider and quota, and --json keeps th
   expect(JSON.parse(json.out)).toEqual({ task: "UNF-12", run });
 });
 
+// TECH-5148 live: an sgt whose contract predates a run field stripped it from `--json` too, so the
+// hosted answer looked as if it lacked the field. `--json` is the API's answer as sent.
+test("run show --json keeps a run field this sgt's contract does not know", async () => {
+  const run = { runId: "run_w1", role: "worker", status: "running", provider: "openai/codex", model: "gpt-5", report: null, newerField: { kept: true } };
+  const { api } = await fakeApi({ "GET /v1/runs/run_w1": { json: { task: "UNF-12", run } }, "GET /v1/runs/run_w2": { json: { task: "UNF-12" } } });
+
+  expect(JSON.parse((await sgt(api, "--json", "run", "show", "run_w1")).out)).toEqual({ task: "UNF-12", run });
+  // Still checked against the contract: an answer outside it is an error, never printed as the run.
+  const outside = await sgt(api, "--json", "run", "show", "run_w2");
+  expect([outside.code, JSON.parse(outside.out).error.code]).toEqual([1, "unavailable"]);
+});
+
 test("task cancel requires a reason before calling the API, then posts it as JSON with a request id", async () => {
   const { api, seen } = await fakeApi({ "POST /v1/tasks/UNF-12/cancel": { json: { ref: "UNF-12", undelegated: true, stopping: [], closedPullRequests: [] } } });
 

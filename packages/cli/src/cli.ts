@@ -20,6 +20,7 @@ import {
   RunDetail,
   RunList,
   MIN_CLI_VERSION,
+  safeJson,
   Provider,
   sergeantVersion,
   TaskDetail,
@@ -178,8 +179,8 @@ const commands: Record<string, Command> = {
   "run show": {
     args: 1,
     run: async (ctx, [runId]) => {
-      const detail = await call(ctx, "GET", `/v1/runs/${path(runId)}`, RunDetail);
-      print(ctx, detail, () => showRun(detail));
+      const { value: detail, answer } = await callAnswer(ctx, "GET", `/v1/runs/${path(runId)}`, RunDetail);
+      print(ctx, answer, () => showRun(detail));
     },
   },
   "run report": {
@@ -429,6 +430,18 @@ async function request(ctx: Context, method: Method, path: string, body?: object
 
 async function call<T>(ctx: Context, method: Method, path: string, schema: z.ZodType<T>, body?: object): Promise<T> {
   return settle(ctx, await client(ctx).call(method, path, schema, body));
+}
+
+/**
+ * `call`, also returning the API's answer as sent: `--json` prints that, so a field this sgt's contract
+ * does not know yet, which the parse strips, still reaches it (TECH-5148).
+ */
+async function callAnswer<T>(ctx: Context, method: Method, path: string, schema: z.ZodType<T>): Promise<{ value: T; answer: unknown }> {
+  const text = await request(ctx, method, path);
+  const answer = safeJson(text);
+  const parsed = schema.safeParse(answer);
+  if (!parsed.success) fail(ctx, "unavailable", `${method} ${path} answered outside the API contract: ${parsed.error.issues[0]?.message ?? text.slice(0, 200)}`);
+  return { value: parsed.data, answer };
 }
 
 const client = (ctx: Context) =>
