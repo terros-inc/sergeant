@@ -15,15 +15,18 @@ export { describeOutcome, execute, type ActionOutcome, type Ports } from "./exec
  */
 export async function takeTurn(
   situation: SituationReport,
-  deps: Ports & { reasoner: Reasoner },
+  /** `costOf` is the task's cost line given this turn's cost, for a close's comment (execute.ts). */
+  deps: Ports & { reasoner: Reasoner; costOf?: (turnCostUsd: number) => string },
 ): Promise<{ turn: TurnResult; outcomes: ActionOutcome[] }> {
   const turn = await deps.reasoner.turn(situation);
   const outcomes: ActionOutcome[] = [];
   let current = { ...situation, budget: { ...situation.budget, spentUsd: situation.budget.spentUsd + (turn.costUsd ?? 0) } };
   let startAttempted = false;
   // A run's id is recorded immediately before the runner is asked to start it (UNF-728).
+  const { costOf } = deps;
   const ports: Ports = {
     ...deps,
+    ...(costOf && { costLine: () => costOf(turn.costUsd ?? 0) }),
     async recordRun(runId) {
       startAttempted = true;
       await deps.recordRun?.(runId);

@@ -1,6 +1,6 @@
 import { readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { checkDelegation, type CloseIssue, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
+import { type CloseIssue, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { LoopResult } from "./loop-options.ts";
 import type { TaskState } from "./task-state.ts";
@@ -30,8 +30,11 @@ export function acceptedComment(pullRequests: Pick<PullRequestFacts, "repo" | "n
   return `Sergeant has stopped: the work was accepted as it is. ${left} yours to merge or close.${cost ? `\n\n${cost}` : ""}`;
 }
 
-/** TECH-5232: once per closing turn, so a replayed close posts its evidence once. */
-export const closedKey = (issueId: string, at: string) => `closed:${issueId}:${at}`;
+/**
+ * TECH-5232: once per conversation revision a close was decided on (TECH-5236), so a close retried on
+ * the same conversation posts its evidence once.
+ */
+export const closedKey = (issueId: string, revision: string) => `closed:${issueId}:${revision}`;
 
 /** The one comment a close posts: what Sergeant did, the evidence, and how a human undoes it. */
 export function closedComment(close: Pick<CloseIssue, "state" | "evidence">, cost?: string): string {
@@ -59,34 +62,25 @@ export const markAccepted = (dir: string, at: string) => writeFile(markerFile(di
  * while the issue stays in Todo. A failed resolve returns nothing, so the loop waits for the next pass;
  * a failed post throws, so the loop fails and the resumed task replays the ending under the same key.
  * Either way the acknowledgment appears only on a task that is ending. TECH-5232: a turn that closed
- * the issue itself ends the same way, its evidence comment and the close in place of the acknowledgment.
+ * the issue itself ends the same way, with nothing to post: its evidence and the close were made with the
+ * turn, on the live read the Gate allowed (execute.ts, TECH-5236), never replayed here over newer input.
  */
 export async function endAccepted(
   accepted: NonNullable<TaskState["accepted"]>,
   dir: string,
   issueId: string,
-  linear: Pick<LinearPort, "readConversation" | "postComment" | "closeIssue">,
+  linear: Pick<LinearPort, "readConversation" | "postComment">,
   resolveDue: (conversation: Conversation) => Promise<boolean>,
-  agentUserId: string,
 ): Promise<LoopResult | undefined> {
   const { at, replyId, comment, close } = accepted;
   const conversation = await linear.readConversation(issueId);
   if (!(await resolveDue(conversation))) return undefined;
   if (replyId) await postAccepted(conversation.issue.id, replyId, comment, linear);
-  // TECH-5232: a close posts its evidence, then closes the issue, both safe to replay. An issue no longer
-  // Sergeant's by the replay (A1) is left as it is.
-  const ours = checkDelegation(conversation.issue, agentUserId).allowed;
-  if (close && ours) {
-    if (!linear.closeIssue) throw new Error("this Sergeant cannot close an issue");
-    await linear.postComment({ issueId: conversation.issue.id, key: closedKey(conversation.issue.id, at), body: comment });
-    await linear.closeIssue(conversation.issue.id, close);
-  }
   // A closed issue is not in Todo, so it needs no marker: reopened to Todo, it starts afresh at once.
   if (!close) await markAccepted(dir, at);
   await rename(join(dir, "state.json"), join(dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
   if (!close) return { outcome: "accepted", detail: "a human accepted the work as it is" };
-  const as = close === "done" ? "Done" : "Canceled";
-  return { outcome: "accepted", detail: ours ? `Sergeant closed the issue as ${as}: nothing to change` : `the issue was no longer Sergeant's to close as ${as}` };
+  return { outcome: "accepted", detail: `Sergeant closed the issue as ${close === "done" ? "Done" : "Canceled"}: nothing to change` };
 }
 
 /**

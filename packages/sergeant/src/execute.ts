@@ -15,6 +15,7 @@ import {
   type RunRecord,
   type SituationReport,
 } from "@terros/sergeant-contracts";
+import { closedComment, closedKey } from "./accepted.ts";
 import { askHuman } from "./ask-human.ts";
 import { answeredBudgetQuestion } from "./budget.ts";
 import { builtByLine } from "./built-by.ts";
@@ -220,17 +221,25 @@ export async function execute(action: ProposedAction, situation: SituationReport
         return { action, status: "done", result: {} };
       }
       case "close_issue": {
-        // No effect here: like an accept, the loop saves the ending with the turn and then replays it
-        // (accepted.ts), posting the evidence and closing the issue (TECH-5232).
+        // TECH-5232: the evidence comment and the close, made here on the live read the Gate allowed, with
+        // nothing that waits in between (TECH-5236): a human comment, an edit, or a PR linked while
+        // reasoning ran denies it (C1, C4), and the next turn reads it. Then the loop ends the task like an
+        // accept (accepted.ts). Both effects are safe to repeat: the comment is keyed by the revision the
+        // close was decided on, and an issue already closed is not moved again.
         const live = await ports.linear.readConversation(conversation.issue.id);
+        const turnRevision = conversationRevision(conversation);
         const verdict = checkClose(action, {
           issue: live.issue,
           agentUserId: ports.agentUserId,
           runs,
-          turnRevision: conversationRevision(conversation),
+          turnRevision,
           liveRevision: conversationRevision(live),
         });
         if (!verdict.allowed) return denied(verdict);
+        if (!ports.linear.closeIssue) return { action, status: "failed", error: "this Sergeant cannot close an issue" };
+        const body = closedComment(action, ports.costLine?.());
+        await ports.linear.postComment({ issueId: conversation.issue.id, key: closedKey(conversation.issue.id, turnRevision), body });
+        await ports.linear.closeIssue(conversation.issue.id, action.state);
         return { action, status: "done", result: { state: action.state } };
       }
       case "create_followup": {
