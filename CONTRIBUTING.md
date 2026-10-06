@@ -29,6 +29,26 @@ While iterating, scope checks to the package you're touching (for example
 `pnpm exec turbo run test --filter=@terros/sergeant-contracts`) rather than running the full suite
 on every edit.
 
+## Repository layout
+
+Packages live in `packages/*` under the `@terros/` scope; [`AGENTS.md`](AGENTS.md) explains the
+one-way dependencies between them, and [`docs/design/`](docs/design/README.md) the architecture.
+
+| Package | What it is |
+|---|---|
+| `packages/contracts` (`@terros/sergeant-contracts`) | Zod schemas for the conversation, Situation Report, run reports, proposed actions, and PR facts; the ports adapters implement; the pure merge Gate |
+| `packages/reasoning` (`@terros/sergeant-reasoning`) | One fresh-context reasoning turn through the local `claude` CLI: Situation Report in, validated proposed actions out |
+| `packages/linear`, `packages/github` (`@terros/sergeant-linear`, `-github`) | Live Linear and GitHub adapters, and GitHub App installation tokens for the control-plane and worker Apps |
+| `packages/runner` (`@terros/sergeant-runner`) | The primary worker and fresh-context reviewer runs ([`packages/runner/README.md`](packages/runner/README.md)) |
+| `packages/sergeant` (`@terros/sergeant`) | The app: executes proposed actions through the Gate against the ports; the per-task loop; and `serve`, the long-running service with its client API ([`deploy/README.md`](deploy/README.md)) |
+| `packages/cli` (`@terros/sergeant-cli`) | `sgt`, a thin client of that API ([`docs/sgt.md`](docs/sgt.md)) |
+| `packages/mcp` (`@terros/sergeant-mcp`) | `sgt-mcp`, a read-only MCP server over stdio, another thin client of that API |
+
+The root `package.json` also has shortcuts: `pnpm lint` (oxlint), `pnpm typecheck` (strict `tsc`), and
+`pnpm test` (Vitest), each through Turborepo. The manual live commands (`live-check`, `canary`,
+`serve`) never run from tests or CI; they are described in [`deploy/README.md`](deploy/README.md)
+under Reference.
+
 ## Opening a pull request
 
 1. Push your branch and open a pull request against `main`.

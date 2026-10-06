@@ -69,7 +69,7 @@ export const client = (ctx: Context) =>
     api: ctx.api,
     fetch: ctx.io.fetch,
     token: ctx.token,
-    unreachableHint: ". Is serve running there, and is SGT_API_URL the hosted HTTPS endpoint (README.md)?",
+    unreachableHint: ". Is serve running there, and is SGT_API_URL the hosted HTTPS endpoint (docs/sgt.md)?",
     version: ctx.io.version ?? sergeantVersion().version,
     onOlderServer: (serverMin) => warnOlderServer(ctx, serverMin),
   });
