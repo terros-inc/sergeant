@@ -31,7 +31,7 @@ export function failedMerges(outcomes: ActionOutcome[], situation: SituationRepo
     if (o.status !== "failed") return [];
     const pr = situation.pullRequests.find((p) => p.repo === action.repo && p.number === action.number && p.headSha === action.expectedHeadSha);
     if (!pr) return [];
-    return [{ repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: situation.conversationRevision, reason: o.error, temporary: true as const, at: new Date().toISOString() }];
+    return [{ repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: situation.conversationRevision, reason: o.error, temporary: true as const, ...(o.handoffStep && { humanFailure: o.handoffStep }), at: new Date().toISOString() }];
   });
 }
 

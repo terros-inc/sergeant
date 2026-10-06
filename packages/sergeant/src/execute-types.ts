@@ -1,6 +1,7 @@
 import type {
   FiledFollowup,
   GitHubPort,
+  HumanHandoffStep,
   LinearPort,
   ProposedAction,
   PullRequestFacts,
@@ -75,6 +76,8 @@ export type ActionOutcome =
       action: ProposedAction;
       status: "failed";
       error: string;
+      /** Which human-merge handoff step failed, when this was not a merge attempt. */
+      handoffStep?: HumanHandoffStep;
       /** A question Linear did not accept: the loop asks it again every poll until it does. */
       unposted?: Extract<ProposedAction, { kind: "ask_human" }>;
     };

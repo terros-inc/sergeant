@@ -23,6 +23,15 @@ export function handoffComment(r: RefusedMerge): string {
       "A human merges it. Sergeant acts on a review requesting changes or a comment on the PR, and finishes the task once it is merged.",
     ].join("\n");
   }
+  if (r.humanFailure) {
+    return [
+      "**Human handoff needs manual help**",
+      "",
+      `${ready}, but Sergeant failed twice at the **${r.humanFailure}** step: ${r.reason.trim()}`,
+      "",
+      "The PR is ready for a human to take over the handoff by hand. Sergeant won't try again unless the PR, its reviews, or this issue change.",
+    ].join("\n");
+  }
   // TECH-5090: a merge call that failed twice with nothing changed is handed over too (TECH-5077); no
   // policy blocked it, so the comment must not say GitHub refused it or that the repository needs a human.
   const [why, who] = r.temporary
@@ -33,8 +42,9 @@ export function handoffComment(r: RefusedMerge): string {
 
 /** Posts a refusal's comment, at most once however often it is retried; false if Linear failed. */
 export async function postHandoff(issueId: string, r: RefusedMerge, linear: Pick<LinearPort, "postComment">, log: (line: string) => void): Promise<boolean> {
+  const description = r.humanFailure ? "posted that its human handoff needs manual help" : "posted that it is ready for a human to merge";
   return linear.postComment({ issueId, body: handoffComment(r), key: handoffKey(issueId, r) }).then(
-    () => (log(`${r.repo}#${r.number}: posted that it is ready for a human to merge`), true),
-    (e: Error) => (log(`${r.repo}#${r.number}: ready-for-human-merge comment not posted: ${e.message}`), false),
+    () => (log(`${r.repo}#${r.number}: ${description}`), true),
+    (e: Error) => (log(`${r.repo}#${r.number}: handoff comment not posted: ${e.message}`), false),
   );
 }
