@@ -146,6 +146,21 @@ describe("fargateRunner", () => {
     expect(await runner.status("run_t1")).toMatchObject({ status: "failed", reportError: "its Fargate task never started" });
   });
 
+  it("records a rejected start as never started once a retry finds its lost deregistration already done", async () => {
+    const { aws, rootDir, run, runner } = await setUp();
+    aws.faults.set("RunTaskCommand", serviceError("ClientException"));
+    aws.faults.set("DeregisterTaskDefinitionCommand", "lost");
+    await expect(run()).rejects.toThrow(/socket hang up/);
+    expect(aws.secrets.size + aws.defs.size).toBe(0);
+    expect(await launchOf(rootDir)).toHaveProperty("taskDefinitionArn");
+
+    // Only ECS's already-inactive answer counts as done; any other rejection keeps the record for a retry.
+    aws.faults.set("DeregisterTaskDefinitionCommand", serviceError("ClientException"));
+    await expect(runner.status("run_t1")).rejects.toThrow(/ClientException/);
+    expect(await runner.status("run_t1")).toMatchObject({ status: "failed", reportError: "its Fargate task never started" });
+    await expect(launchOf(rootDir)).rejects.toThrow(/ENOENT/);
+  });
+
   it("fails clearly, creating nothing, when the brief does not fit in a 64 KiB secret", async () => {
     const huge = { ...spec, objective: "x".repeat(70_000) } as RunSpec;
     const { aws, run } = await setUp({ spec: huge });

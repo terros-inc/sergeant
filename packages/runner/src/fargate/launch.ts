@@ -58,17 +58,32 @@ const RUN_TASK_REJECTED = new Set([
   "PlatformTaskDefinitionIncompatibilityException", "PlatformUnknownException", "UnsupportedFeatureException",
 ]);
 
+/** ECS's answer to a DeregisterTaskDefinition retried after its answer was lost: the revision is already inactive, or gone. */
+const ALREADY_DEREGISTERED = /inactive|delete_in_progress|does not exist|not found|unable to describe/i;
+
 /**
- * Deletes what a start that never got a task made: the secret, by name since a CreateSecret whose
- * answer was lost may have made it without a recorded ARN, then the definition, then the record.
+ * Deletes the run's secret, by name since a CreateSecret whose answer was lost may have made it
+ * without a recorded ARN, then deregisters its definition, recording each so a retry skips what is
+ * done. A retry after a lost deregister answer finds the revision already inactive, which is done;
+ * any other error throws, and the next call resumes here.
  */
-export async function discard(l: Launch, aws: LaunchAws, store: LaunchStore) {
+export async function cleanUp(l: Launch, aws: LaunchAws, store: LaunchStore) {
   await aws.deleteSecret(l.secretName).catch((err: unknown) => {
     if (awsErrorCode(err) !== "ResourceNotFoundException") throw err;
   });
   const { secretArn: _deleted, ...rest } = l;
   await store.write(rest);
-  if (l.taskDefinitionArn) await aws.deregisterTaskDefinition(l.taskDefinitionArn);
+  if (!rest.taskDefinitionArn) return;
+  await aws.deregisterTaskDefinition(rest.taskDefinitionArn).catch((err: unknown) => {
+    if (awsErrorCode(err) !== "ClientException" || !ALREADY_DEREGISTERED.test((err as Error).message)) throw err;
+  });
+  const { taskDefinitionArn: _gone, ...left } = rest;
+  await store.write(left);
+}
+
+/** Deletes what a start that never got a task made, then its record. */
+export async function discard(l: Launch, aws: LaunchAws, store: LaunchStore) {
+  await cleanUp(l, aws, store);
   await store.remove();
 }
 
