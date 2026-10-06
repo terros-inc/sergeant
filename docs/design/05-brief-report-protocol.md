@@ -292,6 +292,15 @@ afterReport(run, r)                        // guardrails, then wake Sergeant
   state from GitHub, never from the report.
 - A recommendation applies only to the SHA it names. If the head moved after the report (the worker
   pushed again, or a human did), that new head has no recommendation until another report covers it.
+- A review report is read forgivingly where its meaning is unambiguous (TECH-5259): a spelling of a
+  verdict or severity (`Approve`, `non-blocking`), a PR number as a string, a missing report version,
+  summary, or finding id. Never toward a merge: an unknown severity reads as `blocking`, and an
+  unknown verdict or a missing reviewed head still rejects the report.
+- A run that ends with no usable report (none written, or one that does not parse) gets one retry at
+  once, before the next reasoning turn (TECH-5259): a reviewer on the same heads, a worker on its
+  objective with an instruction to finish and write its report, each told why. The retry goes through
+  the Gate like any start, and one that also ends without a report is left to reasoning. Each such run
+  is one line in the task's `report-recoveries.jsonl` (`missing` or `malformed`, and what followed).
 
 ## 7. Progress notes and messages
 

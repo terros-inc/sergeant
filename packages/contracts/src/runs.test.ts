@@ -64,3 +64,29 @@ test("marks acceptance findings explicitly while ordinary defects omit the categ
   const parsed = parseReport(report({ ...base, findings }), ReviewReport);
   expect(parsed.ok && parsed.report.findings).toEqual(findings);
 });
+
+test("TECH-5259: a review report's unambiguous slips are read, never toward a merge", () => {
+  const review = { reviewed: [{ ...pr, number: "7" }], verdict: " Changes requested", summary: "s" };
+  const findings = [
+    { severity: "Non-Blocking", description: "No jitter.", location: 12 },
+    { id: 2, severity: "major", category: "acceptance: the README is not updated", description: "README." },
+    { id: "f9", severity: "nit", category: "style", description: "Naming." },
+  ];
+  const parsed = parseReport(report({ ...review, findings }), ReviewReport);
+  expect(parsed.ok && parsed.report).toMatchObject({
+    reportVersion: "s2-review-report/1",
+    reviewed: [{ number: 7 }],
+    verdict: "changes_requested",
+    findings: [
+      { id: "f1", severity: "non_blocking", description: "No jitter." },
+      // An unknown severity is blocking.
+      { id: "2", severity: "blocking", category: "acceptance" },
+      { id: "f9", severity: "nit", category: undefined },
+    ],
+  });
+  const approved = parseReport(report({ ...review, verdict: "APPROVED", summary: undefined }), ReviewReport);
+  expect(approved.ok && [approved.report.verdict, approved.report.summary]).toEqual(["approve", ""]);
+  // What a merge rests on is still exact: an unknown verdict, or no reviewed head, rejects the report.
+  expect(parseReport(report({ ...review, verdict: "looks good" }), ReviewReport).ok).toBe(false);
+  expect(parseReport(report({ ...review, reviewed: undefined }), ReviewReport).ok).toBe(false);
+});

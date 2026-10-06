@@ -21,6 +21,7 @@ import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
+import { recoverReports } from "./report-recovery.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { admitOwner } from "./owner.ts";
@@ -241,6 +242,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
 
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
+    // TECH-5259: a run that ended with no usable report is retried at once, before any turn.
+    if (running.length === 0 && unknown.length === 0 && (await recoverReports(situation, state, ports, { issueId: opts.issueId, dir: opts.dir, log, save }))) continue;
     if (running.length > 0 || humanWait || (fingerprint === state.lastFingerprint && retryDue.length === 0 && !opts.wake?.pending)) {
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
       if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {

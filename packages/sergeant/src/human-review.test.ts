@@ -61,7 +61,7 @@ test("a human's requested changes on the PR wake a turn, block the merge, and re
       github: { readPullRequest: async () => livePr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
       runner: {
         start: async (spec) => void started.push(spec),
-        status: async (id) => records.find((r) => r.runId === id) ?? { runId: id, role: "worker", status: "succeeded", provider: "p", model: "m", report: null },
+        status: async (id) => records.find((r) => r.runId === id) ?? { ...records[0]!, runId: id },
         cancel: async () => {},
       },
       reasoner: {

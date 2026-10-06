@@ -43,7 +43,8 @@ export const worker = (status: RunRecord["status"], costUsd?: number): RunRecord
   provider: "p",
   model: "m",
   ...(costUsd !== undefined && { costUsd }),
-  report: null,
+  // A finished worker reports; one with no usable report would be retried at once (TECH-5259).
+  report: status === "succeeded" ? { reportVersion: "s2-worker-report/1", outcome: "completed", summary: "", pullRequests: [], knownGaps: [], followups: [] } : null,
 });
 export const review: RunRecord = {
   runId: "run_review",
