@@ -88,7 +88,8 @@ export async function execute(action: ProposedAction, situation: SituationReport
           if (!late.allowed) return denied(late);
           const runId = `run_${randomUUID()}`;
           // Accepted: the deadline can pass during this milliseconds-long write, and the run still starts.
-          await ports.recordRun?.(runId);
+          const repositories = action.kind === "start_worker" ? action.repositories : [...new Set(action.subject.map((s) => s.repo))];
+          await ports.recordRun?.(runId, repositories);
           await ports.runner.start(
             action.kind === "start_worker"
               ? {
@@ -96,7 +97,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
                   owner: payer,
                   role: "worker",
                   conversation,
-                  repositories: action.repositories,
+                  repositories,
                   objective: action.objective,
                   context: { pullRequests: situation.pullRequests, runs },
                 }
@@ -105,7 +106,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
                   owner: payer,
                   role: "reviewer",
                   conversation,
-                  repositories: [...new Set(action.subject.map((s) => s.repo))],
+                  repositories,
                   subject: action.subject,
                   pullRequests: subjectPullRequests,
                   ...(action.focus !== undefined && { focus: action.focus }),

@@ -74,6 +74,11 @@ export const InstallationConfig = z.strictObject({
       mergePolicy: MergePolicy.default("human"),
       /** See `GitHubRepositoryConfig.observedChecksFallback`. Off unless set. */
       observedChecksFallback: z.boolean().default(false),
+      /**
+       * TECH-5219: this repository's budget window, for a repository whose builds, tests, and CI need
+       * more (or less) than the installation's `budget`. Each field unset keeps the installation's.
+       */
+      budget: z.strictObject({ wallMinutes: z.number().positive().optional(), costUsd: z.number().positive().optional() }).optional(),
     }),
   ),
   /** The Sergeant model token for reasoning; never a worker's or reviewer's (TECH-5179). */

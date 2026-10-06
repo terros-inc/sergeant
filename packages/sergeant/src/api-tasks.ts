@@ -22,7 +22,7 @@ import type { z } from "zod";
 import type { ApiControl } from "./api.ts";
 import { parse, Refusal } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
-import { budgetStatus } from "./budget.ts";
+import { budgetStatus, windowFor } from "./budget.ts";
 import { CancelConflict, cancelRun, runIdsOf, taskDir } from "./cancel.ts";
 import { readIntent, readStopRecord } from "./cancel-intent.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
@@ -101,7 +101,7 @@ export async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetai
   ]);
   const known = records.flatMap((r) => (r.record ? [r.record] : []));
   const state = task.state;
-  const budget = state && budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs: known, unknownRuns: records.length - known.length });
+  const budget = state && budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => ctl.repositoryBudget?.(r)), startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs: known, unknownRuns: records.length - known.length });
   const verdict = budget && checkBudget(budget, new Date());
   return {
     task: summarize(ctl, task),

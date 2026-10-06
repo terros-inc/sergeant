@@ -81,6 +81,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         ...(opts.waitingGraceMinutes !== undefined && { waitingGraceMinutes: opts.waitingGraceMinutes }),
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
         ...(opts.budget && { budget: opts.budget }),
+        ...(opts.repositoryBudget && { repositoryBudget: opts.repositoryBudget }),
         ...(opts.auditSampleRate !== undefined && { auditSampleRate: opts.auditSampleRate }),
         ...(opts.progressComments !== undefined && { progressComments: opts.progressComments }),
         log: (line) => log(`${issueId}: ${line}`),
@@ -217,6 +218,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     stateDir: opts.stateDir,
     enrolledRepositories: opts.enrolledRepositories,
     deps,
+    ...(opts.repositoryBudget && { repositoryBudget: opts.repositoryBudget }),
     log,
     loop: (ref) => {
       if (active.has(ref)) return { status: "active" };

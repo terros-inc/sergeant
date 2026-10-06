@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { fargateSettings, InstallationConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { fargateSettings, InstallationConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const config = (controlPlaneAppId: number | string, workerAppId: number | string) => ({
@@ -59,6 +59,20 @@ test("a task starts with the installation config's budget window, or the default
     expect(InstallationConfig.safeParse({ ...config(1, 2), budget: { minutes: 0 } }).success).toBe(false);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+// TECH-5219: a repository's own budget window, each field optional; a mistyped or nonpositive one fails
+// the config rather than silently leaving the repository on the installation's window.
+test("a repository's budget parses field by field, and an invalid one fails the config", () => {
+  const withBudget = (budget: unknown) => ({ ...config(1, 2), repositories: { "acme/app": { mergeMethod: "squash", budget } } });
+  const parsed = (budget: unknown) => repoBudget(InstallationConfig.parse(withBudget(budget)).repositories["acme/app"]);
+  expect(parsed({ wallMinutes: 90, costUsd: 60 })).toEqual({ wallMinutes: 90, costUsd: 60 });
+  expect(parsed({ wallMinutes: 90 })).toEqual({ wallMinutes: 90 });
+  expect(parsed({})).toEqual({});
+  expect(repoBudget(InstallationConfig.parse(config(1, 2)).repositories["acme/app"])).toBeUndefined();
+  for (const invalid of [{ wallMinutes: 0 }, { costUsd: -1 }, { wallMinutes: "90" }, { minutes: 90 }, 90]) {
+    expect(InstallationConfig.safeParse(withBudget(invalid)).success, JSON.stringify(invalid)).toBe(false);
   }
 });
 

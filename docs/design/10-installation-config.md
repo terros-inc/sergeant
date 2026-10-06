@@ -56,7 +56,9 @@ Jev's authoritative flag. None of those concepts exist.
 - **Prompts and rules** (Sergeant's prompt, worker rules, reviewer rules) are code, versioned with the
   release and recorded on every turn and run.
 - **Per-task budgets** come from defaults: each budget window (01 `TaskBudget`) copies the current
-  default when it opens, at admission or at a human answer to a Sergeant question.
+  default when it opens, at admission or at a human answer to a Sergeant question. A repository's
+  optional `budget: { wallMinutes, costUsd }` (TECH-5219) replaces those fields for a task once it has
+  a run in that repository, for repositories whose builds and CI need a longer window.
 - **Repository build/test/topology**: not Sergeant's concern. Workers read each repository's own
   `AGENTS.md` and README. S1's `sergeant.toml` is not carried over (13).
 

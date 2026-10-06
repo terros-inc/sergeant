@@ -26,6 +26,7 @@ import { repositoriesRoute } from "./api-repositories.ts";
 import { body, callerOf, notFound, ok, parse, Refusal, type Reply, send } from "./api-http.ts";
 import { allRuns, cancelRunOf, cancelTask, listRuns, listTasks, runReport, showRun, showTask, wakeTask } from "./api-tasks.ts";
 import { callerName, type Caller } from "./auth.ts";
+import type { BudgetWindow } from "./budget.ts";
 import type { CancelProgress } from "./cancel.ts";
 import type { Enrollment } from "./enrollment.ts";
 import type { ServiceDeps } from "./service.ts";
@@ -54,6 +55,8 @@ export type ApiControl = {
   /** The live enrolled list: an approver's change through `enrollment` shows here at once. */
   enrolledRepositories: RepoSlug[];
   deps: ServiceDeps;
+  /** Each repository's own budget window (TECH-5219), so a task's shown budget is the one its loop enforces. */
+  repositoryBudget?: (repo: RepoSlug) => Partial<BudgetWindow> | undefined;
   log: (line: string) => void;
   /** The task's loop in this process: running, waiting for a slot, or how it last ended. */
   loop(ref: TaskRef): { status: TaskStatus; detail?: string } | undefined;

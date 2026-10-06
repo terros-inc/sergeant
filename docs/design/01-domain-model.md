@@ -136,6 +136,7 @@ RepositoryEnrollment {
   enabled                       // disabled: never added to a new repo set, dropped from credentials
   mergePolicy: sergeant | human // who performs the merge (08 §7); unset is human (TECH-5244)
   mergeMethod: squash | merge | rebase
+  budget?: { wallMinutes?, costUsd? } // replaces the installation's window fields for tasks with a run here (TECH-5219)
   alwaysReviewPaths: Glob[]     // optional; a "not required" disposition is refused if the PR touches these
 }
 ```

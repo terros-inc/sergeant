@@ -30,6 +30,11 @@ export type LoopOptions = {
    * minutes, $25). Used when the task starts; an existing task keeps the window it started with.
    */
   budget?: Partial<BudgetWindow>;
+  /**
+   * TECH-5219: a repository's own budget window (the installation config's `repositories[slug].budget`),
+   * which replaces `budget`'s fields for a task once it has a run in that repository (budget.ts `windowFor`).
+   */
+  repositoryBudget?: (repo: RepoSlug) => Partial<BudgetWindow> | undefined;
   /** How long to watch Linear after the merge for the GitHub integration to move the issue. */
   completionWaitMinutes?: number;
   log?: (line: string) => void;
