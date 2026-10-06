@@ -23,6 +23,19 @@ export type TaskOwnerCheck =
       delegatedAt?: string;
     };
 
+export type HumanHandoffStep = "mark ready" | "request reviewers";
+
+/** A human-merge handoff failed at a step a human can finish manually. */
+export class HumanHandoffError extends Error {
+  readonly step: HumanHandoffStep;
+
+  constructor(step: HumanHandoffStep, message: string) {
+    super(message);
+    this.step = step;
+    this.name = "HumanHandoffError";
+  }
+}
+
 export interface LinearPort {
   /** The issue, every human-authored comment, and bounded explicit linked-issue background, live. */
   readConversation(issueId: string): Promise<Conversation>;

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import type { Conversation, HumanPullRequestFeedback, MergePr, PullRequestFacts, RunRecord, SituationReport } from "@terros/sergeant-contracts";
+import { handoffComment } from "./handoff.ts";
 import { runLoop } from "./loop.ts";
 import { Wake } from "./wake.ts";
 
@@ -68,6 +69,24 @@ const ownerApproval: HumanPullRequestFeedback = {
 
 let dir = "";
 afterEach(() => rm(dir, { recursive: true, force: true }));
+
+test.each(["mark ready", "request reviewers"] as const)("a failed human handoff names the %s step and asks a human to take over", (humanFailure) => {
+  const body = handoffComment({
+    repo,
+    number: pr.number,
+    url: pr.url,
+    headSha: head,
+    conversationRevision: "revision",
+    reason: "GitHub was unavailable",
+    temporary: true,
+    humanFailure,
+    at: new Date().toISOString(),
+  });
+
+  expect(body).toContain(`failed twice at the **${humanFailure}** step`);
+  expect(body).toContain("The PR is ready for a human to take over the handoff by hand.");
+  expect(body).not.toContain("Sergeant's merge failed twice");
+});
 
 test("a merge refused by repository policy gets one ready-for-human-merge comment and no retry until something changes", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-handoff-test-"));

@@ -77,3 +77,17 @@ test("a handoff leaves the code owners GitHub already asked, and refuses a moved
   expect(calls.some((c) => c.path.endsWith("/requested_reviewers"))).toBe(false);
   await expect(github.handToHuman?.({ ...handoff, expectedHeadSha: "c".repeat(40) })).rejects.toThrow("head moved");
 });
+
+test.each([
+  ["mark ready", "/graphql", true],
+  ["request reviewers", "/requested_reviewers", false],
+] as const)("a handoff identifies a failed %s step", async (step, failedPath, draft) => {
+  const { github } = port({ mergeMethod: "squash", mergePolicy: "human" }, (path, method) => {
+    if (path.endsWith("/pulls/7")) return json(livePr({ draft }));
+    if (path === failedPath || path.endsWith(failedPath)) throw new Error("GitHub was unavailable");
+    if (path.includes("/issues/7/comments")) return json(method === "GET" ? [] : { id: 1 });
+    throw new Error(`unexpected ${method} ${path}`);
+  });
+
+  await expect(github.handToHuman?.(handoff)).rejects.toMatchObject({ name: "HumanHandoffError", step, message: "GitHub was unavailable" });
+});

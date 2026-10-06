@@ -2,10 +2,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import type { Conversation, GitHubPort, PullRequestFacts, SituationReport } from "@terros/sergeant-contracts";
+import { HumanHandoffError, type Conversation, type GitHubPort, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
 import { execute } from "./execute.ts";
 import { conversation, head, merge, ports, pr, situation } from "./execute-fixtures.ts";
 import { runLoop } from "./loop.ts";
+import { failedMerges } from "./poll.ts";
 import { Wake } from "./wake.ts";
 
 // TECH-5244: Sergeant approved and merged a prod change in terros-inc/sales, a repository only humans
@@ -46,6 +47,17 @@ test("a head the merge checks refuse is not handed over either, and a draft is h
   const draft = { pr: { draft: true, mergeableState: "draft" as const } };
   expect(await execute(merge, situation, humanPorts(() => "human", draft).p)).toMatchObject({ status: "denied", rule: "H1" });
   expect(await execute(merge, situation, ports(draft).p)).toMatchObject({ status: "denied", rule: "M7" });
+});
+
+test("a failed human handoff carries its step into the refusal used for the issue comment", async () => {
+  const { p } = humanPorts(() => "human");
+  p.github.handToHuman = async () => {
+    throw new HumanHandoffError("request reviewers", "GitHub was unavailable");
+  };
+
+  const outcome = await execute(merge, situation, p);
+  expect(outcome).toMatchObject({ status: "failed", error: "GitHub was unavailable", handoffStep: "request reviewers" });
+  expect(failedMerges([outcome], situation)).toMatchObject([{ humanFailure: "request reviewers", temporary: true }]);
 });
 
 let dir = "";

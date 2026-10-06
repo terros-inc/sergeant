@@ -1,4 +1,4 @@
-import type { Conversation, MergePr, PullRequestFacts, RefusedMerge, RunRecord } from "@terros/sergeant-contracts";
+import { HumanHandoffError, type Conversation, type MergePr, type PullRequestFacts, type RefusedMerge, type RunRecord } from "@terros/sergeant-contracts";
 import type { ActionOutcome, Ports } from "./execute-types.ts";
 
 // TECH-5244: in a repository whose `mergePolicy` is `human`, Sergeant never approves or merges. A
@@ -45,13 +45,19 @@ export async function handToHuman(
   if (!ports.github.handToHuman) return { action, status: "failed", error: "this Sergeant cannot hand a PR to a human" };
   const summary = reviewSummary(action.reviewStanding, pr, ctx.runs);
   const assignee = issue.assignee?.url && ports.githubLoginForLinearProfile?.(issue.assignee.url);
-  const { requested } = await ports.github.handToHuman({
-    repo: pr.repo,
-    number: pr.number,
-    expectedHeadSha: pr.headSha,
-    reviewers: assignee ? [assignee] : [],
-    comment: prHandoffComment(pr, summary),
-  });
+  let requested: string[];
+  try {
+    ({ requested } = await ports.github.handToHuman({
+      repo: pr.repo,
+      number: pr.number,
+      expectedHeadSha: pr.headSha,
+      reviewers: assignee ? [assignee] : [],
+      comment: prHandoffComment(pr, summary),
+    }));
+  } catch (e) {
+    if (e instanceof HumanHandoffError) return { action, status: "failed", error: e.message, handoffStep: e.step };
+    throw e;
+  }
   ports.log?.(`${pr.repo}#${pr.number}: handed to a human to merge; review requested from ${requested.join(", ") || "nobody"}`);
   const refused: RefusedMerge = {
     repo: pr.repo,
