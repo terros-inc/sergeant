@@ -55,8 +55,15 @@ sgt whoami    # who the installation takes you for, and the repositories it work
 ```
 
 `sgt login` signs you in as yourself with Linear. If no browser opens, it prints the URL to visit.
-The login needs local port 4546 free while it waits for the browser. It is kept per installation URL
-in `~/.config/sergeant/credentials.json` and renewed automatically; `sgt logout` forgets it.
+The login needs local port 4546 free while it waits for the browser (`SGT_LOGIN_PORT` changes the
+port, and the installation's Linear app must then list that callback URL too). It is kept per
+installation URL in `~/.config/sergeant/credentials.json` (or under `XDG_CONFIG_HOME`), readable only by
+you, and renewed automatically; `sgt logout` forgets it on this machine, and revoking the app in your
+Linear account settings ends it at Linear.
+
+The login uses Linear OAuth with PKCE (no client secret) through the installation's Linear OAuth app,
+whose public client id the API serves. The Linear token it keeps is the only credential `sgt` holds:
+`sgt` needs no AWS credentials, and sends the token only over HTTPS or to loopback.
 
 **Who may use it.** Access needs an active Linear account in your installation's Linear workspace
 that is a member of one of the installation's configured Linear teams; that membership is checked on
@@ -90,7 +97,8 @@ Approvers also have `sgt admin` (§7).
 - `--json` prints JSON for scripts and `jq`: the API's own JSON for most commands, `{"report": "…"}`
   for `run report`, `{"api","signedOut"}` for `logout`, `{"version"}` for `update` and `--version`,
   `{"request","outcome"}` for `admin restart` and `admin update`, and errors as `{"error":{"code","message"}}`.
-- `sgt --help` lists every command, including `run cancel <run> [--reason …]` and `update`.
+- `sgt --help` lists every command: `login`, `logout`, `whoami`, `task list | show | wake | cancel`,
+  `run list | show | report | cancel`, `account …`, `repo list`, `retro`, `admin …`, and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
 - MCP: `sgt-mcp` puts the read-only commands in your AI assistant (§9).
 
@@ -218,6 +226,11 @@ with the login `sgt login` saved (§4); there is nothing else to sign in to.
    { "mcpServers": { "sergeant": { "command": "node", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "https://<your installation's hostname>"] } } }
    ```
 
+- Each tool is one GET to the installation's client API, and returns the API's JSON unchanged as
+  structured content (errors as `{"error":{"code","message"}}` tool errors).
+- `sgt-mcp` finds the API as `sgt` does: `--api`, else `SGT_API_URL`, else `http://127.0.0.1:8080`.
+  With no login saved for that URL it sends none, which only a `serve --trust-loopback` on the same
+  machine answers.
 - `--api` must be the URL you logged in to: each URL has its own login. If you set `XDG_CONFIG_HOME`,
   pass it to `sgt-mcp` too (most assistants take an `env` setting), since your login is kept under it.
 - A tool that answers `unauthorized` has no usable login: it names the `sgt login --api <url>` to run.

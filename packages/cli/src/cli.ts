@@ -64,7 +64,7 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   admin repo remove <owner/name>     an approver's removal: Sergeant stops working in it at once
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host); the hosted API
-is the installation's HTTPS endpoint, https://<hostname> (README.md). Each API URL has its own
+is the installation's HTTPS endpoint, https://<hostname> (docs/sgt.md). Each API URL has its own
 login. --json prints JSON for scripts: the API's answer for most commands, but {"report"} (the
 Markdown) for run report, {"api","signedOut"} for logout, {"version"} for update and --version,
 {"request","outcome"} for admin restart and admin update, and errors as {"error":{"code","message"}}.
