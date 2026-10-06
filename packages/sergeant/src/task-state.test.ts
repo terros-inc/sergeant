@@ -53,3 +53,33 @@ test("a task's state keeps the keys a newer release saved, nested ones included,
 
   expect(written).toMatchObject(stored);
 });
+
+// TECH-5255: loadState drops only the pre-TECH-4991 records that held a temporary 405 as a policy refusal.
+// Those predate TECH-5077, so they have no fingerprint; every handoff written since has one, whether its
+// 405 was temporary (TECH-5090's flag) or kept failing, and the same reason must not lose it on a restart.
+test.each([
+  ["a temporary 405 handoff", true, { fingerprint: "fp", temporary: true }],
+  ["a persistent-405 handoff written before TECH-5090's flag", true, { fingerprint: "fp" }],
+  ["a pre-TECH-4991 405 recorded as a policy refusal", false, {}],
+])("%s is kept by loadState: %s", async (_, kept, extra) => {
+  dir = await mkdtemp(join(tmpdir(), "task-state-"));
+  const file = join(dir, "state.json");
+  const at = "2026-10-01T00:00:00.000Z";
+  const refused = {
+    repo: "terros-inc/sergeant",
+    number: 2,
+    url: "https://github.com/terros-inc/sergeant/pull/2",
+    headSha: "a".repeat(40),
+    conversationRevision: "b".repeat(64),
+    reason: "GitHub 405: Pull Request is not mergeable",
+    at,
+    commentPostedAt: at,
+    ...extra,
+  };
+  const policy = { ...refused, number: 3, url: "https://github.com/terros-inc/sergeant/pull/3", reason: "Waiting on code owner review." };
+  await writeFile(file, JSON.stringify({ issueId: "i1", startedAt: at, turns: 1, runIds: [], recentTurns: [], refusedMerges: [refused, policy] }));
+
+  const state = await loadState(file, "i1", DEFAULT_BUDGET);
+
+  expect(state.refusedMerges).toEqual(kept ? [refused, policy] : [policy]);
+});
