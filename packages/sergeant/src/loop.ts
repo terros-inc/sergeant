@@ -244,9 +244,20 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     // TECH-5259: a run with no usable report is retried at once, before a turn, unless a human said
     // something no turn has read yet. A retry the owner was asked about instead is asked again.
-    const recovery = running.length || unknown.length ? undefined : await recoverReports(situation, state, ports, { issueId: opts.issueId, dir: opts.dir, log, save });
+    const recovery = running.length || unknown.length ? undefined : await recoverReports(situation, state, ports, {
+      issueId: opts.issueId,
+      dir: opts.dir,
+      log,
+      save,
+      work: () => !opts.slot || opts.slot.work(),
+    });
     if (recovery?.unposted) unposted = { action: recovery.unposted, situation };
     if (recovery?.retried || recovery?.unposted) continue;
+    if (recovery?.waitingForSlot) {
+      log("queued: waiting for a free task slot before retrying a run with no usable report");
+      await wait(pollMs);
+      continue;
+    }
     if (running.length > 0 || humanWait || (fingerprint === state.lastFingerprint && retryDue.length === 0 && !opts.wake?.pending)) {
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
       if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
