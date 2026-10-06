@@ -12,7 +12,7 @@ import { DEFAULT_LIMITS, type ContainerRunnerOptions } from "../options.ts";
 import { recorded, runFiles, type RunMeta } from "../run-files.ts";
 import { redactSecrets } from "../redact.ts";
 import { fargateAws, fargateClients, type FargateClients, type FargateSettings } from "./aws.ts";
-import { awsErrorCode, discard, startRun, type Launch, type LaunchStore } from "./launch.ts";
+import { cleanUp, discard, startRun, type Launch, type LaunchStore } from "./launch.ts";
 import { runSecret } from "./secret.ts";
 import { agentOutput, awaitingLogs, CONTAINER, extractFrame, secondsBetween, TASK_SCRIPT, taskDefinition, taskState, type TaskState } from "./task.ts";
 
@@ -88,26 +88,6 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
     return record;
   }
 
-  /** Deletes the run's secret and deregisters its definition, recording each, so a retry skips what is done. */
-  async function cleanUp(meta: RunMeta, l: Launch) {
-    const st = store(meta.runId);
-    await aws.launch.deleteSecret(l.secretName).catch((e: unknown) => {
-      if (awsErrorCode(e) !== "ResourceNotFoundException") throw e;
-    });
-    const { secretArn: _deleted, ...rest } = l;
-    l = rest;
-    await st.write(l);
-    if (l.taskDefinitionArn) {
-      // A retry after a lost answer finds the revision already inactive. A revision ECS refuses to
-      // deregister holds only a reference to the secret just deleted, so it does not hold up the record.
-      await aws.launch.deregisterTaskDefinition(l.taskDefinitionArn).catch((e: unknown) => {
-        if (awsErrorCode(e) !== "ClientException") throw e;
-      });
-      const { taskDefinitionArn: _gone, ...rest } = l;
-      await st.write(rest);
-    }
-  }
-
   /**
    * The stopped (or forgotten) task's record from its log stream: its agent's result, its report, and
    * then its secret deleted. Undefined while the task's last lines may still be on their way.
@@ -131,7 +111,7 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
       ...(!parsed?.ok && status !== "canceled" && { reportError: redactSecrets(parsed ? parsed.error : `no report written; ${why}`) }),
     });
     if (status !== "canceled") await setAsideOnFailure(meta, agent, asides, opts);
-    await cleanUp(meta, l);
+    await cleanUp(l, aws.launch, store(meta.runId));
     const facts = { adapter: meta.adapter, taskArn: l.taskArn, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
     return finish(meta, record, facts, markdown);
   }
@@ -142,8 +122,9 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
     const l = await st.read();
     if (!l) return undefined;
     if (l.taskArn) return l as Launch & { taskArn: string };
-    // Never sent: its start ended before RunTask and did not finish cleaning up.
-    if (!l.runTaskSentAt) {
+    // Never sent, or rejected (its secret is gone only once a discard began): its start never got a
+    // task and did not finish cleaning up.
+    if (!l.runTaskSentAt || !l.secretArn) {
       await discard(l, aws.launch, st);
       return undefined;
     }

@@ -13,7 +13,7 @@ import type { FargateClients } from "./aws.ts";
 // In-memory ECS, Secrets Manager, and CloudWatch Logs behind the SDK clients' `send`, for the
 // Fargate runner's tests. Each AWS error is thrown as the SDK throws it: its code is its name.
 
-export const serviceError = (name: string) => Object.assign(new Error(`${name}: the service said no`), { name, $metadata: { httpStatusCode: 400 } });
+export const serviceError = (name: string, message = `${name}: the service said no`) => Object.assign(new Error(message), { name, $metadata: { httpStatusCode: 400 } });
 
 type Task = { arn: string; def: string; clientToken: string; startedBy: string; lastStatus: string; stopCode?: string; exitCode?: number; stoppedAt?: Date };
 
@@ -51,7 +51,7 @@ export function fakeAws() {
       return { taskDefinition: { taskDefinitionArn: arn } };
     }
     if (name === DeregisterTaskDefinitionCommand.name) {
-      defs.delete(input.taskDefinition as string);
+      if (!defs.delete(input.taskDefinition as string)) throw serviceError("ClientException", "The specified task definition is inactive.");
       return {};
     }
     if (name === RunTaskCommand.name) {
