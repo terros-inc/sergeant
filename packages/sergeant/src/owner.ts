@@ -61,7 +61,7 @@ export function ownerRefusal(issueId: string, check: Exclude<TaskOwnerCheck, { o
       return { key, body: "Sergeant cannot start until this issue is assigned to a human. Assign it to the person whose model accounts should pay for it, and have them delegate it to Sergeant." };
     case "delegator_unknown": {
       const via = app
-        ? `\n\nThis was delegated through the app ${app.name ?? "(unnamed)"} (id \`${app.id}\`) acting for ${app.userDisplayName ?? "an unnamed user"}. If that app should count as the assignee's own delegation, an operator can add the id to \`linear.delegatingAppIds\`.`
+        ? `\n\nThis was delegated through the app ${app.name ?? "(unnamed)"} (id \`${app.id}\`) acting for ${app.userDisplayName ?? "an unnamed user"}. An app's delegation counts as the assignee's own only when an operator has added its id to \`linear.delegatingAppIds\` and the name it acts for exactly matches the assignee's Linear display name. If this app should count, fix whichever does not hold, then delegate the issue to Sergeant again.`
         : "";
       return {
         key,

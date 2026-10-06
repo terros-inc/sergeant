@@ -80,7 +80,7 @@ test("each refusal says what to do; a new delegation that is refused again is sa
 });
 
 test("an app-made delegation that is refused names the app and its id, keyed as before", async () => {
-  // TECH-5321: the operator learns which app to add to `linear.delegatingAppIds` without querying Linear.
+  // TECH-5321: the operator learns which app was refused, and what admits it, without querying Linear.
   const app = { id: "app-n8n", name: "n8n", userDisplayName: "ann" };
   const plain: TaskOwnerCheck = { refused: "delegator_unknown", assignee: ann, delegatedAt: "2026-10-04T06:02:00.000Z" };
   const check = { ...plain, app };
@@ -88,9 +88,15 @@ test("an app-made delegation that is refused names the app and its id, keyed as 
   await t.loop();
   await t.loop();
   expect(t.seen.comments.map((c) => c.body)).toEqual([
-    "Sergeant cannot start: Linear's history does not show Ann delegating this issue to Sergeant, so it cannot spend their model quota. Have Ann delegate it to Sergeant themselves.\n\nThis was delegated through the app n8n (id `app-n8n`) acting for ann. If that app should count as the assignee's own delegation, an operator can add the id to `linear.delegatingAppIds`.",
+    "Sergeant cannot start: Linear's history does not show Ann delegating this issue to Sergeant, so it cannot spend their model quota. Have Ann delegate it to Sergeant themselves.\n\nThis was delegated through the app n8n (id `app-n8n`) acting for ann. An app's delegation counts as the assignee's own only when an operator has added its id to `linear.delegatingAppIds` and the name it acts for exactly matches the assignee's Linear display name. If this app should count, fix whichever does not hold, then delegate the issue to Sergeant again.",
   ]);
   expect(ownerRefusal("UNF-1", check)?.key).toBe(ownerRefusal("UNF-1", plain)?.key);
+  // TECH-5337: an allowlisted app acting for someone else (delegation.test.ts) is refused too, where
+  // allowlisting alone would change nothing, so the guidance names the name match as well.
+  const mismatch: TaskOwnerCheck = { ...plain, app: { id: "linear-mcp-app", userDisplayName: "bob" } };
+  expect(ownerRefusal("UNF-1", mismatch)?.body).toContain(
+    "the app (unnamed) (id `linear-mcp-app`) acting for bob. An app's delegation counts as the assignee's own only when an operator has added its id to `linear.delegatingAppIds` and the name it acts for exactly matches the assignee's Linear display name.",
+  );
   expect(t.starts).toEqual([]);
 });
 
