@@ -4,23 +4,23 @@ import type { FollowupDeps } from "./followup.ts";
 
 // `issue(id:)` takes an identifier too. `inverseRelations` are the relations naming this issue as the
 // related one, so a "blocks" among them is an issue that blocks it.
-const blockedIssue = `
+export const blockedIssue = `
   query SergeantBlockedIssue($id: String!) {
     issue(id: $id) { id inverseRelations(first: 250) { nodes { type issue { id } } } }
   }
 `;
-const blockedIssueShape = z.object({
+export const blockedIssueShape = z.object({
   issue: z
     .object({ id: z.string(), inverseRelations: z.object({ nodes: z.array(z.object({ type: z.string(), issue: z.object({ id: z.string() }) })) }) })
     .nullable(),
 });
-const issueId = `query SergeantIssueId($id: String!) { issue(id: $id) { id } }`;
+export const issueId = `query SergeantIssueId($id: String!) { issue(id: $id) { id } }`;
 const createRelation = `
   mutation SergeantBlockedBy($input: IssueRelationCreateInput!) {
     issueRelationCreate(input: $input) { success }
   }
 `;
-const relationById = `query SergeantBlockedByRelation($id: String!) { issueRelation(id: $id) { id } }`;
+export const relationById = `query SergeantBlockedByRelation($id: String!) { issueRelation(id: $id) { id } }`;
 
 /** The adapter's `recordBlockedBy` (TECH-5278): Linear has no "blocked by" type, so the blocker blocks it. */
 export function blockedByRecorder({ request, createOnce }: Pick<FollowupDeps, "request" | "createOnce">): NonNullable<LinearPort["recordBlockedBy"]> {

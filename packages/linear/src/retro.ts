@@ -13,7 +13,7 @@ const retroTitle = new RegExp(`^${RETRO_TITLE} \\d{4}-\\d{2}-\\d{2}$`);
 
 const pageInfo = z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() });
 const instant = z.iso.datetime({ offset: true });
-const filedIssue = z.object({ identifier: z.string(), title: z.string(), url: z.url(), createdAt: instant, state: z.object({ name: z.string(), type: z.string() }) });
+export const filedIssue = z.object({ identifier: z.string(), title: z.string(), url: z.url(), createdAt: instant, state: z.object({ name: z.string(), type: z.string() }) });
 const filedFields = "identifier title url createdAt state { name type }";
 
 const retroDocuments = `
@@ -60,8 +60,8 @@ const createdIssues = `
   }
 `;
 const createdPage = z.object({ issues: z.object({ nodes: z.array(filedIssue), pageInfo }) });
-const oneIssue = `query SergeantRetroIssue($id: String!) { issue(id: $id) { ${filedFields} } }`;
-const teamStates = `query SergeantRetroTeam($id: String!) { team(id: $id) { states(first: 100) { nodes { id name type position } } } }`;
+export const oneIssue = `query SergeantRetroIssue($id: String!) { issue(id: $id) { ${filedFields} } }`;
+export const teamStates = `query SergeantRetroTeam($id: String!) { team(id: $id) { states(first: 100) { nodes { id name type position } } } }`;
 const createIssue = `
   mutation SergeantRetroIssueCreate($input: IssueCreateInput!) {
     issueCreate(input: $input) { success issue { identifier url } }
@@ -73,7 +73,7 @@ const createDocument = `
     documentCreate(input: $input) { success document { url } }
   }
 `;
-const documentById = `query SergeantRetroDocumentById($id: String!) { document(id: $id) { url } }`;
+export const documentById = `query SergeantRetroDocumentById($id: String!) { document(id: $id) { url } }`;
 
 export type RetroLinear = ReturnType<typeof retroLinear>;
 

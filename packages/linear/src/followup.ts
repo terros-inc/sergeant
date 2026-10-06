@@ -3,7 +3,7 @@ import { z } from "zod";
 import { latestDelegation } from "./delegation.ts";
 import { workflowState } from "./queries.ts";
 
-const followupOrigin = `
+export const followupOrigin = `
   query SergeantFollowupOrigin($id: String!) {
     issue(id: $id) {
       id
@@ -14,7 +14,7 @@ const followupOrigin = `
     }
   }
 `;
-const followupOriginShape = z.object({
+export const followupOriginShape = z.object({
   issue: z.object({
     id: z.string(),
     assignee: z.object({ id: z.string() }).nullable(),
@@ -28,14 +28,14 @@ const createIssue = `
     issueCreate(input: $input) { success issue { identifier url } }
   }
 `;
-const issueById = `query SergeantIssueById($id: String!) { issue(id: $id) { identifier url } }`;
+export const issueById = `query SergeantIssueById($id: String!) { issue(id: $id) { identifier url } }`;
 const createRelation = `
   mutation SergeantRelation($input: IssueRelationCreateInput!) {
     issueRelationCreate(input: $input) { success }
   }
 `;
-const relationById = `query SergeantRelationById($id: String!) { issueRelation(id: $id) { id } }`;
-const issueRef = z.object({ identifier: z.string().min(1), url: z.url() });
+export const relationById = `query SergeantRelationById($id: String!) { issueRelation(id: $id) { id } }`;
+export const issueRef = z.object({ identifier: z.string().min(1), url: z.url() });
 // A filter, not `issue(id:)`: a missing issue is an empty list rather than an error like an outage's.
 const followupByKey = `
   query SergeantFollowupByKey($id: ID!) {

@@ -524,6 +524,17 @@ sudo docker run --rm sergeant-runner:local curl -sS -m 5 -X PUT http://169.254.1
   -H 'X-aws-ec2-metadata-token-ttl-seconds: 60'
 ```
 
+After every deploy, run the post-deploy smoke check: it reads each live Linear and GitHub query added
+since V2, writing nothing, and checks the host serves the version just installed. To close a "check
+the first live use" ticket, cite natural-use evidence from Sergeant's own records
+([docs/live-verification.md](../docs/live-verification.md)):
+
+```sh
+sudo -u sergeant -H bash -c 'cd /opt/sergeant/src/packages/sergeant &&
+  node src/smoke.ts --config /etc/sergeant/installation.json --repo <owner/name> --issue <issue> --pr <number>'
+sudo -u sergeant node /opt/sergeant/src/packages/sergeant/src/evidence.ts --match '<regex>' --since <deploy time>
+```
+
 Then delegate a small controlled issue to the V2 agent and watch `serve.log`: the next intake (within
 two minutes) admits it. The per-feature live checks (below) apply to `serve` as they
 do to `canary`; the service's per-task state is `/var/lib/sergeant/state/tasks/<issue>/`.
@@ -646,7 +657,7 @@ the base branch's declared required checks count toward a merge (ruleset `requir
 a repository with none cannot be merged; a repository's `"observedChecksFallback": true` instead
 treats every check observed on the exact head as required.
 
-### Manual commands: `live-check`, `canary`, and `serve`
+### Manual commands: `live-check`, `smoke`, `evidence`, `canary`, and `serve`
 
 These are manual and never run from tests or CI. Each takes an installation config file.
 
@@ -655,6 +666,14 @@ spending model money, and fails if the base branch does not require an approving
 
 ```sh
 pnpm --filter @terros/sergeant live-check --config <file> --repo owner/name [--issue <issue>] [--pr 45]
+```
+
+`smoke` is the post-deploy smoke check, and `evidence` searches a state directory for natural-use
+evidence. Both write nothing ([docs/live-verification.md](../docs/live-verification.md)):
+
+```sh
+pnpm --filter @terros/sergeant smoke --config <file> [--repo owner/name] [--issue <issue>] [--pr 45] [--no-status] [--api https://<host>]
+pnpm --filter @terros/sergeant evidence --match '<regex>' [--since <time>] [--issue <issue>] --state-dir <dir>
 ```
 
 `canary` runs one task's loop for one explicitly selected issue. It reads and writes live Linear and
