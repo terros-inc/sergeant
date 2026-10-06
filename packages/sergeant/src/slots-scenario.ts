@@ -38,6 +38,7 @@ export function fakes(issues: DelegatedIssue[], withPr?: string) {
     return c;
   };
   const turns: string[] = [];
+  let listings = 0;
   const holding = new Map<string, () => void>();
   const asking = new Set<string>();
   const posted: string[] = [];
@@ -47,7 +48,7 @@ export function fakes(issues: DelegatedIssue[], withPr?: string) {
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
-    delegatedIssues: async () => [...delegated],
+    delegatedIssues: async () => (listings++, [...delegated]),
     linear: {
       readConversation: async (id) => conversation(id.replace(/^i-/, "")),
       postComment: async ({ issueId, body, key }) => {
@@ -95,7 +96,12 @@ export function fakes(issues: DelegatedIssue[], withPr?: string) {
     const listed = delegated.findIndex((i) => i.identifier === id);
     if (listed >= 0) delegated.splice(listed, 1);
   };
-  return { delegated, deps, turns, asking, posted, ci, feedback, finish, answer, complete };
+  /** Resolves once an intake begun after the call has listed the issues and scheduled the slots. */
+  const nextIntake = async () => {
+    const before = listings;
+    await vi.waitFor(() => expect(listings).toBeGreaterThan(before + 1), { timeout: 5_000 });
+  };
+  return { delegated, deps, turns, asking, posted, ci, feedback, finish, answer, complete, nextIntake };
 }
 
 export let dir = "";

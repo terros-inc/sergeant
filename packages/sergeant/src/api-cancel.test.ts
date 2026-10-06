@@ -72,6 +72,28 @@ test("a run cancel notes it on the issue and cancels through the runner; a task 
   expect(f.comments.map((c) => c.key)).toEqual(["cancel-run:run_r1", "cancel:i-UNF-1:req-1"]);
 }, 30_000);
 
+// TECH-5260: a cancel that sets the task aside while its resumed loop is still starting (reading its
+// owner) ends that loop; the loop's first save must not write `state.json` back for a second stop.
+test("a task cancel during a resumed loop's start stops the task once", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-api-test-"));
+  const f = fakes([{ runId: "run_w1", role: "worker", status: "running", provider: "p", model: "m", report: null }]);
+  let release = () => {};
+  const owner = f.deps.linear.readTaskOwner;
+  f.deps.linear.readTaskOwner = async (...args) => (await new Promise<void>((resolve) => (release = resolve)), owner(...args));
+  const task = join(dir, "tasks", "UNF-1");
+  await mkdir(task, { recursive: true });
+  const state = { issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_w1"], recentTurns: [], budget: { window: { wallMinutes: 120, costUsd: 25 } } };
+  await writeFile(join(task, "state.json"), JSON.stringify(state));
+  const port = await start(f.deps);
+  await vi.waitFor(async () => expect((await call(port, "GET", "/v1/tasks/UNF-1")).json.task.status).toBe("active"), { timeout: 5_000 });
+
+  expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach", requestId: "req-1" })).json).toMatchObject({ undelegated: true, stopping: [] });
+  release();
+  await vi.waitFor(async () => expect((await call(port, "GET", "/v1/tasks/UNF-1")).json.task.status).toBe("stopped"), { timeout: 5_000 });
+  expect(await exists(join(task, "state.json"))).toBe(false);
+  expect(f.comments.map((c) => c.key)).toEqual(["cancel:i-UNF-1:req-1"]);
+}, 30_000);
+
 // A task cancel's success must not depend on this process surviving: a restart finds the recorded
 // cancel and finishes it, though the issue is no longer delegated and intake would never admit it,
 // and keeps at it while the runner cannot confirm a run stopped.
