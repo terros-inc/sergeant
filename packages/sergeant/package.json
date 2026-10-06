@@ -13,6 +13,8 @@
     "test": "vitest run --passWithNoTests",
     "canary": "node src/canary.ts",
     "live-check": "node src/live-check.ts",
+    "smoke": "node src/smoke.ts",
+    "evidence": "node src/evidence.ts",
     "serve": "node src/serve.ts"
   },
   "dependencies": {
