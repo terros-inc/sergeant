@@ -134,8 +134,32 @@ test("the worker brief has the worker find and continue existing work, and lists
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/6)");
-  const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n## Report"));
+  expect(brief).toContain("## Rules (s2-reviewer-rules/7)");
+  const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
+});
+
+// TECH-5278: parallel tasks kept colliding on a moved main and on the same hot files. Every worker
+// rebases early and often and may stack PRs; workers and reviewers report the dependencies they see,
+// so Sergeant records them as "blocked by" and intake waits.
+test("worker and reviewer briefs carry the rebase rule and ask for dependencies in the report", () => {
+  const base = spec([]);
+  const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
+  expect(worker).toContain("## Rules (s2-worker-rules/9)");
+  const rebase = worker.slice(worker.indexOf("14. Rebase early and often."), worker.indexOf("\n15. "));
+  expect(rebase).toMatch(/before its first push, before you report a head for\s+review, and whenever the default branch has moved under its open PR/);
+  expect(rebase).toMatch(/Resolve conflicts then, as\s+part of the task/);
+  expect(rebase).toMatch(/Stacking is allowed/);
+  expect(rebase).toMatch(/Once that base merges, retarget your PR to the default branch/);
+
+  const reviewer = reviewerBrief(spec([pr]), [subject], []);
+  expect(reviewer).toMatch(/13\. The implementer rebases onto the current base before each review round\./);
+  expect(reviewer).toMatch(/A stacked PR, based on another PR's branch, is allowed\./);
+
+  for (const brief of [worker, reviewer]) {
+    expect(brief).toMatch(/list it in\s+`dependencies` with its\s+identifier and `why`: `blocked_by` when this issue must wait for\s+it, `blocks` when it must\s+wait for this one/);
+    const json = brief.slice(brief.indexOf("```\n{"));
+    expect(json).toContain('"dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }]');
+  }
 });

@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/6";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/7";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -101,6 +101,14 @@ produced. You have no GitHub, AWS, or Linear credentials; everything you need is
     Settled means recorded on the base branch or by an owner decision the issue cites. A settlement
     the change itself introduces, such as a new entry under \`docs/design\` in this diff, is under
     review like the rest of it.
+13. The implementer rebases onto the current base before each review round. When the head does not
+    contain the current base (\`git merge-base --is-ancestor origin/<base> HEAD\` fails), say so;
+    it is a blocking finding only when the base's newer changes conflict with the change or alter what
+    it does. A stacked PR, based on another PR's branch, is allowed.
+14. When you notice that this issue depends on another Linear issue (shared files, an ordering, one
+    PR building on another), or another depends on this one, list it in \`dependencies\` with its
+    identifier and \`why\`: \`blocked_by\` when this issue must wait for it, \`blocks\` when it must
+    wait for this one. Sergeant records each as a Linear "blocked by" relation.
 
 ## Report
 
@@ -115,6 +123,7 @@ with evidence), ending with exactly one fenced block tagged \`sergeant-report\` 
                  "category": "acceptance" (omit unless this is an unmet or contradicted requirement),
                  "description": "...", "location": "path:line" }],
   "unreadableInputs": [],
+  "dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }],
   "summary": "<one paragraph>" }
 \`\`\`
 `;

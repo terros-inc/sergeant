@@ -267,6 +267,18 @@ export async function execute(action: ProposedAction, situation: SituationReport
         });
         return { action, status: "done", result: { identifier: issue.identifier }, followup: { key: action.key, title: action.title, ...issue } };
       }
+      case "record_blocked_by": {
+        // TECH-5278: only a dependency of this task's issue, on another issue, either way round.
+        const own = conversation.issue.identifier;
+        if (action.blocked === action.blockedBy || (action.blocked !== own && action.blockedBy !== own)) {
+          return denied({ rule: "K1", reason: `a blocked-by relation must link ${own} to another issue` });
+        }
+        const active = checkLive((await ports.linear.readConversation(conversation.issue.id)).issue, ports.agentUserId);
+        if (!active.allowed) return denied(active);
+        if (!ports.linear.recordBlockedBy) return { action, status: "failed", error: "this Sergeant cannot record a blocked-by relation" };
+        const { recorded } = await ports.linear.recordBlockedBy({ blocked: action.blocked, blockedBy: action.blockedBy });
+        return { action, status: "done", result: { recorded } };
+      }
     }
   } catch (e) {
     return { action, status: "failed", error: (e as Error).message };
@@ -281,7 +293,9 @@ export function describeOutcome(o: ActionOutcome): string {
       ? `merge_pr ${a.repo}#${a.number}@${a.expectedHeadSha.slice(0, 12)}`
       : a.kind === "create_followup"
         ? `create_followup ${a.key}`
-        : a.kind;
+        : a.kind === "record_blocked_by"
+          ? `record_blocked_by ${a.blocked} blocked by ${a.blockedBy}`
+          : a.kind;
   if (o.status === "done") return `${what}: done ${JSON.stringify(o.result)}`;
   if (o.status === "denied") return `${what}: denied by ${o.rule} (${o.reason})`;
   return `${what}: failed (${o.error})`;

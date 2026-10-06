@@ -168,6 +168,14 @@ Rule ids refer to §7, `06` §6, and `08` §7.
   security problem (`category`), with `why` it meets it (07 §11, TECH-5186).
 - Gate: G1–G3, F2–F3. Key: `followup:<taskId>:<key>`.
 
+**`record_blocked_by(blocked, blockedBy, why)`** → `{ recorded }`
+- Records a dependency between this task's issue and another existing issue as the Linear relation
+  "`blockedBy` blocks `blocked`", so intake waits on it (07 §5) instead of colliding (TECH-5278).
+  Reasoning proposes one whenever a dependency is evident: from the issue, from what it plans or files,
+  or from a run report's `dependencies` (05 §3). A relation already there is left as it is. Only the
+  relation: no locking, ordering, or conflict prediction.
+- Gate: G1–G3, K1. Key: the pair of issues.
+
 **`link_pr(repo, number)`** / **`unlink_pr(repo, number, reason)`** → `{ ref }`
 - Adds or removes the Linear attachment. Worker-reported PRs are linked by a guardrail (08 §4).
 - Gate: P1, P2. Key: `link:<taskId>:<repo>#<n>`.
@@ -291,6 +299,7 @@ nothing is left for reasoning to notice and correct in another turn.
 | Q2 | bound | ask_human | ≤ 3 unanswered questions in total |
 | F2 | L3 | create_followup_task | follow-up depth (derived from `actions`) < `followups.maxDepth` |
 | F3 | L3, auth | create_followup_task | `delegate` requires `followups.autoDelegate`; team ∈ `allowedTeamIds` |
+| K1 | auth | record_blocked_by | one side is this task's issue and the other a different issue: a task never links two others |
 | P1 | L2 | link_pr, merge_pr, start_reviewer | repo is in the task's repository set |
 | P2 | auth | link_pr, unlink_pr | PR exists; an unlink target is not merged |
 | D1–D6 | L1 | record_review_disposition | evidence rules (06 §6) |

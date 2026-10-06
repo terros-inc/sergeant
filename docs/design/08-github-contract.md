@@ -184,6 +184,12 @@ The worker owns rebasing and conflict resolution (05 §3). Sergeant decides when
   (`sinceReviewedSha`), which decides whether another review is needed (06 §3);
 - a conflict that needs product judgment comes back as a question.
 
+Workers do not wait to be told (TECH-5278): they rebase onto the current default branch before the
+first push, before each review round, and whenever it moves under an open PR (05 §3). A stacked PR,
+based on another PR's branch, is allowed; once its base merges, a worker retargets it to the default
+branch and rebases it. A dependency between tasks is recorded as a Linear "blocked by" relation
+(03 §4 `record_blocked_by`), so intake waits instead of colliding.
+
 Sergeant does not rebase, merge main into branches, or resolve anything itself.
 
 ## 9. Webhooks and reconciliation

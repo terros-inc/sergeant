@@ -37,6 +37,17 @@ const ReportedPr = { repo: RepoSlug, number: z.number().int().positive(), headSh
  */
 const UnreadableInputs = z.array(z.string()).optional();
 
+/**
+ * TECH-5278: dependencies between this task's issue and another that the run noticed (shared files, an
+ * ordering, one PR building on another): `blocked_by` when this issue waits for `issue`, `blocks` when
+ * `issue` must wait for this one. Sergeant's reasoning records each as a Linear "blocked by" relation
+ * (`record_blocked_by`). A malformed list reads as absent rather than failing the report.
+ */
+const Dependencies = z
+  .array(z.object({ issue: z.string(), relation: z.enum(["blocked_by", "blocks"]), why: z.string().default("") }))
+  .optional()
+  .catch(undefined);
+
 export const WorkerReport = z.object({
   reportVersion: z.literal("s2-worker-report/1"),
   outcome: z.enum(["completed", "partial", "blocked", "needs_decision", "failed"]).catch("partial"),
@@ -57,6 +68,7 @@ export const WorkerReport = z.object({
     .default([]),
   knownGaps: z.array(z.string()).default([]),
   unreadableInputs: UnreadableInputs,
+  dependencies: Dependencies,
   /**
    * A concrete bug, required unfinished work, a real blocker, or a current operational or security
    * problem the worker found, each with its category and why; more than one is exceptional. Sergeant's
@@ -100,6 +112,7 @@ export const ReviewReport = z.object({
   verdict: z.enum(["approve", "changes_requested", "needs_human"]),
   findings: z.array(Finding).default([]),
   unreadableInputs: UnreadableInputs,
+  dependencies: Dependencies,
   summary: z.string(),
 });
 export type ReviewReport = z.infer<typeof ReviewReport>;

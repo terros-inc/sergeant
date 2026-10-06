@@ -89,6 +89,7 @@ export function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Con
   const sent: string[] = [];
   const moved: string[] = [];
   const filed: Parameters<Ports["linear"]["createFollowupIssue"]>[0][] = [];
+  const linked: { blocked: string; blockedBy: string }[] = [];
   const p: Ports = {
     linear: {
       readConversation: async () => live.conversation ?? conversation,
@@ -103,6 +104,7 @@ export function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Con
         filed.push(req);
         return { identifier: `UNF-${100 + filed.length}`, url: `https://linear.app/x/issue/UNF-${100 + filed.length}` };
       },
+      recordBlockedBy: async (req) => (linked.push(req), { recorded: true }),
     },
     agentUserId: "agent-v2",
     workerLogin: "sergeant-worker[bot]",
@@ -119,7 +121,7 @@ export function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Con
       send: async (runId) => void sent.push(runId),
     },
   };
-  return { p, merged, started, sent, moved, filed, handoffs };
+  return { p, merged, started, sent, moved, filed, linked, handoffs };
 }
 
 export const followup = (key: string): ProposedAction => ({ kind: "create_followup", key, title: `Do ${key}`, category: "concrete_bug", why: `${key} fails.`, description: `Why ${key}.`, relation: "related" });

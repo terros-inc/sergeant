@@ -125,8 +125,15 @@ Versioned text rendered into every worker brief. A change is a new version, reco
 6. **Implementation and testing.** Follow the durable guidance in `AGENTS.md`; use judgment to
    validate proportionately rather than imposing a test or coverage requirement on every change.
    CI is the full gate. While you are running, watch CI on your PRs and fix what fails.
-7. **Moving bases.** Keep your PRs mergeable: rebase onto a moved base and resolve conflicts
-   yourself. Report a conflict that needs product judgment as a question.
+7. **Moving bases.** Rebase early and often (TECH-5278): onto the current default branch before the
+   first push, before each review round, and whenever the default branch moves under an open PR.
+   Resolve conflicts then, as part of the task, never by reverting another task's change. Report a
+   conflict that needs product judgment as a question. Stacking is allowed: a PR built on another
+   open PR uses that PR's branch as its base, and once that base merges it is retargeted to the
+   default branch and rebased.
+   **Dependencies.** A dependency the worker notices between this issue and another (shared files, an
+   ordering, one PR building on another) goes in `dependencies` (`blocked_by` or `blocks`, with
+   `why`); Sergeant records it as a Linear "blocked by" relation (03 §4 `record_blocked_by`).
 8. **Validation you cannot perform** (missing access, live environment, a human check): record it
    as `blocked_by_environment` with what would be needed. Never seek broader credentials, never
    suggest widening your own access as the fix (S1 UNF-648).
@@ -204,7 +211,7 @@ before identifiers were cached, by looking them up through Linear on a cache mis
                                  "categories": ["behavior_change", "api_contract"] } }],
   "acceptance": [{ "criterion": "`sgt task show UNF-404` works", "status": "met", "evidence": "..." }],
   "validation": [...], "knownGaps": [], "decisionsMade": [...],
-  "addressedFindings": [], "questions": [], "repositoryRequests": [], "followups": [], "feedback": [],
+  "addressedFindings": [], "questions": [], "repositoryRequests": [], "dependencies": [], "followups": [], "feedback": [],
   "subagentReviews": [], "handoff": { "branches": [...], "wipPushed": true, "notes": "" },
   "acknowledgedMessages": [] }
 ```
@@ -222,6 +229,7 @@ before identifiers were cached, by looking them up through Linear on a cache mis
 | Review need | `pullRequests[].review`, per head (§5) |
 | Review findings handled | `addressedFindings[]` (`FindingResolution`, 01): `fixed`, or `disputed` with a reason and evidence, by finding id. Reasoning, not the worker, decides whether an unfixed finding may be accepted |
 | Needs another repository | `repositoryRequests[]` |
+| A dependency on another issue, or of another issue on this one | `dependencies[]`, each with the issue, `blocked_by` or `blocks`, and `why`; reasoning records it (`record_blocked_by`) |
 | A real bug, required unfinished work, a blocker, or an ops/security problem | `followups[]`, each with `category` and `why`; Sergeant decides |
 | What made the task harder, what could be better, whether it recurs | `feedback[]` and a short Feedback section; never filed; may become the issue's Sergeant feedback comment (07 §11) |
 | Failed outright | `outcome: failed` with what happened; still a report if at all possible |
