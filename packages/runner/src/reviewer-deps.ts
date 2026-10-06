@@ -5,7 +5,9 @@ import type { Exec } from "./exec.ts";
 // TECH-5253: a reviewer gets its checkouts with their dependencies installed, so it can run the tests
 // it is judging. A worker installs its own in its container. The install runs the PR head's own
 // package scripts, so it never runs on the host: it is a one-shot container from the run image, with
-// the reviewer's mount and network and no credential at all, finished before the reviewer starts.
+// the reviewer's network, only that checkout mounted, and no credential at all, finished before the
+// reviewer starts. Mounting only the checkout keeps its scripts away from the rest of the run
+// workspace (the brief, the other checkouts), which the host still writes to afterwards.
 
 /** The frozen install for each lockfile a checkout may have, the first one found used. */
 const INSTALLS: [lockfile: string, command: string[]][] = [
@@ -18,7 +20,8 @@ const INSTALL_SECONDS = 600;
 /** What the reviewer is told about a checkout's dependencies. */
 export type Dependencies =
   | { state: "installed"; command: string }
-  | { state: "failed"; command: string; detail: string }
+  /** `output` is the tail of what the PR's own scripts printed: untrusted. */
+  | { state: "failed"; command: string; detail: string; output: string }
   | { state: "none" };
 
 /**
@@ -41,17 +44,21 @@ export async function installDependencies(
   const args = [
     "run", "--rm", "--name", container, "--label", `sergeant.install=${container}`,
     "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-    "--volume", `${workspace}:/workspace`, "--workdir", `/workspace/${rel}`,
+    "--volume", `${join(workspace, rel)}:/workspace/${rel}`, "--workdir", `/workspace/${rel}`,
     "--env", "CI=true", "--env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
     image, "timeout", String(INSTALL_SECONDS), ...install,
   ];
   // Only the non-secret settings above are set, and with no `--env NAME`, nothing from the host's
   // environment reaches the container.
-  const r = await exec("docker", args, { timeoutMs: (INSTALL_SECONDS + 60) * 1000 }).catch((e: Error) => ({ code: -1, stdout: "", stderr: e.message }));
+  // exec rejects only when docker cannot be launched or is killed by the host backstop timeout.
+  const r = await exec("docker", args, { timeoutMs: (INSTALL_SECONDS + 60) * 1000 }).catch((e: Error) => ({
+    code: /killed by/.test(e.message) ? 124 : -1,
+    stdout: "",
+    stderr: e.message,
+  }));
   if (r.code === 0) return { state: "installed", command };
   // A docker CLI killed by its own timeout would leave the install running beside the reviewer.
   await exec("docker", ["rm", "-f", container]).catch(() => undefined);
   const why = r.code === 124 ? `timed out after ${INSTALL_SECONDS}s` : `exited ${r.code}`;
-  const tail = (r.stderr || r.stdout).trim().slice(-500);
-  return { state: "failed", command, detail: tail ? `${why}: ${tail}` : why };
+  return { state: "failed", command, detail: why, output: (r.stderr || r.stdout).trim().slice(-500) };
 }

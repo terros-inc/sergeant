@@ -15,7 +15,7 @@ import { hasCodexLabel, pickAccount, runAccount, setAside } from "./accounts.ts"
 import { AGENTS, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { CODEX_PRICES } from "./codex-prices.ts";
-import { agentFile, gitIdentityEnv, isGone } from "./container.ts";
+import { agentFile, gitIdentityEnv, isGone, writeWorkspaceFile } from "./container.ts";
 import { agentFields, setAsideOnFailure } from "./ended.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import { DEFAULT_LIMITS, type ContainerRunnerOptions, type Role } from "./options.ts";
@@ -164,7 +164,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         }
         brief = reviewerBrief(spec, subjects, prior?.claims ?? [], prior?.reviews ?? [], files);
       }
-      await writeFile(join(p.workspace, "sergeant-brief.md"), brief);
+      await writeWorkspaceFile(join(p.workspace, "sergeant-brief.md"), brief);
 
       const limits = opts.limits?.[spec.role] ?? DEFAULT_LIMITS[spec.role];
       const adapter = account.adapter;

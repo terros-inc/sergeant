@@ -67,7 +67,7 @@ Built by the deterministic core from durable artifacts, never from the implement
 A fresh session and workspace. You did not write this change and have no access to how it was
 produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out locally, and before
 you started its dependencies were installed at the head, so you can run its tests:
-<per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why), or no lockfile>
+<per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why, then its output fenced as untrusted), or no lockfile>
 
 ## Rules (s2-reviewer-rules/8)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
