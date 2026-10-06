@@ -159,7 +159,8 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     agentUserId,
     linearOrganizationId: viewer.organizationId,
     workerLogin,
-    github: createGitHubPort({ token: controlPlaneToken, repositories: repositoryConfigs }),
+    // A rate-limit pause is logged once as it starts (TECH-5336), in serve's log format.
+    github: createGitHubPort({ token: controlPlaneToken, repositories: repositoryConfigs, log: (line) => console.log(`[${new Date().toISOString()}] ${line}`) }),
     controlPlaneApp,
     workerApp,
     githubTokens: runTokens(workerApp),

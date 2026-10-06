@@ -13,6 +13,8 @@ export class Wake {
    * heads. A webhook naming one ends the loop's wait (`interrupt`) without owing a turn.
    */
   watched: string[] = [];
+  /** A GitHub webhook named what it watches since the loop last read its PRs (TECH-5336). */
+  github = false;
   #interrupt = new AbortController();
   #lastNudge = 0;
   #trailing: NodeJS.Timeout | undefined;

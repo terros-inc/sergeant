@@ -83,3 +83,18 @@ export const PullRequestFacts = z.object({
   humanFeedback: z.array(HumanPullRequestFeedback),
 });
 export type PullRequestFacts = z.infer<typeof PullRequestFacts>;
+
+/**
+ * The control-plane App installation's GitHub API budget as its latest response reported it (TECH-5336):
+ * the hourly `core` allowance, what is left of it, and when it resets. `pausedUntil` is set while
+ * Sergeant makes no GitHub call because GitHub refused one for a rate limit: the primary limit's reset,
+ * or a secondary limit's `retry-after`.
+ */
+export const GitHubRateLimit = z.object({
+  limit: z.number().int().nullable(),
+  remaining: z.number().int().nullable(),
+  resetAt: z.string().nullable(),
+  observedAt: z.string().nullable(),
+  pausedUntil: z.string().nullable(),
+});
+export type GitHubRateLimit = z.infer<typeof GitHubRateLimit>;

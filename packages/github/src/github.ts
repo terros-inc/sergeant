@@ -3,6 +3,7 @@ import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 import { handToHuman } from "./hand-to-human.ts";
+import { rateLimiter } from "./rate-limit.ts";
 import { readSquashMessage } from "./squash-message.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
@@ -28,7 +29,17 @@ export type GitHubAdapterOptions = {
   repositories: Readonly<Record<string, GitHubRepositoryConfig>>;
   apiUrl?: string;
   fetch?: typeof globalThis.fetch;
+  /** Where a rate-limit pause is logged, once as it starts. */
+  log?: (line: string) => void;
+  now?: () => number;
 };
+
+/** GET responses kept for conditional reads; past this, the oldest is dropped. */
+const MAX_CONDITIONAL = 2000;
+/** How long an unreadable or absent classic branch protection is not asked again. */
+const PROTECTION_MEMO_MS = 60 * 60_000;
+/** How long a PR's human feedback is reused while its head and `updated_at` stay the same. */
+const FEEDBACK_MEMO_MS = 10 * 60_000;
 
 /** The worker branch convention (08 §3): Sergeant deletes no branch outside it. */
 const BRANCH_PREFIX = "sergeant/";
@@ -61,17 +72,31 @@ const statusState = (state: z.infer<typeof commitStatus>["state"]): ObservedChec
 export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
   const fetchFn = options.fetch ?? globalThis.fetch;
   const apiUrl = (options.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
+  const now = options.now ?? Date.now;
+  const limiter = rateLimiter(options.log ?? (() => {}), now);
+  // TECH-5336: every GET is conditional on the ETag of its last 200, and a 304 (which GitHub does not
+  // count against the rate limit) answers with that response's body.
+  const conditional = new Map<string, { etag: string; body: unknown }>();
+  const unreadableProtection = new Map<string, number>();
+  const feedbackMemo = new Map<string, { headSha: string; updatedAt: string; at: number; feedback: Awaited<ReturnType<typeof readHumanFeedback>> }>();
 
   const request = async (path: string, init: RequestInit = {}, requestOptions: RequestOptions = {}): Promise<unknown | null> => {
+    limiter.check();
+    const get = (init.method ?? "GET") === "GET";
+    const kept = get ? conditional.get(path) : undefined;
     const res = await fetchFn(`${apiUrl}${path}`, {
       ...init,
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${await options.token()}`,
         "X-GitHub-Api-Version": "2022-11-28",
+        ...(kept && { "If-None-Match": kept.etag }),
         ...init.headers,
       },
     });
+    // Before `allowStatuses`: a rate-limit 403 is never an unreadable resource.
+    await limiter.observe(res);
+    if (kept && res.status === 304) return kept.body;
     if (requestOptions.allowStatuses?.includes(res.status)) return null;
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
@@ -80,7 +105,14 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     if (requestOptions.failOnNextPage && /rel="next"/.test(res.headers.get("link") ?? "")) {
       throw new Error("GitHub active-rules page is truncated; pagination is required");
     }
-    return res.json();
+    const body: unknown = await res.json();
+    const etag = res.headers.get("etag");
+    if (get && etag) {
+      conditional.delete(path);
+      conditional.set(path, { etag, body });
+      if (conditional.size > MAX_CONDITIONAL) conditional.delete(conditional.keys().next().value as string);
+    }
+    return body;
   };
 
   const configFor = (repo: string) => {
@@ -128,11 +160,19 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
 
   const readRequiredChecks = async (repo: string, baseRef: string): Promise<RequiredCheck[]> => {
     const branch = encodeURIComponent(baseRef);
+    const protectionPath = `/repos/${repo}/branches/${branch}/protection/required_status_checks`;
+    const unreadable = (unreadableProtection.get(protectionPath) ?? 0) > now();
     const [protectionPayload, rulesPayload] = await Promise.all([
       // Classic protection needs `administration: read`, which the control-plane App does not hold
       // (403). Unreadable protection only removes checks it declares, so this fails closed (M5),
-      // and GitHub still enforces them at merge. Rulesets are readable with `metadata: read`.
-      request(`/repos/${repo}/branches/${branch}/protection/required_status_checks`, {}, { allowStatuses: [403, 404] }),
+      // and GitHub still enforces them at merge. Rulesets are readable with `metadata: read`. A 403
+      // or 404 costs a call every poll and no ETag saves it, so it is not asked again for an hour.
+      unreadable
+        ? null
+        : request(protectionPath, {}, { allowStatuses: [403, 404] }).then((payload) => {
+            if (payload === null) unreadableProtection.set(protectionPath, now() + PROTECTION_MEMO_MS);
+            return payload;
+          }),
       request(`/repos/${repo}/rules/branches/${branch}?per_page=100`, {}, { allowStatuses: [404], failOnNextPage: true }),
     ]);
     const required: RequiredCheck[] = [];
@@ -180,11 +220,17 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const { config } = configFor(repo);
       const live = await readRawPullRequest(repo, number);
       const headSha = Sha.parse(live.head.sha);
+      // A review or comment moves the PR's `updated_at`: with it and the head unchanged, the feedback
+      // read a little earlier is reused, and reread at least every `FEEDBACK_MEMO_MS` regardless.
+      const key = `${repo}#${number}`;
+      const memo = feedbackMemo.get(key);
+      const fresh = memo && live.updated_at && memo.headSha === headSha && memo.updatedAt === live.updated_at && now() - memo.at < FEEDBACK_MEMO_MS;
       const [observed, declared, humanFeedback] = await Promise.all([
         readObservedChecks(repo, headSha),
         readRequiredChecks(repo, live.base.ref),
-        readHumanFeedback((path) => request(path), repo, number),
+        fresh ? memo.feedback : readHumanFeedback((path) => request(path), repo, number),
       ]);
+      if (!fresh && live.updated_at) feedbackMemo.set(key, { headSha, updatedAt: live.updated_at, at: now(), feedback: humanFeedback });
       // Only the base branch's declared required checks count; one that never reported is
       // `missing`. With none declared the list is empty and M5 refuses the merge, unless this
       // repository explicitly opted into the observed-checks fallback.
@@ -221,6 +267,8 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     },
 
     mergePolicy: (repo) => configFor(repo).config.mergePolicy,
+
+    rateLimit: () => limiter.status(),
 
     async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);

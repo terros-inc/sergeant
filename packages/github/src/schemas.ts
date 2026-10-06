@@ -9,6 +9,8 @@ export const pullRequest = z.object({
   state: z.enum(["open", "closed"]),
   draft: z.boolean(),
   merged_at: z.string().nullable(),
+  /** Moves with any change to the PR, its reviews and comments included (TECH-5336). */
+  updated_at: z.string().optional(),
   mergeable: z.boolean().nullable(),
   /** A value missing, or one GitHub adds later, reads as `unknown`: M7 then waits rather than merging. */
   mergeable_state: MergeableState.catch("unknown"),

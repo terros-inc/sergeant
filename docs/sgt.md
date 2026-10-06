@@ -173,7 +173,8 @@ sgt admin restart          # reread the installation config and restart Sergeant
 sgt admin update           # move to the newest green main commit its release channel would choose
 sgt admin update v2.1.0    # or to a branch, tag, or commit, which must be on main with a green check
 sgt admin status           # its release, when it last restarted, the last restart or update, and
-                           # whether the installation config changed since (then: sgt admin restart)
+                           # whether the installation config changed since (then: sgt admin restart),
+                           # and GitHub API calls left this hour, the reset, and any rate-limit pause
 ```
 
 - `restart` and `update` wait for the outcome and print it, with the reason when it failed (exit 1).

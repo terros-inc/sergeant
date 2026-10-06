@@ -35,7 +35,7 @@ export type WebhookOptions = {
   agentUserId: string;
   /** Read at each delivery: an approver's `sgt admin repo add` changes it in place (TECH-5193). */
   enrolledRepositories: string[];
-  nudge: (nudge: Nudge) => void;
+  nudge: (nudge: Nudge, source: "linear" | "github") => void;
   log: (line: string) => void;
 };
 
@@ -61,7 +61,7 @@ export function webhookHandler(opts: WebhookOptions): (req: IncomingMessage, res
     }
     const enrolled = new Set(opts.enrolledRepositories.map((r) => r.toLowerCase()));
     const nudge = source === "linear" ? linearNudge(payload, opts.agentUserId) : githubNudge(header(req, "x-github-event") ?? "", payload, enrolled);
-    if (nudge) opts.nudge(nudge);
+    if (nudge) opts.nudge(nudge, source);
     // Linear counts anything but 200 as a failed delivery, and retries it.
     return 200;
   };

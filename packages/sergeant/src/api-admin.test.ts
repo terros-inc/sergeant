@@ -18,6 +18,7 @@ const callers: Record<string, Caller> = {
 };
 
 const runs = { count: 447, bytes: 46e9, volumeFreeBytes: 48e9, volumeBytes: 98e9 };
+const github = { limit: 5000, remaining: 0, resetAt: "2026-10-04T10:30:00.000Z", observedAt: "2026-10-04T10:05:00.000Z", pausedUntil: "2026-10-04T10:30:00.000Z" };
 let dir = "";
 let server: Server | undefined;
 afterEach(async () => {
@@ -35,6 +36,7 @@ async function serve(onHost = true) {
     serve: { version: "2.1.70+abc1234", startedAt: "2026-10-04T10:00:00.000Z" },
     config: async () => ({ loaded: 3, current: 4 }),
     runs: async () => runs,
+    github: () => github,
   };
   const logs: string[] = [];
   const ctl = {
@@ -96,7 +98,7 @@ test("a ref that could be an option or escape the ref namespace is refused befor
 
 test("status reads the release, the request not yet taken, the host's last outcome, and the runs directory's size", async () => {
   const { call, admin } = await serve();
-  expect((await call("GET", "/v1/admin/status", "grace")).json).toEqual({ serve: admin.serve, release: null, pending: null, last: null, config: { loaded: 3, current: 4 }, runs });
+  expect((await call("GET", "/v1/admin/status", "grace")).json).toEqual({ serve: admin.serve, release: null, pending: null, last: null, config: { loaded: 3, current: 4 }, runs, github });
 
   await writeFile(admin.releaseFile, "ref=main\nsha=0123abc\nat=2026-10-04T09:58:00Z\n");
   const last = { action: "automatic", by: "the release channel (main)", outcome: "succeeded", message: "updated a to b", startedAt: "2026-10-04T09:50:00Z", finishedAt: "2026-10-04T09:58:00Z", sha: "0123abc" };
@@ -110,6 +112,7 @@ test("status reads the release, the request not yet taken, the host's last outco
     last,
     config: { loaded: 3, current: 4 },
     runs,
+    github,
   });
 });
 
