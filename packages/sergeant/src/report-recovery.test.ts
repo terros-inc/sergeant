@@ -6,6 +6,7 @@ import { conversationRevision, type Conversation, type ProposedAction, type Pull
 import { ports, situation } from "./execute-fixtures.ts";
 import { runLoop } from "./loop.ts";
 import { recoverReports } from "./report-recovery.ts";
+import { Slot } from "./slots.ts";
 
 // TECH-5259: a worker that wrote no report, or a reviewer whose report did not parse, left its head
 // with no review standing until the budget ran out. This drives the loop over a fake world where the
@@ -140,4 +141,65 @@ test("a review whose head moved, or a run that failed on its account, is counted
     ["run_w1", "none", "it failed on quota; its account is set aside and reasoning decides"],
     ["run_r1", "none", "a head it was to review has moved or is gone"],
   ]);
+});
+
+test("a released task waits for slot admission before starting one report recovery", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-report-recovery-slot-test-"));
+  const startedAt = new Date().toISOString();
+  await writeFile(join(dir, "state.json"), JSON.stringify({
+    issueId: "UNF-1",
+    startedAt,
+    lastTurnAt: startedAt,
+    turns: 1,
+    runIds: ["run_w1"],
+    recentTurns: [],
+    seen: { revision: conversationRevision({
+      issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Paginate", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
+      humanComments: [],
+      agentComments: [],
+    }), issue: "unused" },
+    starts: { run_w1: { kind: "start_worker", objective: "Paginate the list.", repositories: [repo] } },
+  }));
+  const live: Conversation = {
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Paginate", description: "D", state: "In Progress", stateType: "started", delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
+    humanComments: [],
+    agentComments: [],
+  };
+  const slot = new Slot(() => {});
+  slot.released = true;
+  const started: RunSpec[] = [];
+  let polls = 0;
+
+  const result = await runLoop(
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, idleMinutes: 0, progressComments: false, slot, log: () => {} },
+    {
+      agentUserId: agent.id,
+      workerLogin: "sergeant-worker[bot]",
+      linear: {
+        readConversation: async () => {
+          polls++;
+          if (polls === 2) {
+            expect(started).toHaveLength(0);
+            expect(slot.wanted).toBe(true);
+            slot.released = false;
+          }
+          return live;
+        },
+        postComment: async () => {},
+        createFollowupIssue: async () => { throw new Error("unused"); },
+        moveIssueToStarted: async () => ({ moved: false as const }),
+        readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
+      },
+      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => { throw new Error("unused"); } },
+      runner: {
+        start: async (spec) => void started.push(spec),
+        status: async (runId) => runId === "run_w1" ? missing(runId) : reported(runId),
+        cancel: async () => {},
+      },
+      reasoner: { turn: async () => ({ output: { summary: "nothing else", actions: [] }, model: "m", promptVersion: "p" }) },
+    },
+  );
+
+  expect(result.outcome).toBe("idle");
+  expect(started).toHaveLength(1);
 });

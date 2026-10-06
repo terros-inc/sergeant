@@ -17,7 +17,7 @@ import type { TaskState } from "./task-state.ts";
 /** How much of a run's report error a retry's brief and the telemetry carry. */
 const ERROR_CHARS = 1_000;
 
-type Context = { issueId: string; dir: string; log: (line: string) => void; save: () => Promise<void> };
+type Context = { issueId: string; dir: string; log: (line: string) => void; save: () => Promise<void>; work?: () => boolean };
 
 /**
  * Records each ended run of the task that has no usable report and retries those due one through the
@@ -29,10 +29,11 @@ export async function recoverReports(
   state: TaskState,
   ports: Ports,
   ctx: Context,
-): Promise<{ retried: boolean; unposted?: ProposedAction }> {
+): Promise<{ retried: boolean; waitingForSlot?: boolean; unposted?: ProposedAction }> {
   const { runs } = situation;
   const lines: string[] = [];
   let retried = false;
+  let waitingForSlot = false;
   let unposted: ProposedAction | undefined;
   // What a human said that no turn has read: the conversation the last turn saw (TECH-5034) differs, or
   // a human's PR review or comment came after that turn.
@@ -67,6 +68,13 @@ export async function recoverReports(
       ctx.log(`${why}; not retried: ${skip}`);
       continue;
     }
+    // A resumed task may have released its service-wide task slot while it was waiting. Mark it
+    // wanted and leave the eligible run untouched until the scheduler admits the task. Records that
+    // only explain why no retry is due are telemetry and deliberately do not need a slot.
+    if (ctx.work && !ctx.work()) {
+      waitingForSlot = true;
+      break;
+    }
     const outcome = await execute(retryOf(run, start, why), situation, ports);
     const retryRunId = outcome.status === "done" ? (outcome.result.runId as string) : undefined;
     state.reportRecoveries[run.runId] = retryRunId ? { retryRunId } : {};
@@ -80,10 +88,11 @@ export async function recoverReports(
     lines.push(JSON.stringify({ ...fact, recovery: retryRunId ? "retried" : "retry_not_started", ...(retryRunId ? { retryRunId } : { reason: described }) }));
     ctx.log(`${why}; retrying it: ${described}`);
   }
-  if (lines.length === 0) return { retried };
-  await appendFile(join(ctx.dir, "report-recoveries.jsonl"), lines.map((l) => `${l}\n`).join(""));
-  await ctx.save();
-  return { retried, ...(unposted && { unposted }) };
+  if (lines.length > 0) {
+    await appendFile(join(ctx.dir, "report-recoveries.jsonl"), lines.map((l) => `${l}\n`).join(""));
+    await ctx.save();
+  }
+  return { retried, ...(waitingForSlot && { waitingForSlot }), ...(unposted && { unposted }) };
 }
 
 /** The same start again, saying why: the reviewer on the same heads, the worker told to finish and report. */
