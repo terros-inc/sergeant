@@ -1,5 +1,5 @@
 import { CancelRunResponse, RunDetail, RunList } from "@terros/sergeant-contracts";
-import { type Command, call, callAnswer, path, print, request } from "./cli-call.ts";
+import { type Command, callAnswer, path, print, request } from "./cli-call.ts";
 import { runRow, showRun, table } from "./format.ts";
 
 // `sgt run …`: a task's runs, one run's detail and raw report, and canceling one.
@@ -10,8 +10,8 @@ export const runCommands: Record<string, Command> = {
     flags: ["task"],
     run: async (ctx) => {
       const query = ctx.flags.task ? `?task=${path(ctx.flags.task)}` : "";
-      const { runs } = await call(ctx, "GET", `/v1/runs${query}`, RunList);
-      print(ctx, { runs }, () => (runs.length ? table(runs.map(runRow)) : "no runs"));
+      const { value: { runs }, answer } = await callAnswer(ctx, "GET", `/v1/runs${query}`, RunList);
+      print(ctx, answer, () => (runs.length ? table(runs.map(runRow)) : "no runs"));
     },
   },
   "run show": {
@@ -32,8 +32,8 @@ export const runCommands: Record<string, Command> = {
     args: 1,
     flags: ["reason"],
     run: async (ctx, [runId]) => {
-      const res = await call(ctx, "POST", `/v1/runs/${path(runId)}/cancel`, CancelRunResponse, { reason: ctx.flags.reason });
-      print(ctx, res, () => `${res.runId} (${res.task}) ${res.status === "canceled" ? "canceled" : `already ${res.status}`}`);
+      const { value: res, answer } = await callAnswer(ctx, "POST", `/v1/runs/${path(runId)}/cancel`, CancelRunResponse, { reason: ctx.flags.reason });
+      print(ctx, answer, () => `${res.runId} (${res.task}) ${res.status === "canceled" ? "canceled" : `already ${res.status}`}`);
     },
   },
 };

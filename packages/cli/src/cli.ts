@@ -4,7 +4,7 @@ import { currentToken, loadCredential, saveCredential } from "@terros/sergeant-c
 import { sergeantVersion } from "@terros/sergeant-contracts/version";
 import { accountCommands } from "./cli-accounts.ts";
 import { adminCommands } from "./cli-admin.ts";
-import { type Command, type Context, call, caller, Failure, fail, type Flags, type Io, print, Usage } from "./cli-call.ts";
+import { type Command, type Context, call, callAnswer, caller, Failure, fail, type Flags, type Io, print, Usage } from "./cli-call.ts";
 import { repoCommands } from "./cli-repos.ts";
 import { runCommands } from "./cli-runs.ts";
 import { taskCommands } from "./cli-tasks.ts";
@@ -92,9 +92,9 @@ const commands: Record<string, Command> = {
         },
       }).catch((e: Error) => fail(ctx, "unauthorized", e.message));
       // Kept only once the API accepts it: a login it refuses would fail every later command.
-      const me = await call({ ...ctx, token: credential.accessToken }, "GET", "/v1/whoami", WhoAmI);
+      const { value: me, answer } = await callAnswer({ ...ctx, token: credential.accessToken }, "GET", "/v1/whoami", WhoAmI);
       await saveCredential(ctx.io.env, ctx.api, credential);
-      print(ctx, me, () => `signed in to ${ctx.api} as ${caller(me)}`);
+      print(ctx, answer, () => `signed in to ${ctx.api} as ${caller(me)}`);
     },
   },
   logout: {
@@ -120,15 +120,15 @@ const commands: Record<string, Command> = {
   whoami: {
     args: 0,
     run: async (ctx) => {
-      const me = await call(ctx, "GET", "/v1/whoami", WhoAmI);
-      print(ctx, me, () => [`api ${ctx.api}: ${caller(me)}`, `enrolled ${me.enrolledRepositories.join(", ") || "none"}`].join("\n"));
+      const { value: me, answer } = await callAnswer(ctx, "GET", "/v1/whoami", WhoAmI);
+      print(ctx, answer, () => [`api ${ctx.api}: ${caller(me)}`, `enrolled ${me.enrolledRepositories.join(", ") || "none"}`].join("\n"));
     },
   },
   retro: {
     args: 0,
     run: async (ctx) => {
-      const res = await call(ctx, "POST", "/v1/retro", RetroRequestResponse, {});
-      print(ctx, res, () => "retro requested: Sergeant runs it now and posts it as a document in the Sergeant project");
+      const { answer } = await callAnswer(ctx, "POST", "/v1/retro", RetroRequestResponse, {});
+      print(ctx, answer, () => "retro requested: Sergeant runs it now and posts it as a document in the Sergeant project");
     },
   },
 };

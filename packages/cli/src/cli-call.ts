@@ -12,7 +12,8 @@ import { sergeantVersion } from "@terros/sergeant-contracts/version";
 import type { z } from "zod";
 
 // The plumbing every `sgt` command shares (cli.ts): one API call per request, sent with the caller's
-// login and this sgt's version, and the answer printed concise or as the API's own JSON with `--json`.
+// login and this sgt's version, and the answer printed concise or as the API's own JSON with `--json`:
+// the answer as sent, checked against the contract, never the parse, which drops fields it does not know.
 
 export type Io = {
   env: Record<string, string | undefined>;
@@ -52,16 +53,26 @@ export async function call<T>(ctx: Context, method: Method, path: string, schema
   return settle(ctx, await client(ctx).call(method, path, schema, body));
 }
 
+/** An answer as the API sent it, `answer`, and `value`, its parse against the contract. */
+export type Answered<T> = { value: T; answer: unknown };
+
 /**
  * `call`, also returning the API's answer as sent: `--json` prints that, so a field this sgt's contract
- * does not know yet, which the parse strips, still reaches it (TECH-5148).
+ * does not know yet, which the parse strips, still reaches it (TECH-5148, TECH-5224).
  */
-export async function callAnswer<T>(ctx: Context, method: Method, path: string, schema: z.ZodType<T>): Promise<{ value: T; answer: unknown }> {
-  const text = await request(ctx, method, path);
-  const answer = safeJson(text);
+export async function callAnswer<T>(ctx: Context, method: Method, path: string, schema: z.ZodType<T>, body?: object): Promise<Answered<T>> {
+  return settle(ctx, answered(method, path, schema, await client(ctx).request(method, path, body)));
+}
+
+/** A request's answer checked against `schema`, kept as sent alongside its parse; outside the contract it is an error. */
+export function answered<T>(method: Method, path: string, schema: z.ZodType<T>, res: ApiResult<string>): ApiResult<Answered<T>> {
+  if (!res.ok) return res;
+  const answer = safeJson(res.value);
   const parsed = schema.safeParse(answer);
-  if (!parsed.success) fail(ctx, "unavailable", `${method} ${path} answered outside the API contract: ${parsed.error.issues[0]?.message ?? text.slice(0, 200)}`);
-  return { value: parsed.data, answer };
+  if (!parsed.success) {
+    return { ok: false, error: { code: "unavailable", message: `${method} ${path} answered outside the API contract: ${parsed.error.issues[0]?.message ?? res.value.slice(0, 200)}` } };
+  }
+  return { ok: true, value: { value: parsed.data, answer } };
 }
 
 export const client = (ctx: Context) =>

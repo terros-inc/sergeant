@@ -1,5 +1,5 @@
 import { AccountList, AccountName, Provider, RegisterAccountResponse, RemoveAccountResponse, RemovePersonAccountsResponse, WhoAmI } from "@terros/sergeant-contracts";
-import { type Command, call, client, fail, print, settle, Usage } from "./cli-call.ts";
+import { answered, type Command, call, callAnswer, client, fail, print, settle, Usage } from "./cli-call.ts";
 import { accountRow, quotaLeft, table } from "./format.ts";
 import { providerEmail, registeredLine, registeringFor, registrationRefusal, strandedNotice } from "./register.ts";
 
@@ -18,8 +18,8 @@ export const accountCommands: Record<string, Command> = {
   "account list": {
     args: 0,
     run: async (ctx) => {
-      const { accounts } = await call(ctx, "GET", "/v1/accounts", AccountList);
-      print(ctx, { accounts }, () => (accounts.length ? table(accounts.map(accountRow)) : "no accounts"));
+      const { value: { accounts }, answer } = await callAnswer(ctx, "GET", "/v1/accounts", AccountList);
+      print(ctx, answer, () => (accounts.length ? table(accounts.map(accountRow)) : "no accounts"));
     },
   },
   "account register": {
@@ -47,7 +47,8 @@ export const accountCommands: Record<string, Command> = {
         if (!credential) fail(ctx, "bad_request", "the sign-in gave no credential; nothing was registered");
       }
       const signedIn = !piped;
-      const posted = await client(ctx).call("POST", "/v1/accounts/register", RegisterAccountResponse, { provider, name, credential });
+      const sent = await client(ctx).request("POST", "/v1/accounts/register", { provider, name, credential });
+      const posted = answered("POST", "/v1/accounts/register", RegisterAccountResponse, sent);
       if (!posted.ok && signedIn) {
         // `unavailable` is the one failure that may come after the store: unreachable, an unreadable answer, a failed write.
         try {
@@ -56,22 +57,22 @@ export const accountCommands: Record<string, Command> = {
           ctx.io.err(`${strandedNotice(provider, name, posted.error.code !== "unavailable")}\n`);
         }
       }
-      const res = settle(ctx, posted);
-      print(ctx, res, () => `${registeredLine(res.replaced ? "replaced" : "registered", res.account.name, provider, providerEmail(provider, credential ?? ""), quotaLeft(res.quota))} Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
+      const { value: res, answer } = settle(ctx, posted);
+      print(ctx, answer, () => `${registeredLine(res.replaced ? "replaced" : "registered", res.account.name, provider, providerEmail(provider, credential ?? ""), quotaLeft(res.quota))} Sergeant uses it only for tasks assigned to you that you delegate to it yourself.\n\n${res.notice}`);
     },
   },
   "account remove": {
     args: 1,
     run: async (ctx, [name]) => {
-      const res = await call(ctx, "POST", "/v1/accounts/remove", RemoveAccountResponse, { name });
-      print(ctx, res, () => (res.removed ? `removed your account ${res.name}. ${res.notice ?? "It does not revoke a copy a run may have taken."}` : `you have no registered account named ${res.name}`));
+      const { value: res, answer } = await callAnswer(ctx, "POST", "/v1/accounts/remove", RemoveAccountResponse, { name });
+      print(ctx, answer, () => (res.removed ? `removed your account ${res.name}. ${res.notice ?? "It does not revoke a copy a run may have taken."}` : `you have no registered account named ${res.name}`));
     },
   },
   "admin account remove-person": {
     args: 1,
     run: async (ctx, [userId]) => {
-      const res = await call(ctx, "POST", "/v1/accounts/remove-person", RemovePersonAccountsResponse, { userId });
-      print(ctx, res, () =>
+      const { value: res, answer } = await callAnswer(ctx, "POST", "/v1/accounts/remove-person", RemovePersonAccountsResponse, { userId });
+      print(ctx, answer, () =>
         res.removed.length
           ? `removed ${res.removed.map((a) => `${a.id} (${a.holder})`).join(", ")}; runs already on them finish on them, and a copy is not revoked`
           : `${res.userId} has no registered model account`,
