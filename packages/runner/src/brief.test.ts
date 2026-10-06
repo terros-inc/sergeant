@@ -146,7 +146,7 @@ test("reviewer rule 12 counts a trade-off as settled only on the base branch or 
 test("worker and reviewer briefs carry the rebase rule and ask for dependencies in the report", () => {
   const base = spec([]);
   const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
-  expect(worker).toContain("## Rules (s2-worker-rules/9)");
+  expect(worker).toContain("## Rules (s2-worker-rules/10)");
   const rebase = worker.slice(worker.indexOf("14. Rebase early and often."), worker.indexOf("\n15. "));
   expect(rebase).toMatch(/before its first push, before you report a head for\s+review, and whenever the default branch has moved under its open PR/);
   expect(rebase).toMatch(/Resolve conflicts then, as\s+part of the task/);
@@ -162,4 +162,20 @@ test("worker and reviewer briefs carry the rebase rule and ask for dependencies 
     const json = brief.slice(brief.indexOf("```\n{"));
     expect(json).toContain('"dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }]');
   }
+});
+
+// TECH-5258: follow-ups went stale while other PRs landed (files moved, code removed or never merged,
+// scope changed), and doc-sync work fixed the places it listed while the same claim lived on elsewhere.
+test("worker brief treats the Task's paths and scope as hints and asks for a repo-wide search for an old claim", () => {
+  const base = spec([]);
+  const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
+  const hints = worker.slice(worker.indexOf("16. "), worker.indexOf("\n17. "));
+  expect(hints).toMatch(/File paths, line numbers and scope in the Task are hints/);
+  expect(hints).toMatch(/"Written against" line/);
+  expect(hints).toMatch(/Before you plan, check\s+them on the current default branch/);
+  expect(hints).toMatch(/say in your report what had\s+changed/);
+  const search = worker.slice(worker.indexOf("17. "), worker.indexOf("\n## Report"));
+  expect(search).toMatch(/touches a settled decision or removes config, search the whole repository/);
+  expect(search).toMatch(/`docs\/design\/`, READMEs, Terraform and other IaC/);
+  expect(search).toMatch(/A list of places in the Task is a\s+starting point, not the scope\./);
 });

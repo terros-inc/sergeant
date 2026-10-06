@@ -75,7 +75,10 @@ async function world(w: World) {
     completedIssues: async () => (stateType === "completed" ? ["UNF-1"] : []),
     openIssues: async () => (stateType !== "completed" && w.delegate !== null ? ["UNF-1"] : []),
     issueProgress: async () => (reads++, { stateType, completedAt: stateType === "completed" ? "2026-10-02T06:01:00.000Z" : null }),
-    github: { readPullRequest: async (r, n) => (r === repo && prs[n]) || Promise.reject(new Error(`unexpected PR ${r}#${n}`)) },
+    github: {
+      readPullRequest: async (r, n) => (r === repo && prs[n]) || Promise.reject(new Error(`unexpected PR ${r}#${n}`)),
+      defaultBranchHead: async (r) => (r === repo ? { branch: "main", sha: "d".repeat(40) } : Promise.reject(new Error(`unexpected repo ${r}`))),
+    },
     linear: {
       // Sergeant's own comments come back as the issue's agent comments, as on Linear.
       readConversation: async () => ({
@@ -138,6 +141,8 @@ test("actionable feedback after the merge files one ordinary, undelegated follow
   }
   expect(fromReview?.description).toContain(`[a review comment](https://github.com/${repo}/pull/7#discussion_r2)`);
   expect(fromReview?.description).not.toContain("pull/8");
+  // TECH-5258: the default-branch commit it was written against, so its staleness is visible.
+  expect(fromComment?.description).toContain(`**Written against:** \`${repo}\` main at \`${"d".repeat(40)}\`.`);
   expect([...posted.values()][0]).toContain("in Backlog and not delegated; move it to Todo and delegate it to Sergeant");
 
   // Duplicate delivery: the same feedback seen again is neither judged nor filed again.

@@ -169,6 +169,11 @@ export interface GitHubPort {
    * logins and `org/team`s whose review is now requested. Safe to repeat.
    */
   handToHuman?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha; reviewers: string[]; comment: string }): Promise<{ requested: string[] }>;
+  /**
+   * The repository's default branch and its head commit now (TECH-5258): a filed follow-up records the
+   * commit it was written against, so its staleness is visible. Optional, so a fake without it records none.
+   */
+  defaultBranchHead?(repo: RepoSlug): Promise<{ branch: string; sha: Sha }>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**

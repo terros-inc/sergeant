@@ -58,6 +58,20 @@ test("a repeated follow-up key files one issue", async () => {
   expect(filed).toHaveLength(2);
 });
 
+// TECH-5258: a follow-up waits while other PRs land, so it records the default-branch commit it was
+// written against, read when it is filed; a failed read says so and never stops the filing.
+test("a filed follow-up records its repository's default-branch commit, or why it could not", async () => {
+  const { p, filed } = ports();
+  const main = "d".repeat(40);
+  p.github.defaultBranchHead = async (repo) => (repo === pr.repo ? { branch: "main", sha: main } : Promise.reject(new Error(`unexpected ${repo}`)));
+  expect(await execute(followup("a"), situation, p)).toMatchObject({ status: "done" });
+  expect(filed[0]?.description).toMatch(new RegExp(`\\n\\n\\*\\*Written against:\\*\\* \`${pr.repo}\` main at \`${main}\`\\. Its file paths, line numbers and scope are as of then: check them against the current default branch first\\.$`));
+
+  p.github.defaultBranchHead = async () => Promise.reject(new Error("GitHub API request failed (502)"));
+  expect(await execute(followup("b"), situation, p)).toMatchObject({ status: "done" });
+  expect(filed[1]?.description).toContain(`**Written against:** \`${pr.repo}\` (not recorded: GitHub API request failed (502)).`);
+});
+
 // TECH-4990: the reviewer's brief shows the humans' feedback on its PRs, read live as it starts, so a
 // change a human requested after the deciding turn's snapshot still reaches the reviewer.
 test("a reviewer starts with the live human feedback on its subject PRs, not the snapshot's", async () => {

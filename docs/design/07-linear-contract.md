@@ -308,7 +308,11 @@ that project, `Sergeant retro <date>`, keyed `retro:<window start>`. The newest 
 last retro: its first line names where its window ended and its "Issues filed" section what it filed.
 
 - Same team, linked to the origin (`related`, or `blocked_by` when it must wait).
-- Description: why it exists, what was learned, a link back. Written to stand alone.
+- Description: why it exists, what was learned, a link back. Written to stand alone. It ends with the
+  default-branch commit of each repository it concerns (the task's PRs' repositories, else its one
+  enrolled repository; for feedback, the merged PRs'), read when it is filed, so a worker can see how
+  stale its paths and scope may be and checks them on the current default branch (05 §3, TECH-5258).
+  A failed read says so and never stops the filing.
 - Delegated to Sergeant only when `followups.autoDelegate` is on; otherwise a human starts it.
 - In the team's first `backlog` state, never Triage (whose rotation would auto-assign it to whoever is
   on call). Assigned to the origin's assignee unless that is Sergeant, else to the human who delegated
@@ -321,7 +325,8 @@ the task loop takes no more turns, so a human comment on the issue, or a comment
 merged PR from someone with a role in the repository, would otherwise be lost. Sergeant sweeps
 recently landed issues, reasoning judges each new piece of feedback, and actionable feedback becomes
 one ordinary follow-up under the rule above (Backlog, owner-assigned, not delegated), keyed by the
-feedback, with the delta, the feedback verbatim, and links to the issue and the merged PRs. A human
+feedback, with the delta, the feedback verbatim, links to the issue and the merged PRs, and the
+default-branch commit it was written against. A human
 starts it the normal way, by moving it to Todo and delegating it; nothing about it is special after
 that. Feedback while the task is active stays part of its conversation (§10) and never files one.
 

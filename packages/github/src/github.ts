@@ -270,6 +270,13 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
 
     rateLimit: () => limiter.status(),
 
+    async defaultBranchHead(repo) {
+      configFor(repo);
+      const { default_branch: branch } = z.object({ default_branch: z.string().min(1) }).parse(await request(`/repos/${repo}`));
+      const head = z.object({ commit: z.object({ sha: Sha }) }).parse(await request(`/repos/${repo}/branches/${encodeURIComponent(branch)}`));
+      return { branch, sha: head.commit.sha };
+    },
+
     async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);
       // TECH-5244, defense in depth: whatever decided to merge, the repository's live policy is read
