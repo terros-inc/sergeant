@@ -97,6 +97,8 @@ Approvers also have `sgt admin` (§7).
 - `--json` prints JSON for scripts and `jq`: the API's own JSON for most commands, `{"report": "…"}`
   for `run report`, `{"api","signedOut"}` for `logout`, `{"version"}` for `update` and `--version`,
   `{"request","outcome"}` for `admin restart` and `admin update`, and errors as `{"error":{"code","message"}}`.
+  The API's JSON is printed as it was sent, so it keeps fields newer than your `sgt`; an answer outside
+  the contract your `sgt` knows is an error.
 - `sgt --help` lists every command: `login`, `logout`, `whoami`, `task list | show | wake | cancel`,
   `run list | show | report | cancel`, `account …`, `repo list`, `retro`, `admin …`, and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
