@@ -9,7 +9,8 @@ export type LoopOptions = {
   /**
    * Holds `state.json`, `turns.jsonl` (every turn's report, output, and outcomes), `reviews.jsonl`
    * (`ReviewFacts` for every finished review; the last line per run id holds),
-   * `audit-followups.jsonl` (audit must-fix findings on merged code), and `STOP`.
+   * `audit-followups.jsonl` (audit must-fix findings on merged code), `report-recoveries.jsonl` (each
+   * run that ended with no usable report and what followed, TECH-5259), and `STOP`.
    */
   dir: string;
   /** The fraction of merged heads that skipped fresh review which get an audit review (06 §8). */

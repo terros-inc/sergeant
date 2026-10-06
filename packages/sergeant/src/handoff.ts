@@ -48,3 +48,21 @@ export async function postHandoff(issueId: string, r: RefusedMerge, linear: Pick
     (e: Error) => (log(`${r.repo}#${r.number}: handoff comment not posted: ${e.message}`), false),
   );
 }
+
+/**
+ * A PR GitHub refused to let Sergeant merge waits for a human: say so once on the issue, retried every
+ * poll until Linear confirms it, only while the issue is still Sergeant's (A1 checked first).
+ */
+export async function postHandoffs(
+  issueId: string,
+  refused: (RefusedMerge & { commentPostedAt?: string | undefined })[],
+  linear: Pick<LinearPort, "postComment">,
+  log: (line: string) => void,
+  save: () => Promise<void>,
+): Promise<void> {
+  for (const r of refused) {
+    if (r.commentPostedAt || !(await postHandoff(issueId, r, linear, log))) continue;
+    r.commentPostedAt = new Date().toISOString();
+    await save();
+  }
+}

@@ -121,11 +121,21 @@ export const ReviewReport = z.object({
   reportVersion: z.literal("s2-review-report/1").catch("s2-review-report/1"),
   reviewed: z.array(z.object({ ...ReportedPr, number: z.coerce.number().int().positive() })).min(1),
   verdict: z.preprocess((v) => VERDICTS[token(v) as string] ?? token(v), z.enum(["approve", "changes_requested", "needs_human"])),
-  /** A finding without an id gets its place in the list (`f1`, `f2`, …). */
+  /** A finding without an id gets its place in the list (`f1`, `f2`, …), or the next one no other finding has. */
   findings: z
     .array(z.looseObject({ id: z.unknown().optional() }))
     .default([])
-    .transform((list) => list.map((f, i) => ({ ...f, id: typeof f.id === "number" || (typeof f.id === "string" && f.id.trim()) ? String(f.id) : `f${i + 1}` })))
+    .transform((list) => {
+      const ids = list.map((f) => (typeof f.id === "number" || (typeof f.id === "string" && f.id.trim()) ? String(f.id) : undefined));
+      const taken = new Set(ids);
+      return list.map((f, i) => {
+        let n = i + 1;
+        while (ids[i] === undefined && taken.has(`f${n}`)) n++;
+        const id = ids[i] ?? `f${n}`;
+        taken.add(id);
+        return { ...f, id };
+      });
+    })
     .pipe(z.array(Finding)),
   unreadableInputs: UnreadableInputs,
   dependencies: Dependencies,

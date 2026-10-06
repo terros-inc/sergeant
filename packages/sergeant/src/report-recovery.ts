@@ -1,6 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ProposedAction, RunRecord, SituationReport } from "@terros/sergeant-contracts";
+import { conversationRevision, type ProposedAction, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -9,7 +9,9 @@ import type { TaskState } from "./task-state.ts";
 // window, so the loop retries such a run at once, before the next turn, and says why: a reviewer is
 // rerun on the same heads, a worker is restarted on its objective with an instruction to write its
 // report. Once per run: a retry that also ends without one is left to reasoning, like a run whose start
-// is not on record, that a later run already followed, or whose heads to review moved. Every such run
+// is not on record, that a later run already followed, or whose heads to review moved. So is one while
+// the conversation has changed since the last turn (a human's reply to the budget question, a comment, an
+// issue edit, a PR review): the retry starts only after reasoning has read it. Every such run
 // gets one line in `report-recoveries.jsonl`, with what followed, so how often it happens is counted.
 
 /** How much of a run's report error a retry's brief and the telemetry carry. */
@@ -19,12 +21,25 @@ type Context = { issueId: string; dir: string; log: (line: string) => void; save
 
 /**
  * Records each ended run of the task that has no usable report and retries those due one through the
- * Gate, like any start. Call it only while no run is going. True when a retry started.
+ * Gate, like any start. Call it only while no run is going. `retried` when a retry started; `unposted`
+ * the question to the owner a retry's start could not post (TECH-5217), for the loop to ask again.
  */
-export async function recoverReports(situation: SituationReport, state: TaskState, ports: Ports, ctx: Context): Promise<boolean> {
+export async function recoverReports(
+  situation: SituationReport,
+  state: TaskState,
+  ports: Ports,
+  ctx: Context,
+): Promise<{ retried: boolean; unposted?: ProposedAction }> {
   const { runs } = situation;
   const lines: string[] = [];
   let retried = false;
+  let unposted: ProposedAction | undefined;
+  // What a human said that no turn has read: the conversation the last turn saw (TECH-5034) differs, or
+  // a human's PR review or comment came after that turn.
+  const lastTurn = Date.parse(state.lastTurnAt ?? state.startedAt);
+  const unread =
+    state.seen?.revision !== conversationRevision(situation.conversation) ||
+    situation.pullRequests.some((p) => p.humanFeedback.some((f) => Date.parse(f.updatedAt) > lastTurn));
   for (const [i, run] of runs.entries()) {
     if (run.status === "running" || run.status === "canceled" || run.report || state.reportRecoveries[run.runId]) continue;
     const at = new Date().toISOString();
@@ -40,7 +55,9 @@ export async function recoverReports(situation: SituationReport, state: TaskStat
           ? "a later run has started since"
           : !start
             ? "its start is not on record"
-            : start.kind === "start_reviewer" && start.subject.some((h) => !situation.pullRequests.some((p) => p.repo === h.repo && p.number === h.number && p.headSha === h.headSha))
+            : unread
+              ? "the conversation changed since the last turn, so reasoning reads it first and decides"
+              : start.kind === "start_reviewer" && start.subject.some((h) => !situation.pullRequests.some((p) => p.repo === h.repo && p.number === h.number && p.headSha === h.headSha))
               ? "a head it was to review has moved or is gone"
               : undefined;
     const fact = { at, issue: ctx.issueId, runId: run.runId, role: run.role, status: run.status, problem, reportError: error };
@@ -55,6 +72,7 @@ export async function recoverReports(situation: SituationReport, state: TaskStat
     state.reportRecoveries[run.runId] = retryRunId ? { retryRunId } : {};
     if (retryRunId) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== retryRunId);
     retried ||= retryRunId !== undefined;
+    if (outcome.status === "failed" && outcome.unposted) unposted ??= outcome.unposted;
     const described = describeOutcome(outcome);
     // The next turn's recentTurns say why the run was retried, or why the retry did not start.
     const summary = `Sergeant retried ${run.role} run ${run.runId} at once, before this turn, because it ended with no usable report (${problem}).`;
@@ -62,10 +80,10 @@ export async function recoverReports(situation: SituationReport, state: TaskStat
     lines.push(JSON.stringify({ ...fact, recovery: retryRunId ? "retried" : "retry_not_started", ...(retryRunId ? { retryRunId } : { reason: described }) }));
     ctx.log(`${why}; retrying it: ${described}`);
   }
-  if (lines.length === 0) return false;
+  if (lines.length === 0) return { retried };
   await appendFile(join(ctx.dir, "report-recoveries.jsonl"), lines.map((l) => `${l}\n`).join(""));
   await ctx.save();
-  return retried;
+  return { retried, ...(unposted && { unposted }) };
 }
 
 /** The same start again, saying why: the reviewer on the same heads, the worker told to finish and report. */

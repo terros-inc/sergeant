@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import type { Conversation, ProposedAction, PullRequestFacts, RunRecord, RunSpec, SituationReport } from "@terros/sergeant-contracts";
+import { conversationRevision, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type RunSpec, type SituationReport } from "@terros/sergeant-contracts";
 import { ports, situation } from "./execute-fixtures.ts";
 import { runLoop } from "./loop.ts";
 import { recoverReports } from "./report-recovery.ts";
@@ -127,12 +127,13 @@ test("a run with no usable report is retried at once and says why; a failed retr
 
 test("a review whose head moved, or a run that failed on its account, is counted but left to reasoning", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-report-recovery-test-"));
-  const state = { starts: { run_r1: { kind: "start_reviewer", subject: [{ repo: situation.pullRequests[0]!.repo, number: 7, headSha: "9".repeat(40) }] } }, reportRecoveries: {}, recentTurns: [], unconfirmedStarts: [] };
+  const seen = { revision: conversationRevision(situation.conversation), issue: "unused" };
+  const state = { seen, starts: { run_r1: { kind: "start_reviewer", subject: [{ repo: situation.pullRequests[0]!.repo, number: 7, headSha: "9".repeat(40) }] } }, reportRecoveries: {}, recentTurns: [], unconfirmedStarts: [] };
   const runs: RunRecord[] = [{ ...missing("run_w1"), failureReason: "quota" }, malformed("run_r1")];
   const { p, started } = ports();
   const retried = await recoverReports({ ...situation, runs }, state as never, p, { issueId: "UNF-1", dir, log: () => {}, save: async () => {} });
 
-  expect(retried).toBe(false);
+  expect(retried).toEqual({ retried: false });
   expect(started).toEqual([]);
   const lines = (await readFile(join(dir, "report-recoveries.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
   expect(lines.map((l) => [l.runId, l.recovery, l.reason])).toEqual([

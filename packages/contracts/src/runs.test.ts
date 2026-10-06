@@ -84,6 +84,9 @@ test("TECH-5259: a review report's unambiguous slips are read, never toward a me
       { id: "f9", severity: "nit", category: undefined },
     ],
   });
+  // A positional id never repeats an explicit one, which addressedFindings would then name ambiguously.
+  const clash = parseReport(report({ ...review, findings: [{ severity: "nit", description: "a" }, { id: "f1", severity: "nit", description: "b" }] }), ReviewReport);
+  expect(clash.ok && clash.report.findings.map((f) => f.id)).toEqual(["f2", "f1"]);
   const approved = parseReport(report({ ...review, verdict: "APPROVED", summary: undefined }), ReviewReport);
   expect(approved.ok && [approved.report.verdict, approved.report.summary]).toEqual(["approve", ""]);
   // What a merge rests on is still exact: an unknown verdict, or no reviewed head, rejects the report.
