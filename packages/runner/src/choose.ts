@@ -26,7 +26,13 @@ export type AccountChoice<A> = Candidate<A> & { reason: string };
 export const spent = <A>(c: Candidate<A>) => (c.quota?.weekly?.remainingPercent ?? 1) <= 0 || (c.quota?.fiveHour?.remainingPercent ?? 1) <= 0;
 // Readings are compared exact; only the recorded reason rounds them.
 const shown = (w: { remainingPercent: number } | undefined) => (w ? Math.round(w.remainingPercent * 10) / 10 : "?");
-export const percent = <A>(c: Candidate<A>) => `${shown(c.quota?.weekly)}% weekly, ${shown(c.quota?.fiveHour)}% 5-hour left`;
+/** Its percent left in each window, or in the one window its provider reports, saying so. */
+export const percent = <A>(c: Candidate<A>) => {
+  const unreported = c.quota?.unreported;
+  if (!unreported) return `${shown(c.quota?.weekly)}% weekly, ${shown(c.quota?.fiveHour)}% 5-hour left`;
+  const [name, reported] = unreported === "weekly" ? ["5-hour", c.quota?.fiveHour] : ["weekly", c.quota?.weekly];
+  return `${shown(reported)}% ${name} (no ${unreported} window reported)`;
+};
 
 /**
  * A window's pace: percent left over percent of the window's time left. Above 1 it is ahead of its
@@ -39,20 +45,26 @@ function pace(window: { remainingPercent: number; resetsAt?: string | undefined 
   return window.remainingPercent / timeLeftPercent;
 }
 
-/** The tighter of an account's two paces; undefined (a partial reading) unless both windows have a percent and a reset. */
+/**
+ * The tighter of an account's two paces, or the one window's pace when its provider reported only that
+ * one (`unreported`, TECH-5342). Undefined (a partial reading) unless every window it should have has a
+ * percent and a reset.
+ */
 export function score<A>(c: Candidate<A>, now: number): number | undefined {
   const weekly = pace(c.quota?.weekly, WINDOW_MS.weekly, now);
   const fiveHour = pace(c.quota?.fiveHour, WINDOW_MS.fiveHour, now);
+  if (c.quota?.unreported === "5-hour") return weekly;
+  if (c.quota?.unreported === "weekly") return fiveHour;
   return weekly === undefined || fiveHour === undefined ? undefined : Math.min(weekly, fiveHour);
 }
 
 /**
  * The account for one run. Among the usable accounts (not spent), the one with the highest `score`;
- * one whose reading is partial or unknown is usable (a known zero in either window still spends it)
- * and ranks after every scored one, the `prefer`red provider's first. A reviewer passes its worker's
- * provider as `avoid`: it takes the other provider's best account when that scores within
- * `REVIEW_DIVERSITY_SHARE` of the best, or when no account is scored, and otherwise the best overall.
- * Undefined when no account is usable.
+ * one whose provider reports a single window is scored on that window alone. One whose reading is
+ * partial or unknown is usable (a known zero in either window still spends it) and ranks after every
+ * scored one, the `prefer`red provider's first. A reviewer passes its worker's provider as `avoid`: it
+ * takes the other provider's best account when that scores within `REVIEW_DIVERSITY_SHARE` of the best,
+ * or when no account is scored, and otherwise the best overall. Undefined when no account is usable.
  */
 export function chooseAccount<A>(
   candidates: Candidate<A>[],

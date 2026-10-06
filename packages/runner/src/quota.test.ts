@@ -84,6 +84,21 @@ test("a failed read is unknown, never throws, and never records the credential",
   });
 });
 
+// TECH-5342: a plan with no 5-hour limit returns only its weekly window. That is a reading, told apart
+// from a failed one by what the provider returned, not by an error message.
+test("a Codex plan reporting one window reads it and names the other unreported; one reporting none fails", async () => {
+  let rateLimit: unknown = { primary_window: { used_percent: 7, limit_window_seconds: 604_800, reset_at: 1_791_000_000 }, secondary_window: null };
+  const { fetch } = fakeFetch(() => json({ rate_limit: rateLimit }));
+  const read = accountQuota({ fetch });
+  const single = await read(codex(), { fresh: true });
+  expect(single).toMatchObject({ weekly: { remainingPercent: 93, resetsAt: new Date(1_791_000_000_000).toISOString() }, unreported: "5-hour" });
+  expect(single.error).toBeUndefined();
+  rateLimit = null;
+  const none = await read(codex(), { fresh: true });
+  expect(none).toMatchObject({ error: "no quota window reported" });
+  expect(none.unreported).toBeUndefined();
+});
+
 test("a burst of launches shares one reading until it is 4 minutes old", async () => {
   expect(QUOTA_CACHE_MS).toBe(4 * 60_000);
   let clock = 0;

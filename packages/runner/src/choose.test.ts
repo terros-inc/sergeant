@@ -88,3 +88,30 @@ test("a window without a reset time is partial: usable, ranked after every score
   expect(choose([noReset, account("depleted", [5, 144], FULL)])?.name).toBe("depleted");
   expect(choose([noReset])).toMatchObject({ name: "no-reset", reason: expect.stringContaining("quota unknown (partial: a window without a reset)") });
 });
+
+// TECH-5342: a personal ChatGPT plan reports a weekly window and no 5-hour one. That is a reading of
+// its week, not an unknown, so a mostly unspent subscription is not left idle behind every other account.
+test("an account whose provider reports only its weekly window is scored on it; a failed reading still ranks last", () => {
+  const weeklyOnly = (name: string, resetsAt: string | undefined): Candidate<string> => ({
+    account: name,
+    adapter: "codex-local",
+    name,
+    quota: { adapter: "codex-local", account: name, readAt: at(0), weekly: { remainingPercent: 93, ...(resetsAt && { resetsAt }) }, unreported: "5-hour" },
+  });
+  const personal = weeklyOnly("codexPersonal", at(112)); // 93% left with two thirds of the week to go: pace 1.4
+  const work = account("codexWork", [60, HALF_WEEK], FULL, "codex-local"); // 1.2
+  expect(score(personal, NOW)).toBeCloseTo(1.395);
+  expect(choose([work, personal])).toMatchObject({ name: "codexPersonal", reason: "codexPersonal, 93% weekly (no 5-hour window reported): pace 1.4, the highest of 2 usable" });
+  // Also as a reviewer's other provider, and behind a both-window account with a better pace.
+  expect(choose([account("claude", [80, HALF_WEEK], FULL), personal], { avoid: "claude-code-local" })?.name).toBe("codexPersonal");
+  expect(choose([personal, account("ahead", [80, HALF_WEEK], FULL)])?.name).toBe("ahead");
+
+  // A reading that failed, or whose one window has no reset, is unscored and ranks after a depleted account.
+  const failed: Candidate<string> = { ...work, name: "failed", quota: { adapter: "codex-local", readAt: at(0), error: "usage endpoint answered 401" } };
+  const noReset = weeklyOnly("no-reset", undefined);
+  const depleted = account("depleted", [5, 144], FULL);
+  expect(score(failed, NOW)).toBeUndefined();
+  expect(score(noReset, NOW)).toBeUndefined();
+  expect(choose([failed, noReset, depleted])?.name).toBe("depleted");
+  expect(choose([failed])).toMatchObject({ reason: expect.stringContaining("quota unknown (usage endpoint answered 401)") });
+});

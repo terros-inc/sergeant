@@ -151,7 +151,8 @@ export type QuotaWindowName = z.infer<typeof QuotaWindowName>;
 
 /**
  * A provider's quota as read just before a launch (TECH-5117): its weekly and 5-hour windows, or why
- * they could not be read. A reading without both windows is unknown.
+ * they could not be read. A reading may have one window when its provider reported only that one
+ * (TECH-5342); `unreported` names the other.
  */
 export const QuotaReading = z.object({
   adapter: z.string(),
@@ -162,6 +163,8 @@ export const QuotaReading = z.object({
   source: z.enum(["usage-endpoint", "header-fallback"]).optional(),
   weekly: QuotaWindow.optional(),
   fiveHour: QuotaWindow.optional(),
+  /** The window its provider returned none of, as a personal ChatGPT plan has no 5-hour one; never set on a failed read. */
+  unreported: QuotaWindowName.optional(),
   error: z.string().optional(),
 });
 export type QuotaReading = z.infer<typeof QuotaReading>;
