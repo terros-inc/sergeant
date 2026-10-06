@@ -64,6 +64,7 @@ secret.
 | linear issue workflow | TECH-4947, TECH-4989 | `SergeantIssueWorkflow`, what a move to In Progress or Todo, or a close, reads before it moves the issue |
 | linear comment thread and comment by id | TECH-5052 | `SergeantCommentThread` and `SergeantCommentById` on the issue's first comment, what `resolveThread` and a comment's retry read, plus `SergeantCommentById` under a never-created id |
 | linear follow-up and retro issue reads | TECH-5049, TECH-5187 | `SergeantFollowupOrigin`, `SergeantIssueById`, `SergeantRetroIssue`, and `SergeantRetroTeam` on the issue and its team, plus `SergeantRelationById` and `SergeantRetroDocumentById` under never-created ids: what filing a follow-up or a retro issue reads |
+| github default branch head | TECH-5258 | `defaultBranchHead`: `GET /repos/<repo>` for its default branch, then that branch's head commit, what a filed follow-up records as "Written against". Runs without `--pr` |
 | github PR facts | TECH-5232, TECH-5218, TECH-5244 | `readPullRequest`: `mergeable_state`, human reviews and comments, required checks from rulesets, and the repository's merge policy |
 | github squash message | TECH-5085 | The PR's title, body, and commits, built into the squash message a merge would send. Never sent. Shows the co-authors it keeps |
 | github handoff read | TECH-5244 | The PR as a human handoff reads it: draft state, author, head, and requested reviewers and teams, and its comments, read as a handoff or a close does before posting one |
@@ -78,7 +79,9 @@ checked.
 
 Each check parses with the production schema, so a field Linear or GitHub renamed, or a permission
 the App lacks, fails here before a task needs it. A later change that adds a live read should add
-its check in `packages/sergeant/src/smoke-checks.ts` and a row to this table.
+its check in `packages/sergeant/src/smoke-checks.ts` and a row to this table. Tests keep both
+adapters in step: every named Linear read query must run, and every GitHub port method must be a
+read a check calls, a write whose reads a probe makes, or local (`smoke-checks.test.ts`).
 
 ### Reading the result
 
