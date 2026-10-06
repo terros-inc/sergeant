@@ -20,6 +20,7 @@ import { agentFields, setAsideOnFailure } from "./ended.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import { DEFAULT_LIMITS, type ContainerRunnerOptions, type Role } from "./options.ts";
 import { recorded, runFiles, type RunMeta } from "./run-files.ts";
+import { redactSecrets } from "./redact.ts";
 import { endOnce, publish } from "./terminal.ts";
 
 export type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
@@ -83,7 +84,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
     const written = await agentReport(meta);
-    return { record: RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: `no report written; ${why}` }) }), agent: facts };
+    return { record: RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: redactSecrets(`no report written; ${why}`) }) }), agent: facts };
   }
 
   /** The report the agent wrote in its workspace, if any: copied out as `report.md` and parsed for its role. */
@@ -94,7 +95,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     if (!markdown) return undefined;
     await publish(join(p.dir, "report.md"), markdown);
     const parsed = meta.role === "reviewer" ? parseReport(markdown, ReviewReport) : parseReport(markdown, WorkerReport);
-    return parsed.ok ? { report: parsed.report } : { report: null, reportError: parsed.error };
+    return parsed.ok ? { report: parsed.report } : { report: null, reportError: redactSecrets(parsed.error) };
   }
 
   /** The task owner's account for a launch, from quota read now (accounts.ts). */

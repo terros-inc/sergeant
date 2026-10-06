@@ -96,14 +96,28 @@ test("a Codex turn.failed 401 is recorded as authentication and keeps no key or 
   for (const fragment of ["sk-", "abcd", "codex-test-token", "workspace routing"]) expect(JSON.stringify(run)).not.toContain(fragment);
 });
 
-// Any other Codex failure keeps its message for the record, but with a quoted key redacted.
-test("a non-auth Codex failure redacts the key it quotes", async () => {
-  const message = "Model gpt-5 is not available for key sk-proj-AbC123_xyz.9";
+// Any other Codex failure keeps its message for the record, but with every credential it quotes
+// redacted (TECH-5254): an API key, a ChatGPT access token (a JWT), and a refresh token, whether in
+// ChatGPT's `rt.1.…` shape or any other shape quoted under its auth.json field name.
+test("a non-auth Codex failure keeps its message but no key or token it quotes", async () => {
+  const jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhbm4ifQ.c2lnbmF0dXJlX3NlY3JldA";
+  const secrets = ["sk-proj-AbC123_xyz.9", jwt, "rt.1.AAAQx9Zr_secretRefresh-Value", "rt_OpaqueRefresh42secret", "opaque-refresh-secret"];
+  const message = [
+    "Model gpt-5 is not available for key sk-proj-AbC123_xyz.9;",
+    `stream failed with Bearer ${jwt};`,
+    "retry with rt.1.AAAQx9Zr_secretRefresh-Value or rt_OpaqueRefresh42secret;",
+    'auth {"refresh_token":"opaque-refresh-secret"} kept',
+  ].join(" ");
   const run = await ended({ adapters: { worker: "codex-local" } }, JSON.stringify({ type: "turn.failed", error: { message } }), "");
 
-  expect(run).toMatchObject({ status: "failed", reportError: expect.stringContaining("Model gpt-5 is not available for key sk-[redacted]") });
+  expect(run).toMatchObject({ status: "failed", report: null });
   expect(run.failureReason).toBeUndefined();
-  for (const fragment of ["sk-proj", "AbC123", "xyz"]) expect(JSON.stringify(run)).not.toContain(fragment);
+  expect(run.reportError).toBe(
+    "no report written; agent exited 0 (Model gpt-5 is not available for key sk-[redacted]; stream failed with Bearer [redacted JWT]; " +
+      'retry with [redacted refresh token] or [redacted refresh token]; auth {"refresh_token":"[redacted]"} kept)',
+  );
+  for (const secret of secrets) expect(JSON.stringify(run)).not.toContain(secret);
+  for (const fragment of ["AbC123", "c2lnbmF0dXJl", "secretRefresh", "OpaqueRefresh"]) expect(JSON.stringify(run)).not.toContain(fragment);
 });
 
 test("non-auth Codex failures and unrelated stderr do not report authentication", async () => {
