@@ -101,3 +101,14 @@ test("a closing PR's squash commit says Fixes once, with or without a body", () 
   // Naming the issue in prose, or another issue's Fixes, is not a closing reference to it.
   expect(squashMessage({ ...base, body: "TECH-9 — the thing.\nFixes TECH-90" }).commit_message).toContain("\n\nFixes TECH-9\n\n");
 });
+
+// f1 on #193: a branch commit written with CRLF line endings keeps its human co-author, as it did before
+// the linear-time parse; its agent co-author is still dropped.
+test("a CRLF commit message's human co-author stays and its agent co-author is dropped", () => {
+  const { commit_message } = squashMessage({
+    ...base,
+    body: "Does the thing.",
+    commits: [{ message: "wip\r\n\r\nCo-authored-by: Grace Hopper <grace@terros.com>\r\nCo-authored-by: Claude <noreply@anthropic.com>\r\n" }],
+  });
+  expect(commit_message).toBe(["Does the thing.", "", "Fixes TECH-9", "", builtBy, "", "Co-authored-by: Grace Hopper <grace@terros.com>", ""].join("\n"));
+});

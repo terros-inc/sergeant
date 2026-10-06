@@ -16,7 +16,7 @@ const AGENT_LOGINS = new Set(["copilot"]);
 /** `<id>+<login>@users.noreply.github.com`, GitHub's address for an account, an App's bot included. */
 const GITHUB_NOREPLY = /^(?:\d+\+)?([^@]+)@users\.noreply\.github\.com$/;
 // Linear-time on any input (CodeQL's polynomial-regex check): the name is trimmed, not matched around.
-const CO_AUTHOR = /^\s*co-authored-by:(.*)$/i;
+const CO_AUTHOR = /^\s*co-authored-by:([^\n]*)$/i;
 const coAuthorOf = (line: string) => CO_AUTHOR.exec(line)?.[1]?.trim() || undefined;
 
 /** The address between the first `<` and the `>` after it. */

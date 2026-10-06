@@ -4,7 +4,8 @@
 // call that is not a read; live-check.ts mints the same), costs no model spend, and prints no secret.
 // From packages/sergeant, on the host after `sergeant-update` (docs/live-verification.md):
 //
-//   node src/smoke.ts [--config <installation.json> [--repo owner/name] [--issue TECH-123] [--pr 45]]
+//   node src/smoke.ts [--config <installation.json> [--repo owner/name] [--issue TECH-123] [--pr 45]
+//                     [--upload https://uploads.linear.app/...]]
 //                     [--status-url http://127.0.0.1:8080/status | --no-status] [--api https://<host>]
 //
 // Each line is PASS, FAIL, or SKIP for one check; the last line is the overall result. Exit code 0
@@ -23,13 +24,14 @@ const { values } = parseArgs({
     repo: { type: "string" },
     issue: { type: "string" },
     pr: { type: "string" },
+    upload: { type: "string" },
     "status-url": { type: "string", default: "http://127.0.0.1:8080/status" },
     "no-status": { type: "boolean", default: false },
     api: { type: "string" },
   },
 });
 if (!values.config && !values.api && values["no-status"]) fail("nothing to check: give --config, --api, or leave the /status check on");
-if (!values.config && (values.repo || values.issue || values.pr)) fail("--repo, --issue, and --pr need --config");
+if (!values.config && (values.repo || values.issue || values.pr || values.upload)) fail("--repo, --issue, --pr, and --upload need --config");
 const pr = values.pr === undefined ? undefined : Number(values.pr);
 if (pr !== undefined && !(Number.isInteger(pr) && pr > 0)) fail("--pr must be a pull request number");
 if (pr !== undefined && !values.repo) fail("--pr needs --repo");
@@ -49,7 +51,7 @@ if (values.config) {
     return process.exit(1);
   });
   checks.push(
-    ...linearChecks(installation.linear, { agentUserId: installation.agentUserId, issue: values.issue, retroProjectId: config.retro?.projectId }),
+    ...linearChecks(installation.linear, { agentUserId: installation.agentUserId, issue: values.issue, retroProjectId: config.retro?.projectId, upload: values.upload }),
     ...githubChecks(installation.github, githubReadProbes({ token: cachedToken(() => installation.controlPlaneApp.mint({ repositories: [repo] })) }), {
       repo,
       mergePolicy: config.repositories[repo]?.mergePolicy ?? "human",

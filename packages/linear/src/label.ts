@@ -2,20 +2,20 @@ import type { LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import type { FollowupDeps } from "./followup.ts";
 
-const issueLabelsQuery = `
+export const issueLabelsQuery = `
   query SergeantIssueLabels($id: String!) {
     issue(id: $id) { id team { id } labels(first: 100) { nodes { id name } } }
   }
 `;
-const issueLabelsShape = z.object({
+export const issueLabelsShape = z.object({
   issue: z.object({ id: z.string(), team: z.object({ id: z.string() }), labels: z.object({ nodes: z.array(z.object({ id: z.string(), name: z.string() })) }) }).nullable(),
 });
-const labelsByName = `
+export const labelsByName = `
   query SergeantLabelsByName($name: String!) {
     issueLabels(first: 50, filter: { name: { eqIgnoreCase: $name } }) { nodes { id team { id } } }
   }
 `;
-const labelsByNameShape = z.object({ issueLabels: z.object({ nodes: z.array(z.object({ id: z.string(), team: z.object({ id: z.string() }).nullable() })) }) });
+export const labelsByNameShape = z.object({ issueLabels: z.object({ nodes: z.array(z.object({ id: z.string(), team: z.object({ id: z.string() }).nullable() })) }) });
 const addLabels = `
   mutation SergeantAddLabel($id: String!, $labelIds: [String!]!) {
     issueUpdate(id: $id, input: { addedLabelIds: $labelIds }) { success }

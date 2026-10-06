@@ -5,9 +5,9 @@ operator checks them for real after each deploy, finds evidence in Sergeant's ow
 path ran in production, and closes "check the first live use" tickets (TECH-5279). There is no
 staging workspace: the smoke check reads production and writes nothing.
 
-1. After `sergeant-update`, run the **smoke check** on the host. It reads every live Linear and GitHub
-   query Sergeant added since V2 through the production adapters and parsers, and checks the host
-   serves the version it was updated to.
+1. After `sergeant-update`, run the **smoke check** on the host. It runs every named Linear read query
+   in the adapter (except `SergeantCaller`, below) and every GitHub read Sergeant added since V2,
+   through the production adapters and parsers, and checks the host serves the version it was updated to.
 2. Once the new code has run in normal work, run the **evidence search** on the host. It searches
    Sergeant's records for the new path and prints a citation to paste on the live-check ticket.
 3. **Close the live-check ticket** by the rules under [Closing a live-check ticket](#closing-a-live-check-ticket).
@@ -20,7 +20,8 @@ Open a shell on the host (deploy/README.md, Live check on the host), then:
 
 ```sh
 sudo -u sergeant -H bash -c 'cd /opt/sergeant/src/packages/sergeant &&
-  node src/smoke.ts --config /etc/sergeant/installation.json --repo <owner/name> --issue <issue> --pr <number>'
+  node src/smoke.ts --config /etc/sergeant/installation.json --repo <owner/name> --issue <issue> --pr <number> \
+    --upload <https://uploads.linear.app/... URL>'
 ```
 
 - `--config` turns on the Linear and GitHub checks. It resolves the installation's secrets as `serve`
@@ -31,6 +32,8 @@ sudo -u sergeant -H bash -c 'cd /opt/sergeant/src/packages/sergeant &&
   Without it, the per-issue checks are `SKIP`.
 - `--pr` is any pull request in `--repo`, such as Sergeant's latest merge. Without it, the PR checks are
   `SKIP`.
+- `--upload` is a Linear upload URL (`https://uploads.linear.app/...`), such as a screenshot on the
+  `--issue`: copy the image's address from Linear. Without it, the upload download check is `SKIP`.
 - The host-version check reads `http://127.0.0.1:8080/status`, which answers only on the host. Change
   the URL with `--status-url`, or turn the check off with `--no-status`.
 - `--api https://<host>` adds the hosted API check with the `sgt login` saved on that machine.
@@ -47,17 +50,31 @@ secret.
 | Check | Covers | The live read |
 | --- | --- | --- |
 | host serves this checkout's version | deployed version | `/status` answers `ok` with the version of the checkout `sergeant-update` installed |
+| linear viewer and user names | V2 config | `SergeantViewer` and `SergeantUsers`: the token's user is the configured agent, and its name |
+| linear upload download | TECH-4994, TECH-5042 | `fetchUpload`: a GET of the `--upload` URL with the agent token, redirects followed as attachment reading does. Shows status, content type, and size. `SKIP` without `--upload` |
 | linear delegated issues (intake) | V2 intake | `SergeantDelegated`: open issues delegated to the agent, with blocking relations |
 | linear completed issues in the feedback lookback | TECH-5049 | `SergeantCompleted` over the feedback sweep's 14-day lookback |
 | linear follow-up lookup by key | TECH-5049 | `SergeantFollowupByKey` (`findFollowupIssue`), archived included, for a key nothing was filed under: it must answer "none", not fail |
 | linear retro reads | TECH-5187 | `SergeantRetroDocuments`, `SergeantRetroFeedback`, `SergeantRetroFiled`. `SKIP` without `retro` in the config |
-| linear issue conversation | TECH-5244 | `SergeantIssue` with the assignee's profile `url`, plus linked-issue background |
+| linear issue conversation | TECH-5244 | `SergeantIssue` with the assignee's profile `url`, plus linked-issue background (`SergeantLinkedIssue`, when the issue links one) |
 | linear task owner from delegation history | TECH-5192, TECH-5217 | `SergeantIssueOwnership` (creator, `botActor`, assignee) and `SergeantDelegationHistory` (`botActor`, `fromDelegate`). A refusal is a correct answer too |
 | linear issue progress (close gate) | TECH-5232 | `SergeantIssueProgress`: state type and `completedAt` |
+| linear issue labels and label by name | TECH-5186 | `SergeantIssueLabels` and `SergeantLabelsByName`, what `addLabel` reads before adding the feedback label. Shows whether that label exists in the workspace or the issue's team |
+| linear blocked-by reads | TECH-5278 | `SergeantBlockedIssue`, `SergeantIssueId`, and `SergeantBlockedByRelation` under an id nothing was created with, what `recordBlockedBy` reads |
+| linear issue workflow | TECH-4947, TECH-4989 | `SergeantIssueWorkflow`, what a move to In Progress or Todo, or a close, reads before it moves the issue |
+| linear comment thread and comment by id | TECH-5052 | `SergeantCommentThread` and `SergeantCommentById` on the issue's first comment, what `resolveThread` and a comment's retry read, plus `SergeantCommentById` under a never-created id |
+| linear follow-up and retro issue reads | TECH-5049, TECH-5187 | `SergeantFollowupOrigin`, `SergeantIssueById`, `SergeantRetroIssue`, and `SergeantRetroTeam` on the issue and its team, plus `SergeantRelationById` and `SergeantRetroDocumentById` under never-created ids: what filing a follow-up or a retro issue reads |
 | github PR facts | TECH-5232, TECH-5218, TECH-5244 | `readPullRequest`: `mergeable_state`, human reviews and comments, required checks from rulesets, and the repository's merge policy |
 | github squash message | TECH-5085 | The PR's title, body, and commits, built into the squash message a merge would send. Never sent. Shows the co-authors it keeps |
-| github handoff read | TECH-5244 | The PR as a human handoff reads it: draft state, author, head, and requested reviewers and teams |
+| github handoff read | TECH-5244 | The PR as a human handoff reads it: draft state, author, head, and requested reviewers and teams, and its comments, read as a handoff or a close does before posting one |
+| github branch-delete read | TECH-5230 | What deleting a closed PR's branch reads before any delete: the PR's head, open PRs from or onto its branch, and the branch tip (a deleted branch is a correct answer). Nothing is deleted |
 | api run list and run view | TECH-5148, TECH-5123 | `GET /v1/runs`, then `GET /v1/runs/<id>` for the first run, through the typed client with your `sgt login`. Shows the run's provider, provider choice, and account |
+
+A lookup under a never-created id (the retry a create makes when its first attempt may have
+succeeded) passes when Linear answers null or "not found"; any other error, or an entity under that
+id, fails. `SergeantCaller` is the one Linear read not covered: it reads with a human's own OAuth
+token, so every `sgt login` runs it. The Gate and every write, approval, merge, and comment are not
+checked.
 
 Each check parses with the production schema, so a field Linear or GitHub renamed, or a permission
 the App lacks, fails here before a task needs it. A later change that adds a live read should add
@@ -75,8 +92,8 @@ SMOKE FAIL: 9 passed, 1 failed, 2 skipped
 ```
 
 The exit code is 0 when nothing failed and 1 when any check failed. A usage error exits with 2. A
-`SKIP` doesn't fail the run, but it also checked nothing: give `--issue` and `--pr` to cover the
-whole table. A failed host-version check usually means serve didn't restart on the new checkout,
+`SKIP` doesn't fail the run, but it also checked nothing: give `--issue`, `--pr`, and `--upload` to
+cover the whole table. A failed host-version check usually means serve didn't restart on the new checkout,
 which deploy/README.md covers.
 
 ## Natural-use evidence

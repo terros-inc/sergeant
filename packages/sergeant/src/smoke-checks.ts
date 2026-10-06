@@ -1,4 +1,4 @@
-import { type ApiClient, type GitHubPort, type MergePolicy, type RepoSlug, RunDetail, RunList } from "@terros/sergeant-contracts";
+import { type ApiClient, FEEDBACK_LABEL, type GitHubPort, type MergePolicy, type RepoSlug, RunDetail, RunList } from "@terros/sergeant-contracts";
 import type { githubReadProbes } from "@terros/sergeant-github";
 import type { createLinearPort } from "@terros/sergeant-linear";
 import { z } from "zod";
@@ -12,7 +12,7 @@ export type SmokeResult = { name: string; covers: string[]; status: "PASS" | "FA
 
 type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
-  "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner"
+  "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
 > & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "lastRetro" | "feedbackTasks" | "filedIssues"> };
 type GitHubReads = Pick<GitHubPort, "readPullRequest">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
@@ -42,12 +42,29 @@ export function hostChecks(input: { statusUrl: string; localVersion: string; fet
 
 export function linearChecks(
   linear: LinearReads,
-  input: { agentUserId: string; issue?: string | undefined; retroProjectId?: string | undefined; now?: Date },
+  input: { agentUserId: string; issue?: string | undefined; retroProjectId?: string | undefined; upload?: string | undefined; now?: Date },
 ): SmokeCheck[] {
   const since = new Date((input.now ?? new Date()).getTime() - 14 * DAY_MS).toISOString();
-  const { issue, retroProjectId } = input;
+  const { issue, retroProjectId, upload } = input;
   const needsIssue = "needs --issue <a controlled issue delegated to the agent>";
+  const uploadCheck = { name: "linear upload download (attachment reading)", covers: ["TECH-4994", "TECH-5042"] };
   const checks: SmokeCheck[] = [
+    {
+      name: "linear viewer and user names",
+      covers: ["V2 config"],
+      run: async () => ({ viewerIsAgent: (await linear.viewer()).id === input.agentUserId, agentName: (await linear.userNames([input.agentUserId]))[0] ?? null }),
+    },
+    upload
+      ? {
+          ...uploadCheck,
+          run: async () => {
+            const res = await linear.fetchUpload(upload);
+            const bytes = (await res.arrayBuffer()).byteLength;
+            if (!res.ok) throw new Error(`Linear upload answered ${res.status}`);
+            return { status: res.status, contentType: res.headers.get("content-type"), bytes };
+          },
+        }
+      : { ...uploadCheck, skip: "needs --upload <an https://uploads.linear.app/... URL from a controlled issue>" },
     { name: "linear delegated issues (intake)", covers: ["V2 intake"], run: async () => ({ open: (await linear.delegatedIssues(input.agentUserId)).length }) },
     {
       name: "linear completed issues in the feedback lookback",
@@ -72,6 +89,13 @@ export function linearChecks(
         }
       : { name: "linear retro reads (documents, feedback, filed issues)", covers: ["TECH-5187"], skip: "no `retro` in the installation config" },
   ];
+  const issueProbes = [
+    { name: "linear issue labels and label by name (feedback label)", covers: ["TECH-5186"] },
+    { name: "linear blocked-by reads (relations, issue id, relation by id)", covers: ["TECH-5278"] },
+    { name: "linear issue workflow (state moves, close)", covers: ["TECH-4947", "TECH-4989"] },
+    { name: "linear comment thread and comment by id", covers: ["TECH-5052"] },
+    { name: "linear follow-up and retro issue reads (origin, issue, team states, relation and document by id)", covers: ["TECH-5049", "TECH-5187"] },
+  ];
   if (!issue) {
     return [
       ...checks,
@@ -79,6 +103,7 @@ export function linearChecks(
         { name: "linear issue conversation", covers: ["TECH-5244"] },
         { name: "linear task owner from delegation history", covers: ["TECH-5192", "TECH-5217"] },
         { name: "linear issue progress (close gate)", covers: ["TECH-5232"] },
+        ...issueProbes,
       ].map((c) => ({ ...c, skip: needsIssue })),
     ];
   }
@@ -107,6 +132,16 @@ export function linearChecks(
       run: () => linear.readTaskOwner(issue, input.agentUserId),
     },
     { name: "linear issue progress (close gate)", covers: ["TECH-5232"], run: () => linear.issueProgress(issue) },
+    ...[
+      () => linear.readProbes.labels(issue, FEEDBACK_LABEL),
+      () => linear.readProbes.blockedBy(issue),
+      () => linear.readProbes.workflow(issue),
+      async () => {
+        const c = await linear.readConversation(issue);
+        return linear.readProbes.comments(c.humanComments[0]?.id ?? c.agentComments[0]?.id);
+      },
+      () => linear.readProbes.followupAndRetro(issue),
+    ].map((run, i) => ({ ...issueProbes[i]!, run })),
   ];
 }
 
@@ -118,8 +153,9 @@ export function githubChecks(
   const { repo, pr } = input;
   const facts = { name: `github ${repo} PR facts (mergeable state, human reviews, required checks)`, covers: ["TECH-5232", "TECH-5218", "TECH-5244"] };
   const squash = { name: `github ${repo} squash message from PR text and commits`, covers: ["TECH-5085"] };
-  const handoff = { name: `github ${repo} handoff read (draft, requested reviewers)`, covers: ["TECH-5244"] };
-  if (pr === undefined) return [facts, squash, handoff].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }));
+  const handoff = { name: `github ${repo} handoff read (draft, requested reviewers, posted comments)`, covers: ["TECH-5244"] };
+  const branch = { name: `github ${repo} branch-delete read (head, open PRs on the branch, branch tip)`, covers: ["TECH-5230"] };
+  if (pr === undefined) return [facts, squash, handoff, branch].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }));
   return [
     {
       ...facts,
@@ -147,6 +183,7 @@ export function githubChecks(
       },
     },
     { ...handoff, run: () => probes.handoffRead(repo, pr) },
+    { ...branch, run: () => probes.branchDeleteRead(repo, pr) },
   ];
 }
 

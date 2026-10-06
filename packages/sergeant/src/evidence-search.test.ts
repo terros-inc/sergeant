@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -78,4 +78,11 @@ test("a Gate denial is shown for the operator to judge but is not evidence by it
   const out = citation(hits, { query, version: "v", host: "h", searchedAt: "t" });
   expect(out.exitCode).toBe(1);
   expect(out.text).toContain("0 supporting, 0 contrary, 1 denied");
+});
+
+// f3 on #193: a run whose run.json cannot be read must fail the search, never vanish from it.
+test.skipIf(process.getuid?.() === 0)("an unreadable run.json fails the search", async () => {
+  const dir = await stateDir();
+  await chmod(join(dir, "runs", "run-a", "run.json"), 0o000);
+  await expect(searchEvidence(dir, { match: /"holder"/, since: "2026-10-06" })).rejects.toThrow(/EACCES/);
 });

@@ -5,6 +5,7 @@ import { taskOwnerReader } from "./delegation.ts";
 import { blockedByRecorder } from "./blocked-by.ts";
 import { followupFiler, followupFinder } from "./followup.ts";
 import { labeler } from "./label.ts";
+import { linearReadProbes } from "./read-probes.ts";
 import { retroLinear, type RetroLinear } from "./retro.ts";
 import {
   actor,
@@ -73,6 +74,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   recordBlockedBy: NonNullable<LinearPort["recordBlockedBy"]>;
   /** The retro's reads and writes (TECH-5187, retro.ts). */
   retro: RetroLinear;
+  /** The reads the port makes only on the way to a write, run alone by the post-deploy smoke check (TECH-5279). */
+  readProbes: ReturnType<typeof linearReadProbes>;
 } {
   if (!options.apiKey) throw new Error("Linear API key is required");
   const fetchFn = options.fetch ?? globalThis.fetch;
@@ -154,6 +157,8 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     addLabel: labeler({ request }),
 
     retro: retroLinear({ request, createOnce, sergeantUsers }),
+
+    readProbes: linearReadProbes({ request }),
 
     async moveIssueToStarted(issueId) {
       const { issue } = await request(issueWorkflow, { id: issueId }, issueWorkflowShape);

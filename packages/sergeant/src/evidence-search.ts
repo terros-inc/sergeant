@@ -66,7 +66,8 @@ export async function searchEvidence(stateDir: string, query: EvidenceQuery): Pr
       const raw = await readFile(join(stateDir, "runs", runId, "record.json"), "utf8").catch(missing(undefined));
       const record = raw === undefined ? undefined : (json(raw) as { status?: string; provider?: string; role?: string } | undefined);
       if (!raw || !record || !query.match.test(raw)) continue;
-      const meta = json(await readFile(join(stateDir, "runs", runId, "run.json"), "utf8").catch(() => "")) as { startedAt?: string } | undefined;
+      // An unreadable run.json fails the search: under `since` it would otherwise silently drop the run.
+      const meta = json(await readFile(join(stateDir, "runs", runId, "run.json"), "utf8").catch(missing(""))) as { startedAt?: string } | undefined;
       const at = meta?.startedAt ?? "";
       if (!recent(at) || record.status === "running" || record.status === "canceled") continue;
       hits.push({
