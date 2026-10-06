@@ -9,8 +9,11 @@ import type { Conversation, LinearPerson, LinearPort, NoModelAccount, ProposedAc
 // and reviewer runs only on the owner's registered accounts (runner `accounts.ts`). Each refusal is
 // said once on the issue per condition, keyed by what Linear showed, so a poll never repeats it.
 
-/** The task's owner as `state.json` records it: who, and when the task was admitted for them. */
-export type TaskOwner = LinearPerson & { admittedAt: string; delegatedAt?: string | undefined };
+/**
+ * The task's owner as `state.json` records it: who, and when the task was admitted for them. `warning`
+ * notes an app delegation accepted on a suspicious display-name match (TECH-5280).
+ */
+export type TaskOwner = LinearPerson & { admittedAt: string; delegatedAt?: string | undefined; warning?: string | undefined };
 
 /**
  * Why a task stops because its issue is no longer assigned to its owner (poll-checks.ts), as the end
@@ -89,7 +92,8 @@ export async function admitOwner(issueId: string, deps: { linear: LinearPort; ag
   }
   if ("owner" in check) {
     log(`owned by ${check.owner.name} (${check.owner.id}), who assigned and delegated it: its runs use only their model accounts`);
-    return { ...check.owner, admittedAt: new Date().toISOString(), ...(check.delegatedAt && { delegatedAt: check.delegatedAt }) };
+    if (check.warning) log(`warning: ${check.warning}`);
+    return { ...check.owner, admittedAt: new Date().toISOString(), ...(check.delegatedAt && { delegatedAt: check.delegatedAt }), ...(check.warning && { warning: check.warning }) };
   }
   const refusal = ownerRefusal(issueId, check);
   if (refusal) {

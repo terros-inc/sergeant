@@ -116,7 +116,12 @@ A guardrail admits an issue when **all** of these hold (deterministic):
    creation made through an app counts as that person's only when the app is in
    `linear.delegatingAppIds` (Linear's MCP connector, so the owner's assistant can file work for
    them) and Linear records it acting for a user with the assignee's display name; Linear gives no
-   id or email for that user, so no other app is trusted with the name. That person is the task's **owner**, recorded with the task:
+   id or email for that user, so no other app is trusted with the name. **Known issue (TECH-5280):**
+   the match relies only on Linear's `botActor.userDisplayName` equalling the assignee's
+   `displayName`, so an empty name matches an empty name, and a match overrides a different human
+   that Linear reports as the entry's actor. The downside is small and the allowlist bounds it, so
+   both are accepted as before but flagged: Sergeant logs a warning and notes it with the owner in
+   the task's `state.json`. That person is the task's **owner**, recorded with the task:
    every run of it uses only their registered model accounts (04 §10). Reassigning or unassigning
    the issue while the task runs is a **handoff** (§8): token ownership never moves mid-task, nothing
    resumes on its own, and the new assignee's own delegation starts a new episode (§9), checked

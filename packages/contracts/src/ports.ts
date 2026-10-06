@@ -16,7 +16,16 @@ export type LinearPerson = { id: string; name: string };
  * `app` the Linear app it was made through, if any, and the user it acted for (TECH-5321).
  */
 export type TaskOwnerCheck =
-  | { owner: LinearPerson; delegatedAt?: string }
+  | {
+      owner: LinearPerson;
+      delegatedAt?: string;
+      /**
+       * Set when an allowlisted app's delegation was accepted on a display-name match that looks
+       * suspicious (TECH-5280): the name is empty, or Linear reports a different human as the actor.
+       * Acceptance is unchanged; Sergeant logs it and notes it in the task's record.
+       */
+      warning?: string;
+    }
   | {
       refused: "not_delegated" | "no_assignee" | "delegator_unknown" | "delegator_differs";
       assignee?: LinearPerson;

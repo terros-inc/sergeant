@@ -31,9 +31,10 @@ const TaskState = z.looseObject({
   startedAt: z.iso.datetime(),
   /**
    * TECH-5179: who pays for this task's runs, recorded on admission and never changed for this task.
-   * Absent on a task saved before it, which is admitted afresh on its next start (loop.ts).
+   * Absent on a task saved before it, which is admitted afresh on its next start (loop.ts). `warning`
+   * notes an app delegation accepted on a suspicious display-name match (TECH-5280).
    */
-  owner: z.looseObject({ id: z.string().min(1), name: z.string(), admittedAt: z.iso.datetime(), delegatedAt: z.string().optional() }).optional(),
+  owner: z.looseObject({ id: z.string().min(1), name: z.string(), admittedAt: z.iso.datetime(), delegatedAt: z.string().optional(), warning: z.string().optional() }).optional(),
   turns: z.number().int(),
   lastTurnAt: z.iso.datetime().optional(),
   /** What the last turn saw; an unchanged situation gets no new turn. */

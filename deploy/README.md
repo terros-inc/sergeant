@@ -593,7 +593,12 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   comments are not human input.
 - **`linear.delegatingAppIds`** (optional) lists Linear app ids (`botActor.id`), such as Linear's MCP
   connector, whose delegations count as the assignee's own when the app acted for a user with the
-  assignee's display name; any other app's delegation is refused.
+  assignee's display name; any other app's delegation is refused. **Known issue (TECH-5280):** the
+  match relies only on Linear's `botActor.userDisplayName` equalling the assignee's `displayName`
+  (Linear gives no id or email for that user), so list only apps you trust to report it. Two edge
+  cases are accepted all the same: an empty name matches an empty name, and a match overrides a
+  different human Linear reports as the actor. Either one logs a `warning:` line and is noted as
+  `owner.warning` in the task's `state.json`.
 - **`linear.reviewerProfiles`** (optional) maps GitHub logins to Linear profile URLs. Sergeant puts the
   URL in a re-review request so Linear renders a real user mention and sends an Inbox notification; a
   missing mapping or failed lookup leaves the plain `@github-login` text.
