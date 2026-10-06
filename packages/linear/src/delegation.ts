@@ -13,7 +13,7 @@ const delegationHistory = `
   query SergeantDelegationHistory($id: String!, $after: String) {
     issue(id: $id) {
       history(first: 100, after: $after) {
-        nodes { createdAt actor { id name } botActor { id name userDisplayName } toDelegate { id } fromDelegate { id } }
+        nodes { createdAt actor { id name app } botActor { id name userDisplayName } toDelegate { id } fromDelegate { id } }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -21,13 +21,15 @@ const delegationHistory = `
 `;
 /** The app an entry was made through, and the user Linear records it acting for: a name, never an id. */
 const botActor = z.object({ id: z.string().nullable(), name: z.string().nullish(), userDisplayName: z.string().nullable() }).nullish();
+/** A user, and whether Linear says it is an app's user rather than a person (TECH-5280). */
+const user = actor.extend({ app: z.boolean().optional() });
 const delegationHistoryShape = z.object({
   issue: z.object({
     history: z.object({
       nodes: z.array(
         z.object({
           createdAt: z.string(),
-          actor: actor.nullable(),
+          actor: user.nullable(),
           botActor,
           toDelegate: z.object({ id: z.string() }).nullable(),
           fromDelegate: z.object({ id: z.string() }).nullish(),
@@ -40,13 +42,13 @@ const delegationHistoryShape = z.object({
 /** More history than this is not read: the proof fails closed rather than paging without end. */
 const MAX_HISTORY_PAGES = 20;
 
-const issueOwnership = `query SergeantIssueOwnership($id: String!) { issue(id: $id) { id createdAt creator { id name } botActor { id name userDisplayName } assignee { id name displayName } delegate { id name } } }`;
+const issueOwnership = `query SergeantIssueOwnership($id: String!) { issue(id: $id) { id createdAt creator { id name app } botActor { id name userDisplayName } assignee { id name displayName } delegate { id name } } }`;
 const issueOwnershipShape = z.object({
   issue: z
     .object({
       id: z.string(),
       createdAt: z.string(),
-      creator: actor.nullable(),
+      creator: user.nullable(),
       botActor,
       assignee: actor.extend({ displayName: z.string() }).nullable(),
       delegate: actor.nullable(),
@@ -69,7 +71,7 @@ export async function latestDelegation(request: Request, issueId: string, delega
  * all: when it never does, the delegate was set when the issue was created (TECH-5192).
  */
 async function delegationsTo(request: Request, issueId: string, delegateId: string) {
-  const delegations: { createdAt: string; actor: LinearPerson | null; botActor?: z.infer<typeof botActor> }[] = [];
+  const delegations: { createdAt: string; actor: z.infer<typeof user> | null; botActor?: z.infer<typeof botActor> }[] = [];
   let undelegated = false;
   let after: string | null = null;
   for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
@@ -91,7 +93,8 @@ async function delegationsTo(request: Request, issueId: string, delegateId: stri
  * human and are the one who most recently delegated it to `agentUserId`, or created it already
  * delegated (TECH-5192). A delegation or creation made through an app counts as the assignee's own only
  * when the app is in `delegatingAppIds` and acted for a user with the assignee's display name (TECH-5192);
- * any other app's stays what it was. Fails closed: anything Linear's history cannot prove is a refusal, and an
+ * any other app's stays what it was. A match on an empty name, or over a different human Linear reports as the
+ * actor, is accepted all the same but carries a `warning` (TECH-5280). Fails closed: anything Linear's history cannot prove is a refusal, and an
  * unreadable history throws.
  */
 export function taskOwnerReader(request: Request, sergeantUsers: ReadonlySet<string>, delegatingAppIds: ReadonlySet<string> = new Set()) {
@@ -107,6 +110,12 @@ export function taskOwnerReader(request: Request, sergeantUsers: ReadonlySet<str
     // Linear names the user an app acted for only by display name, so only allowlisted apps are trusted with it.
     const actedForAssignee = !!made?.bot?.id && delegatingAppIds.has(made.bot.id) && made.bot.userDisplayName === issue.assignee?.displayName;
     const delegation = made && { at: made.at, by: assignee && actedForAssignee ? assignee : made.by };
+    // The name match's known weaknesses are flagged, not refused (TECH-5280, 07 §5): an empty name
+    // matches an empty name, and the match overrides whichever human Linear reports as the actor.
+    const actingHuman = made?.by?.app ? undefined : human(made?.by);
+    const otherHuman = actingHuman && actingHuman.id !== assignee?.id ? actingHuman : undefined;
+    const doubts = assignee && actedForAssignee ? [!made?.bot?.userDisplayName?.trim() && "the name is empty", otherHuman && `Linear reports ${otherHuman.name} (${otherHuman.id}) as the actor`].filter(Boolean) : [];
+    const warning = doubts.length > 0 ? `the app ${made?.bot?.name ?? "(unnamed)"} (id ${made?.bot?.id}) delegated it for "${made?.bot?.userDisplayName}", accepted as ${assignee?.name}'s own on a display-name match, but ${doubts.join(", and ")}` : undefined;
     const delegator = human(delegation?.by);
     // Named in a refusal so an operator can allowlist the app without querying Linear by hand (TECH-5321).
     const bot = made?.bot;
@@ -115,6 +124,6 @@ export function taskOwnerReader(request: Request, sergeantUsers: ReadonlySet<str
     if (!assignee) return { refused: "no_assignee", ...facts };
     if (!delegator) return { refused: "delegator_unknown", ...facts };
     if (delegator.id !== assignee.id) return { refused: "delegator_differs", ...facts };
-    return { owner: assignee, ...(delegation && { delegatedAt: delegation.at }) };
+    return { owner: assignee, ...(delegation && { delegatedAt: delegation.at }), ...(warning && { warning }) };
   };
 }

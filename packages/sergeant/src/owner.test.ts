@@ -18,7 +18,7 @@ const ann = { id: "user-ann", name: "Ann" };
 const bob = { id: "user-bob", name: "Bob" };
 const succeeded = (runId: string) => ({ runId, role: "worker" as const, status: "succeeded" as const, provider: "p", model: "m", report: null });
 
-async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promise<void>) {
+async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promise<void>, log: (line: string) => void = () => {}) {
   const dir = await mkdtemp(join(tmpdir(), "sergeant-owner-test-"));
   const live = { conversation: issue("unstarted", "Todo") };
   const { deps, seen } = fakes(live);
@@ -39,9 +39,9 @@ async function task(check: () => TaskOwnerCheck, start: (spec: RunSpec) => Promi
   };
   const loop = (idleMinutes?: number) => {
     abort = new AbortController();
-    return runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0.01, log: () => {}, signal: abort.signal, ...(idleMinutes !== undefined && { idleMinutes }) }, deps);
+    return runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0.01, log, signal: abort.signal, ...(idleMinutes !== undefined && { idleMinutes }) }, deps);
   };
-  const saved = async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as { owner?: { id: string; name: string } };
+  const saved = async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as { owner?: { id: string; name: string; warning?: string } };
   return { loop, live, seen, starts, saved, dir, deps, checks: () => checks };
 }
 
@@ -149,4 +149,17 @@ test("an active task's owner proof is reread: someone else delegating stops it, 
   expect(await redelegated(owner, "UNF-1", deps(async () => ({ owner: ann, delegatedAt: owner.delegatedAt })))).toBeUndefined();
   expect(await redelegated(owner, "UNF-1", deps(async () => ({ refused: "delegator_differs", assignee: ann, delegator: bob })))).toMatch(/delegator_differs/);
   await expect(redelegated(owner, "UNF-1", deps(async () => Promise.reject(new Error("Linear API request failed (503)"))))).rejects.toThrow(/503/);
+});
+
+test("an app delegation accepted on a suspicious name match is logged as a warning and noted in the task's record", async () => {
+  // TECH-5280: the adapter flags an empty name or a different human actor; admission is unchanged.
+  const warning = `the app Linear MCP (id mcp) delegated it for "ann", accepted as Ann's own on a display-name match, but Linear reports Bob (user-bob) as the actor`;
+  for (const flagged of [warning, undefined]) {
+    const lines: string[] = [];
+    const t = await task(() => ({ owner: ann, delegatedAt: "2026-10-04T06:01:00.000Z", ...(flagged && { warning: flagged }) }), async () => {}, (line) => lines.push(line));
+    await t.loop();
+    expect(t.starts.map((s) => s.owner)).toEqual([ann]);
+    expect(lines.filter((l) => l.includes("warning"))).toEqual(flagged ? [expect.stringContaining(`warning: ${flagged}`)] : []);
+    expect((await t.saved()).owner?.warning).toBe(flagged);
+  }
 });

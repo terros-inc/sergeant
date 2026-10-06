@@ -12,10 +12,10 @@ const bob = { id: "bob", name: "Bob" };
 const mcp = "linear-mcp-app";
 const at = (minute: number) => `2026-10-04T06:${String(minute).padStart(2, "0")}:00.000Z`;
 type Bot = { id: string | null; name?: string | null; userDisplayName: string | null };
-type Entry = { createdAt: string; actor: { id: string; name: string } | null; botActor?: Bot | null; toDelegate: { id: string } | null; fromDelegate?: { id: string } | null };
+type Entry = { createdAt: string; actor: { id: string; name: string; app?: boolean } | null; botActor?: Bot | null; toDelegate: { id: string } | null; fromDelegate?: { id: string } | null };
 const delegated = (actor: Entry["actor"], minute: number, to = agent): Entry => ({ createdAt: at(minute), actor, toDelegate: { id: to.id } });
 
-type Issue = { assignee: { id: string; name: string } | null; delegate: { id: string; name: string } | null; creator?: { id: string; name: string } | null; botActor?: Bot | null };
+type Issue = { assignee: { id: string; name: string; displayName?: string } | null; delegate: { id: string; name: string } | null; creator?: { id: string; name: string } | null; botActor?: Bot | null };
 function linear({ creator = null, botActor = null, assignee, ...issue }: Issue, pages: Entry[][] | Response) {
   const reads: (string | null)[] = [];
   const port = createLinearPort({
@@ -24,7 +24,7 @@ function linear({ creator = null, botActor = null, assignee, ...issue }: Issue, 
     delegatingAppIds: [mcp],
     fetch: async (_i, init) => {
       const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { after?: string | null } };
-      if (query.includes("SergeantIssueOwnership")) return Response.json({ data: { issue: { id: "issue-1", createdAt: at(0), creator, botActor, assignee: assignee && { ...assignee, displayName: assignee.name.toLowerCase() }, ...issue } } });
+      if (query.includes("SergeantIssueOwnership")) return Response.json({ data: { issue: { id: "issue-1", createdAt: at(0), creator, botActor, assignee: assignee && { displayName: assignee.name.toLowerCase(), ...assignee }, ...issue } } });
       if (pages instanceof Response) return pages;
       reads.push(variables.after ?? null);
       const n = variables.after ? Number(variables.after) : 0;
@@ -94,12 +94,12 @@ test("a history page that claims more but gives no cursor fails closed instead o
 
 test("a delegation an allowlisted app made for the assignee is the assignee's own; any other app's is not", async () => {
   // TECH-5192: Linear's MCP connector acting for Ann. Linear records whom the app acted for only by display name.
-  const appUser = { id: "mcp-app-user", name: "Linear MCP" };
+  const appUser = { id: "mcp-app-user", name: "Linear MCP", app: true };
   const viaApp = (bot: Bot): Entry => ({ ...delegated(appUser, 4), botActor: bot });
   expect(await linear({ assignee: ann, delegate: agent }, [[viaApp({ id: mcp, userDisplayName: "ann" })]]).check()).toEqual({ owner: ann, delegatedAt: at(4) });
   // Not allowlisted (our own n8n app, say), or acting for someone other than the assignee: refused as before.
   for (const bot of [{ id: "n8n-app", userDisplayName: "ann" }, { id: mcp, userDisplayName: "bob" }]) {
-    expect(await linear({ assignee: ann, delegate: agent }, [[viaApp(bot)]]).check()).toEqual({ refused: "delegator_differs", assignee: ann, delegator: appUser, delegatedAt: at(4), app: bot });
+    expect(await linear({ assignee: ann, delegate: agent }, [[viaApp(bot)]]).check()).toEqual({ refused: "delegator_differs", assignee: ann, delegator: { id: appUser.id, name: appUser.name }, delegatedAt: at(4), app: bot });
   }
 });
 
@@ -114,4 +114,25 @@ test("an issue an allowlisted app created already delegated, for the assignee, i
     app: { id: "n8n-app", name: "n8n", userDisplayName: "ann" },
   });
   expect(await created({ id: mcp, userDisplayName: "bob" })).toEqual({ refused: "delegator_unknown", assignee: ann, delegatedAt: at(0), app: { id: mcp, userDisplayName: "bob" } });
+});
+
+test("a name match accepted on an empty name, or over a different human actor, carries a warning; a normal one does not", async () => {
+  // TECH-5280: known weaknesses of the display-name match, flagged rather than refused.
+  const viaApp = (by: Entry["actor"], userDisplayName: string): Entry => ({ ...delegated(by, 4), botActor: { id: mcp, name: "Linear MCP", userDisplayName } });
+  const appUser = { id: "mcp-app-user", name: "Linear MCP", app: true };
+  // The app's own user as the actor, acting for Ann by her display name: accepted, nothing to flag.
+  expect(await linear({ assignee: ann, delegate: agent }, [[viaApp(appUser, "ann")]]).check()).toEqual({ owner: ann, delegatedAt: at(4) });
+  // An assignee with no display name matches an app acting for nobody named.
+  const nameless = { ...ann, displayName: "" };
+  expect(await linear({ assignee: nameless, delegate: agent }, [[viaApp(appUser, "")]]).check()).toEqual({
+    owner: ann,
+    delegatedAt: at(4),
+    warning: `the app Linear MCP (id ${mcp}) delegated it for "", accepted as Ann's own on a display-name match, but the name is empty`,
+  });
+  // Linear reports Bob, a human, as the actor, while the app claims to act for Ann.
+  expect(await linear({ assignee: ann, delegate: agent }, [[viaApp(bob, "ann")]]).check()).toEqual({
+    owner: ann,
+    delegatedAt: at(4),
+    warning: `the app Linear MCP (id ${mcp}) delegated it for "ann", accepted as Ann's own on a display-name match, but Linear reports Bob (bob) as the actor`,
+  });
 });
