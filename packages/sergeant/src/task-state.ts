@@ -179,7 +179,9 @@ export async function loadState(file: string, issueId: string, window: BudgetWin
   if (state.issueId !== issueId) throw new Error(`${file} belongs to ${state.issueId}, not ${issueId}`);
   // Before TECH-4991 a temporary 405 "Pull Request is not mergeable" was recorded as a policy refusal,
   // which M12 would keep holding until a human touched the conversation; it is not one, so drop it.
-  state.refusedMerges = state.refusedMerges.filter((r) => !/pull request is not mergeable/i.test(r.reason));
+  // Only such a record lacks a fingerprint: every one written since TECH-5077 has one, and a current
+  // handoff for a 405 that kept failing, with the same reason, must survive a restart (TECH-5255).
+  state.refusedMerges = state.refusedMerges.filter((r) => r.fingerprint !== undefined || !/pull request is not mergeable/i.test(r.reason));
   return state;
 }
 

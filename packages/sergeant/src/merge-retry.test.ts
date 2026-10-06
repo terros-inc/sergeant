@@ -190,6 +190,12 @@ test("a persistent 405 gets one re-check, one handoff, and no more turns", async
   expect((await f.run()).outcome).toBe("idle");
   expect(f.attempts()).toBe(2);
   expect(f.turns()).toBe(2);
+  // TECH-5255: each run loads `state.json` afresh, as a serve restart does. The handoff must survive it,
+  // so a turn on unchanged facts (a human's wake) is still held by M12 rather than merging again.
+  f.wake();
+  expect((await f.run()).outcome).toBe("idle");
+  expect(f.attempts()).toBe(2);
+  expect(f.turns()).toBe(3);
   expect(f.handoffs()).toEqual([{ issueId: "i1", key: `merge-handoff:i1:${repo}#7:${head}`, body: expect.stringContaining("Ready for a human to merge") }]);
   // TECH-5090: no policy blocked this merge, so the handoff must not say so.
   const body = f.handoffs()[0]?.body;
