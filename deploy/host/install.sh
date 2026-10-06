@@ -88,48 +88,9 @@ systemctl enable --now caddy
 sed "s#__LOG_GROUP__#$SERGEANT_LOG_GROUP#" "$here/cloudwatch-agent.json" >/opt/aws/amazon-cloudwatch-agent/etc/sergeant.json
 amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/sergeant.json >/dev/null
 
-# --- The installation config (identifiers and secret references only) from its SSM parameter. A
-# config that does not parse never replaces the running service's. Its version goes beside it, read in
-# the same call, so a serve systemd restarts later can tell which version it runs (TECH-5206). ---
-aws ssm get-parameter --region "$AWS_REGION" --name "$SERGEANT_CONFIG_PARAMETER" \
-  --query 'Parameter.{value: Value, version: Version}' --output json >/tmp/installation-parameter.json
-jq -r .value /tmp/installation-parameter.json >/tmp/installation.json
-installed_version=$(jq -r .version /tmp/installation-parameter.json)
-rm -f /tmp/installation-parameter.json
-if ! (cd "$repo/packages/sergeant" &&
-  node --input-type=module -e 'await (await import("./src/config.ts")).loadConfig(process.argv[1])' /tmp/installation.json); then
-  echo "$SERGEANT_CONFIG_PARAMETER is not a valid installation config; serve was not restarted" >&2
-  exit 1
-fi
-# The config first: a serve restarted between the two finds it current, as it is.
-install -m 0644 /tmp/installation.json /etc/sergeant/installation.json
-echo "$installed_version" >/etc/sergeant/installation.json.version
-rm -f /tmp/installation.json
-
-# --- Workers on Fargate (TECH-5237). Once Terraform has made its resources (terraform/fargate.tf), the
-# runner image just built goes to ECR tagged by this commit, and where tasks run, with that image, goes to
-# /etc/sergeant/fargate-runner.json for serve. A failed push fails the install only when the config runs
-# workers on Fargate; otherwise this host's own runner needs none of it. ---
-fargate_parameter=/sergeant/v2/fargate-runner
-if fargate=$(aws ssm get-parameter --region "$AWS_REGION" --name "$fargate_parameter" --query Parameter.Value --output text 2>/dev/null); then
-  ecr=$(jq -r .repositoryUrl <<<"$fargate")
-  image="$ecr:$(git -C "$repo" rev-parse HEAD)"
-  if aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ecr%%/*}" >/dev/null &&
-    docker tag sergeant-runner:local "$image" && docker push -q "$image" >/dev/null; then
-    jq --arg image "$image" 'del(.repositoryUrl) + {image: $image}' <<<"$fargate" >/tmp/fargate-runner.json
-    install -m 0644 /tmp/fargate-runner.json /etc/sergeant/fargate-runner.json
-    rm -f /tmp/fargate-runner.json
-    echo "pushed the runner image to $image"
-  elif [ "$(jq -r '.runners.workerBackend // "local"' /etc/sergeant/installation.json)" = fargate ]; then
-    echo "cannot push the runner image to $image, and workers run on Fargate; serve was not restarted" >&2
-    exit 1
-  else
-    echo "cannot push the runner image to $image; workers run on this host, so the install goes on" >&2
-  fi
-  docker logout "${ecr%%/*}" >/dev/null 2>&1 || true
-else
-  echo "no $fargate_parameter yet (terraform/fargate.tf): workers can run only on this host"
-fi
+# --- The installation config, and the runner image and Fargate settings it needs; on any failure the
+# previous installation stays and serve is not restarted (install-config.sh). ---
+"$here/install-config.sh" /etc/sergeant
 
 # --- Restart serve. SIGTERM lets each task end at its next poll; running workers keep running and
 # the new process picks them up. ---

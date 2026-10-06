@@ -19,6 +19,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 | `host/sergeant-update.sh` | `sergeant-update <ref>`: fetch a ref of the public source repository anonymously and run its `install.sh`. The first boot runs it once; every update afterwards is the same command. |
 | `host/sergeant-autoupdate.sh`, `.service`, `.timer`, `.path` | Every 10 minutes, run `sergeant-update` to a newer green commit of `main` if the installation config's `release` setting asks for one (Automatic updates below); and at once, an approver's `sgt admin restart` or `update` (Restart or update with `sgt` below). |
 | `host/install.sh` | Idempotent install from the checkout: packages (Docker, Node 24, Caddy, the `claude` CLI at the runner image's version), the data volume, the `sergeant` user, the runner image, dependencies, the config, and a restart of `serve`. |
+| `host/install-config.sh` | Run by `install.sh`: the installation config from its parameter, validated and staged, installed only once the runner image and `/etc/sergeant/fargate-runner.json` a Fargate config needs are ready (Workers on Fargate below). |
 | `host/installation.example.json` | The shape of the installation config (`InstallationConfig`; identifiers and secret references only). |
 | `host/sergeant.service`, `Caddyfile`, `cloudwatch-agent.json`, `logrotate` | The systemd unit, the HTTPS proxy, log shipping, and log rotation. |
 
@@ -208,7 +209,8 @@ competing with the host for CPU and memory. Reviewers stay on the host. How a ru
 3. **Turn it on.** Add `"workerBackend": "fargate"` to the installation config's `runners`, put the
    parameter, and update (or `sgt admin restart`). `serve` logs `workers run on Fargate; Fargate image …`
    at startup, and refuses to start if `/etc/sergeant/fargate-runner.json` is missing. From then on an
-   install whose push fails stops before restarting `serve`.
+   install whose push fails stops before installing the new config or restarting `serve`, so the
+   previous installation stays on disk (`host/install-config.sh`, TECH-5273).
 4. **Live check.** Let one controlled worker run start. Its `runs/<run>/run.json` says
    `"backend": "fargate"`, and `launch.json` names its task. While it runs:
 
