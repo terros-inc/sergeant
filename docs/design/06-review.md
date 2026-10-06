@@ -130,6 +130,11 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
     on the base branch or by an owner decision the issue cites. A settlement the change itself introduces,
     such as a new entry under `docs/design` in this diff, is under review like the rest of it
     (TECH-5167).
+13. **Moving bases.** The implementer rebases onto the current base before each review round (05 §3).
+    A head that does not contain the current base is reported, and is blocking only when the base's
+    newer changes conflict with the change or alter what it does. A stacked PR is allowed (TECH-5278).
+14. **Dependencies.** A dependency the reviewer notices between this issue and another goes in
+    `dependencies`, like a worker's (05 §3); Sergeant records it as "blocked by" (TECH-5278).
 
 The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
 

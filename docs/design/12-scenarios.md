@@ -309,6 +309,8 @@ None of the fifteen needed a phase, a per-review or per-repository lifecycle, or
 
 - Long-lived tasks (days) with many human round-trips: compaction (03 §8) is designed for them but
   untested.
-- Two tasks editing the same files at once: left to GitHub conflicts and workers' rebases.
+- Two tasks editing the same files at once: left to GitHub conflicts and workers' early, frequent
+  rebases; a dependency someone notices is recorded as "blocked by" so intake waits (TECH-5278). No
+  file locking or conflict prediction.
 - A repository with a merge queue: merging would mean enqueuing. Not designed until a repository needs
   it.

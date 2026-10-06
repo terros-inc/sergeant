@@ -16,7 +16,7 @@ Reports go to S3; operational logs go to CloudWatch (02 §5). Linear gets summar
 | Comments (top-level and threads) | human instructions, answers, discussion; Sergeant's concise updates and questions |
 | Delegation (`delegate` = Sergeant's app user) | intake: delegated means "Sergeant is responsible" |
 | Workflow state | started when work begins; Done/Canceled close the task |
-| Relations: blocked by, blocks, related, parent/children | admission waits on blockers; follow-ups are linked |
+| Relations: blocked by, blocks, related, parent/children | admission waits on blockers; follow-ups are linked; evident dependencies are recorded as blocked-by (`record_blocked_by`, TECH-5278) |
 | Attachments (GitHub PR links) | **which PRs belong to the task** (08 §4) |
 | Labels | `sergeant:hold` stops merges and new run starts (§12) |
 

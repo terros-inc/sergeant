@@ -101,6 +101,25 @@ export const CreateFollowup = z.object({
 });
 export type CreateFollowup = z.infer<typeof CreateFollowup>;
 
+/** A Linear issue identifier, such as `TECH-5278`. */
+export const IssueIdentifier = z.string().regex(/^[A-Z][A-Z0-9]*-\d+$/, "expected a Linear issue identifier");
+
+/**
+ * TECH-5278: a dependency between this task's issue and another existing issue, recorded as a Linear
+ * "blocked by" relation so intake waits instead of colliding (07 §5). One side is always this task's
+ * issue (K1). Only the relation is recorded: no locking, ordering, or conflict prediction.
+ */
+export const RecordBlockedBy = z.object({
+  kind: z.literal("record_blocked_by"),
+  /** The issue that must wait. */
+  blocked: IssueIdentifier,
+  /** The issue it waits for. */
+  blockedBy: IssueIdentifier,
+  /** The evidence: shared files, an ordering, or one PR building on another. */
+  why: z.string().min(1).max(1_000),
+});
+export type RecordBlockedBy = z.infer<typeof RecordBlockedBy>;
+
 /** Everything reasoning may propose. Reasoning only proposes; the core gates and performs. */
 export const ProposedAction = z.discriminatedUnion("kind", [
   StartWorker,
@@ -111,6 +130,7 @@ export const ProposedAction = z.discriminatedUnion("kind", [
   AcceptAsIs,
   CloseIssue,
   CreateFollowup,
+  RecordBlockedBy,
 ]);
 export type ProposedAction = z.infer<typeof ProposedAction>;
 

@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/8";
+export const WORKER_RULES_VERSION = "s2-worker-rules/9";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -93,6 +93,18 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
     attachment, a file the brief lists as not downloaded): never guess its content. Name it in
     \`unreadableInputs\` exactly as the issue gives it (its URL or path); Sergeant asks a human
     about it before anything merges.
+14. Rebase early and often. Rebase each branch onto the current default branch (\`git fetch origin\`,
+    then \`git rebase origin/<default branch>\`) before its first push, before you report a head for
+    review, and whenever the default branch has moved under its open PR. Resolve conflicts then, as
+    part of the task, never by reverting another task's change, and push with \`--force-with-lease\`.
+    Stacking is allowed when your work builds on another open PR: base your PR on that PR's branch
+    and say so in its body. Once that base merges, retarget your PR to the default branch
+    (\`gh pr edit --base <default branch>\`) and rebase it onto it.
+15. Dependencies. When you notice that this issue depends on another Linear issue (shared files, an
+    ordering, one PR building on another), or another depends on this one, list it in
+    \`dependencies\` with its identifier and \`why\`: \`blocked_by\` when this issue must wait for
+    it, \`blocks\` when it must wait for this one. Sergeant records each as a Linear "blocked by"
+    relation, so intake waits instead of colliding. Report only one you have evidence for.
 
 ## Report
 
@@ -110,6 +122,7 @@ what changed, validation, known gaps, decisions, a short Feedback section), endi
                      "review": { "required": true | false, "reason": "<why>" } }],
   "knownGaps": ["..."],
   "unreadableInputs": [],
+  "dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }],
   "followups": [{ "title": "<standalone title>",
                    "category": "concrete_bug" | "required_unfinished_work" | "real_blocker" | "operational_or_security",
                    "why": "<why it meets that category and why it matters>" }],

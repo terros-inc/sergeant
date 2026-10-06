@@ -132,3 +132,21 @@ test("the live merge preflight refuses a reassigned issue or a newer delegation 
   expect(again.merged).toEqual([]);
   expect(again.handoffs).toHaveLength(1);
 });
+
+// TECH-5278: reasoning records a dependency it sees as a Linear "blocked by" relation, so intake waits
+// instead of colliding. K1 keeps that authority to this task's own issue: it never links two others.
+test("a blocked-by relation is recorded only between this task's issue and another, while delegated", async () => {
+  const why = "Both edit prompt.ts.";
+  const { p, linked } = ports();
+  for (const [blocked, blockedBy] of [["UNF-1", "UNF-7"], ["UNF-8", "UNF-1"]] as const) {
+    expect(await execute({ kind: "record_blocked_by", blocked, blockedBy, why }, situation, p)).toMatchObject({ status: "done", result: { recorded: true } });
+  }
+  for (const [blocked, blockedBy] of [["UNF-7", "UNF-8"], ["UNF-1", "UNF-1"]] as const) {
+    expect(await execute({ kind: "record_blocked_by", blocked, blockedBy, why }, situation, p)).toMatchObject({ status: "denied", rule: "K1" });
+  }
+  expect(linked).toEqual([{ blocked: "UNF-1", blockedBy: "UNF-7" }, { blocked: "UNF-8", blockedBy: "UNF-1" }]);
+
+  const undelegated = ports({ conversation: { ...conversation, issue: { ...conversation.issue, delegate: null } } });
+  expect(await execute({ kind: "record_blocked_by", blocked: "UNF-1", blockedBy: "UNF-7", why }, situation, undelegated.p)).toMatchObject({ status: "denied" });
+  expect(undelegated.linked).toEqual([]);
+});
