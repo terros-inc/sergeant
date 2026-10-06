@@ -47,7 +47,8 @@ const claudeWindow = (w: z.infer<typeof ClaudeWindow>): Window | undefined =>
  */
 const headerWindow = (headers: Headers, name: "5h" | "7d"): Window | undefined => {
   const utilization = headers.get(`anthropic-ratelimit-unified-${name}-utilization`);
-  if (utilization === null || !Number.isFinite(Number(utilization))) return undefined;
+  if (utilization === null) return undefined;
+  if (!Number.isFinite(Number(utilization))) throw new Unreadable(`answered ${name} utilization that is not a number`);
   return { remainingPercent: left(Number(utilization) * 100), ...unixTime(Number(headers.get(`anthropic-ratelimit-unified-${name}-reset`))) };
 };
 
@@ -135,6 +136,14 @@ export function accountQuota(opts: QuotaOptions = {}): ReadQuota {
   };
 }
 
-function windows(weekly: Window | undefined, fiveHour: Window | undefined) {
-  return weekly && fiveHour ? { weekly, fiveHour } : { ...(weekly && { weekly }), ...(fiveHour && { fiveHour }), error: "a quota window is missing" };
+/**
+ * A reading from the windows a provider returned, each undefined only when the provider returned none
+ * of it (TECH-5342). One alone is a reading of that window, its absent one named `unreported`; none is
+ * a failure. A request, parse or window that failed never reaches here as an absent window.
+ */
+function windows(weekly: Window | undefined, fiveHour: Window | undefined): Pick<QuotaReading, "weekly" | "fiveHour" | "unreported" | "error"> {
+  if (weekly && fiveHour) return { weekly, fiveHour };
+  if (weekly) return { weekly, unreported: "5-hour" };
+  if (fiveHour) return { fiveHour, unreported: "weekly" };
+  return { error: "no quota window reported" };
 }

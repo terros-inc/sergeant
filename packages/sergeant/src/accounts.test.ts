@@ -27,7 +27,7 @@ test("a Codex login whose usage reports one window registers with the other unkn
   expect((await registry.list())[0]?.quotaUnknown).toEqual(["5-hour"]);
 
   usage = { rate_limit: null };
-  await expect(registry.register(ada, "codex-local", "codexNone", login("b"))).rejects.toThrow(/quota cannot be read with this credential \(a quota window is missing\)/);
+  await expect(registry.register(ada, "codex-local", "codexNone", login("b"))).rejects.toThrow(/quota cannot be read with this credential \(no quota window reported\)/);
   status = 401;
   await expect(registry.register(ada, "codex-local", "codexExpired", login("c"))).rejects.toThrow(/usage endpoint answered 401/);
   expect((await registry.list()).map((a) => a.name)).toEqual(["codexPersonal"]);

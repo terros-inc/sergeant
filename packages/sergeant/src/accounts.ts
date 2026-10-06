@@ -109,7 +109,7 @@ export function accountRegistry(opts: {
       const at = { userId: person.id, accountName };
       const quota = await opts.readQuota({ id: id(at), adapter, credential });
       // A rejected credential (401/403) reads no window. A plan that reports only one still registers
-      // (TECH-5211): chooseAccount ranks a partial reading after fully read ones.
+      // (TECH-5211), and chooseAccount scores it on that window (TECH-5342).
       if (!quota.weekly && !quota.fiveHour) {
         throw new AccountRefused(`its subscription quota cannot be read with this credential (${quota.error ?? "no quota window was reported"}), so Sergeant could not choose it`);
       }

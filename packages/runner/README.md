@@ -103,7 +103,8 @@ each run uses an account its task's owner registered for Sergeant to use.
   the one with the highest pace, the lower of its weekly and 5-hour windows' percent left over percent
   of the window's time left. Time left counts as at least an hour's share of the window (20% of the
   5-hour window, about 0.6% of the week), so a sliver just before its reset does not start a run it
-  cannot finish. An account whose quota could not be read, or has a window without a reset time, is
+  cannot finish. An account whose provider reports only one window is scored on that window alone
+  (TECH-5342). An account whose quota could not be read, or has a window without a reset time, is
   usable and ranks after every scored one, the `runners` default's first. A reviewer takes an account
   of another provider than its worker's when that provider's best scores within 20% of the best.
   Quota readings are cached for 4 minutes. There is no low-quota warning. Only the chosen account's
