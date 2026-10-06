@@ -27,9 +27,9 @@ export async function takeTurn(
   const ports: Ports = {
     ...deps,
     ...(costOf && { costLine: () => costOf(turn.costUsd ?? 0) }),
-    async recordRun(runId) {
+    async recordRun(runId, repositories) {
       startAttempted = true;
-      await deps.recordRun?.(runId);
+      await deps.recordRun?.(runId, repositories);
     },
   };
   // Q1: nothing else happens on the task until a human answers the question (UNF-727).

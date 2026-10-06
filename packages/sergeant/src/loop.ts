@@ -6,7 +6,7 @@ import type { Reasoner } from "@terros/sergeant-reasoning";
 import { driveMerged, exists, mergedOf } from "./after-merge.ts";
 import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
-import { budgetStatus, DEFAULT_BUDGET } from "./budget.ts";
+import { budgetStatus, DEFAULT_BUDGET, windowFor } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoff } from "./handoff.ts";
@@ -97,9 +97,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     ...deps,
     log,
     handoff: (reason) => recordStop(opts.dir, reason, { handoff: { delegatedAt: state.owner?.delegatedAt } }),
-    async recordRun(runId) {
+    async recordRun(runId, repositories) {
       state.runIds.push(runId);
       state.unconfirmedStarts.push(runId);
+      state.repositories = [...new Set([...state.repositories, ...repositories])];
       await save();
     },
   };
@@ -125,7 +126,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   };
 
   const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
-    budgetStatus({ ...state.budget, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
+    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
 
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };

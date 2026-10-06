@@ -6,6 +6,7 @@ import type {
   ProposedAction,
   PullRequestFacts,
   RefusedMerge,
+  RepoSlug,
   RunId,
   RunnerPort,
   RunRecord,
@@ -28,9 +29,10 @@ export type Ports = {
   workerLogin: string;
   /**
    * Called with a run's id before the runner is asked to start it. The loop saves the id here, so a
-   * crash between the start and the loop's save still leaves a run it can cancel (UNF-728).
+   * crash between the start and the loop's save still leaves a run it can cancel (UNF-728). With it,
+   * the repositories the run is given, whose budget overrides then apply to the task (TECH-5219).
    */
-  recordRun?: (runId: RunId) => Promise<void>;
+  recordRun?: (runId: RunId, repositories: RepoSlug[]) => Promise<void>;
   /**
    * The task's start/cancel lock, held from a start's live delegation check until the runner is asked
    * to start it. A task cancel lists the runs to stop under the same lock, so a start either sees the

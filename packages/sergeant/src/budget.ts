@@ -13,6 +13,21 @@ export type BudgetWindow = BudgetStatus["window"];
 
 export const DEFAULT_BUDGET: BudgetWindow = { wallMinutes: 120, costUsd: 25 };
 
+/**
+ * TECH-5219: the window a task works in, `window` with its repositories' overrides (the installation
+ * config's `repositories[slug].budget`) applied: each field of a repository's override replaces the
+ * window's, and over several repositories the largest of each field holds. A task with no run in a
+ * repository yet has `window` itself.
+ */
+export function windowFor(window: BudgetWindow, repositories: readonly string[], override: (repo: string) => Partial<BudgetWindow> | undefined): BudgetWindow {
+  const windows = repositories.map((r) => {
+    const own = override(r);
+    return { wallMinutes: own?.wallMinutes ?? window.wallMinutes, costUsd: own?.costUsd ?? window.costUsd };
+  });
+  if (windows.length === 0) return window;
+  return { wallMinutes: Math.max(...windows.map((w) => w.wallMinutes)), costUsd: Math.max(...windows.map((w) => w.costUsd)) };
+}
+
 /** What `state.json` keeps of the budget: the window, and when and over which runs it opened. */
 export type TaskBudget = {
   /** Fixed when the window opens; a restart with other options does not change it. */

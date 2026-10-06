@@ -55,6 +55,13 @@ export function taskBudget(config: InstallationConfig): Partial<BudgetWindow> {
   return { ...(minutes !== undefined && { wallMinutes: minutes }), ...(usd !== undefined && { costUsd: usd }) };
 }
 
+/** TECH-5219: a repository's `budget` as a loop's `repositoryBudget`: each field set replaces the installation's. */
+export function repoBudget(repo: InstallationConfig["repositories"][string] | undefined): Partial<BudgetWindow> | undefined {
+  if (!repo?.budget) return undefined;
+  const { wallMinutes, costUsd } = repo.budget;
+  return { ...(wallMinutes !== undefined && { wallMinutes }), ...(costUsd !== undefined && { costUsd }) };
+}
+
 /** Configured reviewer identity lookup. GitHub logins are case-insensitive. */
 export function reviewerProfileLookup(config: InstallationConfig): (login: string) => string | undefined {
   const profiles = new Map(Object.entries(config.linear.reviewerProfiles).map(([login, url]) => [login.toLowerCase(), url]));

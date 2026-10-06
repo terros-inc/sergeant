@@ -473,6 +473,11 @@ aws ssm put-parameter --name /sergeant/v2/installation-config --type String --ov
 Only tasks that start after the update get the new window. A task already running keeps the one it
 started with (the log says `ignoring the budget options`); only a human's "extend" reply enlarges it.
 
+A repository whose builds, tests, and CI need a longer (or cheaper) window gets its own `budget` in
+its `repositories` entry, for example
+`"owner/ios": { "mergeMethod": "squash", "budget": { "wallMinutes": 180, "costUsd": 40 } }`, put and
+updated the same way. It applies to a task once the task has a run in that repository (Budget below).
+
 ### Change the task slots
 
 The installation config's `maxTasks` (default 2) is how many task slots `serve` fills, and
@@ -578,6 +583,9 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   merge call and refuses in a `human` repository whatever asked it to merge. A repository's
   `"observedChecksFallback": true` treats every check observed on the exact head as required (GitHub
   Apps and rulesets below).
+- **`repositories.<owner/name>.budget`** (optional) replaces the installation's `budget` for tasks
+  working in that repository, field by field: `"budget": { "wallMinutes": 180, "costUsd": 40 }`
+  (positive numbers, each optional; a field unset keeps the installation's; Budget below).
 - **`linear.tokenSecret`** must act as `agentUserId` (checked at startup); every Linear read and write
   uses it. It needs permission to create issues, issue relations, and documents, and to edit issue
   labels (follow-ups, feedback, and retros below).
@@ -707,6 +715,15 @@ the stored window and logs that it ignores a different one, so changing the conf
 only tasks that start afterward, and their next fresh window. A human's answer to any of the agent's
 questions gives the task a fresh window: from the answer's time, with zero spend (runs of earlier
 windows no longer count) and the config's current `budget`.
+
+A repository's own `budget` (`repositories.<owner/name>.budget`, TECH-5219) replaces the stored
+window's fields for a task once it has a run in that repository: `state.json` records the
+repositories each worker or reviewer was started in, and every poll measures the window, from its
+start, with those repositories' budgets applied. A field a repository leaves unset keeps the
+installation's; over several repositories the largest of each field holds. Unlike the installation's
+`budget`, serve reads a repository's at each poll, so an Update that changes one also changes the
+window of tasks already working in that repository. `canary` applies its repository's `budget` before
+its own flags.
 
 Wall time is hard and runs from the window's start, including time spent waiting for a human before an
 answer, and for a task slot after one. Spend is best-effort: the cost runs and reasoning turns report

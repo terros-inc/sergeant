@@ -25,6 +25,8 @@ export type ServiceOptions = {
   idleMinutes?: number;
   /** The budget window of a task that starts; a task already started keeps its stored one (loop.ts). */
   budget?: Partial<BudgetWindow>;
+  /** Each enrolled repository's own budget window, for every task loop (loop-options.ts). */
+  repositoryBudget?: (repo: RepoSlug) => Partial<BudgetWindow> | undefined;
   /** Each task loop's audit sample rate (loop.ts); omitted, the loop's default. */
   auditSampleRate?: number;
   /** Whether each task loop posts a progress comment after a review round (loop.ts); omitted, it does. */

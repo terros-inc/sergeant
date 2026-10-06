@@ -21,7 +21,7 @@ import { RepoSlug } from "@terros/sergeant-contracts";
 import { claudeCliReasoner } from "@terros/sergeant-reasoning";
 import { containerRunner, reasoningFiles } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
-import { connect, githubLoginLookup, loadConfig, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { connect, githubLoginLookup, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const { values } = parseArgs({
@@ -63,6 +63,7 @@ const result = await runLoop(
     progressComments: config.review.progressComments,
     budget: {
       ...taskBudget(config),
+      ...repoBudget(config.repositories[repo]),
       ...(values["budget-minutes"] !== undefined && { wallMinutes: positive(values["budget-minutes"], "--budget-minutes") }),
       ...(values["budget-usd"] !== undefined && { costUsd: positive(values["budget-usd"], "--budget-usd") }),
     },

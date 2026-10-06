@@ -129,7 +129,7 @@ export async function scenario(opts: {
   return { result, posted, replies, resolved, merged, closed, live };
 }
 
-export type Saved = { runIds: string[]; budget: { window: unknown; since?: string; priorRuns: string[] }; recentTurns: { outcomes: string[] }[] };
+export type Saved = { runIds: string[]; repositories?: string[]; budget: { window: unknown; since?: string; priorRuns: string[] }; recentTurns: { outcomes: string[] }[] };
 export const saved = async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as Saved;
 export const stopAfter = (n: number) => async (poll: number, live: Conversation) => {
   if (poll >= n) await writeFile(join(dir, "STOP"), "");

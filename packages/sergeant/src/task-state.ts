@@ -46,6 +46,8 @@ const TaskState = z.looseObject({
    */
   actedThrough: z.iso.datetime({ offset: true }).optional(),
   runIds: z.array(RunId),
+  /** TECH-5219: the repositories this task's runs were started in, whose budget overrides apply (budget.ts `windowFor`). */
+  repositories: z.array(RepoSlug).default([]),
   /**
    * Runs saved before the runner was asked to start them and not yet seen started: a crash, or a
    * start that failed, in between. Each is confirmed with the runner, or canceled, before anything else.
