@@ -42,8 +42,9 @@ export function handoffComment(r: RefusedMerge): string {
 
 /** Posts a refusal's comment, at most once however often it is retried; false if Linear failed. */
 export async function postHandoff(issueId: string, r: RefusedMerge, linear: Pick<LinearPort, "postComment">, log: (line: string) => void): Promise<boolean> {
+  const description = r.humanFailure ? "posted that its human handoff needs manual help" : "posted that it is ready for a human to merge";
   return linear.postComment({ issueId, body: handoffComment(r), key: handoffKey(issueId, r) }).then(
-    () => (log(`${r.repo}#${r.number}: posted that it is ready for a human to merge`), true),
-    (e: Error) => (log(`${r.repo}#${r.number}: ready-for-human-merge comment not posted: ${e.message}`), false),
+    () => (log(`${r.repo}#${r.number}: ${description}`), true),
+    (e: Error) => (log(`${r.repo}#${r.number}: handoff comment not posted: ${e.message}`), false),
   );
 }

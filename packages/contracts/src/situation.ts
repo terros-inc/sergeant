@@ -31,7 +31,7 @@ export const RefusedMerge = z.object({
    */
   human: z.object({ requested: z.array(z.string()), summary: z.string() }).optional(),
   /** A `human` repository's handoff failed at this step, rather than a merge being attempted. */
-  humanFailure: z.enum(["mark ready", "request reviewers"]).optional(),
+  humanFailure: z.enum(["read pull request", "mark ready", "re-read pull request", "request reviewers", "post review summary", "complete handoff"]).optional(),
   at: z.iso.datetime({ offset: true }),
 });
 export type RefusedMerge = z.infer<typeof RefusedMerge>;

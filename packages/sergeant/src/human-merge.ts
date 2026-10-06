@@ -42,11 +42,11 @@ export async function handToHuman(
   ctx: { runs: RunRecord[]; liveRevision: string; ports: Ports },
 ): Promise<ActionOutcome> {
   const { ports } = ctx;
-  if (!ports.github.handToHuman) return { action, status: "failed", error: "this Sergeant cannot hand a PR to a human" };
-  const summary = reviewSummary(action.reviewStanding, pr, ctx.runs);
-  const assignee = issue.assignee?.url && ports.githubLoginForLinearProfile?.(issue.assignee.url);
-  let requested: string[];
   try {
+    if (!ports.github.handToHuman) throw new HumanHandoffError("complete handoff", "this Sergeant cannot hand a PR to a human");
+    const summary = reviewSummary(action.reviewStanding, pr, ctx.runs);
+    const assignee = issue.assignee?.url && ports.githubLoginForLinearProfile?.(issue.assignee.url);
+    let requested: string[];
     ({ requested } = await ports.github.handToHuman({
       repo: pr.repo,
       number: pr.number,
@@ -54,20 +54,20 @@ export async function handToHuman(
       reviewers: assignee ? [assignee] : [],
       comment: prHandoffComment(pr, summary),
     }));
+    ports.log?.(`${pr.repo}#${pr.number}: handed to a human to merge; review requested from ${requested.join(", ") || "nobody"}`);
+    const refused: RefusedMerge = {
+      repo: pr.repo,
+      number: pr.number,
+      url: pr.url,
+      headSha: pr.headSha,
+      conversationRevision: ctx.liveRevision,
+      reason: "the repository's merge policy is human",
+      human: { requested, summary },
+      at: new Date().toISOString(),
+    };
+    return { action, status: "denied", rule: "H1", reason: `${pr.repo} is merged only by humans: handed to a human, review requested from ${requested.join(", ") || "nobody"}`, refused };
   } catch (e) {
     if (e instanceof HumanHandoffError) return { action, status: "failed", error: e.message, handoffStep: e.step };
-    throw e;
+    return { action, status: "failed", error: (e as Error).message, handoffStep: "complete handoff" };
   }
-  ports.log?.(`${pr.repo}#${pr.number}: handed to a human to merge; review requested from ${requested.join(", ") || "nobody"}`);
-  const refused: RefusedMerge = {
-    repo: pr.repo,
-    number: pr.number,
-    url: pr.url,
-    headSha: pr.headSha,
-    conversationRevision: ctx.liveRevision,
-    reason: "the repository's merge policy is human",
-    human: { requested, summary },
-    at: new Date().toISOString(),
-  };
-  return { action, status: "denied", rule: "H1", reason: `${pr.repo} is merged only by humans: handed to a human, review requested from ${requested.join(", ") || "nobody"}`, refused };
 }

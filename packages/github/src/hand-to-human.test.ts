@@ -79,9 +79,9 @@ test("a handoff leaves the code owners GitHub already asked, and refuses a moved
 });
 
 test.each([
-  ["mark ready", "/graphql", true],
-  ["request reviewers", "/requested_reviewers", false],
-] as const)("a handoff identifies a failed %s step", async (step, failedPath, draft) => {
+  ["mark ready", "/graphql", true, `could not mark ${repo}#7 ready for review: GitHub was unavailable`],
+  ["request reviewers", "/requested_reviewers", false, "GitHub was unavailable"],
+] as const)("a handoff identifies a failed %s step", async (step, failedPath, draft, expectedMessage) => {
   const { github } = port({ mergeMethod: "squash", mergePolicy: "human" }, (path, method) => {
     if (path.endsWith("/pulls/7")) return json(livePr({ draft }));
     if (path === failedPath || path.endsWith(failedPath)) throw new Error("GitHub was unavailable");
@@ -89,5 +89,29 @@ test.each([
     throw new Error(`unexpected ${method} ${path}`);
   });
 
+  await expect(github.handToHuman?.(handoff)).rejects.toMatchObject({ name: "HumanHandoffError", step, message: expectedMessage });
+});
+
+test.each([
+  ["read pull request", false],
+  ["re-read pull request", true],
+] as const)("a handoff identifies a failed %s step", async (step, markReady) => {
+  let reads = 0;
+  const { github } = port({ mergeMethod: "squash", mergePolicy: "human" }, (path) => {
+    if (path === "/graphql") return json({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+    if (path.endsWith("/pulls/7") && ++reads === 1 && markReady) return json(livePr({ draft: true }));
+    throw new Error("GitHub was unavailable");
+  });
+
   await expect(github.handToHuman?.(handoff)).rejects.toMatchObject({ name: "HumanHandoffError", step, message: "GitHub was unavailable" });
+});
+
+test("a handoff identifies a failed post review summary step", async () => {
+  const { github } = port({ mergeMethod: "squash", mergePolicy: "human" }, (path) => {
+    if (path.endsWith("/pulls/7")) return json(livePr({ requested_reviewers: [{ login: "codeowner" }] }));
+    if (path.includes("/issues/7/comments")) throw new Error("GitHub was unavailable");
+    throw new Error(`unexpected path ${path}`);
+  });
+
+  await expect(github.handToHuman?.(handoff)).rejects.toMatchObject({ name: "HumanHandoffError", step: "post review summary", message: "GitHub was unavailable" });
 });

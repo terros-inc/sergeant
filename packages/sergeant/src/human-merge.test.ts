@@ -5,6 +5,7 @@ import { afterEach, expect, test } from "vitest";
 import { HumanHandoffError, type Conversation, type GitHubPort, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
 import { execute } from "./execute.ts";
 import { conversation, head, merge, ports, pr, situation } from "./execute-fixtures.ts";
+import { handoffComment } from "./handoff.ts";
 import { runLoop } from "./loop.ts";
 import { failedMerges } from "./poll.ts";
 import { Wake } from "./wake.ts";
@@ -58,6 +59,20 @@ test("a failed human handoff carries its step into the refusal used for the issu
   const outcome = await execute(merge, situation, p);
   expect(outcome).toMatchObject({ status: "failed", error: "GitHub was unavailable", handoffStep: "request reviewers" });
   expect(failedMerges([outcome], situation)).toMatchObject([{ humanFailure: "request reviewers", temporary: true }]);
+});
+
+test.each([
+  ["an unclassified port failure", (p: GitHubPort) => (p.handToHuman = async () => { throw new Error("GitHub was unavailable"); })],
+  ["a missing handoff port", (p: GitHubPort) => delete p.handToHuman],
+] as const)("%s retains human-handoff wording through the generic failure path", async (_, fail) => {
+  const { p } = humanPorts(() => "human");
+  fail(p.github);
+
+  const outcome = await execute(merge, situation, p);
+  const [refused] = failedMerges([outcome], situation);
+  expect(outcome).toMatchObject({ status: "failed", handoffStep: "complete handoff" });
+  expect(refused).toMatchObject({ humanFailure: "complete handoff", temporary: true });
+  expect(refused && handoffComment(refused)).not.toContain("Sergeant's merge failed twice");
 });
 
 let dir = "";

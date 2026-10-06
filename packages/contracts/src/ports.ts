@@ -23,7 +23,13 @@ export type TaskOwnerCheck =
       delegatedAt?: string;
     };
 
-export type HumanHandoffStep = "mark ready" | "request reviewers";
+export type HumanHandoffStep =
+  | "read pull request"
+  | "mark ready"
+  | "re-read pull request"
+  | "request reviewers"
+  | "post review summary"
+  | "complete handoff";
 
 /** A human-merge handoff failed at a step a human can finish manually. */
 export class HumanHandoffError extends Error {
