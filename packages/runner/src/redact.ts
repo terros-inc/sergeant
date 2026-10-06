@@ -8,10 +8,14 @@
 // redacted whatever its shape. OpenAI API keys are `sk-…`, and their errors quote them masked
 // (`sk-proj***abcd`). Redacting twice changes nothing.
 const SECRETS: [RegExp, string][] = [
-  [/((?:access|refresh|id)_token\\?["']?\s*[:=]\s*\\?["']?)[^\s"'\\,;&)}[\]]+/gi, "$1[redacted]"],
+  // A quoted value is redacted up to its closing quote (`"`, `'`, or an escaped `\"`), whatever it holds.
+  [/((?:access|refresh|id)_token\\?["']?\s*[:=]\s*)(\\?["'])(?:(?!\2)(?:\\[\s\S]|[^\\]))*(\2?)/gi, "$1$2[redacted]$3"],
+  // An unquoted `key=value` is redacted up to the next separator.
+  [/((?:access|refresh|id)_token\\?["']?\s*[:=]\s*)(?!\\?["'])[^\s"'\\,;&)}[\]]+/gi, "$1[redacted]"],
   [/\beyJ[\w-]*(?:\.[\w-]*)*/g, "[redacted JWT]"],
   [/\brt[._][\w.~+/=-]{8,}/g, "[redacted refresh token]"],
-  [/\bsk-[\w*.-]+/g, "sk-[redacted]"],
+  // Not after a letter or digit (`task-…`), but after `_` (`OPENAI_API_KEY_sk-…`).
+  [/(?<![A-Za-z0-9])sk-[\w*.-]+/g, "sk-[redacted]"],
 ];
 
 /** `text` with every access token, refresh token and API key it quotes replaced. */
