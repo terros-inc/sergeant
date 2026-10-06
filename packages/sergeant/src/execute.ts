@@ -23,6 +23,7 @@ import { handToHuman } from "./human-merge.ts";
 import type { ActionOutcome, Ports } from "./execute-types.ts";
 import { accountQuestion, notOwned } from "./owner.ts";
 import { questionKey } from "./question.ts";
+import { writtenAgainst } from "./written-against.ts";
 
 export { askHuman } from "./ask-human.ts";
 export type { ActionOutcome, Ports } from "./execute-types.ts";
@@ -257,10 +258,13 @@ export async function execute(action: ProposedAction, situation: SituationReport
         const late = inBudget();
         if (!late.allowed) return denied(late);
         const { identifier, url } = conversation.issue;
+        // TECH-5258: the task's PRs' repositories, else the one repository a run could have been given.
+        const prRepos = situation.pullRequests.map((p) => p.repo);
+        const against = await writtenAgainst(ports.github, prRepos.length > 0 ? prRepos : enrolledRepositories.length === 1 ? enrolledRepositories : []);
         const issue = await ports.linear.createFollowupIssue({
           originIssueId: conversation.issue.id,
           title: action.title,
-          description: `**Why a follow-up (${categoryLabel[action.category]}):** ${action.why}\n\n${action.description}\n\n---\nFollow-up from [${identifier}](${url}), filed by Sergeant. Not delegated: move it to Todo and delegate it when it should start.`,
+          description: `**Why a follow-up (${categoryLabel[action.category]}):** ${action.why}\n\n${action.description}\n\n---\nFollow-up from [${identifier}](${url}), filed by Sergeant. Not delegated: move it to Todo and delegate it when it should start.${against && `\n\n${against}`}`,
           relation: action.relation,
           // Per task and reasoning's key, never per turn or run: a re-proposal, a retry, or a
           // restarted loop files nothing new, even when state.json never recorded the first one.

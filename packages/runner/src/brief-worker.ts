@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/9";
+export const WORKER_RULES_VERSION = "s2-worker-rules/10";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -105,6 +105,15 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
     \`dependencies\` with its identifier and \`why\`: \`blocked_by\` when this issue must wait for
     it, \`blocks\` when it must wait for this one. Sergeant records each as a Linear "blocked by"
     relation, so intake waits instead of colliding. Report only one you have evidence for.
+16. File paths, line numbers and scope in the Task are hints, written against an older default branch;
+    a follow-up Sergeant filed names the commit (its "Written against" line). Before you plan, check
+    them on the current default branch: files moved, code removed or never merged, work another task
+    already did, scope grown or shrunk. Work from what is true now, and say in your report what had
+    changed.
+17. When your change touches a settled decision or removes config, search the whole repository
+    (\`docs/design/\`, READMEs, Terraform and other IaC, every other doc) for the old claim, and update
+    every place that still makes it before you call the work done. A list of places in the Task is a
+    starting point, not the scope.
 
 ## Report
 

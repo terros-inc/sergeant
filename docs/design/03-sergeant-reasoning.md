@@ -166,6 +166,7 @@ Rule ids refer to §7, `06` §6, and `08` §7.
 → `{ issueId, identifier, url }`
 - Only for a concrete bug, required unfinished work, a real blocker, or a current operational or
   security problem (`category`), with `why` it meets it (07 §11, TECH-5186).
+- The filed description ends with the default-branch commit it was written against (07 §11, TECH-5258).
 - Gate: G1–G3, F2–F3. Key: `followup:<taskId>:<key>`.
 
 **`record_blocked_by(blocked, blockedBy, why)`** → `{ recorded }`

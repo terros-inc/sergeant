@@ -769,7 +769,10 @@ do theoretical edge cases, future robustness, generalized cleanup, speculative r
 abstraction improvements.
 
 Reasoning decides whether a suggestion deserves an issue and proposes `create_followup` with its
-category, why, and a short key naming the idea; the filed issue opens with the category and why. The
+category, why, and a short key naming the idea; the filed issue opens with the category and why, and
+ends with the default-branch commit of each repository it concerns, read when it is filed (TECH-5258),
+so whoever picks it up can see how far main has moved since. Workers treat a follow-up's paths, line
+numbers and scope as hints and check them on the current default branch before planning. The
 agent files it in the task issue's team and project, related to the issue (or blocked by it), with no
 delegate or assignee, so humans triage it. Linear's client-supplied ids, derived from
 `followup:<task>:<key>`, make it at most one issue and one relation per key, even across a crash or a
@@ -892,8 +895,8 @@ shell over the canary's per-task loop, not a workflow engine:
   from the repository's owners, members, and collaborators. A reasoning call judges each one; an
   acknowledgement or discussion files nothing. Actionable feedback becomes one ordinary follow-up issue
   (Backlog, assigned to the origin's owner, not delegated), related to the origin, whose description is
-  the delta reasoning wrote, the feedback verbatim, and links to the original issue and the merged PRs;
-  a comment on the origin says so. A human starts it like any issue, by moving it to Todo and
+  the delta reasoning wrote, the feedback verbatim, links to the original issue and the merged PRs,
+  and the default-branch commit it was written against; a comment on the origin says so. A human starts it like any issue, by moving it to Todo and
   delegating it to Sergeant. Its Linear id is derived from the feedback, so the same feedback never
   files a second issue. `<state dir>/feedback.json` records what was judged and failed attempts, and
   its `since` (the first sweep) keeps feedback from before the rollout out. Per issue, at most 3

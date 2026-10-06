@@ -15,6 +15,7 @@ import type { FeedbackJudge } from "@terros/sergeant-reasoning";
 import { z } from "zod";
 import { completedEpisodes, readTaskState } from "./task-state.ts";
 import { pause } from "./wake.ts";
+import { writtenAgainst } from "./written-against.ts";
 
 // Post-merge feedback (TECH-4985). While a task is active, a human's comment is part of its
 // conversation and its own loop handles it (loop.ts). Once the completing PR merged or the issue is
@@ -61,7 +62,7 @@ type FeedbackRecord = z.infer<typeof FeedbackRecord>;
 
 export type FeedbackDeps = {
   linear: Pick<LinearPort, "readConversation" | "postComment" | "createFollowupIssue" | "findFollowupIssue">;
-  github: Pick<GitHubPort, "readPullRequest">;
+  github: Pick<GitHubPort, "readPullRequest" | "defaultBranchHead">;
   /** Issues delegated to the V2 agent that reached a completed state after `since`. */
   completedIssues(since: string): Promise<string[]>;
   /** Open issues delegated to the V2 agent: one whose completing PR merged but that is not Done is swept too. */
@@ -227,7 +228,7 @@ async function handle(
   const issue = await deps.linear.createFollowupIssue({
     originIssueId: origin.issue.id,
     title: judgment.title,
-    description: followupDescription(origin, merged, item, judgment.delta),
+    description: followupDescription(origin, merged, item, judgment.delta, await writtenAgainst(deps.github, merged.map((p) => p.repo))),
     relation: "related",
     key: followupKey(item),
   });
@@ -246,7 +247,7 @@ async function postFiled(deps: FeedbackDeps, origin: Conversation, item: Feedbac
 }
 
 /** The follow-up's description: reasoning's delta, then the feedback verbatim and links back. */
-export function followupDescription(origin: Conversation, prs: { url: string }[], item: Feedback, delta: string): string {
+export function followupDescription(origin: Conversation, prs: { url: string }[], item: Feedback, delta: string, against = ""): string {
   const quoted = (item.body.length > MAX_QUOTE ? `${item.body.slice(0, MAX_QUOTE)}…` : item.body).replace(/^/gm, "> ");
   const { identifier, title, url } = origin.issue;
   return [
@@ -257,6 +258,7 @@ export function followupDescription(origin: Conversation, prs: { url: string }[]
     `**Original issue:** [${identifier}](${url}) ${title}`,
     `**Merged:** ${prs.map((p) => p.url).join(", ") || "no merged PR on record"}`,
     "Filed by Sergeant from feedback that arrived after the original work landed. To have Sergeant do it, move it to Todo and delegate it to Sergeant.",
+    ...(against ? [against] : []),
   ].join("\n\n");
 }
 
