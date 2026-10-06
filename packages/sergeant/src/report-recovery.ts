@@ -9,8 +9,8 @@ import type { TaskState } from "./task-state.ts";
 // window, so the loop retries such a run at once, before the next turn, and says why: a reviewer is
 // rerun on the same heads, a worker is restarted on its objective with an instruction to write its
 // report. Once per run: a retry that also ends without one is left to reasoning, like a run whose start
-// is not on record or that a later run already followed. Every such run gets one line in
-// `report-recoveries.jsonl`, with what followed, so how often it happens can be counted.
+// is not on record, that a later run already followed, or whose heads to review moved. Every such run
+// gets one line in `report-recoveries.jsonl`, with what followed, so how often it happens is counted.
 
 /** How much of a run's report error a retry's brief and the telemetry carry. */
 const ERROR_CHARS = 1_000;
@@ -40,7 +40,9 @@ export async function recoverReports(situation: SituationReport, state: TaskStat
           ? "a later run has started since"
           : !start
             ? "its start is not on record"
-            : undefined;
+            : start.kind === "start_reviewer" && start.subject.some((h) => !situation.pullRequests.some((p) => p.repo === h.repo && p.number === h.number && p.headSha === h.headSha))
+              ? "a head it was to review has moved or is gone"
+              : undefined;
     const fact = { at, issue: ctx.issueId, runId: run.runId, role: run.role, status: run.status, problem, reportError: error };
     if (skip || !start) {
       state.reportRecoveries[run.runId] = {};

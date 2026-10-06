@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import type { Conversation, ProposedAction, PullRequestFacts, RunRecord, RunSpec, SituationReport } from "@terros/sergeant-contracts";
+import { ports, situation } from "./execute-fixtures.ts";
 import { runLoop } from "./loop.ts";
+import { recoverReports } from "./report-recovery.ts";
 
 // TECH-5259: a worker that wrote no report, or a reviewer whose report did not parse, left its head
 // with no review standing until the budget ran out. This drives the loop over a fake world where the
@@ -120,5 +122,21 @@ test("a run with no usable report is retried at once and says why; a failed retr
     expect.objectContaining({ issue: "UNF-1", runId: w1.runId, role: "worker", problem: "missing", recovery: "retried", retryRunId: w2.runId }),
     expect.objectContaining({ runId: r1?.runId, role: "reviewer", problem: "malformed", recovery: "retried", retryRunId: r2?.runId }),
     expect.objectContaining({ runId: r2?.runId, role: "reviewer", problem: "malformed", recovery: "none", reason: "it was itself a retry, and Sergeant retries a run once" }),
+  ]);
+});
+
+test("a review whose head moved, or a run that failed on its account, is counted but left to reasoning", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-report-recovery-test-"));
+  const state = { starts: { run_r1: { kind: "start_reviewer", subject: [{ repo: situation.pullRequests[0]!.repo, number: 7, headSha: "9".repeat(40) }] } }, reportRecoveries: {}, recentTurns: [], unconfirmedStarts: [] };
+  const runs: RunRecord[] = [{ ...missing("run_w1"), failureReason: "quota" }, malformed("run_r1")];
+  const { p, started } = ports();
+  const retried = await recoverReports({ ...situation, runs }, state as never, p, { issueId: "UNF-1", dir, log: () => {}, save: async () => {} });
+
+  expect(retried).toBe(false);
+  expect(started).toEqual([]);
+  const lines = (await readFile(join(dir, "report-recoveries.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+  expect(lines.map((l) => [l.runId, l.recovery, l.reason])).toEqual([
+    ["run_w1", "none", "it failed on quota; its account is set aside and reasoning decides"],
+    ["run_r1", "none", "a head it was to review has moved or is gone"],
   ]);
 });
