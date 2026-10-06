@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises";
+import { lstat, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Docker's definite answer that a container does not exist; any other failure is unknown. */
@@ -16,6 +16,16 @@ export async function agentFile(workspace: string, ...parts: string[]): Promise<
     if (!st || st.isSymbolicLink() || (i < parts.length - 1 ? !st.isDirectory() : !st.isFile())) return undefined;
   }
   return path;
+}
+
+/**
+ * Writes a host file into the run workspace without following a link: whatever is at `path` is
+ * removed first and the file is created exclusively, so a link planted there (by a reviewer's
+ * dependency install, say) cannot send this host process's write elsewhere.
+ */
+export async function writeWorkspaceFile(path: string, data: string): Promise<void> {
+  await rm(path, { force: true, recursive: true });
+  await writeFile(path, data, { flag: "wx" });
 }
 
 export const gitIdentityEnv = ({ name, email }: { name: string; email: string }) =>

@@ -65,9 +65,11 @@ Built by the deterministic core from durable artifacts, never from the implement
 
 ## Environment
 A fresh session and workspace. You did not write this change and have no access to how it was
-produced. You have no GitHub, AWS, or Linear credentials; everything you need is checked out locally.
+produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out locally, and before
+you started its dependencies were installed at the head, so you can run its tests:
+<per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why, then its output fenced as untrusted), or no lockfile>
 
-## Rules (s2-reviewer-rules/6)   <§4>
+## Rules (s2-reviewer-rules/8)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -94,7 +96,7 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/6)
+## 4. Reviewer rules (s2-reviewer-rules/8)
 
 The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 
@@ -113,7 +115,8 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
    Verify it where you can; if you cannot, record it as `unverified`, which is **not** blocking by
    itself (captain decision on UNF-608, option A).
 6. **Size and simplification claims** need `git diff --numstat` evidence.
-7. **Run only targeted probes** a specific finding needs. CI is the test gate.
+7. **Run the tests and targeted probes** a requirement, claim, or finding needs; the dependencies are
+   installed (TECH-5253). CI is the full test gate: the reviewer does not rerun the whole suite.
 8. **Severity.** `blocking`: a defect, an unmet requirement, or a risk the change should not merge with.
    `non_blocking`: worth fixing, not worth holding the merge. `nit`: style. Non-blocking findings and
    nits are notes kept with the review record; they never become follow-up issues (TECH-5186).

@@ -415,7 +415,7 @@ ReviewBrief {
   }
   implementerClaims: [{ fromRunId, summary, decisionsMade[], knownGaps[], validation[] }]
   focus?
-  environment: EnvironmentNote  // no GitHub, AWS, or Linear credentials; the PRs are checked out locally
+  environment: EnvironmentNote  // no GitHub, AWS, or Linear credentials; the PRs are checked out locally, dependencies installed
   limits, rulesVersion
   reportContract: "s2-review-report/1"
 }
