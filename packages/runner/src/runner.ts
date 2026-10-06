@@ -21,6 +21,7 @@ import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
 import { DEFAULT_LIMITS, type ContainerRunnerOptions, type Role } from "./options.ts";
 import { recorded, runFiles, type RunMeta } from "./run-files.ts";
 import { redactSecrets } from "./redact.ts";
+import { installDependencies } from "./reviewer-deps.ts";
 import { endOnce, publish } from "./terminal.ts";
 
 export type { ContainerRunnerOptions, Limits, Role } from "./options.ts";
@@ -31,7 +32,8 @@ export const PROVIDER = AGENTS["claude-code-local"].provider;
  * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
  * reviewer is a new `claude -p` or `codex exec` session in a new container whose only mount is the
  * run's own workspace. Its credentials are one of the task owner's model accounts and, for a worker,
- * the worker-App token it pushes branches and opens PRs with. Repositories are cloned on the host before launch.
+ * the worker-App token it pushes branches and opens PRs with. Repositories are cloned on the host before launch,
+ * and a reviewer's checkouts get their dependencies installed in a container with no credentials (reviewer-deps.ts).
  *
  * Basic cancellation only: no leases, adoption, or restart recovery. `send` is not supported.
  */
@@ -157,7 +159,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           await tokenGit(githubToken, ["clone", "--quiet", `https://github.com/${s.repo}.git`, dir], p.workspace);
           await tokenGit(githubToken, ["fetch", "--quiet", "origin", s.headSha], dir);
           await execOk("git", ["checkout", "--quiet", "--detach", s.headSha], { cwd: dir });
-          subjects.push({ ...s, url: pr.html_url, title: pr.title, body: pr.body ?? "", baseRef: pr.base.ref, path: `/workspace/${rel}` });
+          const dependencies = await installDependencies(exec, { image, workspace: p.workspace, rel, container: `sergeant-${spec.runId}-install-${subjects.length}` });
+          subjects.push({ ...s, url: pr.html_url, title: pr.title, body: pr.body ?? "", baseRef: pr.base.ref, path: `/workspace/${rel}`, dependencies });
         }
         brief = reviewerBrief(spec, subjects, prior?.claims ?? [], prior?.reviews ?? [], files);
       }

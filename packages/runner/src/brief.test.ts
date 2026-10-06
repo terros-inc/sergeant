@@ -16,6 +16,7 @@ const subject: ReviewSubject = {
   title: "Add it",
   body: "Fixes UNF-1",
   path: "/workspace/o/r-pr7",
+  dependencies: { state: "installed", command: "pnpm install --frozen-lockfile" },
 };
 const pr: PullRequestFacts = {
   repo: "o/r",
@@ -104,6 +105,24 @@ test("the reviewer brief distinguishes acceptance findings from ordinary defects
   expect(brief).toContain("Omit `category` from ordinary implementation defects.");
 });
 
+// TECH-5253: a reviewer told "everything you need is checked out locally" without dependencies
+// traced the code instead of running its tests. It is told each checkout's install result, including
+// a failed one, and that it may run the tests a requirement or finding needs.
+test("the reviewer brief says which checkouts have their dependencies installed and that tests can be run", () => {
+  const other = { ...subject, number: 8, path: "/workspace/o/r-pr8", dependencies: { state: "failed" as const, command: "npm ci", detail: "exited 1:\nnpm ERR! lockfile out of date" } };
+  const bare = { ...subject, number: 9, path: "/workspace/o/r-pr9", dependencies: { state: "none" as const } };
+  const brief = reviewerBrief(spec([pr]), [subject, other, bare], []);
+  const env = brief.slice(brief.indexOf("## Environment"), brief.indexOf("## Rules"));
+
+  expect(env).not.toContain("everything you need is checked out locally");
+  expect(env).toMatch(/You have no GitHub, AWS, or Linear credentials\./);
+  expect(env).toMatch(/so you can run its\s+tests/);
+  expect(env).toContain("- `/workspace/o/r-pr7`: installed with `pnpm install --frozen-lockfile`.");
+  expect(env).toContain("- `/workspace/o/r-pr8`: `npm ci` failed (exited 1: npm ERR! lockfile out of date).");
+  expect(env).toContain("- `/workspace/o/r-pr9`: no pnpm or npm lockfile, so nothing was installed");
+  expect(brief).toMatch(/7\. Run the tests and targeted probes a requirement, claim, or finding needs/);
+});
+
 // TECH-5191: after a handoff or a reopen, earlier work exists that Sergeant's own records may not
 // carry. A worker has no Linear access, so the PRs Linear links to the issue reach it only here.
 test("the worker brief has the worker find and continue existing work, and lists the issue's linked PRs", () => {
@@ -134,7 +153,7 @@ test("the worker brief has the worker find and continue existing work, and lists
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/7)");
+  expect(brief).toContain("## Rules (s2-reviewer-rules/8)");
   const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);

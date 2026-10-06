@@ -1,9 +1,10 @@
 import type { PullRequestFacts, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
 import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-common.ts";
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
+import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/7";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/8";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -23,7 +24,16 @@ export type ReviewSubject = {
   body: string;
   /** Where the PR is checked out at exactly headSha, inside the container. */
   path: string;
+  /** Whether its dependencies were installed before the reviewer started (reviewer-deps.ts). */
+  dependencies: Dependencies;
 };
+
+function renderDependencies(s: ReviewSubject): string {
+  const d = s.dependencies;
+  if (d.state === "installed") return `\`${s.path}\`: installed with \`${d.command}\`.`;
+  if (d.state === "none") return `\`${s.path}\`: no pnpm or npm lockfile, so nothing was installed; install what a test needs yourself.`;
+  return `\`${s.path}\`: \`${d.command}\` failed (${d.detail.replace(/\s+/g, " ")}). Retry it if a test needs it, and say so in your report.`;
+}
 
 export function reviewerBrief(
   spec: Extract<RunSpec, { role: "reviewer" }>,
@@ -68,7 +78,11 @@ ${humanFeedback}${previousReviews.length ? `\n## Previous reviews of these PRs (
 ## Environment
 
 A fresh session and workspace. You did not write this change and have no access to how it was
-produced. You have no GitHub, AWS, or Linear credentials; everything you need is checked out locally.
+produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out locally, and before
+you started its dependencies were installed at the head (each result is below), so you can run its
+tests (for example \`pnpm exec vitest run <file>\`, or the repository's own test command), type checks,
+and linters:
+${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
 
 ## Rules (${REVIEWER_RULES_VERSION})
 
@@ -85,7 +99,8 @@ produced. You have no GitHub, AWS, or Linear credentials; everything you need is
 5. Name every correctness claim that rests on behavior outside the repository; verify it if you can,
    otherwise mark it unverified (not blocking by itself).
 6. Size and simplification claims need \`git diff --numstat\` evidence.
-7. Run only the targeted probes a specific finding needs. CI is the test gate.
+7. Run the tests and targeted probes a requirement, claim, or finding needs; the dependencies are
+   installed. CI is the full test gate: do not rerun the whole suite.
 8. Severity: \`blocking\` (a defect, an unmet requirement, or a risk the change should not merge
    with), \`non_blocking\` (worth fixing, not worth holding the merge), \`nit\` (style). Your
    non-blocking findings and nits are notes kept with this review's record; they never become
