@@ -71,6 +71,12 @@ test("admin status says when the installation config changed since serve started
   // TECH-5229: the runs directory's size and the data volume's free space, so growth is visible.
   next = { json: { ...status(null).json, runs: { count: 447, bytes: 46e9, volumeFreeBytes: 48.4e9, volumeBytes: 98e9 } } };
   expect((await sgt(api, "admin", "status")).out).toContain("runs     447 in 46.0 GB; data volume 48.4 GB free of 98.0 GB\n");
+  // TECH-5336: the GitHub API budget and a rate-limit pause, so an operator sees why GitHub work waits.
+  const github = { limit: 5000, remaining: 0, resetAt: "2026-10-04T10:30:00.000Z", observedAt: "2026-10-04T10:05:00.000Z", pausedUntil: "2026-10-04T10:30:00.000Z" };
+  next = { json: { ...status(null).json, github } };
+  expect((await sgt(api, "admin", "status")).out).toContain(
+    "github   0 of 5000 API calls left, resets 2026-10-04T10:30:00.000Z (as of 2026-10-04T10:05:00.000Z); rate limited, no GitHub calls until 2026-10-04T10:30:00.000Z\n",
+  );
   next = status({ loaded: 4, current: null });
   expect((await sgt(api, "admin", "status")).out).toContain("config   version 4; serve cannot read the parameter now");
   next = status(null);

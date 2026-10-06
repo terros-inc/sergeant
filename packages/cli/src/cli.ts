@@ -55,7 +55,8 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      passed, else to what its release channel would choose; then wait.
                                      With nothing to install, it says if the config needs a restart
   admin status                       the host's release, when serve started, the last restart or update,
-                                     and whether the installation config changed since serve started
+                                     whether the installation config changed since serve started, and
+                                     GitHub API calls left this hour, its reset, and any rate-limit pause
   admin repo add <owner/name> [--merge-method squash|merge|rebase] [--merge-policy sergeant|human]
                                      an approver's enrollment (default squash, human), once both GitHub
                                      Apps reach it; serve takes it at once, no host update. In a human

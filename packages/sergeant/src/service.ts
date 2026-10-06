@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { GitHubRateLimitedError } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost } from "./auth.ts";
@@ -45,7 +46,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const slots = new Map<string, Slot>();
   // When and how each task loop last ended: an unchanged ending (an idle task readmitted every intake,
   // say) is not logged again, and a loop that ended since the latest intake waits for the next.
-  const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string }>();
+  // `resumeAt`: a loop that failed on GitHub's rate limit is not resumed before it resets (TECH-5336).
+  const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string; resumeAt?: number }>();
+  const rateLimited = (issueId: string) => (ended.get(issueId)?.resumeAt ?? 0) > Date.now();
   let lastIntake: { at: string; error?: string } | undefined;
   let intakeStartedAt = 0;
   // The delegated issues intake would run at the last intake, in admission order, and each task's wake (API).
@@ -72,12 +75,15 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     slot.released = released;
     let outcome: LoopResult["outcome"] | "failed" = "failed";
     let detail = "";
+    let resumeAt: number | undefined;
     const loop = runLoop(
       {
         issueId,
         enrolledRepositories: opts.enrolledRepositories,
         dir: join(opts.stateDir, "tasks", issueId),
         ...(opts.pollSeconds !== undefined && { pollSeconds: opts.pollSeconds }),
+        // TECH-5336: GitHub's webhooks wake a loop whose PRs change, so between them it polls GitHub less.
+        ...(opts.webhookSecrets?.github && { githubPollSeconds: opts.githubPollSeconds ?? 300 }),
         ...(opts.waitingGraceMinutes !== undefined && { waitingGraceMinutes: opts.waitingGraceMinutes }),
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
         ...(opts.budget && { budget: opts.budget }),
@@ -96,13 +102,18 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
           ({ outcome, detail } = result);
           if (ended.get(issueId)?.outcome !== outcome) log(`${issueId}: loop ended ${outcome}: ${result.detail}`);
         },
-        // A failed iteration ends the loop; the next intake admits it again.
-        (e: Error) => log(`${issueId}: loop failed, retrying on a later intake: ${(detail = e.message)}`),
+        // A failed iteration ends the loop; the next intake admits it again. One GitHub's rate limit
+        // failed waits for its reset instead, and the GitHub adapter has already logged the pause once.
+        (e: Error) => {
+          detail = e.message;
+          if (e instanceof GitHubRateLimitedError) resumeAt = Date.parse(e.until);
+          else log(`${issueId}: loop failed, retrying on a later intake: ${detail}`);
+        },
       )
       .finally(() => {
         if (active.get(issueId) === loop) active.delete(issueId);
         if (slots.get(issueId) === slot) slots.delete(issueId);
-        ended.set(issueId, { at: Date.now(), outcome, detail });
+        ended.set(issueId, { at: Date.now(), outcome, detail, ...(resumeAt !== undefined && { resumeAt }) });
         schedule();
       });
     active.set(issueId, loop);
@@ -127,7 +138,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
     const queued = [
       ...[...slots].filter(([, s]) => s.wanted).map(([id]) => id).sort(byRank),
-      ...freshIssues.map((issue) => issue.identifier).filter((id) => !active.has(id) && (ended.get(id)?.at ?? 0) < intakeStartedAt),
+      ...freshIssues.map((issue) => issue.identifier).filter((id) => !active.has(id) && (ended.get(id)?.at ?? 0) < intakeStartedAt && !rateLimited(id)),
     ].sort((a, b) => woken(a) - woken(b));
     for (const issueId of queued) {
       if (free-- <= 0) break;
@@ -187,7 +198,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     // A loop that already ended resumes cheaply and asks for a slot only if its live checks find work.
     // This leaves the same intake free to admit newly listed Todo work instead of letting unchanged
     // local tasks reclaim every slot on each periodic intake.
-    for (const ref of resumable.sort(byRank)) admit(ref, ended.has(ref) || freeSlots() <= 0);
+    for (const ref of resumable.sort(byRank)) if (!rateLimited(ref)) admit(ref, ended.has(ref) || freeSlots() <= 0);
     if (failed) throw failed;
     ordered = await newWork(opts.stateDir, listed, { blocked, active, woken: (ref) => wakes.get(ref)?.pending === true }, log);
     delegated = ordered.map((issue) => issue.identifier);

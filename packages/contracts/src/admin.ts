@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GitHubRateLimit } from "./github.ts";
 
 // `/v1/admin` (TECH-5195): an approver restarts or updates the Sergeant host through `sgt admin`, with no
 // AWS access. `serve` never runs a privileged command: it leaves one validated request where the host's
@@ -76,6 +77,12 @@ export const AdminStatus = z.object({
     .object({ count: z.number().int(), bytes: z.number(), volumeFreeBytes: z.number(), volumeBytes: z.number() })
     .nullable()
     .default(null),
+  /**
+   * The control-plane App's GitHub API budget (TECH-5336): what is left, when it resets, and whether
+   * Sergeant is pausing GitHub calls for a rate limit. Null before serve's first GitHub response, and
+   * absent from a serve older than TECH-5336.
+   */
+  github: GitHubRateLimit.nullable().default(null),
 });
 export type AdminStatus = z.infer<typeof AdminStatus>;
 

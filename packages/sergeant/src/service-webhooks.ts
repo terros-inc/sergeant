@@ -18,11 +18,13 @@ export function serviceWebhooks(
   // delegated issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
   // most once per `webhookGapSeconds`. An issue or PR no task knows is ignored; the polls cover it.
   const gapMs = (opts.webhookGapSeconds ?? 5) * 1000;
-  const nudge = ({ keys, intake }: Nudge) => {
+  const nudge = ({ keys, intake }: Nudge, source: "linear" | "github") => {
     const named = new Set(keys);
     let admit = intake;
     for (const [issueId, wake] of wakes) {
       if (!named.has(issueId) && !wake.watched.some((k) => named.has(k))) continue;
+      // Its PRs are reread at its next pass, not only at the fallback interval (poll.ts `pullRequestPolls`).
+      if (source === "github") wake.github = true;
       if (active.has(issueId)) wake.nudge(gapMs);
       else admit = true;
     }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mergeRefusal, reportedClosing, type PullRequestFacts, type PullRequestRef, type RefusedMerge, type RepoSlug, type RunId, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import type { ActionOutcome, Ports } from "./execute.ts";
+import type { Wake } from "./wake.ts";
 
 // What the loop reads and compares on each poll (loop.ts).
 
@@ -64,6 +65,31 @@ export async function readPullRequests(runs: RunRecord[], linked: PullRequestRef
   const refs = new Map<string, PullRequestRef>();
   for (const pr of [...linked, ...reported]) if (enrolled.includes(pr.repo)) refs.set(`${pr.repo}#${pr.number}`, { repo: pr.repo, number: pr.number });
   return Promise.all([...refs.values()].map((r) => deps.github.readPullRequest(r.repo, r.number)));
+}
+
+/**
+ * TECH-5336: a task loop's PR reads. With GitHub's webhooks delivered (TECH-4937), `everyMs` is set and
+ * the loop rereads its PRs when a GitHub event names one of them or its head (`Wake.github`), and
+ * otherwise only every `everyMs`, polling being the reliability fallback. They are also reread when the
+ * PRs to read or a run's status changed, after a turn (`forget`), at a human's wake, and while GitHub
+ * is still computing a PR's mergeability, which no webhook announces. Without `everyMs`, every pass.
+ */
+export function pullRequestPolls(everyMs: number | undefined, wake: Wake | undefined, now: () => number = Date.now) {
+  let last: { at: number; key: string; prs: PullRequestFacts[] } | undefined;
+  return {
+    async read(runs: RunRecord[], linked: PullRequestRef[], enrolled: RepoSlug[], deps: Ports): Promise<PullRequestFacts[]> {
+      const key = JSON.stringify([runs.map((r) => [r.runId, r.status]), linked.map((p) => `${p.repo}#${p.number}`).sort()]);
+      const settled = last?.prs.every((p) => p.state !== "open" || (p.mergeable !== null && p.mergeableState !== "unknown"));
+      if (everyMs !== undefined && last && last.key === key && settled && !wake?.github && !wake?.pending && now() - last.at < everyMs) return last.prs;
+      if (wake) wake.github = false;
+      const prs = await readPullRequests(runs, linked, enrolled, deps);
+      last = { at: now(), key, prs };
+      return prs;
+    },
+    forget(): void {
+      last = undefined;
+    },
+  };
 }
 
 /**

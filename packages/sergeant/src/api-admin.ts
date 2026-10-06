@@ -33,6 +33,8 @@ export type HostAdmin = {
   config: () => Promise<AdminStatus["config"]>;
   /** The runs directory's size and its volume's free space (TECH-5229); null when it cannot be read. */
   runs: () => Promise<AdminStatus["runs"]>;
+  /** The control-plane App's GitHub API budget and any rate-limit pause (TECH-5336). */
+  github?: () => AdminStatus["github"];
 };
 
 export async function adminRoute(
@@ -88,7 +90,7 @@ async function status(admin: HostAdmin): Promise<AdminStatus> {
     admin.config(),
     admin.runs(),
   ]);
-  return { serve: admin.serve, release, pending, last, config, runs };
+  return { serve: admin.serve, release, pending, last, config, runs, github: admin.github?.() ?? null };
 }
 
 /** sergeant-update's `ref=…`, `sha=…`, `at=…` lines. */

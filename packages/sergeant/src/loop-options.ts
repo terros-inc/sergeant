@@ -17,6 +17,11 @@ export type LoopOptions = {
   /** TECH-5227: false posts no progress comment after a review round (progress.ts); default true. */
   progressComments?: boolean;
   pollSeconds?: number;
+  /**
+   * TECH-5336: set when GitHub's webhooks wake the loop; its PRs are then reread at most this often
+   * unless an event names them (poll.ts `pullRequestPolls`). Absent, every poll rereads them.
+   */
+  githubPollSeconds?: number;
   /** The service's existing waiting grace; also delays the one bounded retry after a merge failure. */
   waitingGraceMinutes?: number;
   /**

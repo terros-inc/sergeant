@@ -63,8 +63,17 @@ export function showStatus(s: AdminStatus): string {
   }
   const config = s.config;
   if (s.runs) lines.push(`runs     ${s.runs.count} in ${gb(s.runs.bytes)}; data volume ${gb(s.runs.volumeFreeBytes)} free of ${gb(s.runs.volumeBytes)}`);
+  if (s.github) lines.push(`github   ${githubBudget(s.github)}`);
   if (config) lines.push(`config   ${staleConfig(s) ?? (config.current === null ? `version ${config.loaded}; serve cannot read the parameter now (serve.log says why)` : `version ${config.loaded}, as serve has it`)}`);
   return lines.join("\n");
+}
+
+/** TECH-5336: the control-plane App's API calls left this hour, and any rate-limit pause. */
+function githubBudget(g: NonNullable<AdminStatus["github"]>): string {
+  const left = g.remaining === null ? "API budget unknown" : `${g.remaining}${g.limit === null ? "" : ` of ${g.limit}`} API calls left`;
+  const reset = g.resetAt ? `, resets ${g.resetAt}` : "";
+  const seen = g.observedAt ? ` (as of ${g.observedAt})` : "";
+  return `${left}${reset}${seen}${g.pausedUntil ? `; rate limited, no GitHub calls until ${g.pausedUntil}` : ""}`;
 }
 
 const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;

@@ -1,6 +1,6 @@
 import type { CreateFollowup } from "./actions.ts";
 import type { Conversation, RepoSlug, Sha } from "./conversation.ts";
-import type { MergePolicy, PullRequestFacts } from "./github.ts";
+import type { GitHubRateLimit, MergePolicy, PullRequestFacts } from "./github.ts";
 import type { RunId, RunRecord } from "./runs.ts";
 
 // The seams adapters implement. Adapters validate what they read with the schemas above before
@@ -50,6 +50,20 @@ export class HumanHandoffError extends Error {
     super(message);
     this.step = step;
     this.name = "HumanHandoffError";
+  }
+}
+
+/**
+ * GitHub refused a call for its rate limit, or Sergeant is waiting one out (TECH-5336): no GitHub call
+ * is made until `until`. A task loop that fails on it resumes after `until`, not on the next intake.
+ */
+export class GitHubRateLimitedError extends Error {
+  readonly until: string;
+
+  constructor(until: string, message = `GitHub API rate limit: no GitHub calls until ${until}`) {
+    super(message);
+    this.until = until;
+    this.name = "GitHubRateLimitedError";
   }
 }
 
@@ -164,6 +178,8 @@ export interface GitHubPort {
    * Linear port's later methods, so a fake without it deletes nothing.
    */
   deletePullRequestBranch?(req: { repo: RepoSlug; number: number }): Promise<{ deleted: string } | { kept: string }>;
+  /** The installation's API budget as GitHub last reported it (TECH-5336); null before any response. */
+  rateLimit?(): GitHubRateLimit | null;
 }
 
 /**

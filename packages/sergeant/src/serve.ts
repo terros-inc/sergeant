@@ -117,6 +117,7 @@ const admin = existsSync(release)
       serve: { version, startedAt: new Date().toISOString() },
       config: enrolled.versions,
       runs: () => runsUsage(runsDir).catch(() => null),
+      github: () => installation.github.rateLimit?.() ?? null,
     }
   : undefined;
 

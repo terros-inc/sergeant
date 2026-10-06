@@ -16,7 +16,7 @@ import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
 import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
-import { describePr, fingerprintOf, landedOf, readPullRequests, unsettledMerges } from "./poll.ts";
+import { describePr, fingerprintOf, landedOf, pullRequestPolls, unsettledMerges } from "./poll.ts";
 import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
@@ -110,6 +110,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
   // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
   const resolvedThreads = new Set<string>();
+  const prPolls = pullRequestPolls(opts.githubPollSeconds === undefined ? undefined : opts.githubPollSeconds * 1000, opts.wake);
   const resolveDue = (conversation: Conversation) => resolveAnswered(conversation, state.actedThrough, deps.linear, resolvedThreads, log);
 
   const recordReviews = (runs: RunRecord[]) =>
@@ -202,7 +203,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     unposted = undefined;
-    const pullRequests = await readPullRequests(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
+    const pullRequests = await prPolls.read(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
     // A human's review opens a fresh window (TECH-5218): the next pass rereads everything under it.
     if (await openReviewWindow(pullRequests, configured, ctx)) continue;
@@ -266,6 +267,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // A close posts the task's cost with its evidence, this turn's included (execute.ts).
     const costOf = (turnCostUsd: number) => costTotal({ ...spent(earlierTurns + turnCostUsd), at: new Date().toISOString() });
     const { turn, outcomes } = await takeTurn(situation, { ...ports, costOf });
+    prPolls.forget();
     const at = new Date().toISOString();
     const described = outcomes.map(describeOutcome);
     log(`turn ${state.turns + 1} (${turn.model}, $${turn.costUsd ?? "?"}): ${turn.output.summary}`);

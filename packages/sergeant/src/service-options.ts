@@ -44,6 +44,11 @@ export type ServiceOptions = {
   /** The least time between two webhook wakes of one task loop, or of intake (`Wake.nudge`). */
   webhookGapSeconds?: number;
   /**
+   * With a GitHub webhook secret, how often a task loop rereads its PRs when no event names them
+   * (TECH-5336); default 5 minutes. Without one, every poll does.
+   */
+  githubPollSeconds?: number;
+  /**
    * Who may call the client API with a Linear login, the client id `sgt login` uses (auth.ts), and the
    * approvers' names, which `whoami` tells people to ask (TECH-5202).
    */
