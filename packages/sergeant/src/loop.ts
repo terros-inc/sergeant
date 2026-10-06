@@ -56,6 +56,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   await mkdir(opts.dir, { recursive: true });
   // The installation's budget now: a new task's window, and any fresh window it opens later.
   const configured = { ...DEFAULT_BUDGET, ...opts.budget };
+  // Whether this resumes a task under way: read first, so a stop that sets it aside meanwhile is seen.
+  const resumed = await exists(files.state);
   const state = await loadState(files.state, opts.issueId, configured);
   // Why this task is stopping: set once a stop (cancel.ts) is recorded for it, by this loop or anyone
   // else. From then on the loop takes no turn and makes no effect; it only drives that stop, and ends
@@ -85,8 +87,15 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     if (owner.unreadable || !(await exists(files.state))) return { outcome: "stopped", detail: owner.refused };
     await recordStop(opts.dir, `the task started before Sergeant recorded who pays for it, and Linear does not show its assignee delegated it (${owner.refused.replace(/^not started: /, "")})`, { handoff: {} });
   } else if (owner) deps = { ...deps, owner: (state.owner = owner) };
-  // The start time, the owner, and the budget window are on disk before anything else happens.
-  await save();
+  // The start time, the owner, and the budget window are on disk before anything else happens, under the
+  // task's lock a stop sets `state.json` aside under: one set aside since it was read is over (TECH-5260).
+  const exclusive = deps.exclusive ?? ((step) => step());
+  const setAside = await exclusive(async () => {
+    if (resumed && !(await exists(files.state))) return true;
+    await save();
+    return false;
+  });
+  if (setAside) return { outcome: "stopped", detail: "the task was stopped" };
   const requested = { ...state.budget.window, ...opts.budget };
   if (requested.wallMinutes !== state.budget.window.wallMinutes || requested.costUsd !== state.budget.window.costUsd) {
     log(`ignoring the budget options: this task keeps its window of ${JSON.stringify(state.budget.window)} until a human answers one of its questions`);

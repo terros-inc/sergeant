@@ -8,23 +8,30 @@ import { cleanup, dir, fakes, issue, start, underway } from "./slots-scenario.ts
 // TECH-5015: a task waiting, on a human, on CI, on a refused merge, or on a budget answer, must not keep
 // its slot past the grace, nor lose it when the human answers within it.
 
-afterEach(cleanup);
+afterEach(async () => {
+  vi.useRealTimers();
+  await cleanup();
+});
 
 test("a task answered within the grace keeps its slot and continues without queueing", async () => {
   const f = fakes([issue("ASKS", "In Progress", 2, "2026-10-01T00:00:00.000Z"), issue("NEWER", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
   f.asking.add("ASKS");
   const logs: string[] = [];
-  // A grace of 1.2 seconds: the human answers well within it, and the test outlasts it.
-  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 0.02 }, logs);
+  // The clock moves only when the test moves it, so however slowly a loaded machine runs, the human
+  // answers within the minute's grace, and the next turn outlasts it.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  await start(f.deps, { maxTasks: 1, waitingGraceMinutes: 1 }, logs);
   await f.finish("ASKS");
   await vi.waitFor(() => expect(logs).toContainEqual(expect.stringContaining("ASKS: waiting: the question posted at")), { timeout: 5_000 });
-  await sleep(100);
+  await f.nextIntake();
   expect(f.turns).toEqual(["ASKS"]);
 
+  vi.setSystemTime(Date.now() + 30_000);
   f.answer("ASKS");
   await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "ASKS"]), { timeout: 5_000 });
   // Its wait ended with the answer: the grace running out during its next turn frees nothing.
-  await sleep(1_500);
+  vi.setSystemTime(Date.now() + 60_000);
+  await f.nextIntake();
   expect(f.turns).toEqual(["ASKS", "ASKS"]);
   expect(logs.filter((l) => l.startsWith("ASKS:") && /queued|past the grace/.test(l))).toEqual([]);
 });
@@ -44,7 +51,9 @@ test("a task waiting past the grace frees its slot, and once answered is readmit
   await vi.waitFor(() => expect(logs).toContainEqual("ASKS: queued: waiting for a free task slot"), { timeout: 5_000 });
   await underway("REVIEW");
   f.delegated.push(issue("REVIEW", "In Review", 0, "2026-09-01T00:00:00.000Z"));
-  await sleep(100);
+  // Queued too, and ranked by an intake that lists it, before the slot frees.
+  await vi.waitFor(() => expect(logs).toContainEqual("REVIEW: queued: waiting for a free task slot"), { timeout: 5_000 });
+  await f.nextIntake();
   await f.finish("NEWER");
   await vi.waitFor(() => expect(f.turns).toEqual(["ASKS", "NEWER", "REVIEW"]), { timeout: 5_000 });
   await sleep(100);

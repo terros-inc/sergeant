@@ -42,6 +42,9 @@ test("works every delegated issue unattended within the task limit, and resumes 
   let maxInTurn = 0;
   let intakeFailures = 1;
   let readFailures = 1;
+  // The first turn is held until a second overlaps it, however slow the machine: a third past the limit would join them.
+  let overlapped = () => {};
+  const overlap = new Promise<void>((resolve) => (overlapped = resolve));
 
   const deps: ServiceDeps = {
     agentUserId: agent.id,
@@ -65,6 +68,8 @@ test("works every delegated issue unattended within the task limit, and resumes 
     reasoner: {
       async turn(situation) {
         maxInTurn = Math.max(maxInTurn, ++inTurn);
+        if (inTurn >= 2) overlapped();
+        await Promise.race([overlap, sleep(4_000)]);
         await sleep(20);
         inTurn--;
         turns.push({ issue: situation.conversation.issue.identifier, comments: situation.conversation.humanComments.length });
@@ -244,7 +249,8 @@ test("of processes racing for one state directory, exactly one serves it, even o
   const afterCrash = await race(16, join(dir, "go-2"));
   expect(afterCrash.lines.join("")).toMatch(/refused/);
   expect(afterCrash.serving, afterCrash.lines.join("")).toHaveLength(1);
-}, 30_000);
+  // 32 Node processes each load the service: past 30 s on a loaded CI runner or full local suite.
+}, 120_000);
 
 /** GETs `path` from `connect` (the address the peer reaches serve on) with `headers`. */
 function get(connect: string, port: number | undefined, path: string, headers: Record<string, string> = {}) {
