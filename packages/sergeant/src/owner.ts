@@ -49,18 +49,22 @@ export async function notOwned(owner: TaskOwner, issue: Conversation["issue"], d
 
 /** What a refusal tells the humans on the issue, and the key that keeps it to one comment per condition. */
 export function ownerRefusal(issueId: string, check: Exclude<TaskOwnerCheck, { owner: LinearPerson }>): { key: string; body: string } | undefined {
-  const { refused, assignee, delegator, delegatedAt } = check;
+  const { refused, assignee, delegator, delegatedAt, app } = check;
   const key = `owner-refusal:${issueId}:${refused}:${assignee?.id ?? "-"}:${delegator?.id ?? "-"}:${delegatedAt ?? "-"}`;
   switch (refused) {
     case "not_delegated":
       return undefined;
     case "no_assignee":
       return { key, body: "Sergeant cannot start until this issue is assigned to a human. Assign it to the person whose model accounts should pay for it, and have them delegate it to Sergeant." };
-    case "delegator_unknown":
+    case "delegator_unknown": {
+      const via = app
+        ? `\n\nThis was delegated through the app ${app.name ?? "(unnamed)"} (id \`${app.id}\`) acting for ${app.userDisplayName ?? "an unnamed user"}. If that app should count as the assignee's own delegation, an operator can add the id to \`linear.delegatingAppIds\`.`
+        : "";
       return {
         key,
-        body: `Sergeant cannot start: Linear's history does not show ${assignee?.name ?? "the assignee"} delegating this issue to Sergeant, so it cannot spend their model quota. Have ${assignee?.name ?? "the assignee"} delegate it to Sergeant themselves.`,
+        body: `Sergeant cannot start: Linear's history does not show ${assignee?.name ?? "the assignee"} delegating this issue to Sergeant, so it cannot spend their model quota. Have ${assignee?.name ?? "the assignee"} delegate it to Sergeant themselves.${via}`,
       };
+    }
     case "delegator_differs": {
       const a = assignee?.name ?? "the assignee";
       const d = delegator?.name ?? "someone else";

@@ -13,14 +13,14 @@ const delegationHistory = `
   query SergeantDelegationHistory($id: String!, $after: String) {
     issue(id: $id) {
       history(first: 100, after: $after) {
-        nodes { createdAt actor { id name } botActor { id userDisplayName } toDelegate { id } fromDelegate { id } }
+        nodes { createdAt actor { id name } botActor { id name userDisplayName } toDelegate { id } fromDelegate { id } }
         pageInfo { hasNextPage endCursor }
       }
     }
   }
 `;
 /** The app an entry was made through, and the user Linear records it acting for: a name, never an id. */
-const botActor = z.object({ id: z.string().nullable(), userDisplayName: z.string().nullable() }).nullish();
+const botActor = z.object({ id: z.string().nullable(), name: z.string().nullish(), userDisplayName: z.string().nullable() }).nullish();
 const delegationHistoryShape = z.object({
   issue: z.object({
     history: z.object({
@@ -40,7 +40,7 @@ const delegationHistoryShape = z.object({
 /** More history than this is not read: the proof fails closed rather than paging without end. */
 const MAX_HISTORY_PAGES = 20;
 
-const issueOwnership = `query SergeantIssueOwnership($id: String!) { issue(id: $id) { id createdAt creator { id name } botActor { id userDisplayName } assignee { id name displayName } delegate { id name } } }`;
+const issueOwnership = `query SergeantIssueOwnership($id: String!) { issue(id: $id) { id createdAt creator { id name } botActor { id name userDisplayName } assignee { id name displayName } delegate { id name } } }`;
 const issueOwnershipShape = z.object({
   issue: z
     .object({
@@ -108,7 +108,10 @@ export function taskOwnerReader(request: Request, sergeantUsers: ReadonlySet<str
     const actedForAssignee = !!made?.bot?.id && delegatingAppIds.has(made.bot.id) && made.bot.userDisplayName === issue.assignee?.displayName;
     const delegation = made && { at: made.at, by: assignee && actedForAssignee ? assignee : made.by };
     const delegator = human(delegation?.by);
-    const facts = { ...(assignee && { assignee }), ...(delegator && { delegator }), ...(delegation && { delegatedAt: delegation.at }) };
+    // Named in a refusal so an operator can allowlist the app without querying Linear by hand (TECH-5321).
+    const bot = made?.bot;
+    const app = bot?.id ? { id: bot.id, ...(bot.name && { name: bot.name }), ...(bot.userDisplayName && { userDisplayName: bot.userDisplayName }) } : undefined;
+    const facts = { ...(assignee && { assignee }), ...(delegator && { delegator }), ...(delegation && { delegatedAt: delegation.at }), ...(app && { app }) };
     if (!assignee) return { refused: "no_assignee", ...facts };
     if (!delegator) return { refused: "delegator_unknown", ...facts };
     if (delegator.id !== assignee.id) return { refused: "delegator_differs", ...facts };

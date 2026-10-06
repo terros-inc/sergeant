@@ -12,7 +12,8 @@ export type LinearPerson = { id: string; name: string };
 /**
  * Whose model accounts may pay for a task (TECH-5179): the issue's human assignee, and only when
  * Linear's history shows that same person most recently delegated the issue to Sergeant. Anything
- * else is a refusal, with what Linear showed: `delegatedAt` is the latest delegation to Sergeant.
+ * else is a refusal, with what Linear showed: `delegatedAt` is the latest delegation to Sergeant, and
+ * `app` the Linear app it was made through, if any, and the user it acted for (TECH-5321).
  */
 export type TaskOwnerCheck =
   | { owner: LinearPerson; delegatedAt?: string }
@@ -21,6 +22,7 @@ export type TaskOwnerCheck =
       assignee?: LinearPerson;
       delegator?: LinearPerson;
       delegatedAt?: string;
+      app?: { id: string; name?: string; userDisplayName?: string };
     };
 
 export type HumanHandoffStep =
