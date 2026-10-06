@@ -11,7 +11,7 @@ const ann = { id: "ann", name: "Ann" };
 const bob = { id: "bob", name: "Bob" };
 const mcp = "linear-mcp-app";
 const at = (minute: number) => `2026-10-04T06:${String(minute).padStart(2, "0")}:00.000Z`;
-type Bot = { id: string | null; userDisplayName: string | null };
+type Bot = { id: string | null; name?: string | null; userDisplayName: string | null };
 type Entry = { createdAt: string; actor: { id: string; name: string } | null; botActor?: Bot | null; toDelegate: { id: string } | null; fromDelegate?: { id: string } | null };
 const delegated = (actor: Entry["actor"], minute: number, to = agent): Entry => ({ createdAt: at(minute), actor, toDelegate: { id: to.id } });
 
@@ -99,13 +99,19 @@ test("a delegation an allowlisted app made for the assignee is the assignee's ow
   expect(await linear({ assignee: ann, delegate: agent }, [[viaApp({ id: mcp, userDisplayName: "ann" })]]).check()).toEqual({ owner: ann, delegatedAt: at(4) });
   // Not allowlisted (our own n8n app, say), or acting for someone other than the assignee: refused as before.
   for (const bot of [{ id: "n8n-app", userDisplayName: "ann" }, { id: mcp, userDisplayName: "bob" }]) {
-    expect(await linear({ assignee: ann, delegate: agent }, [[viaApp(bot)]]).check()).toEqual({ refused: "delegator_differs", assignee: ann, delegator: appUser, delegatedAt: at(4) });
+    expect(await linear({ assignee: ann, delegate: agent }, [[viaApp(bot)]]).check()).toEqual({ refused: "delegator_differs", assignee: ann, delegator: appUser, delegatedAt: at(4), app: bot });
   }
 });
 
 test("an issue an allowlisted app created already delegated, for the assignee, is the assignee's own", async () => {
   const created = (bot: Bot) => linear({ assignee: ann, delegate: agent, botActor: bot }, [[]]).check();
   expect(await created({ id: mcp, userDisplayName: "ann" })).toEqual({ owner: ann, delegatedAt: at(0) });
-  expect(await created({ id: "n8n-app", userDisplayName: "ann" })).toEqual({ refused: "delegator_unknown", assignee: ann, delegatedAt: at(0) });
-  expect(await created({ id: mcp, userDisplayName: "bob" })).toEqual({ refused: "delegator_unknown", assignee: ann, delegatedAt: at(0) });
+  // TECH-5321: a refusal names the app and whom it acted for, so an operator can allowlist it without querying Linear.
+  expect(await created({ id: "n8n-app", name: "n8n", userDisplayName: "ann" })).toEqual({
+    refused: "delegator_unknown",
+    assignee: ann,
+    delegatedAt: at(0),
+    app: { id: "n8n-app", name: "n8n", userDisplayName: "ann" },
+  });
+  expect(await created({ id: mcp, userDisplayName: "bob" })).toEqual({ refused: "delegator_unknown", assignee: ann, delegatedAt: at(0), app: { id: mcp, userDisplayName: "bob" } });
 });

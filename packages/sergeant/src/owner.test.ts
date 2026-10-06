@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { NoModelAccount, type RunSpec, type TaskOwnerCheck } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
-import { redelegated } from "./owner.ts";
+import { ownerRefusal, redelegated } from "./owner.ts";
 import { fakes, issue, repo } from "./stop-fixtures.ts";
 
 // TECH-5179: a task spends only its owner's model quota. Its owner is the issue's human assignee, and
@@ -76,6 +76,21 @@ test("each refusal says what to do; a new delegation that is refused again is sa
     "Sergeant cannot start: Linear's history does not show Ann delegating this issue to Sergeant, so it cannot spend their model quota. Have Ann delegate it to Sergeant themselves.",
     "Sergeant cannot start: Linear's history does not show Ann delegating this issue to Sergeant, so it cannot spend their model quota. Have Ann delegate it to Sergeant themselves.",
   ]);
+  expect(t.starts).toEqual([]);
+});
+
+test("an app-made delegation that is refused names the app and its id, keyed as before", async () => {
+  // TECH-5321: the operator learns which app to add to `linear.delegatingAppIds` without querying Linear.
+  const app = { id: "app-n8n", name: "n8n", userDisplayName: "ann" };
+  const plain: TaskOwnerCheck = { refused: "delegator_unknown", assignee: ann, delegatedAt: "2026-10-04T06:02:00.000Z" };
+  const check = { ...plain, app };
+  const t = await task(() => check, async () => {});
+  await t.loop();
+  await t.loop();
+  expect(t.seen.comments.map((c) => c.body)).toEqual([
+    "Sergeant cannot start: Linear's history does not show Ann delegating this issue to Sergeant, so it cannot spend their model quota. Have Ann delegate it to Sergeant themselves.\n\nThis was delegated through the app n8n (id `app-n8n`) acting for ann. If that app should count as the assignee's own delegation, an operator can add the id to `linear.delegatingAppIds`.",
+  ]);
+  expect(ownerRefusal("UNF-1", check)?.key).toBe(ownerRefusal("UNF-1", plain)?.key);
   expect(t.starts).toEqual([]);
 });
 
