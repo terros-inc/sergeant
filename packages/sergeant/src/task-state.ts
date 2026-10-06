@@ -11,6 +11,8 @@ import {
   reportedClosing,
   RunId,
   Sha,
+  StartReviewer,
+  StartWorker,
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
@@ -113,6 +115,13 @@ const TaskState = z.looseObject({
   mergeRetries: z.array(RefusedMerge.loose().extend({ fingerprint: z.string() })).default([]),
   /** Per finished review: the later-known facts its last `reviews.jsonl` line carried. */
   reviewsRecorded: z.record(z.string(), z.string()).default({}),
+  /**
+   * TECH-5259: the start each run of a turn was given, so one that ends with no usable report can be
+   * retried as it was (report-recovery.ts). Losing it only leaves that run to reasoning.
+   */
+  starts: z.record(z.string(), z.union([StartWorker.loose(), StartReviewer.loose()])).default({}),
+  /** TECH-5259: per run that ended with no usable report, the retry Sergeant started for it, if any. */
+  reportRecoveries: z.record(z.string(), z.looseObject({ retryRunId: RunId.optional() })).default({}),
 });
 export type TaskState = z.infer<typeof TaskState>;
 type State = TaskState;
@@ -152,6 +161,7 @@ export function applyTurn(
   for (const o of done) {
     const { started } = o;
     if (started) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== started.runId);
+    if (started && (o.action.kind === "start_worker" || o.action.kind === "start_reviewer")) state.starts[started.runId] = o.action;
     const { followup } = o;
     if (followup && !state.followups.some((f) => f.key === followup.key)) state.followups.push(followup);
   }

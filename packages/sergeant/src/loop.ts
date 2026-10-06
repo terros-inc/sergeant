@@ -9,7 +9,7 @@ import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET, windowFor } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
-import { postHandoff } from "./handoff.ts";
+import { postHandoffs } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
@@ -21,6 +21,7 @@ import { awaitedHumanPrAction, onlyWallTimeExhausted } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
+import { recoverReports } from "./report-recovery.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { admitOwner } from "./owner.ts";
@@ -116,15 +117,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const recordReviews = (runs: RunRecord[]) =>
     recordReviewFacts(runs, state, { issueId: opts.issueId, auditFollowups: files.auditFollowups, reviews: files.reviews, log, save });
 
-  // A PR GitHub refused to let Sergeant merge waits for a human: say so once on the issue, retried
-  // every poll until Linear confirms it, only while the issue is still Sergeant's (A1 checked first).
-  const postHandoffs = async (issueId: string) => {
-    for (const r of state.refusedMerges) {
-      if (r.commentPostedAt || !(await postHandoff(issueId, r, deps.linear, log))) continue;
-      r.commentPostedAt = new Date().toISOString();
-      await save();
-    }
-  };
 
   const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
     budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
@@ -226,7 +218,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       situation = SituationReport.parse({ ...situation, refusedMerges: state.refusedMerges });
       fingerprint = fingerprintOf(situation);
     }
-    await postHandoffs(conversation.issue.id);
+    await postHandoffs(conversation.issue.id, state.refusedMerges, deps.linear, log, save);
     await postRereviewRequests(situation, deps, deps.linear, log);
     const retryDue = dueMergeRetries(state, retryGraceMs);
     // TECH-5218: a window whose wall time ran out while nothing changed but Sergeant waiting on a human's
@@ -241,6 +233,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
 
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
+    // TECH-5259: a run with no usable report is retried at once, before a turn, unless a human said
+    // something no turn has read yet. A retry the owner was asked about instead is asked again.
+    const recovery = running.length || unknown.length ? undefined : await recoverReports(situation, state, ports, { issueId: opts.issueId, dir: opts.dir, log, save });
+    if (recovery?.unposted) unposted = { action: recovery.unposted, situation };
+    if (recovery?.retried || recovery?.unposted) continue;
     if (running.length > 0 || humanWait || (fingerprint === state.lastFingerprint && retryDue.length === 0 && !opts.wake?.pending)) {
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
       if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
@@ -298,6 +295,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // TECH-5227: each finished review round not yet told gets its own short comment (progress.ts), with
     // the cost recorded up to this turn. The one switch.
     if (opts.progressComments !== false) await postProgress(opts.issueId, situation, costSoFar(spent(earlierTurns)), outcomes, deps, log);
-    await postHandoffs(conversation.issue.id);
+    await postHandoffs(conversation.issue.id, state.refusedMerges, deps.linear, log, save);
   }
 }

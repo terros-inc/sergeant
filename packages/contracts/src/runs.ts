@@ -96,24 +96,50 @@ export const WorkerReport = z.object({
 });
 export type WorkerReport = z.infer<typeof WorkerReport>;
 
+/**
+ * TECH-5259: a reviewer's report is read forgivingly where the meaning is unambiguous, since one that
+ * fails to parse leaves its head with no review standing and costs a whole rerun: a spelling of a
+ * verdict or severity (`Approve`, `non-blocking`), a missing finding id or report version. Never toward
+ * a merge: an unknown severity reads as blocking, and an unknown verdict or a missing reviewed head
+ * still rejects the report.
+ */
+const token = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase().replace(/[\s-]+/g, "_") : v);
+const VERDICTS: Record<string, string> = { approved: "approve", request_changes: "changes_requested", changes_required: "changes_requested" };
+const SEVERITIES: Record<string, string> = { nonblocking: "non_blocking", nitpick: "nit" };
+
 export const Finding = z.object({
   id: z.string().min(1),
-  severity: z.enum(["blocking", "non_blocking", "nit"]),
+  severity: z.preprocess((v) => SEVERITIES[token(v) as string] ?? token(v), z.enum(["blocking", "non_blocking", "nit"])).catch("blocking"),
   /** An unmet or contradicted requirement; ordinary implementation defects omit this. */
-  category: z.literal("acceptance").optional(),
+  category: z.preprocess((v) => (typeof v === "string" && /acceptance/i.test(v) ? "acceptance" : undefined), z.literal("acceptance").optional()),
   description: z.string(),
-  location: z.string().optional(),
+  location: z.string().optional().catch(undefined),
 });
 export type Finding = z.infer<typeof Finding>;
 
 export const ReviewReport = z.object({
-  reportVersion: z.literal("s2-review-report/1"),
-  reviewed: z.array(z.object(ReportedPr)).min(1),
-  verdict: z.enum(["approve", "changes_requested", "needs_human"]),
-  findings: z.array(Finding).default([]),
+  reportVersion: z.literal("s2-review-report/1").catch("s2-review-report/1"),
+  reviewed: z.array(z.object({ ...ReportedPr, number: z.coerce.number().int().positive() })).min(1),
+  verdict: z.preprocess((v) => VERDICTS[token(v) as string] ?? token(v), z.enum(["approve", "changes_requested", "needs_human"])),
+  /** A finding without an id gets its place in the list (`f1`, `f2`, …), or the next one no other finding has. */
+  findings: z
+    .array(z.looseObject({ id: z.unknown().optional() }))
+    .default([])
+    .transform((list) => {
+      const ids = list.map((f) => (typeof f.id === "number" || (typeof f.id === "string" && f.id.trim()) ? String(f.id) : undefined));
+      const taken = new Set(ids);
+      return list.map((f, i) => {
+        let n = i + 1;
+        while (ids[i] === undefined && taken.has(`f${n}`)) n++;
+        const id = ids[i] ?? `f${n}`;
+        taken.add(id);
+        return { ...f, id };
+      });
+    })
+    .pipe(z.array(Finding)),
   unreadableInputs: UnreadableInputs,
   dependencies: Dependencies,
-  summary: z.string(),
+  summary: z.string().default(""),
 });
 export type ReviewReport = z.infer<typeof ReviewReport>;
 
@@ -192,6 +218,11 @@ const RunBase = {
     .optional(),
   /** Why the report is null: missing, malformed, or failed validation. */
   reportError: z.string().optional(),
+  /**
+   * TECH-5259: whether an ended run's report was never written (`missing`) or did not parse
+   * (`malformed`); absent with a usable report, while running, and on older records.
+   */
+  reportProblem: z.enum(["missing", "malformed"]).optional(),
   /** A distinct actionable cause when the runner can classify the failure safely. */
   failureReason: RunFailureReason.optional(),
   /**

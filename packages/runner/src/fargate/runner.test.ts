@@ -97,7 +97,7 @@ describe("fargateRunner", () => {
     expect((await runner.status("run_t1")).status).toBe("running");
     expect(aws.secrets.size).toBe(1);
     now = new Date("2026-10-05T00:03:00Z");
-    expect(await runner.status("run_t1")).toMatchObject({ status: "failed", report: null, reportError: expect.stringMatching(/no report written; exit 137/) });
+    expect(await runner.status("run_t1")).toMatchObject({ status: "failed", report: null, reportProblem: "missing", reportError: expect.stringMatching(/no report written; exit 137/) });
     expect(aws.secrets.size).toBe(0);
   });
 

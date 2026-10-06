@@ -86,7 +86,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     const facts = { adapter: meta.adapter, exitCode, sessionId: agent.sessionId, costUsd: agent.costUsd, tokens: agent.tokens, models: agent.models };
 
     const written = await agentReport(meta);
-    return { record: RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportError: redactSecrets(`no report written; ${why}`) }) }), agent: facts };
+    return { record: RunRecord.parse({ ...base, role: meta.role, ...(written ?? { report: null, reportProblem: "missing", reportError: redactSecrets(`no report written; ${why}`) }) }), agent: facts };
   }
 
   /** The report the agent wrote in its workspace, if any: copied out as `report.md` and parsed for its role. */
@@ -97,7 +97,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
     if (!markdown) return undefined;
     await publish(join(p.dir, "report.md"), markdown);
     const parsed = meta.role === "reviewer" ? parseReport(markdown, ReviewReport) : parseReport(markdown, WorkerReport);
-    return parsed.ok ? { report: parsed.report } : { report: null, reportError: redactSecrets(parsed.error) };
+    return parsed.ok ? { report: parsed.report } : { report: null, reportProblem: "malformed" as const, reportError: redactSecrets(parsed.error) };
   }
 
   /** The task owner's account for a launch, from quota read now (accounts.ts). */
@@ -214,7 +214,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       if (inspect.code !== 0) {
         // Unknown is not death (04 §6): only Docker saying the container does not exist is loss.
         if (!isGone(inspect)) throw new Error(`status of ${runId} unavailable: ${inspect.stderr.trim().slice(-500)}`);
-        return endRun(meta, async () => ({ record: { ...base, status: "failed", reportError: "container is gone and left no result" }, agent: {} }));
+        return endRun(meta, async () => ({ record: { ...base, status: "failed", reportProblem: "missing", reportError: "container is gone and left no result" }, agent: {} }));
       }
       const [state, code] = inspect.stdout.trim().split(" ");
       if (state !== "exited" && state !== "dead") return RunRecord.parse({ ...base, status: "running" });

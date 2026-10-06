@@ -146,3 +146,13 @@ test("non-auth Codex failures and unrelated stderr do not report authentication"
   expect(success.status).toBe("succeeded");
   expect(success.failureReason).toBeUndefined();
 });
+
+// TECH-5259: Sergeant retries a run with no usable report and counts how often each kind happens.
+test("a run's record says whether its report is missing or malformed", async () => {
+  const done = '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}';
+  const missing = await ended({ adapters: { worker: "codex-local" } }, done, "");
+  expect(missing).toMatchObject({ status: "succeeded", report: null, reportProblem: "missing", reportError: expect.stringMatching(/^no report written/) });
+  const malformed = await ended({ adapters: { worker: "codex-local" } }, done, REPORT.replace('"summary": "s", ', ''));
+  expect(malformed).toMatchObject({ status: "succeeded", report: null, reportProblem: "malformed" });
+  expect((await ended({ adapters: { worker: "codex-local" } }, done)).reportProblem).toBeUndefined();
+});

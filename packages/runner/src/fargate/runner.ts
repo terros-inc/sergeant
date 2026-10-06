@@ -108,7 +108,8 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
       status,
       role: "worker",
       report: parsed?.ok ? parsed.report : null,
-      ...(!parsed?.ok && status !== "canceled" && { reportError: redactSecrets(parsed ? parsed.error : `no report written; ${why}`) }),
+      ...(!parsed?.ok &&
+        status !== "canceled" && { reportProblem: parsed ? "malformed" : "missing", reportError: redactSecrets(parsed ? parsed.error : `no report written; ${why}`) }),
     });
     if (status !== "canceled") await setAsideOnFailure(meta, agent, asides, opts);
     await cleanUp(l, aws.launch, store(meta.runId));
@@ -133,7 +134,7 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
   }
 
   const neverStarted = (meta: RunMeta, status: "failed" | "canceled") =>
-    finish(meta, RunRecord.parse({ ...base(meta), status, ...(status === "failed" && { reportError: "its Fargate task never started" }) }), {});
+    finish(meta, RunRecord.parse({ ...base(meta), status, ...(status === "failed" && { reportProblem: "missing", reportError: "its Fargate task never started" }) }), {});
 
   return {
     async start(spec: RunSpec) {
