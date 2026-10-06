@@ -15,9 +15,16 @@ const AGENT_EMAILS = new Set(["noreply@anthropic.com", "codex@openai.com", "nore
 const AGENT_LOGINS = new Set(["copilot"]);
 /** `<id>+<login>@users.noreply.github.com`, GitHub's address for an account, an App's bot included. */
 const GITHUB_NOREPLY = /^(?:\d+\+)?([^@]+)@users\.noreply\.github\.com$/;
-const CO_AUTHOR = /^\s*co-authored-by:\s*(.+?)\s*$/i;
+// Linear-time on any input (CodeQL's polynomial-regex check): the name is trimmed, not matched around.
+const CO_AUTHOR = /^\s*co-authored-by:(.*)$/i;
+const coAuthorOf = (line: string) => CO_AUTHOR.exec(line)?.[1]?.trim() || undefined;
 
-const emailOf = (coAuthor: string) => /<([^>]*)>/.exec(coAuthor)?.[1]?.trim().toLowerCase();
+/** The address between the first `<` and the `>` after it. */
+const emailOf = (coAuthor: string) => {
+  const start = coAuthor.indexOf("<");
+  const end = start < 0 ? -1 : coAuthor.indexOf(">", start + 1);
+  return end < 0 ? undefined : coAuthor.slice(start + 1, end).trim().toLowerCase();
+};
 const isAgentLogin = (login: string) => login.toLowerCase().endsWith("[bot]") || AGENT_LOGINS.has(login.toLowerCase());
 
 /**
@@ -87,13 +94,13 @@ export function squashMessage(input: SquashMessageInput): { commit_title: string
   };
   // The body's human co-author lines move, as written, into the trailer block, where GitHub reads them.
   for (const line of lines) {
-    const who = CO_AUTHOR.exec(line)?.[1];
+    const who = coAuthorOf(line);
     if (who !== undefined) add(who);
   }
   for (const commit of input.commits) {
     if (commit.author) add(`${commit.author.name} <${commit.author.email}>`, commit.author.login);
     for (const line of commit.message.split("\n")) {
-      const who = CO_AUTHOR.exec(line)?.[1];
+      const who = coAuthorOf(line);
       if (who !== undefined) add(who);
     }
   }
