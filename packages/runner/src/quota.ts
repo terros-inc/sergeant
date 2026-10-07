@@ -5,7 +5,7 @@ import type { Adapter } from "./agents.ts";
 
 // Live quota for each model account (TECH-5117, TECH-5113): the weekly and 5-hour windows Claude
 // Code's `/usage` and Codex's usage endpoint show. A read never throws and never waits long: a failure
-// is an unknown reading, and the chooser then passes the account over or keeps the configured provider.
+// is an unknown reading, and the chooser then ranks the account after every one it could read.
 
 /** A model account to read: its id, the agent CLI it serves, and its credential. */
 export type QuotaAccount = { id: string; adapter: Adapter; credential: string };

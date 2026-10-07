@@ -11,6 +11,8 @@ RUN apt-get update \
   && apt-get update && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
+# Both agent CLIs, always: a run takes whichever provider its owner's registered accounts and quota
+# choose, with no installation setting (TECH-5390).
 ARG CLAUDE_CODE_VERSION=2.1.287
 ARG CODEX_VERSION=0.160.0
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/codex@${CODEX_VERSION}" && corepack enable

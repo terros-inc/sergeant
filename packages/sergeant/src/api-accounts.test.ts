@@ -45,7 +45,6 @@ async function serve(runs: RunRecord[] = []) {
     secret: "sergeant/x/registered-accounts",
     readSecret: async (ref) => secrets[ref] ?? Promise.reject(new Error(`no ${ref}`)),
     writeSecret: async (ref, value) => void (secrets[ref] = value),
-    adapters: ["claude-code-local"],
     readQuota: readable,
     log: (line) => logs.push(line),
   });
@@ -108,7 +107,7 @@ test("a person registers, replaces, and removes only their own account, and its 
   expect(await call("POST", "/v1/accounts/register", "ada", { provider: "claude", name: "claude", credential: "sk-ant-oat01-ada-new" })).toMatchObject({ json: { replaced: true } });
   const refused = await call("POST", "/v1/accounts/register", "ada", { provider: "claude", name: "claude", credential: "sk-ant-oat01-expired" });
   expect(refused).toMatchObject({ status: 400, json: { error: { message: expect.stringContaining("usage endpoint answered 401") } } });
-  expect(await call("POST", "/v1/accounts/register", "ada", { provider: "codex", name: "codex", credential: "{}" })).toMatchObject({ status: 400 });
+  expect(await call("POST", "/v1/accounts/register", "ada", { provider: "codex", name: "codex", credential: "sk-proj-not-a-login" })).toMatchObject({ status: 400 });
   expect(JSON.parse(secrets["sergeant/x/registered-accounts"] ?? "").accounts).toEqual([expect.objectContaining({ credential: "sk-ant-oat01-ada-new" })]);
 
   // Removal says again that it does not revoke a copy a run took, and where to revoke it with the provider (TECH-5198).
@@ -126,6 +125,19 @@ test("a person registers, replaces, and removes only their own account, and its 
 
 // TECH-5179: a task's runs get only its owner's registered accounts: never someone else's, and never
 // an empty list standing in for an unreadable secret.
+// TECH-5390: every provider the build supports is registrable; the registry, built as modelAccounts
+// builds it, takes nothing from the config's `codex` block, which this installation does not have.
+test("a Codex account registers on an installation with no codex config", async () => {
+  const { call, accounts } = await serve();
+  expect((await call("GET", "/v1/whoami", "ada")).json.registration).toEqual({ providers: ["claude", "codex"] });
+  const codex = '{"auth_mode":"chatgpt","tokens":{"access_token":"t"}}';
+  expect(await call("POST", "/v1/accounts/register", "ada", { provider: "codex", name: "codex", credential: codex })).toMatchObject({
+    status: 200,
+    json: { account: { id: "person:u-ada:codex", adapter: "codex-local" }, replaced: false },
+  });
+  expect(await accounts.of(ADA.id)).toEqual([expect.objectContaining({ adapter: "codex-local", credential: codex })]);
+});
+
 test("the runner reads only the task owner's own accounts", async () => {
   const { call, accounts, secrets } = await serve();
   await call("POST", "/v1/accounts/register", "ada", { provider: "claude", name: "claude", credential: CLAUDE });

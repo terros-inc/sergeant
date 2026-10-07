@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { fargateSettings, InstallationConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { CODEX_DEFAULT_MODEL, fargateSettings, InstallationConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const config = (controlPlaneAppId: number | string, workerAppId: number | string) => ({
@@ -76,36 +76,31 @@ test("a repository's budget parses field by field, and an invalid one fails the 
   }
 });
 
-// TECH-5009: an installation that names no runner keeps today's Claude Code workers and reviewers, and
-// a Codex role can't start without the codex config's model.
-test("each role runs Claude Code unless the config selects Codex for it, with the config's Codex model", () => {
+// TECH-5390: which provider a run uses comes from its owner's registered accounts, so a config needs no
+// runner or codex setting for Codex; one that still sets them parses, and they keep their meaning for models.
+test("Codex runs a built-in default model, and an existing codex.model or runners setting keeps its meaning", () => {
   const none = { worker: undefined, reviewer: undefined };
+  const both = (claude: string, codex: string) => ({ "claude-code-local": claude, "codex-local": codex });
   expect(runnerRoles(InstallationConfig.parse(config(1, 2)), none)).toEqual({
-    adapters: { worker: "claude-code-local", reviewer: "claude-code-local" },
-    models: { worker: { "claude-code-local": "opus", "codex-local": "opus" }, reviewer: { "claude-code-local": "opus", "codex-local": "opus" } },
+    models: { worker: both("opus", CODEX_DEFAULT_MODEL), reviewer: both("opus", CODEX_DEFAULT_MODEL) },
   });
 
   const codexReviewer = { ...config(1, 2), runners: { reviewer: "codex-local" } };
-  expect(InstallationConfig.safeParse(codexReviewer).success).toBe(false);
+  expect(runnerRoles(InstallationConfig.parse(codexReviewer), none).models.reviewer).toEqual(both("opus", CODEX_DEFAULT_MODEL));
   // TECH-5184: runs use only their owner's registered accounts, so a config still naming the installation's
   // Codex credential is refused, and install.sh keeps serve on its previous config until it is removed.
   expect(InstallationConfig.safeParse({ ...codexReviewer, codex: { credentialSecret: "sergeant/codex", model: "m" } }).success).toBe(false);
   const parsed = InstallationConfig.parse({ ...codexReviewer, codex: { model: "gpt-5.5-codex" } });
-  expect(runnerRoles(parsed, none)).toEqual({
-    adapters: { worker: "claude-code-local", reviewer: "codex-local" },
-    models: {
-      worker: { "claude-code-local": "opus", "codex-local": "gpt-5.5-codex" },
-      reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5.5-codex" },
-    },
-  });
-  // A model flag is for the role's configured adapter; quota may still move the role to the other one (TECH-5117).
+  expect(runnerRoles(parsed, none).models).toEqual({ worker: both("opus", "gpt-5.5-codex"), reviewer: both("opus", "gpt-5.5-codex") });
+  // A model flag is for the adapter `runners` names for the role, Claude Code when unset.
   expect(runnerRoles(parsed, { worker: "sonnet", reviewer: "gpt-6" }).models).toEqual({
-    worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5.5-codex" },
-    reviewer: { "claude-code-local": "opus", "codex-local": "gpt-6" },
+    worker: both("sonnet", "gpt-5.5-codex"),
+    reviewer: both("opus", "gpt-6"),
   });
-  // TECH-5021: the config's Codex prices reach the runner, which estimates a priced model's cost.
+  // TECH-5021: the config's Codex prices reach the runner, with or without a model.
   const prices = { "gpt-5.5-codex": { input: 1.25, cachedInput: 0.125, output: 10 } };
   expect(runnerRoles(InstallationConfig.parse({ ...codexReviewer, codex: { model: "gpt-5.5-codex", prices } }), none).codexPrices).toEqual(prices);
+  expect(runnerRoles(InstallationConfig.parse({ ...config(1, 2), codex: { prices } }), none)).toMatchObject({ codexPrices: prices, models: { worker: both("opus", CODEX_DEFAULT_MODEL) } });
 });
 
 // TECH-5237: workers stay on the host unless the config says fargate, and a host without Terraform's

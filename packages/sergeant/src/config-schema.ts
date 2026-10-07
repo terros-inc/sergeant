@@ -134,24 +134,26 @@ export const InstallationConfig = z.strictObject({
   /** Minutes a waiting task keeps its slot; `serve --waiting-grace-minutes` wins, and without either it is 15. */
   waitingGraceMinutes: z.number().nonnegative().optional(),
   /**
-   * The agent CLI each role runs (TECH-5009). A role not named runs Claude Code, as it always has.
    * `workerBackend` is where workers run (TECH-5237): `local`, the default, in a container on this
    * host; `fargate`, one ECS Fargate task each, on what Terraform made (deploy/README.md, "Workers on
-   * Fargate"). Reviewers always run on this host.
+   * Fargate"). Reviewers always run on this host. `worker` and `reviewer` no longer choose a provider:
+   * each run's comes from its owner's registered accounts (TECH-5390). They only say which agent a
+   * role's `--worker-model`/`--reviewer-model` flag is for, Claude Code when unset.
    */
   runners: z
     .strictObject({ worker: z.enum(ADAPTERS).optional(), reviewer: z.enum(ADAPTERS).optional(), workerBackend: z.enum(["local", "fargate"]).optional() })
     .optional(),
   /**
-   * The model Codex runs for a Codex role, unless `serve`/`canary` names that role's model. Required when
-   * `runners` names `codex-local`; without it nobody can register a Codex account. The credential is
-   * always the task owner's registered account (TECH-5179), never the installation's (TECH-5184).
+   * Optional. `model` overrides the model Codex runs (`CODEX_DEFAULT_MODEL` otherwise, TECH-5390),
+   * unless `serve`/`canary` names that role's model. People may register Codex accounts with or without
+   * this block. The credential is always the task owner's registered account (TECH-5179), never the
+   * installation's (TECH-5184).
    * `prices`, USD per million tokens by model, adds to or replaces the runner's built-in OpenAI list
    * prices (`codex-prices.ts`, TECH-5021): a Codex run on a priced model records an estimated cost.
    */
   codex: z
     .strictObject({
-      model: z.string().min(1),
+      model: z.string().min(1).optional(),
       prices: z
         .record(
           z.string().min(1),
@@ -167,9 +169,5 @@ export const InstallationConfig = z.strictObject({
    * TECH-5204). Absent, nobody can register an account.
    */
   registeredAccountsSecret: SecretRef.optional(),
-})
-  .refine((c) => c.codex || ![c.runners?.worker, c.runners?.reviewer].includes("codex-local"), {
-    message: "a codex-local runner needs the codex config, for its model",
-    path: ["codex"],
-  });
+});
 export type InstallationConfig = z.infer<typeof InstallationConfig>;

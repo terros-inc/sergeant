@@ -59,21 +59,21 @@ export function score<A>(c: Candidate<A>, now: number): number | undefined {
 }
 
 /**
- * The account for one run. Among the usable accounts (not spent), the one with the highest `score`;
- * one whose provider reports a single window is scored on that window alone. One whose reading is
- * partial or unknown is usable (a known zero in either window still spends it) and ranks after every
- * scored one, the `prefer`red provider's first. A reviewer passes its worker's provider as `avoid`: it
- * takes the other provider's best account when that scores within `REVIEW_DIVERSITY_SHARE` of the best,
- * or when no account is scored, and otherwise the best overall. Undefined when no account is usable.
+ * The account for one run. Among the usable accounts (not spent), the one with the highest `score`,
+ * whichever its provider: no provider is preferred (TECH-5390). One whose provider reports a single
+ * window is scored on that window alone. One whose reading is partial or unknown is usable (a known
+ * zero in either window still spends it) and ranks after every scored one; ties keep the candidates'
+ * order. A reviewer passes its worker's provider as `avoid`: it takes the other provider's best account
+ * when that scores within `REVIEW_DIVERSITY_SHARE` of the best, or when no account is scored, and
+ * otherwise the best overall. Undefined when no account is usable.
  */
 export function chooseAccount<A>(
   candidates: Candidate<A>[],
-  opts: { prefer: Adapter; avoid?: Adapter | undefined; now?: number | undefined },
+  opts: { avoid?: Adapter | undefined; now?: number | undefined } = {},
 ): AccountChoice<A> | undefined {
   const now = opts.now ?? Date.now();
   const usable = candidates.filter((c) => !spent(c)).map((c) => ({ ...c, score: score(c, now) }));
-  const preferred = (c: Candidate<A>) => (c.adapter === opts.prefer ? 0 : 1);
-  const ranked = usable.toSorted((a, b) => (b.score ?? -1) - (a.score ?? -1) || preferred(a) - preferred(b));
+  const ranked = usable.toSorted((a, b) => (b.score ?? -1) - (a.score ?? -1));
   const best = ranked[0];
   if (!best) return undefined;
   const other = ranked.find((c) => c.adapter !== opts.avoid);

@@ -193,20 +193,27 @@ installation, in this order, and expect deliveries made in between to fail harml
 
 ### A Codex reviewer
 
-Reviews can come from Codex while workers stay on Claude Code (TECH-5009; details in
-`packages/runner/README.md`, under Codex). Codex runs, like every run, use only the task owner's
-registered accounts (Model accounts below); the installation has no Codex credential (TECH-5184).
+Registering a Codex account is all it takes (TECH-5390): there is no installation setting to turn
+Codex on. Every installation accepts `sgt account register codex` as well as `claude`, and the runner
+image always carries both CLIs. Codex runs, like every run, use only the task owner's registered
+accounts (Model accounts below); the installation has no Codex credential (TECH-5184). Details are in
+`packages/runner/README.md`, under Codex.
 
-1. **Installation config.** Add `"runners": { "reviewer": "codex-local" }` and
-   `"codex": { "model": "<Codex model>" }`, put the parameter, then Update: it rebuilds the runner
-   image, which carries the Codex CLI, and restarts `serve`. `codex` also lets people register Codex
-   accounts (`sgt account register`).
-2. **Check** on the host (Live check on the host below): `node src/live-check.ts --adapter codex-local`
-   in `packages/runner` shows only `CODEX_CREDENTIAL` and `GH_TOKEN` entering. Then let one controlled
-   task whose owner registered a Codex account reach review: its reviewer run's record
-   (`/var/lib/sergeant/state/runs/<run>/record.json`) says `"provider": "openai/codex"` and has `tokens`.
+Which provider works and which reviews is chosen for each run from the owner's registered accounts and
+their live quota. A worker takes the owner's best-paced account, whichever its provider (the
+`sergeant:codex` label forces Codex for that issue's workers, TECH-5084). A reviewer takes the other
+provider than its worker's when the owner has an account of it whose pace is within 20% of the best;
+an owner with only one provider is reviewed by that provider. So once a task's owner has registered
+both a Claude and a Codex account, its reviews usually come from the other provider than its worker's.
 
-To go back, remove `runners` (or set the role to `claude-code-local`) and update.
+- **Model.** Codex runs `gpt-5.5` unless the config's optional `"codex": { "model": "<Codex model>" }`
+  names another.
+- **Check** on the host (Live check on the host below): `node src/live-check.ts --adapter codex-local`
+  in `packages/runner` shows only `CODEX_CREDENTIAL` and `GH_TOKEN` entering. Then let one controlled
+  task whose owner registered a Codex account reach review: its reviewer run's record
+  (`/var/lib/sergeant/state/runs/<run>/record.json`) says `"provider": "openai/codex"` and has `tokens`.
+
+To stop a person's runs using Codex, they remove their Codex account (`sgt account remove codex`).
 
 ### Workers on Fargate (TECH-5237)
 
@@ -667,14 +674,17 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 - **`release`** (optional) makes the host update itself to green commits of `main`: `{ "channel":
   "main" }` or `{ "channel": "soaked", "soakMinutes": 90 }`, with `"paused": true` to stop (Automatic
   updates above).
-- **`runners`** (optional) chooses each role's agent: `{ "reviewer": "codex-local" }` runs reviewers on
-  the Codex CLI; a role not named runs Claude Code. `"workerBackend": "fargate"` runs workers on Fargate
-  (Workers on Fargate above). A `codex-local` role needs **`codex`**: `{ "model": "<Codex model>" }`,
-  which also lets people register Codex accounts; each run uses its task owner's registered account. A
-  Codex run's cost is estimated from its tokens at OpenAI's list price for its model; optional
+- **`runners`** (optional): `"workerBackend": "fargate"` runs workers on Fargate (Workers on Fargate
+  above). Which agent, Claude Code or Codex, runs a worker or reviewer is never set here: each run's
+  comes from its task owner's registered accounts (A Codex reviewer above, TECH-5390). An older
+  `"worker"` or `"reviewer"` (`claude-code-local` or `codex-local`) still parses, and only says which
+  agent that role's `serve --worker-model`/`--reviewer-model` names a model for (Claude Code when unset).
+- **`codex`** (optional): `"model"` overrides the model Codex runs, `gpt-5.5` by default. A Codex
+  run's cost is estimated from its tokens at OpenAI's list price for its model; optional
   `codex.prices`, `{ "<model>": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }` in USD per
   million tokens, adds or replaces a model's price, and a model with none counts as unknown cost
-  ([`packages/runner/README.md`](../packages/runner/README.md#codex-codex-local-tech-5009)).
+  ([`packages/runner/README.md`](../packages/runner/README.md#codex-codex-local-tech-5009)). People
+  register Codex accounts with or without it.
 - **`retro`** (optional) is the Sergeant project's Linear id and the team its issues are filed in
   (Retros below).
 - **`registeredAccountsSecret`** (optional) names the registered-accounts secret (Model accounts above).

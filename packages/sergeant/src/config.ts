@@ -16,20 +16,22 @@ export { InstallationConfig } from "./config-schema.ts";
 
 type Role = RunSpec["role"];
 
+/** The model a Codex run uses when the config's `codex.model` names none (TECH-5390): Codex's own default for a ChatGPT login. */
+export const CODEX_DEFAULT_MODEL = "gpt-5.5";
+
 /**
- * Each role's configured adapter, and its model on each adapter, for `containerRunner` (TECH-5009). A
- * role's model flag is for its configured adapter; otherwise Codex runs `codex.model` and Claude Code
- * "opus", today's default. When the owner has an account for the other provider, quota may run a role
- * on the other adapter (TECH-5117). With them, the config's Codex prices (TECH-5021).
+ * Each role's model on each adapter, for `containerRunner` (TECH-5009). Which adapter a run uses comes
+ * from its owner's registered accounts and their quota (TECH-5117, TECH-5390), never from here. A
+ * role's model flag is for the adapter `runners.<role>` names, Claude Code when unset; otherwise Codex
+ * runs `codex.model`, or `CODEX_DEFAULT_MODEL`, and Claude Code "opus". With them, the config's Codex
+ * prices (TECH-5021).
  */
 export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role, string | undefined>) {
-  const adapter = (role: Role): Adapter => config.runners?.[role] ?? "claude-code-local";
   const models = (role: Role): Record<Adapter, string> => {
-    const flag = (a: Adapter) => (a === adapter(role) ? modelFlags[role] : undefined);
-    return { "claude-code-local": flag("claude-code-local") ?? "opus", "codex-local": flag("codex-local") ?? config.codex?.model ?? "opus" };
+    const flag = (a: Adapter) => (a === (config.runners?.[role] ?? "claude-code-local") ? modelFlags[role] : undefined);
+    return { "claude-code-local": flag("claude-code-local") ?? "opus", "codex-local": flag("codex-local") ?? config.codex?.model ?? CODEX_DEFAULT_MODEL };
   };
   return {
-    adapters: { worker: adapter("worker"), reviewer: adapter("reviewer") },
     models: { worker: models("worker"), reviewer: models("reviewer") },
     ...(config.codex?.prices && { codexPrices: config.codex.prices }),
   };

@@ -38,7 +38,6 @@ export class AccountRefused extends Error {}
 // Refusals in plain English (TECH-5202): a person reads them, not an operator, so they name no config;
 // the one an approver must act on names the page that says how.
 const NOT_SET_UP = `This Sergeant isn't set up for account registration yet. Ask an approver to enable it (deploy/README.md, "Model accounts").`;
-const PROVIDER_NAME: Record<Provider, string> = { claude: "Claude", codex: "Codex" };
 
 export type AccountRegistry = ReturnType<typeof accountRegistry>;
 
@@ -47,8 +46,6 @@ export function accountRegistry(opts: {
   secret?: string | undefined;
   readSecret: (ref: string) => Promise<string>;
   writeSecret: (ref: string, value: string) => Promise<void>;
-  /** Adapters this installation can run: Codex only with its `codex` config, which names the model. */
-  adapters: AccountAdapter[];
   /** Reads a credential's quota: registration keeps one with at least one window read (TECH-5211). */
   readQuota: (account: QuotaAccount) => Promise<QuotaReading>;
   log: (line: string) => void;
@@ -88,12 +85,12 @@ export function accountRegistry(opts: {
   return {
     /** The providers people may register accounts of: none without the secret (TECH-5202). */
     providers(): Provider[] {
-      return opts.secret ? opts.adapters.map(providerOf) : [];
+      return opts.secret ? AccountAdapter.options.map(providerOf) : [];
     },
 
-    /** The accounts `userId` registered, for an installation's adapters: the only ones their tasks run on. Throws when unreadable. */
+    /** The accounts `userId` registered: the only ones their tasks run on. Throws when unreadable. */
     async of(userId: string): Promise<ModelAccount[]> {
-      return (await entries()).filter((e) => e.userId === userId && opts.adapters.includes(e.adapter)).map(account);
+      return (await entries()).filter((e) => e.userId === userId).map(account);
     },
 
     /** Every registered account, without credentials. */
@@ -103,7 +100,6 @@ export function accountRegistry(opts: {
 
     /** Registers, or replaces, the person's own account named `accountName`, once some of its quota reads with it. */
     async register(person: Person, adapter: AccountAdapter, accountName: string, credential: string) {
-      if (!opts.adapters.includes(adapter)) throw new AccountRefused(`This Sergeant doesn't run ${PROVIDER_NAME[providerOf(adapter)]} accounts. Ask an approver if you need it.`);
       if (adapter === "codex-local" && !credential.startsWith("{")) {
         throw new AccountRefused("a Codex account is the JSON of the auth.json a `codex login` with your ChatGPT account writes, not an API key");
       }
@@ -156,7 +152,6 @@ export function modelAccounts(config: InstallationConfig, log: (line: string) =>
     secret: config.registeredAccountsSecret,
     readSecret: secretResolver(config),
     writeSecret: secretWriter(config),
-    adapters: config.codex ? ["claude-code-local", "codex-local"] : ["claude-code-local"],
     readQuota,
     log,
   });

@@ -57,9 +57,9 @@ agents being told by their commit identity, so no agent becomes a contributor in
 
 ## Codex (`codex-local`, TECH-5009)
 
-The installation config chooses the agent per role: `"runners": { "reviewer": "codex-local" }` makes
-reviews come from a different provider than the Claude Code worker. A role not named runs Claude Code,
-exactly as before. The earlier blocker, that the only Codex login was personal (UNF-710), is gone:
+No installation setting turns Codex on (TECH-5390): the image carries both CLIs, and each run's agent
+comes from its task owner's registered accounts and their quota (below). An owner with both providers
+registered usually gets reviews from the other provider than the worker's. The earlier blocker, that the only Codex login was personal (UNF-710), is gone:
 each run uses an account its task's owner registered for Sergeant to use.
 
 - **Credential.** Only the task owner's registered Codex account (Model accounts below), which they
@@ -76,7 +76,8 @@ each run uses an account its task's owner registered for Sergeant to use.
   The alert tells the account's holder to register it again or remove it. It never includes provider
   error text or token values. An API key does not age this way, but bills that API project per token
   instead of a ChatGPT plan.
-- **Model.** `codex.model` in the config, unless `serve`/`canary` gets `--worker-model`/`--reviewer-model`.
+- **Model.** `gpt-5.5`, or the config's optional `codex.model`, unless `serve`/`canary` gets
+  `--worker-model`/`--reviewer-model` for a role whose `runners.<role>` is `codex-local`.
 - **Usage.** `codex exec --json` reports tokens, not dollars. The run record keeps `tokens` (input,
   cached input, output, reasoning output; `sgt run` shows them) and, for a model with a price,
   `costUsd` estimated from them with `costBasis: "estimated"` (TECH-5021). Prices are OpenAI's
@@ -94,8 +95,8 @@ each run uses an account its task's owner registered for Sergeant to use.
   minutes, and `choose.ts` decides deterministically (below). A reviewer prefers an account of another
   provider than the latest worker that reported its PR (else the same, marked `sameProviderAsWorker`).
   The run record's `providerChoice` holds the choice, its reason, and the readings (`sgt run <id>`).
-  A role's `--worker-model`/`--reviewer-model` applies to its configured adapter; on the other one it
-  runs that adapter's default model.
+  A role's `--worker-model`/`--reviewer-model` applies to the adapter the config's `runners.<role>`
+  names (Claude Code when unset); on the other one it runs that adapter's default model.
 - **Model accounts (TECH-5179).** Each run uses only its task owner's accounts (`RunSpec.owner`, the
   human assignee who delegated the issue), read at each launch from `accounts(ownerId)`, the ones that
   person registered; never the installation's credentials or anyone else's. `accounts.ts` and
@@ -105,7 +106,8 @@ each run uses an account its task's owner registered for Sergeant to use.
   5-hour window, about 0.6% of the week), so a sliver just before its reset does not start a run it
   cannot finish. An account whose provider reports only one window is scored on that window alone
   (TECH-5342). An account whose quota could not be read, or has a window without a reset time, is
-  usable and ranks after every scored one, the `runners` default's first. A reviewer takes an account
+  usable and ranks after every scored one; ties keep the registry's order, and no provider is preferred
+  for a worker (TECH-5390). A reviewer takes an account
   of another provider than its worker's when that provider's best scores within 20% of the best.
   Quota readings are cached for 4 minutes. There is no low-quota warning. Only the chosen account's
   credential enters the container. A run whose agent reports a quota or authentication failure (`failureReason`,
