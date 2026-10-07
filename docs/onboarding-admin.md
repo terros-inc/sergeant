@@ -22,6 +22,12 @@ edit of `humans.teams` (team keys, such as `ENG`) or `humans.approvers` (Linear 
 installation's own workspace; the same person's id in another workspace never matches)
 ([`deploy/README.md`](../deploy/README.md), "Public human API and login for `sgt`").
 
+If they work through an assistant that delegates issues to Sergeant with Linear's MCP connector, the
+installation config needs the connector's app id in `linear.delegatingAppIds`; without it Sergeant
+refuses every issue delegated that way and comments with the app and its id. An operator sets it once
+per installation ([`deploy/README.md`](../deploy/README.md), "Before the first apply", step 8, which
+also covers the known issue with its display-name match).
+
 ## 2. Enroll their repositories
 
 `sgt repo list` shows what is enrolled and each repository's merge policy. An approver enrolls one,

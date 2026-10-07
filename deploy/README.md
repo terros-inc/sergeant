@@ -97,6 +97,29 @@ anything, and the state backend and the provider refuse any other account.
    never merges there (GitHub Apps and rulesets below, which has a ruleset to copy).
 6. **Linear**: the token acts as the agent user in `linear.agentUserId` (`live-check` verifies it).
 7. **Human login** for `sgt` (below): the config's `humans`, and the callback URL on the Linear app.
+8. **Delegations through Linear's MCP connector** (optional): set `linear.delegatingAppIds` when
+   anyone works through an assistant that delegates issues to Sergeant with Linear's MCP connector.
+   Without it, Sergeant refuses every issue an assistant delegates (or creates already delegated)
+   through the connector, commenting that Linear's history does not show the assignee delegating it.
+   The connector uses one global OAuth client id, the same in every Linear workspace
+   (`f69dcc4d4c3c994d8f7f1475b2b23a11`, confirmed in two workspaces), so the installation config
+   usually needs only:
+
+   ```json
+   "linear": { "delegatingAppIds": ["f69dcc4d4c3c994d8f7f1475b2b23a11"] }
+   ```
+
+   To confirm the id, read the `botActor.id` on a delegation the connector made (the issue's history
+   in Linear's API), or Sergeant's refusal comment on such an issue, which names the app and its id
+   (TECH-5321): "delegated through the app … (id `…`)". **Known issue
+   ([TECH-5280](https://linear.app/terros/issue/TECH-5280/app-delegation-name-matching-document-the-known-issue-and-flag)):**
+   an app's delegation counts as the assignee's own only when Linear's `botActor.userDisplayName`, the
+   user the app acted for, equals the assignee's `displayName`; Linear gives no id or email for that
+   user, so list only apps you trust to report it. Two edge cases are accepted all the same: an empty
+   name matches an empty name, and a match overrides a different human Linear reports as the actor.
+   Either one logs a `warning:` line and is noted as `owner.warning` in the task's `state.json`. On an
+   existing installation, add the field to the installation-config parameter, then restart or update
+   (Restart or update with `sgt` below); an issue refused before then needs delegating again.
 
 ### Public human API and login for `sgt` (TECH-4938, TECH-4939)
 
@@ -651,13 +674,10 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 - **`linear.otherAgentUserIds`** (optional) lists other agents' users (such as Sergeant 1's) whose
   comments are not human input.
 - **`linear.delegatingAppIds`** (optional) lists Linear app ids (`botActor.id`), such as Linear's MCP
-  connector, whose delegations count as the assignee's own when the app acted for a user with the
-  assignee's display name; any other app's delegation is refused. **Known issue (TECH-5280):** the
-  match relies only on Linear's `botActor.userDisplayName` equalling the assignee's `displayName`
-  (Linear gives no id or email for that user), so list only apps you trust to report it. Two edge
-  cases are accepted all the same: an empty name matches an empty name, and a match overrides a
-  different human Linear reports as the actor. Either one logs a `warning:` line and is noted as
-  `owner.warning` in the task's `state.json`.
+  connector (`f69dcc4d4c3c994d8f7f1475b2b23a11` in every workspace), whose delegations count as the
+  assignee's own when the app acted for a user with the assignee's display name; any other app's
+  delegation is refused. Setting it, confirming the id, and the known issue with the display-name
+  match (TECH-5280) are under Before the first apply above, step 8.
 - **`linear.reviewerProfiles`** (optional) maps GitHub logins to Linear profile URLs. Sergeant puts the
   URL in a re-review request so Linear renders a real user mention and sends an Inbox notification; a
   missing mapping or failed lookup leaves the plain `@github-login` text.
