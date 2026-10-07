@@ -145,9 +145,18 @@ with evidence), ending with exactly one fenced block tagged \`sergeant-report\` 
   "summary": "<one paragraph>" }
 \`\`\`
 
-\`reportVersion\` must be exactly \`s2-review-report/1\`. The required fields are \`reviewed\` (a
-non-empty array of the heads above), \`verdict\` (exactly one of \`approve\`, \`changes_requested\`,
-or \`needs_human\`), and \`findings\`. A minimal report with nothing to change:
+This is the reviewer report, \`s2-review-report/1\`. Every field below is required:
+
+- \`reportVersion\`: exactly \`"s2-review-report/1"\`.
+- \`reviewed\`: a non-empty array naming each head you reviewed as \`{ "repo", "number", "headSha" }\`
+  (\`owner/name\`, the positive PR number, and the full 40-character SHA), as listed above.
+- \`verdict\`: exactly one of \`"approve"\`, \`"changes_requested"\`, \`"needs_human"\`.
+- \`findings\`: an array, \`[]\` when there are none; each finding has a non-empty \`id\`, a
+  \`severity\`, and a \`description\`, with \`category\` and \`location\` as above.
+- \`unreadableInputs\` and \`dependencies\`: arrays, \`[]\` when there are none.
+- \`summary\`: one paragraph.
+
+A minimal correct report with nothing to change:
 
 \`\`\`
 { "reportVersion": "s2-review-report/1",
@@ -155,9 +164,10 @@ or \`needs_human\`), and \`findings\`. A minimal report with nothing to change:
   "verdict": "approve", "findings": [], "unreadableInputs": [], "dependencies": [], "summary": "Approve, no findings." }
 \`\`\`
 
-The worker report format is **wrong for a reviewer**: never write \`reportVersion:
-"s2-sergeant-report/1"\` or any version other than \`s2-review-report/1\`, and never use the worker's
-fields (\`outcome\`, \`pullRequests\` and \`pullRequests[].decision\`, \`knownGaps\`,
-\`addressedFindings\`). Use \`verdict\` and \`findings\`, not \`outcome\` and \`reviewed[]\` claims.
+The worker report format is **wrong for a reviewer** and makes the review count for nothing: never
+write \`"s2-worker-report/1"\`, \`"s2-sergeant-report/1"\`, or any version other than
+\`s2-review-report/1\`, and never use the worker's fields \`outcome\`, \`pullRequests\` (or
+\`pullRequests[].decision\`), \`knownGaps\`, or \`addressedFindings\`. Your decision goes in
+\`verdict\`, your findings in \`findings\`, and the heads you reviewed in \`reviewed\`.
 `;
 }

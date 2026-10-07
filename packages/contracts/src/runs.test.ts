@@ -126,3 +126,35 @@ test("the Codex reviewer schema is in step with ReviewReport", () => {
   expect(props.findings.items.properties.severity.enum).toEqual(["blocking", "non_blocking", "nit"]);
   expect(props.dependencies.items.properties.relation.enum).toEqual(["blocked_by", "blocks"]);
 });
+
+// TECH-5392: every value the schema admits must parse, so each ReviewReport value constraint has a schema
+// keyword strict structured output supports, and the two agree at its boundary.
+test("the Codex reviewer schema admits only values ReviewReport accepts", () => {
+  const head = { repo: "o/r", number: 7, headSha: "a".repeat(40) };
+  const base = { reportVersion: "s2-review-report/1", reviewed: [head], verdict: "approve", findings: [], unreadableInputs: [], dependencies: [], summary: "s" };
+  const parses = (r: object) => parseJsonReport(JSON.stringify({ ...base, ...r }), ReviewReport).ok;
+  const reviewed = REVIEW_REPORT_SCHEMA.properties.reviewed;
+  const pr = reviewed.items.properties;
+
+  // A non-empty reviewed list.
+  expect(reviewed.minItems).toBe(1);
+  expect(parses({ reviewed: [] })).toBe(false);
+
+  // A positive PR number.
+  expect(pr.number).toEqual({ type: "integer", minimum: 1 });
+  for (const number of [0, -1]) expect(parses({ reviewed: [{ ...head, number }] })).toBe(false);
+  expect(parses({ reviewed: [{ ...head, number: 1 }] })).toBe(true);
+
+  // The repo slug: the schema's pattern and the contract agree on each spelling.
+  const repoPattern = new RegExp(pr.repo.pattern);
+  for (const repo of ["o/r", "my-org/my.repo_2", "", "o", "o/r/x", "o r/x", "/r", "o/"]) {
+    expect(repoPattern.test(repo), repo).toBe(parses({ reviewed: [{ ...head, repo }] }));
+  }
+
+  // A finding id that is not blank (strict mode has no minLength, so a pattern says it).
+  const idPattern = new RegExp(REVIEW_REPORT_SCHEMA.properties.findings.items.properties.id.pattern);
+  for (const id of ["", " ", "\t"]) expect(idPattern.test(id), JSON.stringify(id)).toBe(false);
+  expect(idPattern.test("f1")).toBe(true);
+  const finding = { id: "f1", severity: "nit", category: null, description: "d", location: null };
+  expect(parses({ findings: [finding] })).toBe(true);
+});

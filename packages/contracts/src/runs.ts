@@ -150,7 +150,10 @@ export type ReviewReport = z.infer<typeof ReviewReport>;
  * spellings, missing ids) do not translate to a schema and are not needed when the shape is fixed at
  * generation time. Kept in step with `ReviewReport` by `runs.test.ts`. Strict-mode compatible for
  * OpenAI structured output: every property is required and every object forbids extra ones; a field
- * that may be absent is nullable instead (the parser reads `null` as absent).
+ * that may be absent is nullable instead (the parser reads `null` as absent). The contract's value
+ * constraints are spelled with keywords strict mode supports: `minItems` for a non-empty `reviewed`,
+ * `minimum` for a positive PR number, and `pattern` for the repo slug and a non-blank finding id
+ * (strict mode has no `minLength`), so every schema-valid answer parses as `ReviewReport`.
  */
 export const REVIEW_REPORT_SCHEMA = {
   type: "object",
@@ -164,8 +167,13 @@ export const REVIEW_REPORT_SCHEMA = {
         type: "object",
         additionalProperties: false,
         required: ["repo", "number", "headSha"],
-        properties: { repo: { type: "string" }, number: { type: "integer" }, headSha: { type: "string" } },
+        properties: {
+          repo: { type: "string", pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+          number: { type: "integer", minimum: 1 },
+          headSha: { type: "string" },
+        },
       },
+      minItems: 1,
     },
     verdict: { type: "string", enum: ["approve", "changes_requested", "needs_human"] },
     findings: {
@@ -175,7 +183,7 @@ export const REVIEW_REPORT_SCHEMA = {
         additionalProperties: false,
         required: ["id", "severity", "category", "description", "location"],
         properties: {
-          id: { type: "string" },
+          id: { type: "string", pattern: "\\S" },
           severity: { type: "string", enum: ["blocking", "non_blocking", "nit"] },
           category: { type: ["string", "null"], enum: ["acceptance", null] },
           description: { type: "string" },

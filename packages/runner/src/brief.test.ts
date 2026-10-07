@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { HumanPullRequestFeedback, PullRequestFacts, RunSpec } from "@terros/sergeant-contracts";
+import { type HumanPullRequestFeedback, parseJsonReport, type PullRequestFacts, REVIEW_REPORT_SCHEMA, ReviewReport, type RunSpec } from "@terros/sergeant-contracts";
 import { reviewerBrief, type ReviewSubject, workerBrief } from "./brief.ts";
 
 // TECH-4990: a fresh reviewer must see the humans' feedback on the PRs it reviews, or it can approve
@@ -200,4 +200,25 @@ test("worker brief treats the Task's paths and scope as hints and asks for a rep
   expect(search).toMatch(/touches a settled decision or removes config, search the whole repository/);
   expect(search).toMatch(/`docs\/design\/`, READMEs, Terraform and other IaC/);
   expect(search).toMatch(/A list of places in the Task is a\s+starting point, not the scope\./);
+});
+
+// TECH-5392: Codex reviewers wrote the worker report format. The reviewer brief names the exact version
+// and every required field, reviewed[] included, gives a minimal example that parses as the contract,
+// and calls the worker format wrong.
+test("the reviewer brief states the exact reviewer report shape and rejects the worker format", () => {
+  const brief = reviewerBrief(spec([pr]), [subject], []);
+  expect(brief).toContain('`reportVersion`: exactly `"s2-review-report/1"`');
+  const required = brief.split("Every field below is required:")[1]?.split("A minimal correct report")[0] ?? "";
+  for (const field of REVIEW_REPORT_SCHEMA.required) expect(required).toMatch(new RegExp(`^- .*\`${field}\``, "m"));
+  expect(brief).toContain('`reviewed`: a non-empty array naming each head you reviewed as `{ "repo", "number", "headSha" }`');
+  expect(brief).not.toMatch(/not[^.]*reviewed\[\]/);
+
+  const example = brief.split("A minimal correct report with nothing to change:")[1]?.split("```")[1];
+  const parsed = parseJsonReport(example ?? "", ReviewReport);
+  expect(parsed.ok && parsed.report).toMatchObject({ verdict: "approve", reviewed: [{ repo: "o/r", number: 7, headSha: head }] });
+
+  expect(brief).toContain("The worker report format is **wrong for a reviewer**");
+  for (const wrong of ['"s2-sergeant-report/1"', "`outcome`", "`pullRequests[].decision`", "`knownGaps`", "`addressedFindings`"]) {
+    expect(brief).toContain(wrong);
+  }
 });
