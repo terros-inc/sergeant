@@ -2,7 +2,9 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   issueRevision,
+  parseJsonReport,
   parseReport,
+  REVIEW_REPORT_SCHEMA,
   ReviewReport,
   RunRecord,
   WorkerReport,
@@ -12,7 +14,7 @@ import {
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
 import { hasCodexLabel, pickAccount, runAccount, setAside } from "./accounts.ts";
-import { AGENTS, type Adapter } from "./agents.ts";
+import { AGENTS, CODEX_REVIEW_SCHEMA_PATH, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { CODEX_PRICES } from "./codex-prices.ts";
 import { agentFile, gitIdentityEnv, isGone, writeWorkspaceFile } from "./container.ts";
@@ -92,9 +94,25 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   async function agentReport(meta: RunMeta) {
     const p = paths(meta.runId);
     const reportPath = await agentFile(p.workspace, "sergeant-report.md");
-    const markdown = reportPath && (await readFile(reportPath, "utf8"));
-    if (!markdown) return undefined;
-    await publish(join(p.dir, "report.md"), markdown);
+    const markdown = reportPath ? await readFile(reportPath, "utf8") : undefined;
+    if (markdown !== undefined) await publish(join(p.dir, "report.md"), markdown);
+
+    // A Codex reviewer is launched with the report schema (TECH-5392), so its authoritative report is
+    // the structured result, which the schema keeps a valid `s2-review-report/1`; the fenced block it
+    // sometimes fills with the worker format is only the fallback when the structured result is absent.
+    if (meta.role === "reviewer" && meta.adapter === "codex-local") {
+      const structuredPath = await agentFile(p.workspace, ".sergeant", "review-report.json");
+      const structured = structuredPath ? await readFile(structuredPath, "utf8") : undefined;
+      const fromStructured = structured !== undefined ? parseJsonReport(structured, ReviewReport) : undefined;
+      if (fromStructured?.ok) return { report: fromStructured.report };
+      const fromMarkdown = markdown !== undefined ? parseReport(markdown, ReviewReport) : undefined;
+      if (fromMarkdown?.ok) return { report: fromMarkdown.report };
+      const error = (fromStructured && !fromStructured.ok && fromStructured.error) || (fromMarkdown && !fromMarkdown.ok && fromMarkdown.error);
+      if (!error) return undefined;
+      return { report: null, reportProblem: "malformed" as const, reportError: redactSecrets(error) };
+    }
+
+    if (markdown === undefined) return undefined;
     const parsed = meta.role === "reviewer" ? parseReport(markdown, ReviewReport) : parseReport(markdown, WorkerReport);
     return parsed.ok ? { report: parsed.report } : { report: null, reportProblem: "malformed" as const, reportError: redactSecrets(parsed.error) };
   }
@@ -168,6 +186,13 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       const limits = opts.limits?.[spec.role] ?? DEFAULT_LIMITS[spec.role];
       const adapter = account.adapter;
       const agent = AGENTS[adapter];
+      // A Codex reviewer is launched against the report schema in its workspace, so its structured
+      // result is a valid `s2-review-report/1` and never the worker report format (TECH-5392).
+      const reviewSchema = spec.role === "reviewer" && adapter === "codex-local";
+      if (reviewSchema) {
+        await mkdir(join(p.workspace, ".sergeant"), { recursive: true });
+        await writeWorkspaceFile(join(p.workspace, ".sergeant", "review-schema.json"), JSON.stringify(REVIEW_REPORT_SCHEMA));
+      }
       const meta: RunMeta = {
         runId: spec.runId,
         role: spec.role,
@@ -199,6 +224,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           ...gitIdentityEnv(opts.gitIdentity),
           image, "sh", "-c", agent.script, "sh",
           String(limits.maxWallSeconds), meta.model, String(limits.maxCostUsd),
+          ...(reviewSchema ? [CODEX_REVIEW_SCHEMA_PATH] : []),
         ],
         { env: { ...process.env, [agent.credentialEnv]: account.credential, ...(worker && { GH_TOKEN: githubToken }) } },
       );
