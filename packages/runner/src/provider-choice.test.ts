@@ -32,8 +32,8 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
     if (cmd === "docker" && args[0] === "logs") return { code: 0, stdout: '{"is_error":false}', stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
-  // Half of each window gone: claude's pace is 1.66, and codex's 1.5 is within 20% of it for the reviewer.
-  const left: Record<Adapter, [number, number]> = { "claude-code-local": [83, 90], "codex-local": [75, 90] };
+  // Claude's pace is 1.66 and Codex's 0.6, far more than 20% behind: the reviewer still goes to Codex (TECH-5390).
+  const left: Record<Adapter, [number, number]> = { "claude-code-local": [83, 90], "codex-local": [30, 90] };
   const resetIn = (hours: number) => new Date(Date.now() + hours * 60 * 60_000).toISOString();
   const quota = async ({ id, adapter }: { id: string; adapter: Adapter }): Promise<QuotaReading> => ({
     adapter,
@@ -82,7 +82,7 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
 });
 
 // TECH-5084: the issue's `sergeant:codex` label puts its worker on Codex though Claude is better
-// paced, and its reviewer still takes the other provider, Claude, under the diversity rule.
+// paced, and its reviewer still takes the other provider, Claude.
 test("a sergeant:codex issue's worker runs on Codex, and its reviewer on Claude", async () => {
   const launched: string[] = [];
   const exec: Exec = async (cmd, args) => {
@@ -117,12 +117,12 @@ test("a sergeant:codex issue's worker runs on Codex, and its reviewer on Claude"
   expect(await runner.status("run_w")).toMatchObject({ provider: "openai/codex", accountReason: expect.stringMatching(/^sergeant:codex: person:ann:codex-local/) });
   expect(launched[0]).toContain("codex exec");
 
-  // Codex now the better paced: the label does not hold the reviewer there; Claude is within 20% of it.
+  // Codex now the better paced: the label does not hold the reviewer there; it goes to the other provider, Claude.
   left["claude-code-local"] = 80;
   left["codex-local"] = 90;
   await runner.start({ ...reviewer, conversation: labelled });
   expect(launched[1]).toContain("claude -p");
-  expect(await runner.status("run_r")).toMatchObject({ provider: "anthropic/claude-code", accountReason: expect.stringContaining("within 20% of the best for another provider") });
+  expect(await runner.status("run_r")).toMatchObject({ provider: "anthropic/claude-code", accountReason: expect.stringContaining("the highest for another provider") });
 });
 
 // TECH-5179: a run spends only its task owner's quota. A run that fails on the account's quota sends

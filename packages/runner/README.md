@@ -59,7 +59,7 @@ agents being told by their commit identity, so no agent becomes a contributor in
 
 No installation setting turns Codex on (TECH-5390): the image carries both CLIs, and each run's agent
 comes from its task owner's registered accounts and their quota (below). An owner with both providers
-registered usually gets reviews from the other provider than the worker's. The earlier blocker, that the only Codex login was personal (UNF-710), is gone:
+registered gets reviews from the other provider than the worker's. The earlier blocker, that the only Codex login was personal (UNF-710), is gone:
 each run uses an account its task's owner registered for Sergeant to use.
 
 - **Credential.** Only the task owner's registered Codex account (Model accounts below), which they
@@ -76,8 +76,8 @@ each run uses an account its task's owner registered for Sergeant to use.
   The alert tells the account's holder to register it again or remove it. It never includes provider
   error text or token values. An API key does not age this way, but bills that API project per token
   instead of a ChatGPT plan.
-- **Model.** `gpt-5.5`, or the config's optional `codex.model`, unless `serve`/`canary` gets
-  `--worker-model`/`--reviewer-model` for a role whose `runners.<role>` is `codex-local`.
+- **Model.** `gpt-5.6-sol`, or the config's optional `codex.model`, in both roles.
+  `serve`/`canary`'s `--worker-model`/`--reviewer-model` name only Claude Code's model for the role.
 - **Usage.** `codex exec --json` reports tokens, not dollars. The run record keeps `tokens` (input,
   cached input, output, reasoning output; `sgt run` shows them) and, for a model with a price,
   `costUsd` estimated from them with `costBasis: "estimated"` (TECH-5021). Prices are OpenAI's
@@ -92,11 +92,11 @@ each run uses an account its task's owner registered for Sergeant to use.
   right before the launch (`quota.ts`: Claude's `/api/oauth/usage`, or the
   `anthropic-ratelimit-unified-*` headers of a one-token Haiku request when the token may only run
   inference; Codex's `chatgpt.com/backend-api/wham/usage` with a ChatGPT login), cached for five
-  minutes, and `choose.ts` decides deterministically (below). A reviewer prefers an account of another
-  provider than the latest worker that reported its PR (else the same, marked `sameProviderAsWorker`).
+  minutes, and `choose.ts` decides deterministically (below). A reviewer takes an account of another
+  provider than the latest worker that reported its PR whenever the owner has a usable one (else the
+  same, marked `sameProviderAsWorker`).
   The run record's `providerChoice` holds the choice, its reason, and the readings (`sgt run <id>`).
-  A role's `--worker-model`/`--reviewer-model` applies to the adapter the config's `runners.<role>`
-  names (Claude Code when unset); on the other one it runs that adapter's default model.
+  The config's `runners.worker`/`runners.reviewer` are deprecated and ignored (a warning is logged).
 - **Model accounts (TECH-5179).** Each run uses only its task owner's accounts (`RunSpec.owner`, the
   human assignee who delegated the issue), read at each launch from `accounts(ownerId)`, the ones that
   person registered; never the installation's credentials or anyone else's. `accounts.ts` and
@@ -107,8 +107,8 @@ each run uses an account its task's owner registered for Sergeant to use.
   cannot finish. An account whose provider reports only one window is scored on that window alone
   (TECH-5342). An account whose quota could not be read, or has a window without a reset time, is
   usable and ranks after every scored one; ties keep the registry's order, and no provider is preferred
-  for a worker (TECH-5390). A reviewer takes an account
-  of another provider than its worker's when that provider's best scores within 20% of the best.
+  for a worker (TECH-5390). A reviewer takes the best usable account
+  of another provider than its worker's whenever there is one, however it scores.
   Quota readings are cached for 4 minutes. There is no low-quota warning. Only the chosen account's
   credential enters the container. A run whose agent reports a quota or authentication failure (`failureReason`,
   from Claude Code's result text or Codex's failed turn) sets its account aside for an hour, or until the

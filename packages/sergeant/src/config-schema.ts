@@ -136,9 +136,9 @@ export const InstallationConfig = z.strictObject({
   /**
    * `workerBackend` is where workers run (TECH-5237): `local`, the default, in a container on this
    * host; `fargate`, one ECS Fargate task each, on what Terraform made (deploy/README.md, "Workers on
-   * Fargate"). Reviewers always run on this host. `worker` and `reviewer` no longer choose a provider:
-   * each run's comes from its owner's registered accounts (TECH-5390). They only say which agent a
-   * role's `--worker-model`/`--reviewer-model` flag is for, Claude Code when unset.
+   * Fargate"). Reviewers always run on this host. `worker` and `reviewer` are deprecated and ignored
+   * (TECH-5390): each run's provider comes from its owner's registered accounts. They still parse, so an
+   * older config loads, and `loadConfig` warns about them (`deprecatedSettings`).
    */
   runners: z
     .strictObject({ worker: z.enum(ADAPTERS).optional(), reviewer: z.enum(ADAPTERS).optional(), workerBackend: z.enum(["local", "fargate"]).optional() })

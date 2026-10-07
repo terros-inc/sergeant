@@ -62,19 +62,21 @@ test("a worker takes the highest score, whichever its provider", () => {
   expect(choose([unread(codex), unread(claude)])?.name).toBe("codex");
 });
 
-test("a reviewer takes the other provider within 20% of the best score, and the best when it is further behind", () => {
+// TECH-5390: a reviewer takes the other provider whenever the owner has a usable account of it, however
+// far behind its pace is, and its worker's provider only when there is none.
+test("a reviewer takes the other provider's best usable account, however it scores, and its worker's only without one", () => {
   const claude = account("claude", [100, HALF_WEEK], FULL); // pace 2
-  const near = account("codex", [80, HALF_WEEK], FULL, "codex-local"); // 1.6: exactly 80% of the best
-  expect(choose([claude, near], { avoid: "claude-code-local" })).toMatchObject({ name: "codex", reason: expect.stringContaining("within 20% of the best") });
-  // A materially less healthy other provider is not burned for diversity's sake.
-  const stressed = account("codex", [60, HALF_WEEK], FULL, "codex-local"); // 1.2
-  expect(choose([claude, stressed], { avoid: "claude-code-local" })).toMatchObject({ name: "claude", reason: expect.stringContaining("the highest") });
-  // Nor is a partial reading on the other provider preferred over a scored one.
+  const stressed = account("codex", [30, HALF_WEEK], FULL, "codex-local"); // 0.6: far more than 20% behind
+  const codexBest = account("codexBest", [60, HALF_WEEK], FULL, "codex-local"); // 1.2
+  expect(choose([claude, stressed], { avoid: "claude-code-local" })).toMatchObject({ name: "codex", reason: expect.stringContaining("the highest for another provider") });
+  expect(choose([claude, stressed, codexBest], { avoid: "claude-code-local" })?.name).toBe("codexBest");
+  // A partial reading on the other provider is usable, so it reviews too.
   const partial: Candidate<string> = { ...stressed, quota: { adapter: "codex-local", readAt: at(0), weekly: { remainingPercent: 99 }, fiveHour: { remainingPercent: 99 } } };
-  expect(choose([claude, partial], { avoid: "claude-code-local" })?.name).toBe("claude");
-  // With nothing scored, review still comes from the other provider.
-  const unknown: Candidate<string> = { ...claude, quota: undefined };
-  expect(choose([partial, unknown], { avoid: "codex-local" })?.name).toBe("claude");
+  expect(choose([claude, partial], { avoid: "claude-code-local" })?.name).toBe("codex");
+  // A spent one is not usable: the review stays on the worker's provider.
+  const spentCodex = account("codex", [0, HALF_WEEK], FULL, "codex-local");
+  expect(choose([claude, spentCodex], { avoid: "claude-code-local" })).toMatchObject({ name: "claude", reason: expect.stringContaining("the highest") });
+  expect(choose([claude], { avoid: "claude-code-local" })?.name).toBe("claude");
 });
 
 test("time left is at least an hour's share of the window: finite at its reset, and a sliver near reset stays behind a healthy account", () => {

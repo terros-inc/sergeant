@@ -157,9 +157,10 @@ in the report's prose and the reviewer's own `acceptance` findings are what the 
 
 The decision to let subagent reviews count belongs to the captain, once the comparison data exists.
 
-Vendors are configured per role: `defaults.profileForRole.reviewer` for required reviews and
-`auditReviewer` for audit reviews. Setting the audit reviewer to a different provider from the
-implementer yields a cross-provider signal from ordinary operation (§9).
+Vendors are not configured per role (TECH-5390): each run's provider comes from its task owner's
+registered accounts, and a reviewer, required or audit, takes a different provider from the
+implementer's whenever the owner has a usable account of one (04, Provider by quota). That yields a
+cross-provider signal from ordinary operation (§9).
 
 ## 6. Review disposition: the one deterministic hook
 

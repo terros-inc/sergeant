@@ -16,25 +16,32 @@ export { InstallationConfig } from "./config-schema.ts";
 
 type Role = RunSpec["role"];
 
-/** The model a Codex run uses when the config's `codex.model` names none (TECH-5390): Codex's own default for a ChatGPT login. */
-export const CODEX_DEFAULT_MODEL = "gpt-5.5";
+/** The model a Codex run uses when the config's `codex.model` names none (TECH-5390): the model the installations already run. */
+export const CODEX_DEFAULT_MODEL = "gpt-5.6-sol";
 
 /**
  * Each role's model on each adapter, for `containerRunner` (TECH-5009). Which adapter a run uses comes
  * from its owner's registered accounts and their quota (TECH-5117, TECH-5390), never from here. A
- * role's model flag is for the adapter `runners.<role>` names, Claude Code when unset; otherwise Codex
- * runs `codex.model`, or `CODEX_DEFAULT_MODEL`, and Claude Code "opus". With them, the config's Codex
- * prices (TECH-5021).
+ * role's `--worker-model`/`--reviewer-model` flag is its Claude Code model, "opus" without one; Codex
+ * runs `codex.model`, or `CODEX_DEFAULT_MODEL`, in both roles. With them, the config's Codex prices
+ * (TECH-5021).
  */
-export function runnerRoles(config: InstallationConfig, modelFlags: Record<Role, string | undefined>) {
-  const models = (role: Role): Record<Adapter, string> => {
-    const flag = (a: Adapter) => (a === (config.runners?.[role] ?? "claude-code-local") ? modelFlags[role] : undefined);
-    return { "claude-code-local": flag("claude-code-local") ?? "opus", "codex-local": flag("codex-local") ?? config.codex?.model ?? CODEX_DEFAULT_MODEL };
-  };
+export function runnerRoles(config: InstallationConfig, claudeModels: Record<Role, string | undefined>) {
+  const codex = config.codex?.model ?? CODEX_DEFAULT_MODEL;
+  const models = (role: Role): Record<Adapter, string> => ({ "claude-code-local": claudeModels[role] ?? "opus", "codex-local": codex });
   return {
     models: { worker: models("worker"), reviewer: models("reviewer") },
     ...(config.codex?.prices && { codexPrices: config.codex.prices }),
   };
+}
+
+/** A warning for each setting the config still has that is ignored now: `runners.worker`/`runners.reviewer` (TECH-5390). */
+export function deprecatedSettings(config: InstallationConfig): string[] {
+  return (["worker", "reviewer"] as const).flatMap((role) =>
+    config.runners?.[role] === undefined
+      ? []
+      : [`runners.${role} is deprecated and ignored: each run's provider comes from its owner's registered accounts (TECH-5390). Remove it from the config.`],
+  );
 }
 
 /**
@@ -76,8 +83,10 @@ export function githubLoginLookup(config: InstallationConfig): (profileUrl: stri
   return (profileUrl) => logins.get(profileUrl.toLowerCase());
 }
 
-export async function loadConfig(file: string): Promise<InstallationConfig> {
-  return InstallationConfig.parse(JSON.parse(await readFile(file, "utf8")));
+export async function loadConfig(file: string, warn: (line: string) => void = console.warn): Promise<InstallationConfig> {
+  const config = InstallationConfig.parse(JSON.parse(await readFile(file, "utf8")));
+  for (const line of deprecatedSettings(config)) warn(`${file}: ${line}`);
+  return config;
 }
 
 export const run = promisify(execFile);

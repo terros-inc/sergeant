@@ -44,7 +44,9 @@ test("a reviewer on its worker's provider says so", async () => {
   const reviewer = await pick([claude, codex], left, { role: "reviewer", workerAdapter: "claude-code-local" });
   expect(reviewer.account.id).toBe(codex.id);
   expect(reviewer.providerChoice?.sameProviderAsWorker).toBeUndefined();
-  const shared = await pick([claude, codex], { ...left, [codex.id]: [43, 90] }, { role: "reviewer", workerAdapter: "claude-code-local" });
+  // Far behind still reviews (TECH-5390); only with no usable Codex account does Claude review its own worker.
+  expect((await pick([claude, codex], { ...left, [codex.id]: [5, 90] }, { role: "reviewer", workerAdapter: "claude-code-local" })).account.id).toBe(codex.id);
+  const shared = await pick([claude, codex], { ...left, [codex.id]: [0, 90] }, { role: "reviewer", workerAdapter: "claude-code-local" });
   expect(shared).toMatchObject({ account: { id: claude.id }, providerChoice: { sameProviderAsWorker: true } });
 });
 
