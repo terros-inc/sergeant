@@ -143,6 +143,64 @@ export const ReviewReport = z.object({
 });
 export type ReviewReport = z.infer<typeof ReviewReport>;
 
+/**
+ * The reviewer report as a JSON Schema, the canonical `s2-review-report/1` shape a Codex reviewer is
+ * launched with so its structured result cannot be the worker report format (TECH-5392). Authored by
+ * hand rather than derived from `ReviewReport`, whose forgiving coercions (verdict and severity
+ * spellings, missing ids) do not translate to a schema and are not needed when the shape is fixed at
+ * generation time. Kept in step with `ReviewReport` by `runs.test.ts`. Strict-mode compatible for
+ * OpenAI structured output: every property is required and every object forbids extra ones; a field
+ * that may be absent is nullable instead (the parser reads `null` as absent).
+ */
+export const REVIEW_REPORT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reportVersion", "reviewed", "verdict", "findings", "unreadableInputs", "dependencies", "summary"],
+  properties: {
+    reportVersion: { type: "string", enum: ["s2-review-report/1"] },
+    reviewed: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["repo", "number", "headSha"],
+        properties: { repo: { type: "string" }, number: { type: "integer" }, headSha: { type: "string" } },
+      },
+    },
+    verdict: { type: "string", enum: ["approve", "changes_requested", "needs_human"] },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "severity", "category", "description", "location"],
+        properties: {
+          id: { type: "string" },
+          severity: { type: "string", enum: ["blocking", "non_blocking", "nit"] },
+          category: { type: ["string", "null"], enum: ["acceptance", null] },
+          description: { type: "string" },
+          location: { type: ["string", "null"] },
+        },
+      },
+    },
+    unreadableInputs: { type: "array", items: { type: "string" } },
+    dependencies: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["issue", "relation", "why"],
+        properties: {
+          issue: { type: "string" },
+          relation: { type: "string", enum: ["blocked_by", "blocks"] },
+          why: { type: "string" },
+        },
+      },
+    },
+    summary: { type: "string" },
+  },
+} as const;
+
 /** One quota window as its provider reports it: the percent left and, when known, when it resets. */
 const QuotaWindow = z.object({ remainingPercent: z.number(), resetsAt: z.string().optional() });
 /** A quota window as a person names it. */
@@ -250,6 +308,18 @@ export type RunRecord = z.infer<typeof RunRecord>;
 
 export type ParsedReport<T> = { ok: true; report: T } | { ok: false; error: string };
 
+/** Parses a run report from raw JSON text (a Codex reviewer's structured result, TECH-5392). */
+export function parseJsonReport<T>(text: string, schema: z.ZodType<T>): ParsedReport<T> {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    return { ok: false, error: `report is not JSON: ${(e as Error).message}` };
+  }
+  const parsed = schema.safeParse(json);
+  return parsed.success ? { ok: true, report: parsed.data } : { ok: false, error: z.prettifyError(parsed.error) };
+}
+
 /**
  * Parses the one fenced `sergeant-report` JSON block that ends a run's Markdown report (05 §6).
  * Anything else (no block, several, bad JSON, wrong shape) is an error, never a guess.
@@ -260,14 +330,5 @@ export function parseReport<T>(markdown: string, schema: z.ZodType<T>): ParsedRe
   if (body === undefined) {
     return { ok: false, error: `expected one sergeant-report block, found ${blocks.length}` };
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(body);
-  } catch (e) {
-    return { ok: false, error: `sergeant-report block is not JSON: ${(e as Error).message}` };
-  }
-  const parsed = schema.safeParse(json);
-  return parsed.success
-    ? { ok: true, report: parsed.data }
-    : { ok: false, error: z.prettifyError(parsed.error) };
+  return parseJsonReport(body, schema);
 }

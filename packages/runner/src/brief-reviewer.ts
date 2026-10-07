@@ -144,5 +144,20 @@ with evidence), ending with exactly one fenced block tagged \`sergeant-report\` 
   "dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }],
   "summary": "<one paragraph>" }
 \`\`\`
+
+\`reportVersion\` must be exactly \`s2-review-report/1\`. The required fields are \`reviewed\` (a
+non-empty array of the heads above), \`verdict\` (exactly one of \`approve\`, \`changes_requested\`,
+or \`needs_human\`), and \`findings\`. A minimal report with nothing to change:
+
+\`\`\`
+{ "reportVersion": "s2-review-report/1",
+  "reviewed": [${subjects.map((s) => `{ "repo": "${s.repo}", "number": ${s.number}, "headSha": "${s.headSha}" }`).join(", ")}],
+  "verdict": "approve", "findings": [], "unreadableInputs": [], "dependencies": [], "summary": "Approve, no findings." }
+\`\`\`
+
+The worker report format is **wrong for a reviewer**: never write \`reportVersion:
+"s2-sergeant-report/1"\` or any version other than \`s2-review-report/1\`, and never use the worker's
+fields (\`outcome\`, \`pullRequests\` and \`pullRequests[].decision\`, \`knownGaps\`,
+\`addressedFindings\`). Use \`verdict\` and \`findings\`, not \`outcome\` and \`reviewed[]\` claims.
 `;
 }

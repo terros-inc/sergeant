@@ -126,15 +126,26 @@ esac || exit 1
 unset CODEX_CREDENTIAL
 `;
 
+/**
+ * A Codex reviewer is launched with the reviewer report schema so its structured result is a valid
+ * `s2-review-report/1` and never the worker report format Codex otherwise mixes in (TECH-5392). The
+ * schema file (written into the workspace at `start`) is passed as `$4`; the structured result is
+ * written here and read back as the authoritative report (runner.ts `agentReport`).
+ */
+export const CODEX_REVIEW_SCHEMA_PATH = "/workspace/.sergeant/review-schema.json";
+export const CODEX_REVIEW_OUTPUT_PATH = "/workspace/.sergeant/review-report.json";
+
 const codex: Agent = {
   provider: "openai/codex",
   credentialEnv: "CODEX_CREDENTIAL",
-  // Codex has no spend cap; the wall-time limit is the only backstop (04 §7), and "$3" is unused.
+  // Codex has no spend cap; the wall-time limit is the only backstop (04 §7), and "$3" is unused. "$4"
+  // is the reviewer report schema path, set only for a reviewer (TECH-5392); empty otherwise.
   script: `
-wall="$1"; model="$2"
+wall="$1"; model="$2"; schema="$4"
 ${CODEX_LOGIN}
+if [ -n "$schema" ]; then set -- --output-schema "$schema" --output-last-message "${CODEX_REVIEW_OUTPUT_PATH}"; else set --; fi
 exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-git-repo-check \\
-  --dangerously-bypass-approvals-and-sandbox "${PROMPT}"
+  --dangerously-bypass-approvals-and-sandbox "$@" "${PROMPT}"
 `,
   parse(stdout, stderr = "") {
     let sessionId: string | undefined;

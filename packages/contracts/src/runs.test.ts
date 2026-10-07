@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseReport, ReviewReport, WorkerReport } from "./runs.ts";
+import { parseJsonReport, parseReport, REVIEW_REPORT_SCHEMA, ReviewReport, WorkerReport } from "./runs.ts";
 
 // Worker and reviewer reports are untrusted external text. A lenient parse here could turn a
 // malformed or unjustified "skip review" into a merge standing (L1), so these boundaries are tested.
@@ -92,4 +92,37 @@ test("TECH-5259: a review report's unambiguous slips are read, never toward a me
   // What a merge rests on is still exact: an unknown verdict, or no reviewed head, rejects the report.
   expect(parseReport(report({ ...review, verdict: "looks good" }), ReviewReport).ok).toBe(false);
   expect(parseReport(report({ ...review, reviewed: undefined }), ReviewReport).ok).toBe(false);
+});
+
+// TECH-5392: a Codex reviewer is launched against REVIEW_REPORT_SCHEMA, so its structured result is a
+// valid s2-review-report/1 by construction. The schema and the parser must stay in step: the canonical
+// shape it constrains Codex to (every field present, optionals as null) must parse, and its enums must
+// be the contract's own canonical values so no spelling can slip through.
+test("the Codex reviewer schema is in step with ReviewReport", () => {
+  const structured = {
+    reportVersion: "s2-review-report/1",
+    reviewed: [{ repo: "o/r", number: 7, headSha: "a".repeat(40) }],
+    verdict: "changes_requested",
+    findings: [
+      { id: "f1", severity: "blocking", category: "acceptance", description: "d", location: "x.ts:1" },
+      { id: "f2", severity: "nit", category: null, description: "n", location: null },
+    ],
+    unreadableInputs: [],
+    dependencies: [],
+    summary: "s",
+  };
+  const parsed = parseJsonReport(JSON.stringify(structured), ReviewReport);
+  expect(parsed.ok).toBe(true);
+  if (!parsed.ok) return;
+  expect(parsed.report.verdict).toBe("changes_requested");
+  expect(parsed.report.findings[0]).toMatchObject({ id: "f1", severity: "blocking", category: "acceptance", location: "x.ts:1" });
+  // A null optional reads as absent, never a value.
+  expect(parsed.report.findings[1]?.category).toBeUndefined();
+  expect(parsed.report.findings[1]?.location).toBeUndefined();
+
+  const props = REVIEW_REPORT_SCHEMA.properties;
+  expect(props.reportVersion.enum).toEqual(["s2-review-report/1"]);
+  expect(props.verdict.enum).toEqual(["approve", "changes_requested", "needs_human"]);
+  expect(props.findings.items.properties.severity.enum).toEqual(["blocking", "non_blocking", "nit"]);
+  expect(props.dependencies.items.properties.relation.enum).toEqual(["blocked_by", "blocks"]);
 });

@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import { issueRevision } from "@terros/sergeant-contracts";
 import { CODEX, ended, GH, ON_CODEX, REPORT, spec, started } from "./runner-fixtures.ts";
@@ -155,4 +157,69 @@ test("a run's record says whether its report is missing or malformed", async () 
   const malformed = await ended(ON_CODEX, done, REPORT.replace('"summary": "s", ', ''));
   expect(malformed).toMatchObject({ status: "succeeded", report: null, reportProblem: "malformed" });
   expect((await ended(ON_CODEX, done)).reportProblem).toBeUndefined();
+});
+
+// TECH-5392: a Codex reviewer is launched against the report schema, so its structured result is a valid
+// s2-review-report/1 even when it fills the Markdown block with the invented worker report format. The
+// schema file enters its workspace and `codex exec` runs with `--output-schema`.
+const reviewerRun = {
+  ...spec,
+  role: "reviewer" as const,
+  subject: [{ repo: "o/canary", number: 7, headSha: "a".repeat(40) }],
+  pullRequests: [],
+};
+const PR_JSON = { html_url: "https://github.com/o/canary/pull/7", title: "T", body: "B", base: { ref: "main" } };
+const reviewerOpts = { ...ON_CODEX, fetch: async () => new Response(JSON.stringify(PR_JSON), { headers: { "content-type": "application/json" } }) };
+const DONE = '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}';
+// The worker report format Codex wrongly wrote into the fenced block (the TECH-5392 bug).
+const INVENTED = `Approve, no findings.
+
+\`\`\`sergeant-report
+{ "reportVersion": "s2-sergeant-report/1", "outcome": "approved", "pullRequests": [{ "decision": "approve" }], "knownGaps": [], "addressedFindings": [] }
+\`\`\`
+`;
+const STRUCTURED = JSON.stringify({
+  reportVersion: "s2-review-report/1",
+  reviewed: [{ repo: "o/canary", number: 7, headSha: "a".repeat(40) }],
+  verdict: "approve",
+  findings: [],
+  unreadableInputs: [],
+  dependencies: [],
+  summary: "Approve, no findings.",
+});
+
+async function endedReview(markdown: string | undefined, structured: string | undefined, logs = DONE) {
+  const { runner, host, rootDir } = await started(reviewerOpts, reviewerRun);
+  const ws = join(rootDir, "run_t1", "workspace");
+  if (markdown !== undefined) await writeFile(join(ws, "sergeant-report.md"), markdown);
+  if (structured !== undefined) await writeFile(join(ws, ".sergeant", "review-report.json"), structured);
+  host.docker.running = false;
+  host.docker.logs = logs;
+  return { record: await runner.status("run_t1"), host, rootDir };
+}
+
+test("a Codex reviewer is launched with the report schema in its workspace", async () => {
+  const { host, rootDir } = await started(reviewerOpts, reviewerRun);
+  const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
+  expect(run?.args.join(" ")).toContain("--output-schema");
+  expect(run?.args).toContain("/workspace/.sergeant/review-schema.json");
+  const schema = JSON.parse(await readFile(join(rootDir, "run_t1", "workspace", ".sergeant", "review-schema.json"), "utf8"));
+  expect(schema.properties.verdict.enum).toEqual(["approve", "changes_requested", "needs_human"]);
+});
+
+test("a Codex reviewer's invented worker-format block is overridden by its valid structured result", async () => {
+  const { record } = await endedReview(INVENTED, STRUCTURED);
+  expect(record).toMatchObject({ status: "succeeded", role: "reviewer", report: { reportVersion: "s2-review-report/1", verdict: "approve" } });
+  expect(record.reportProblem).toBeUndefined();
+});
+
+test("a Codex reviewer with no structured result still reads a valid Markdown block", async () => {
+  const valid = `Approve.\n\n\`\`\`sergeant-report\n${STRUCTURED}\n\`\`\`\n`;
+  const { record } = await endedReview(valid, undefined);
+  expect(record).toMatchObject({ status: "succeeded", report: { verdict: "approve" } });
+});
+
+test("a Codex reviewer whose structured result and Markdown block are both malformed stops as malformed", async () => {
+  const { record } = await endedReview(INVENTED, '{ "reportVersion": "s2-sergeant-report/1", "outcome": "approved" }');
+  expect(record).toMatchObject({ status: "succeeded", report: null, reportProblem: "malformed" });
 });
