@@ -35,8 +35,9 @@ export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registe
 /** Registration refused for a reason the caller can act on; its message never quotes the credential. */
 export class AccountRefused extends Error {}
 
-// Refusals in plain English (TECH-5202): a person reads them, not an operator, so they name no config.
-const NOT_SET_UP = "This Sergeant isn't set up for account registration yet. Ask an approver to enable it.";
+// Refusals in plain English (TECH-5202): a person reads them, not an operator, so they name no config;
+// the one an approver must act on names the page that says how.
+const NOT_SET_UP = `This Sergeant isn't set up for account registration yet. Ask an approver to enable it (deploy/README.md, "Model accounts").`;
 const PROVIDER_NAME: Record<Provider, string> = { claude: "Claude", codex: "Codex" };
 
 export type AccountRegistry = ReturnType<typeof accountRegistry>;

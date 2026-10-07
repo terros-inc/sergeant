@@ -47,6 +47,17 @@ export SGT_API_URL=https://<your installation's hostname>
 Without it, `sgt` calls `http://127.0.0.1:8080` (a Sergeant running on your own machine).
 `--api <url>` overrides it for one command.
 
+**Several installations.** `sgt` keeps one login per API URL (§4), so the URL is what chooses the
+installation; there is no profiles file. Give each one an alias in your shell profile instead of the
+`export`, and log in once through each:
+
+```sh
+alias sgtw='SGT_API_URL=https://<work installation hostname> sgt'
+alias sgtp='SGT_API_URL=https://<other installation hostname> sgt'
+sgtw login && sgtp login
+sgtw task list
+```
+
 ## 4. Log in
 
 ```sh
@@ -162,8 +173,9 @@ sgt account remove claudeWork                   # remove yours, then revoke it w
   id, `person:<linear-user-id>:<name>`). Runs already on them finish on them, and it does not revoke
   a copy: the person, or their workspace admin, revokes the credential as above.
 - The installation must be configured for registration: a hosted Sergeant is out of the box
-  (deploy/README.md), and a `serve` elsewhere needs `registeredAccountsSecret` in its config.
-  Otherwise `register` says so.
+  (deploy/README.md), except one whose host was first booted before TECH-5204, and a `serve`
+  elsewhere needs `registeredAccountsSecret` in its config. Otherwise `register` says so, and your
+  operator follows deploy/README.md, "Model accounts".
 
 ## 7. Restarting or updating Sergeant (approvers)
 

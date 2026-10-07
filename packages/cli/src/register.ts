@@ -47,7 +47,7 @@ export function registrationRefusal(me: WhoAmI, provider: Provider): { code: Api
   if (!me.user) return { code: "forbidden", message: "an account is registered by its own person: sign in with `sgt login`" };
   const ask = `Ask an approver${me.approvers.length ? ` (${me.approvers.join(" or ")})` : ""}`;
   const { providers } = me.registration;
-  if (providers.length === 0) return { code: "bad_request", message: `This Sergeant isn't set up for account registration yet. ${ask} to enable it.` };
+  if (providers.length === 0) return { code: "bad_request", message: `This Sergeant isn't set up for account registration yet. ${ask} to enable it (deploy/README.md, "Model accounts").` };
   if (!providers.includes(provider)) {
     const takes = providers.map((p) => NAME[p]).join(" and ");
     return { code: "bad_request", message: `This Sergeant doesn't run ${NAME[provider]} accounts, only ${takes}. ${ask} if you need ${NAME[provider]}.` };

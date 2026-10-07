@@ -67,7 +67,7 @@ test("account register asks first, refuses before any sign-in, and says what to 
   expect(await refusedBy(whoami({ registration: { providers: [] } }), "claude")).toEqual({
     code: 1,
     out: "",
-    err: "sgt: bad_request: This Sergeant isn't set up for account registration yet. Ask an approver (Grace Hopper or Linus Torvalds) to enable it.\n",
+    err: "sgt: bad_request: This Sergeant isn't set up for account registration yet. Ask an approver (Grace Hopper or Linus Torvalds) to enable it (deploy/README.md, \"Model accounts\").\n",
   });
   expect((await refusedBy(whoami({ registration: { providers: ["claude"] }, approvers: [] }), "codex")).err).toContain(
     "This Sergeant doesn't run Codex accounts, only Claude. Ask an approver if you need Codex.",

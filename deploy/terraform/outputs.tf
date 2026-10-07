@@ -23,3 +23,8 @@ output "runner_repository_url" {
 output "fargate_runner_parameter" {
   value = aws_ssm_parameter.fargate_runner.name
 }
+
+output "registered_accounts_secret" {
+  description = "The registered-accounts secret's name: on a host first booted before TECH-5204, the installation config's `registeredAccountsSecret` (README, Model accounts)."
+  value       = aws_secretsmanager_secret.registered_accounts.name
+}
