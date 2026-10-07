@@ -527,9 +527,9 @@ aws ssm put-parameter --name /sergeant/v2/installation-config --type String --ov
 ```
 
 The unit file no longer passes `--max-tasks`, so the config is the single source; an explicit flag
-would still win over it. Terros's hosts run 4 tasks through a stopgap systemd drop-in that overrides
-`ExecStart` with `--max-tasks 4`. Once the config says `"maxTasks": 4` and an install with this change
-has run, find the drop-in with `systemctl cat sergeant` (the file under
+would still win over it. If your host was given more slots through a systemd drop-in that overrides
+`ExecStart` with `--max-tasks <n>`, then once the config says `"maxTasks": <n>` and an install with this
+change has run, find the drop-in with `systemctl cat sergeant` (the file under
 `/etc/systemd/system/sergeant.service.d/` that sets `ExecStart`), delete it, and reload, so the config
 and the unit file's own `ExecStart` apply:
 

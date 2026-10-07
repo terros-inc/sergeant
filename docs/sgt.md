@@ -209,8 +209,8 @@ list them; an approver enrolls or removes one with their own Linear login, no AW
 
 ```sh
 sgt repo list                                     # each repository and how Sergeant merges in it
-sgt admin repo add terros-inc/example --merge-method rebase   # squash unless you say otherwise
-sgt admin repo remove terros-inc/example
+sgt admin repo add <owner>/<repo> --merge-method rebase   # squash unless you say otherwise
+sgt admin repo remove <owner>/<repo>
 ```
 
 A repository is enrolled only once both of Sergeant's GitHub Apps can reach it. The change is written
