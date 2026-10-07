@@ -12,7 +12,7 @@ host runs with (`/sergeant/v2/installation-config`). The repository holds exampl
 
 | Path | What it is |
 |---|---|
-| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge`) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or six with the webhook signing secrets, plus an adopted registered-accounts secret if it stays listed); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
+| `terraform/` | The host: one Graviton instance (Ubuntu 24.04, `m7g.xlarge` by default; smaller with workers on Fargate) in the account's default VPC, an encrypted root and a separate encrypted data volume, an Elastic IP, the hostname's A record, a security group with 443 and 80 only, and an instance role with SSM core, its own log group, `ssm:GetParameter` and `ssm:PutParameter` on the config parameter (and an explicit deny on reading every other parameter, which SSM core would otherwise allow; the write is for an approver's `sgt admin repo add | remove`), and `secretsmanager:GetSecretValue` on exactly the listed secrets (four, or six with the webhook signing secrets, plus an adopted registered-accounts secret if it stays listed); and the registered-accounts secret (`{"accounts":[]}` at first, an existing one adopted), with `secretsmanager:GetSecretValue` and `secretsmanager:PutSecretValue` on only it. |
 | `terraform/fargate.tf` | Workers on ECS Fargate (TECH-5237): the runner image's ECR repository, the `sergeant-v2-runs` cluster and security group (no ingress), the `/sergeant/v2/runs` log group, the tasks' execution role (it reads only `sergeant/runs/*` secrets, pulls the image, and writes the run logs; there is no task role), the host's permissions to run, stop, and collect tasks, and the `/sergeant/v2/fargate-runner` parameter telling the host where they run. Workers use it only once the installation config says so. |
 | `terraform/init.sh` | `EXPECTED_ACCOUNT_ID=<account> ./init.sh`: refuses unless the credentials are that account, then reads the infrastructure-config parameter, refuses any shape but the expected one, writes the auto-loaded `terraform.tfvars.json`, and runs `terraform init` against its state bucket (key fixed at `v2/terraform.tfstate`), allowing only that account. Run before every plan and apply. |
 | `terraform/infrastructure-config.example.json` | The shape of that parameter, exactly: `backend` (the existing state bucket and its region, nothing else) and `variables` (only `variables.tf`'s variables, `account_id` the expected account). |
@@ -94,7 +94,7 @@ anything, and the state backend and the provider refuse any other account.
 4. **Control-plane App** is installed on every enrolled repository.
 5. **Enrolled repositories' rulesets**: the default branch requires a pull request and declares
    required status checks, and the worker App is not a bypass actor. Without required checks Sergeant
-   never merges there (GitHub Apps and rulesets below).
+   never merges there (GitHub Apps and rulesets below, which has a ruleset to copy).
 6. **Linear**: the token acts as the agent user in `linear.agentUserId` (`live-check` verifies it).
 7. **Human login** for `sgt` (below): the config's `humans`, and the callback URL on the Linear app.
 
@@ -125,6 +125,7 @@ mutation:
    sgt task list
    ```
 
+   Someone who uses more than one installation picks it by URL ([`docs/sgt.md`](../docs/sgt.md) §3).
 5. From a logged-out shell, check every published operational route. Each must return `401`; the
    three POSTs must not change a task or run. Placeholder ids are sufficient because authentication
    happens before resource lookup or body parsing. Each call names a current `sgt` version, since
@@ -143,6 +144,22 @@ mutation:
 
 `GET /v1/auth/config` is the sole unauthenticated `/v1` exception: `sgt login` needs the public
 `linearClientId` from it. It exposes no task, run, user, or installation-admin data.
+
+**On an existing installation** set up before `humans`, the same steps apply, with these differences:
+
+- The OAuth application may already list `http://localhost:4546/callback` (another installation
+  sharing the app, or an earlier attempt); then leave it. Its client id is on the same page, under
+  Settings, API, OAuth applications.
+- `teams` takes team keys (the prefix of the team's issue identifiers, such as `ENG`), not team names
+  or ids. `approvers` takes Linear user ids from this installation's own Linear workspace: the same
+  person has a different id in every workspace, and an id from another one never matches.
+- Until `humans` is live, `sgt admin` cannot sign in, so step 3's update goes over SSM (Update below).
+- It is live once `GET /v1/auth/config` answers `200` with `{"linear":{"clientId":"…"}}` instead of
+  `404`:
+
+  ```sh
+  curl -sS -H "Sergeant-Cli-Version: $(sgt --version | cut -d' ' -f2)" https://<hostname>/v1/auth/config
+  ```
 
 ### Webhooks
 
@@ -195,7 +212,8 @@ To go back, remove `runners` (or set the role to `claude-code-local`) and update
 
 Workers can run as one ECS Fargate task each, with their own 2 vCPU and 8 GiB, so they stop
 competing with the host for CPU and memory. Reviewers stay on the host. How a run works is in
-`packages/runner/README.md`, under Fargate.
+`packages/runner/README.md`, under Fargate. A new installation and an existing one take the same
+steps, in this order; each one needs the one before it.
 
 1. **Apply** (Apply above). The plan adds `terraform/fargate.tf`'s resources and an inline policy on
    the host's role, and changes the host's deny on other parameters to let it read
@@ -205,10 +223,14 @@ competing with the host for CPU and memory. Reviewers stay on the host. How a ru
    deleted by hand once workers run here.
 2. **Update** the host (Update below). The install now pushes the runner image it built to
    `sergeant-v2-runner`, tagged by the installed commit, and writes `/etc/sergeant/fargate-runner.json`
-   (`pushed the runner image to …` in its output). Workers still run on the host.
+   (`pushed the runner image to …` in its output). Workers still run on the host. On an installation
+   whose config has no `humans` yet, `sgt admin update` cannot sign in: run this update over SSM
+   (`sergeant-update main`, the operator's command under Update).
 3. **Turn it on.** Add `"workerBackend": "fargate"` to the installation config's `runners`, put the
    parameter, and update (or `sgt admin restart`). `serve` logs `workers run on Fargate; Fargate image …`
-   at startup, and refuses to start if `/etc/sergeant/fargate-runner.json` is missing. From then on an
+   at startup (`grep 'workers run on' /var/log/sergeant/serve.log | tail -1` on the host, or the
+   `<instance id>/serve` log stream; `workers run on this host` means the config did not take), and
+   refuses to start if `/etc/sergeant/fargate-runner.json` is missing. From then on an
    install whose push fails stops before installing the new config or restarting `serve`, so the
    previous installation stays on disk (`host/install-config.sh`, TECH-5273).
 4. **Live check.** Let one controlled worker run start. Its `runs/<run>/run.json` says
@@ -227,6 +249,14 @@ competing with the host for CPU and memory. Reviewers stay on the host. How a ru
 
 To go back, remove `workerBackend` (or set it to `local`) and update: new workers start on the host,
 and runs already on Fargate are still read, stopped, and collected there.
+
+**A smaller host.** With workers on Fargate the host runs only `serve`, reasoning, the reviewer
+containers, and each install's runner-image build, so the default `m7g.xlarge` (sized for workers on
+the host) is more than it needs. `t4g.large` (2 vCPU, 8 GiB) is enough; 4 GiB is too tight for a
+reviewer installing a monorepo's dependencies. Set `instance_type` in the infrastructure-config
+parameter, `./init.sh`, plan, and apply: the plan changes the instance in place, which AWS does by
+stopping and starting it, so `serve` is down for a few minutes and restarts at boot; the Elastic IP,
+the data volume, and the state on it are kept. Go back to a larger type before turning Fargate off.
 
 A worker's brief, the issue's files, and its two credentials travel in its secret, which Secrets
 Manager caps at 64 KiB: files that do not fit are left out and named in the brief as not downloaded,
@@ -256,9 +286,15 @@ issue saying what to do, and nothing starts.
    host, where `serve` uses it unless the installation config sets `registeredAccountsSecret`.
    Terraform never changes the value afterwards: the host owns it, and the initial value stays in
    a version labelled `sergeant-initial`, never current once someone registers.
-   - **An existing secret** (made by hand before TECH-5204; Terros:
-     `sergeant/terros/registered-accounts`) is adopted, not recreated: with `registered_accounts_secret`
-     naming it, the next plan shows it imported (its description and tags updated in place) and a
+   - **A host first booted before TECH-5204** never learns the name: the first boot writes it to
+     `/etc/sergeant/host.env`, which nothing rewrites afterwards (Apply above). After the apply that
+     creates the secret, `sgt account register` still answers "This Sergeant isn't set up for account
+     registration yet". Set the installation config's `registeredAccountsSecret` to the secret's name
+     (`terraform output -raw registered_accounts_secret` once an apply has recorded that output;
+     `sergeant/v2/registered-accounts` unless `registered_accounts_secret` says otherwise), put the parameter, and run `sgt admin restart` (or
+     an update). Registration works from that restart on.
+   - **An existing secret** (made by hand before TECH-5204, under another name) is adopted, not
+     recreated: with `registered_accounts_secret` naming it, the next plan shows it imported (its description and tags updated in place) and a
      `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` (the reason `secret_names` accepts up to seven names) or leave it: the role reads and writes it through its own grant either way.
    - **Another name, later, is unsupported.** Changing `registered_accounts_secret` would replace the
      secret, which holds every registered credential, so its `prevent_destroy` makes the plan fail
@@ -491,9 +527,9 @@ aws ssm put-parameter --name /sergeant/v2/installation-config --type String --ov
 ```
 
 The unit file no longer passes `--max-tasks`, so the config is the single source; an explicit flag
-would still win over it. Terros's hosts run 4 tasks through a stopgap systemd drop-in that overrides
-`ExecStart` with `--max-tasks 4`. Once the config says `"maxTasks": 4` and an install with this change
-has run, find the drop-in with `systemctl cat sergeant` (the file under
+would still win over it. If your host was given more slots through a systemd drop-in that overrides
+`ExecStart` with `--max-tasks <n>`, then once the config says `"maxTasks": <n>` and an install with this
+change has run, find the drop-in with `systemctl cat sergeant` (the file under
 `/etc/systemd/system/sergeant.service.d/` that sets `ExecStart`), delete it, and reload, so the config
 and the unit file's own `ExecStart` apply:
 
@@ -626,7 +662,7 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   secret is set (Webhooks above).
 - **`humans`** (optional) says who may use `sgt` and the client API, each with their own Linear login:
   `{ "linearClientId": "<the Linear OAuth app's client id>", "teams": ["<team key>"], "approvers":
-  ["<Linear user id>"] }`. Until all three are set the API fails closed (Public human API and login for
+  ["<Linear user id>"] }`. Without it the API fails closed (Public human API and login for
   `sgt` above).
 - **`release`** (optional) makes the host update itself to green commits of `main`: `{ "channel":
   "main" }` or `{ "channel": "soaked", "soakMinutes": 90 }`, with `"paused": true` to stop (Automatic
@@ -656,6 +692,57 @@ Gate check passes, immediately before its SHA-guarded merge. A failed approval s
 the base branch's declared required checks count toward a merge (ruleset `required_status_checks`), so
 a repository with none cannot be merged; a repository's `"observedChecksFallback": true` instead
 treats every check observed on the exact head as required.
+
+**A ruleset for a newly enrolled repository.** Someone with admin on the repository creates it once,
+before or right after `sgt admin repo add`. It covers the default branch: no deletion or force push, a
+pull request with one approving review (stale ones dismissed on a new push), one required check from
+GitHub Actions (`integration_id` 15368), and the repository admin role (`RepositoryRole` 5) as an
+`always` bypass actor, so the owner can still merge their own PRs; the worker App is no admin, so it
+cannot bypass. Prefer one aggregate job as the required check over listing every job, so the ruleset
+need not change when the workflow does; `CI complete` below is that job's name (the check's name is
+the job's `name`):
+
+```sh
+cat >ruleset.json <<'EOF'
+{
+  "name": "sergeant",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "bypass_actors": [{ "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always" }],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "pull_request", "parameters": {
+        "required_approving_review_count": 1, "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false, "require_last_push_approval": false,
+        "required_review_thread_resolution": false } },
+    { "type": "required_status_checks", "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [{ "context": "CI complete", "integration_id": 15368 }] } }
+  ]
+}
+EOF
+gh api -X POST repos/<owner>/<repo>/rulesets --input ruleset.json
+```
+
+The aggregate job, in the repository's workflow, fails when any job it waits for failed or was canceled:
+
+```yaml
+  ci-complete:
+    name: CI complete
+    needs: [build, test]   # every other job
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+```
+
+Once the ruleset is on, every PR to the default branch, not only Sergeant's, needs an approving review
+or an admin's bypass to merge. `live-check --repo <owner/name>` (Live check on the host above, or
+Manual commands below) then confirms it: an approving review required, required checks declared, and
+no bypass for the worker App.
 
 ### Manual commands: `live-check`, `smoke`, `evidence`, `canary`, and `serve`
 

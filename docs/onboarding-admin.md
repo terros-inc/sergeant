@@ -18,7 +18,8 @@ Who does what:
 Access needs an active Linear account in the installation's workspace that is a member of one of the
 teams in `humans.teams`, checked on every call. A Linear admin adds the user to one of those teams;
 nothing in Sergeant changes. Admitting another team, or making someone an approver, is an operator's
-edit of `humans.teams` or `humans.approvers`
+edit of `humans.teams` (team keys, such as `ENG`) or `humans.approvers` (Linear user ids from this
+installation's own workspace; the same person's id in another workspace never matches)
 ([`deploy/README.md`](../deploy/README.md), "Public human API and login for `sgt`").
 
 ## 2. Enroll their repositories
@@ -38,6 +39,11 @@ change at once, with no restart
 ([`deploy/README.md`](../deploy/README.md), "Enrolled repositories"). In a human-merge
 repository the user needs GitHub write access to merge.
 
+A repository new to Sergeant also needs a ruleset on its default branch, or Sergeant never merges
+there: someone with admin on it creates one from the recipe in
+[`deploy/README.md`](../deploy/README.md), "GitHub Apps and rulesets", and `live-check --repo` confirms
+it. From then on every PR there, not only Sergeant's, needs an approving review or an admin's bypass.
+
 ## 3. Other settings
 
 - **Reviewer profile.** Add the user to `linear.reviewerProfiles`
@@ -49,7 +55,9 @@ repository the user needs GitHub write access to merge.
   per user
   ([`deploy/README.md`](../deploy/README.md), "Change the per-task budget").
 - **Model accounts.** Nothing to do: each user registers their own
-  ([`deploy/README.md`](../deploy/README.md), "Model accounts").
+  ([`deploy/README.md`](../deploy/README.md), "Model accounts"). If `sgt account register` says this
+  Sergeant isn't set up for account registration yet, the host was first booted before TECH-5204: the
+  same section's upgrade step sets `registeredAccountsSecret`, then `sgt admin restart`.
 
 ## Offboarding
 

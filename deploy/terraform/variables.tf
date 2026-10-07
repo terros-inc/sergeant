@@ -61,7 +61,7 @@ variable "initial_ref" {
 }
 
 variable "instance_type" {
-  description = "Graviton. Sized for 2 task slots (`maxTasks`): two tasks' Docker workers and reviewers plus the control plane."
+  description = "Graviton. The default is sized for 2 task slots (`maxTasks`) with workers on the host: two tasks' Docker workers and reviewers plus the control plane. With workers on Fargate the host runs only serve, reasoning, reviewers, and the runner-image build: `t4g.large` (8 GiB) is enough, 4 GiB too tight for a monorepo reviewer's dependency install. A change applies in place (stop and start; the Elastic IP and data volume stay)."
   type        = string
   default     = "m7g.xlarge"
 }
