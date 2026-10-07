@@ -28,7 +28,7 @@ const quota =
       : { adapter, account: id, readAt, error: "usage endpoint answered 401" };
   };
 const pick = (accounts: ModelAccount[], left: Record<string, [number, number]>, more: Partial<Parameters<typeof pickAccount>[0]> = {}) =>
-  pickAccount({ owner: ann, accounts, read: quota(left), isSetAside: () => false, role: "worker", configured: "codex-local", workerAdapter: undefined, codexLabel: false, now: () => NOW, ...more });
+  pickAccount({ owner: ann, accounts, read: quota(left), isSetAside: () => false, role: "worker", workerAdapter: undefined, codexLabel: false, now: () => NOW, ...more });
 
 test("the best-paced account, never one with a known zero in either window", async () => {
   const chosen = await pick([claude, codex], { [claude.id]: [83, 90], [codex.id]: [53, 90] });
@@ -44,13 +44,15 @@ test("a reviewer on its worker's provider says so", async () => {
   const reviewer = await pick([claude, codex], left, { role: "reviewer", workerAdapter: "claude-code-local" });
   expect(reviewer.account.id).toBe(codex.id);
   expect(reviewer.providerChoice?.sameProviderAsWorker).toBeUndefined();
-  const shared = await pick([claude, codex], { ...left, [codex.id]: [43, 90] }, { role: "reviewer", workerAdapter: "claude-code-local" });
+  // Far behind still reviews (TECH-5390); only with no usable Codex account does Claude review its own worker.
+  expect((await pick([claude, codex], { ...left, [codex.id]: [5, 90] }, { role: "reviewer", workerAdapter: "claude-code-local" })).account.id).toBe(codex.id);
+  const shared = await pick([claude, codex], { ...left, [codex.id]: [0, 90] }, { role: "reviewer", workerAdapter: "claude-code-local" });
   expect(shared).toMatchObject({ account: { id: claude.id }, providerChoice: { sameProviderAsWorker: true } });
 });
 
-test("an account whose quota cannot be read is usable after every known one, the configured provider's first", async () => {
+test("an account whose quota cannot be read is usable after every known one", async () => {
   expect((await pick([claude, codex], { [codex.id]: [10, 90] })).account.id).toBe(codex.id);
-  const unknown = await pick([claude, codex], {}, { configured: "claude-code-local" });
+  const unknown = await pick([claude, codex], {});
   expect(unknown).toMatchObject({ account: { id: claude.id }, accountReason: expect.stringContaining("quota unknown (usage endpoint answered 401)") });
   // Only one window read, the other not reported missing by its provider: ranked after a known reading, however much week it shows; a known zero stays spent.
   const partial: ReadQuota = async ({ id, adapter }) =>
@@ -59,7 +61,7 @@ test("an account whose quota cannot be read is usable after every known one, the
       : { adapter, account: id, readAt, weekly: { remainingPercent: 10, resetsAt: WEEKLY_RESET }, fiveHour: { remainingPercent: 90, resetsAt: FIVE_HOUR_RESET } };
   expect((await pick([claude, codex], {}, { read: partial })).account.id).toBe(codex.id);
   const spentPartial: ReadQuota = async ({ id, adapter }) => ({ adapter, account: id, readAt, ...(id === claude.id ? { weekly: { remainingPercent: 0 } } : {}) });
-  expect((await pick([claude, codex], {}, { read: spentPartial, configured: "claude-code-local" })).account.id).toBe(codex.id);
+  expect((await pick([claude, codex], {}, { read: spentPartial })).account.id).toBe(codex.id);
 });
 
 // TECH-5084: the `sergeant:codex` label runs a task's workers on Codex even when Claude is better

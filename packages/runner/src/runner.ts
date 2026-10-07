@@ -18,7 +18,7 @@ import { CODEX_PRICES } from "./codex-prices.ts";
 import { agentFile, gitIdentityEnv, isGone, writeWorkspaceFile } from "./container.ts";
 import { agentFields, setAsideOnFailure } from "./ended.ts";
 import { checked, exec as hostExec, TOKEN_CREDENTIAL } from "./exec.ts";
-import { DEFAULT_LIMITS, type ContainerRunnerOptions, type Role } from "./options.ts";
+import { DEFAULT_LIMITS, type ContainerRunnerOptions } from "./options.ts";
 import { recorded, runFiles, type RunMeta } from "./run-files.ts";
 import { redactSecrets } from "./redact.ts";
 import { installDependencies } from "./reviewer-deps.ts";
@@ -40,7 +40,6 @@ export const PROVIDER = AGENTS["claude-code-local"].provider;
 export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   const root = resolve(opts.rootDir);
   const image = opts.image ?? "sergeant-runner:local";
-  const adapterOf = (role: Role): Adapter => opts.adapters?.[role] ?? "claude-code-local";
   const asides = opts.asides ?? setAside();
   const codexPrices = { ...CODEX_PRICES, ...opts.codexPrices };
   const exec = opts.exec ?? hostExec;
@@ -104,7 +103,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   async function chooseAccount(spec: RunSpec, workerAdapter: Adapter | undefined) {
     const accounts = await opts.accounts(spec.owner.id);
     const codexLabel = hasCodexLabel(spec.conversation.issue.labels);
-    return pickAccount({ owner: spec.owner, accounts, read: opts.quota, isSetAside: asides.has, role: spec.role, configured: adapterOf(spec.role), workerAdapter, codexLabel });
+    return pickAccount({ owner: spec.owner, accounts, read: opts.quota, isSetAside: asides.has, role: spec.role, workerAdapter, codexLabel });
   }
 
   return {

@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { fargateSettings, InstallationConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { CODEX_PRICES } from "@terros/sergeant-runner";
+import { CODEX_DEFAULT_MODEL, fargateSettings, InstallationConfig, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const config = (controlPlaneAppId: number | string, workerAppId: number | string) => ({
@@ -76,36 +77,48 @@ test("a repository's budget parses field by field, and an invalid one fails the 
   }
 });
 
-// TECH-5009: an installation that names no runner keeps today's Claude Code workers and reviewers, and
-// a Codex role can't start without the codex config's model.
-test("each role runs Claude Code unless the config selects Codex for it, with the config's Codex model", () => {
+// TECH-5390: which provider a run uses comes from its owner's registered accounts, so a config needs no
+// runner or codex setting for Codex. An existing codex.model still names Codex's model; an existing
+// runners.worker/reviewer still parses but is ignored, with a warning.
+test("Codex runs a built-in default model, codex.model overrides it, and runners.worker/reviewer are ignored with a warning", async () => {
   const none = { worker: undefined, reviewer: undefined };
+  const both = (claude: string, codex: string) => ({ "claude-code-local": claude, "codex-local": codex });
+  // A default run records an estimated cost (TECH-5021).
+  expect(CODEX_PRICES[CODEX_DEFAULT_MODEL]).toBeDefined();
   expect(runnerRoles(InstallationConfig.parse(config(1, 2)), none)).toEqual({
-    adapters: { worker: "claude-code-local", reviewer: "claude-code-local" },
-    models: { worker: { "claude-code-local": "opus", "codex-local": "opus" }, reviewer: { "claude-code-local": "opus", "codex-local": "opus" } },
+    models: { worker: both("opus", CODEX_DEFAULT_MODEL), reviewer: both("opus", CODEX_DEFAULT_MODEL) },
   });
 
-  const codexReviewer = { ...config(1, 2), runners: { reviewer: "codex-local" } };
-  expect(InstallationConfig.safeParse(codexReviewer).success).toBe(false);
+  const legacy = { ...config(1, 2), runners: { worker: "claude-code-local", reviewer: "codex-local" }, codex: { model: "gpt-5.5-codex" } };
   // TECH-5184: runs use only their owner's registered accounts, so a config still naming the installation's
   // Codex credential is refused, and install.sh keeps serve on its previous config until it is removed.
-  expect(InstallationConfig.safeParse({ ...codexReviewer, codex: { credentialSecret: "sergeant/codex", model: "m" } }).success).toBe(false);
-  const parsed = InstallationConfig.parse({ ...codexReviewer, codex: { model: "gpt-5.5-codex" } });
-  expect(runnerRoles(parsed, none)).toEqual({
-    adapters: { worker: "claude-code-local", reviewer: "codex-local" },
-    models: {
-      worker: { "claude-code-local": "opus", "codex-local": "gpt-5.5-codex" },
-      reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5.5-codex" },
-    },
+  expect(InstallationConfig.safeParse({ ...legacy, codex: { credentialSecret: "sergeant/codex", model: "m" } }).success).toBe(false);
+  const parsed = InstallationConfig.parse(legacy);
+  expect(runnerRoles(parsed, none).models).toEqual({ worker: both("opus", "gpt-5.5-codex"), reviewer: both("opus", "gpt-5.5-codex") });
+  // A model flag is the role's Claude Code model, whatever runners.<role> says.
+  expect(runnerRoles(parsed, { worker: "sonnet", reviewer: "haiku" }).models).toEqual({
+    worker: both("sonnet", "gpt-5.5-codex"),
+    reviewer: both("haiku", "gpt-5.5-codex"),
   });
-  // A model flag is for the role's configured adapter; quota may still move the role to the other one (TECH-5117).
-  expect(runnerRoles(parsed, { worker: "sonnet", reviewer: "gpt-6" }).models).toEqual({
-    worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5.5-codex" },
-    reviewer: { "claude-code-local": "opus", "codex-local": "gpt-6" },
-  });
-  // TECH-5021: the config's Codex prices reach the runner, which estimates a priced model's cost.
+
+  const dir = await mkdtemp(join(tmpdir(), "sergeant-legacy-config-"));
+  const file = join(dir, "installation.json");
+  await writeFile(file, JSON.stringify(legacy));
+  const warnings: string[] = [];
+  expect((await loadConfig(file, (line) => warnings.push(line))).codex?.model).toBe("gpt-5.5-codex");
+  expect(warnings).toEqual([
+    expect.stringMatching(/runners\.worker is deprecated and ignored/),
+    expect.stringMatching(/runners\.reviewer is deprecated and ignored/),
+  ]);
+  await writeFile(file, JSON.stringify({ ...config(1, 2), runners: { workerBackend: "fargate" } }));
+  await loadConfig(file, (line) => warnings.push(line));
+  expect(warnings).toHaveLength(2);
+  await rm(dir, { recursive: true });
+
+  // TECH-5021: the config's Codex prices reach the runner, with or without a model.
   const prices = { "gpt-5.5-codex": { input: 1.25, cachedInput: 0.125, output: 10 } };
-  expect(runnerRoles(InstallationConfig.parse({ ...codexReviewer, codex: { model: "gpt-5.5-codex", prices } }), none).codexPrices).toEqual(prices);
+  expect(runnerRoles(InstallationConfig.parse({ ...legacy, codex: { model: "gpt-5.5-codex", prices } }), none).codexPrices).toEqual(prices);
+  expect(runnerRoles(InstallationConfig.parse({ ...config(1, 2), codex: { prices } }), none)).toMatchObject({ codexPrices: prices, models: { worker: both("opus", CODEX_DEFAULT_MODEL) } });
 });
 
 // TECH-5237: workers stay on the host unless the config says fargate, and a host without Terraform's

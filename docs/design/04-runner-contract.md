@@ -227,8 +227,11 @@ This is not a capability broker: every worker gets the same development authorit
 | `cloud-…` | provider cloud agents | varies | allowed when its identity meets §9's hard boundary |
 | `fake` | in-process script | all, configurable | tests only; never launches real processes (S1 UNF-383) |
 
-**`codex-local` (TECH-5009; resolves V6).** Installation config picks the adapter per role
-(`runners.worker`, `runners.reviewer`); a role not named runs `claude-code-local`. A Codex run uses the
+**`codex-local` (TECH-5009; resolves V6).** Every installation runs both adapters, and the image
+carries both CLIs; which one a run uses comes from its owner's registered accounts and their quota
+(below), never from installation config (TECH-5390): the old `runners.worker`/`runners.reviewer`
+settings are deprecated and ignored, with a warning when a config still sets them. Codex runs
+`gpt-5.6-sol` unless the config's optional `codex.model` names another. A Codex run uses the
 same container, workspace, worker-App token, git identity, and network as a Claude Code run; only the
 model credential differs (the task owner's registered Codex account, in place of their Claude
 account; TECH-5179, TECH-5184). Checked against Codex CLI 0.160.0:
@@ -248,12 +251,13 @@ account; TECH-5179, TECH-5184). Checked against Codex CLI 0.160.0:
   fallback is a fresh run from pushed branches and the earlier runs' reports in the brief (05 §2), as
   for Claude Code here. The thread id is kept in the run's `agent.json` for a future `resume`.
 
-**Provider by quota (TECH-5117).** With both credentials configured, the runner picks each run's
+**Provider by quota (TECH-5117).** When the owner has accounts of both providers, the runner picks each run's
 adapter right before launch from each provider's live quota (weekly and 5-hour percent left), by
-deterministic code: the worker gets the best-paced account (the model accounts paragraph below); the
-reviewer gets the other provider than its worker's when that provider's best scores within 20% of the best. An
-unknown reading keeps the `runners` default, so a quota read never blocks a launch. The run record's
-`providerChoice` keeps the choice and the readings behind it.
+deterministic code: the worker gets the best-paced account, whichever its provider (the model accounts
+paragraph below; no provider is preferred, TECH-5390); the
+reviewer gets the other provider's best usable account whenever the owner has one, however it scores,
+and its worker's provider only when the owner has no usable account of the other (TECH-5390). An unknown reading ranks after every known one,
+so a quota read never blocks a launch. The run record's `providerChoice` keeps the choice and the readings behind it.
 
 **Model accounts (TECH-5179, replacing TECH-5113's shared pool).** Every run carries its task's owner
 (`RunSpec.owner`: the issue's human assignee, admitted only when Linear's history shows that person
@@ -265,9 +269,9 @@ of the 5-hour window, about 0.6% of the week), and the lower of the two windows'
 quota would expire unused; below 1 it runs out before its reset. An account whose provider reports
 only one window (a personal ChatGPT plan has no 5-hour one) is scored on that window's pace alone, and
 its reason says so (TECH-5342). One whose quota could not be read, or has a window without a reset
-time, ranks after every scored one. A reviewer takes an account of
-another provider than its worker's when that provider's best scores within 20% of the best (the
-provider choice above), else the best overall. Nothing is remembered between launches: no burn
+time, ranks after every scored one. A reviewer takes the best usable account of
+another provider than its worker's whenever there is one (the provider choice above), else the best
+overall. Nothing is remembered between launches: no burn
 history, stickiness, or round-robin. No low-quota warning is posted. A run that fails
 on the account's quota or authentication (`failureReason`) sets the account aside for an hour, or until the window it ran out of resets if sooner, in
 memory. That window is the one at 0% in the account's quota read again, past the cache, as the run fails; with none

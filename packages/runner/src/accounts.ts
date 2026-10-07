@@ -63,7 +63,6 @@ export async function pickAccount(opts: {
   read: ReadQuota | undefined;
   isSetAside: (accountId: string) => boolean;
   role: Role;
-  configured: Adapter;
   workerAdapter: Adapter | undefined;
   codexLabel: boolean;
   now?: () => number;
@@ -77,7 +76,7 @@ export async function pickAccount(opts: {
   );
   const avoid = opts.role === "reviewer" ? opts.workerAdapter : undefined;
   const now = (opts.now ?? Date.now)();
-  const choose = (among: Candidate<ModelAccount>[]) => chooseAccount(among, { prefer: opts.configured, avoid, now });
+  const choose = (among: Candidate<ModelAccount>[]) => chooseAccount(among, { avoid, now });
   const labelled = opts.role === "worker" && opts.codexLabel;
   const codex = labelled ? choose(candidates.filter((c) => c.adapter === "codex-local")) : undefined;
   const best = codex ?? choose(candidates);

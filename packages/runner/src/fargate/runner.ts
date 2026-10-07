@@ -143,9 +143,8 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
       if (await stat(p.dir).then(() => true, () => false)) return; // idempotent on runId
       const owner = spec.owner;
       const accounts = await opts.accounts(owner.id);
-      const configured = opts.adapters?.worker ?? "claude-code-local";
       const codexLabel = hasCodexLabel(spec.conversation.issue.labels);
-      const { account, accountReason, providerChoice } = await pickAccount({ owner, accounts, read: opts.quota, isSetAside: asides.has, role: "worker", configured, workerAdapter: undefined, codexLabel });
+      const { account, accountReason, providerChoice } = await pickAccount({ owner, accounts, read: opts.quota, isSetAside: asides.has, role: "worker", workerAdapter: undefined, codexLabel });
       await mkdir(root, { recursive: true });
       try {
         await mkdir(p.dir);

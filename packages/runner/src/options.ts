@@ -23,11 +23,6 @@ export type ContainerRunnerOptions = {
   /** The model each role runs on each adapter; each run is a new agent session in a new container. */
   models: Record<Role, Record<Adapter, string>>;
   /**
-   * The agent CLI per role (TECH-5009): the provider whose account runs first when no account's quota
-   * can be read. A role not named here prefers Claude Code.
-   */
-  adapters?: Partial<Record<Role, Adapter>>;
-  /**
    * Live quota per model account (TECH-5117). With it, each launch picks among the task owner's
    * accounts from quota read just before it (`accounts.ts`, `choose.ts`) and records the readings.
    */

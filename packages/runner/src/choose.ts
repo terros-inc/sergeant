@@ -14,8 +14,6 @@ const WINDOW_MS = { weekly: 7 * 24 * HOUR_MS, fiveHour: 5 * HOUR_MS } as const;
  * and start a run that will outlast it.
  */
 const RUN_MS = HOUR_MS;
-/** A reviewer takes the other provider than its worker's when that provider's best score is at least this share of the best. */
-export const REVIEW_DIVERSITY_SHARE = 0.8;
 
 /** One of the owner's accounts and what was read of its quota; no reading when there is no reader. */
 export type Candidate<A> = { account: A; adapter: Adapter; name: string; quota: QuotaReading | undefined };
@@ -59,31 +57,29 @@ export function score<A>(c: Candidate<A>, now: number): number | undefined {
 }
 
 /**
- * The account for one run. Among the usable accounts (not spent), the one with the highest `score`;
- * one whose provider reports a single window is scored on that window alone. One whose reading is
- * partial or unknown is usable (a known zero in either window still spends it) and ranks after every
- * scored one, the `prefer`red provider's first. A reviewer passes its worker's provider as `avoid`: it
- * takes the other provider's best account when that scores within `REVIEW_DIVERSITY_SHARE` of the best,
- * or when no account is scored, and otherwise the best overall. Undefined when no account is usable.
+ * The account for one run. Among the usable accounts (not spent), the one with the highest `score`,
+ * whichever its provider: no provider is preferred (TECH-5390). One whose provider reports a single
+ * window is scored on that window alone. One whose reading is partial or unknown is usable (a known
+ * zero in either window still spends it) and ranks after every scored one; ties keep the candidates'
+ * order. A reviewer passes its worker's provider as `avoid`: it takes the other provider's best usable
+ * account whenever there is one, however it scores (TECH-5390), and its worker's provider only when
+ * there is none. Undefined when no account is usable.
  */
 export function chooseAccount<A>(
   candidates: Candidate<A>[],
-  opts: { prefer: Adapter; avoid?: Adapter | undefined; now?: number | undefined },
+  opts: { avoid?: Adapter | undefined; now?: number | undefined } = {},
 ): AccountChoice<A> | undefined {
   const now = opts.now ?? Date.now();
   const usable = candidates.filter((c) => !spent(c)).map((c) => ({ ...c, score: score(c, now) }));
-  const preferred = (c: Candidate<A>) => (c.adapter === opts.prefer ? 0 : 1);
-  const ranked = usable.toSorted((a, b) => (b.score ?? -1) - (a.score ?? -1) || preferred(a) - preferred(b));
+  const ranked = usable.toSorted((a, b) => (b.score ?? -1) - (a.score ?? -1));
   const best = ranked[0];
   if (!best) return undefined;
-  const other = ranked.find((c) => c.adapter !== opts.avoid);
-  const diverse = opts.avoid !== undefined && other !== undefined && (best.score === undefined || (other.score ?? -1) >= best.score * REVIEW_DIVERSITY_SHARE);
-  const pick = diverse ? other : best;
+  const pick = (opts.avoid !== undefined && ranked.find((c) => c.adapter !== opts.avoid)) || best;
   const { score: chosenScore, ...chosen } = pick;
   const unscored = chosen.quota?.error ?? (chosen.quota ? "partial: a window without a reset" : "not read");
   const rank =
     chosenScore === undefined
       ? `quota unknown (${unscored})`
-      : `pace ${Math.round(chosenScore * 100) / 100}, ${pick === best ? "the highest" : `within ${Math.round((1 - REVIEW_DIVERSITY_SHARE) * 100)}% of the best for another provider than its worker's`}`;
+      : `pace ${Math.round(chosenScore * 100) / 100}, ${pick === best ? "the highest" : "the highest for another provider than its worker's"}`;
   return { ...chosen, reason: `${chosen.name}, ${percent(chosen)}: ${rank} of ${usable.length} usable` };
 }

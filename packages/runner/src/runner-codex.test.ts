@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { issueRevision } from "@terros/sergeant-contracts";
-import { CODEX, ended, GH, REPORT, spec, started } from "./runner-fixtures.ts";
+import { CODEX, ended, GH, ON_CODEX, REPORT, spec, started } from "./runner-fixtures.ts";
 
 // A run on Codex (TECH-5009): its credential, and what its logs record about cost and failure.
 
@@ -9,7 +9,7 @@ const envNames = (args: string[] = []) => args.flatMap((a, i, all) => (a === "--
 // TECH-5009: a role on Codex gets the Codex credential in place of the Claude token, never both, and
 // otherwise the same container: workspace mount, worker-App token, and human git identity.
 test("a codex-local run gets only the Codex credential in place of the Claude token", async () => {
-  const { host } = await started({ adapters: { worker: "codex-local" } });
+  const { host } = await started(ON_CODEX);
 
   const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
   expect(envNames(run?.args)).toEqual([
@@ -38,7 +38,7 @@ const codexLogs = [
 ].join("\n");
 
 test("a Codex run on a priced model records its tokens and an estimated cost; a Claude run its reported cost", async () => {
-  const codex = await ended({ adapters: { worker: "codex-local" } }, codexLogs);
+  const codex = await ended(ON_CODEX, codexLogs);
   // M13 skips a record without `issueRevision`, so a Codex run must carry it like a Claude run (TECH-5045).
   expect(codex).toMatchObject({ status: "succeeded", provider: "openai/codex", model: "gpt-5", issueRevision: issueRevision(spec.conversation.issue) });
   expect(codex.tokens).toEqual({ input: 1_010_000, cachedInput: 400_000, output: 55_000, reasoningOutput: 20_000 });
@@ -55,12 +55,12 @@ test("a Codex run on a priced model records its tokens and an estimated cost; a 
 
 test("the config's Codex prices replace or add a model's; an unpriced model's cost stays unknown", async () => {
   const models = { worker: { "claude-code-local": "sonnet", "codex-local": "in-house" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } };
-  const unpriced = await ended({ adapters: { worker: "codex-local" }, models }, codexLogs);
+  const unpriced = await ended({ ...ON_CODEX, models }, codexLogs);
   expect(unpriced.tokens).toBeDefined();
   expect(unpriced.costUsd).toBeUndefined();
   expect(unpriced.costBasis).toBeUndefined();
 
-  const priced = await ended({ adapters: { worker: "codex-local" }, models, codexPrices: { "in-house": { input: 1, output: 2 } } }, codexLogs);
+  const priced = await ended({ ...ON_CODEX, models, codexPrices: { "in-house": { input: 1, output: 2 } } }, codexLogs);
   // No cached-input price: cached input is charged as input.
   expect(priced).toMatchObject({ costBasis: "estimated", costUsd: expect.closeTo(1.01 + 0.11, 6) });
 });
@@ -74,7 +74,7 @@ test.each([
   "Your access token could not be refreshed. Please log out and sign in again.",
   "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
 ])("a Codex refresh failure is recorded as authentication: %s", async (message) => {
-  const run = await started({ adapters: { worker: "codex-local" } });
+  const run = await started(ON_CODEX);
   run.host.docker.running = false;
   run.host.docker.logErrors = `Error refreshing token: ${message}`;
 
@@ -90,7 +90,7 @@ test.each([
 // reaches the run record: the alert names the fix instead.
 test("a Codex turn.failed 401 is recorded as authentication and keeps no key or token", async () => {
   const message = "workspace routing discovery unauthorized (401): Incorrect API key provided: sk-proj***abcd, token codex-test-token";
-  const run = await ended({ adapters: { worker: "codex-local" } }, JSON.stringify({ type: "turn.failed", error: { message } }), "");
+  const run = await ended(ON_CODEX, JSON.stringify({ type: "turn.failed", error: { message } }), "");
 
   expect(run).toMatchObject({ status: "failed", failureReason: "authentication", reportError: expect.stringContaining("replace the account's Codex credential") });
   for (const fragment of ["sk-", "abcd", "codex-test-token", "workspace routing"]) expect(JSON.stringify(run)).not.toContain(fragment);
@@ -108,7 +108,7 @@ test("a non-auth Codex failure keeps its message but no key or token it quotes",
     "retry with rt.1.AAAQx9Zr_secretRefresh-Value or rt_OpaqueRefresh42secret;",
     'auth {"refresh_token":"opaque-refresh-secret"} kept',
   ].join(" ");
-  const run = await ended({ adapters: { worker: "codex-local" } }, JSON.stringify({ type: "turn.failed", error: { message } }), "");
+  const run = await ended(ON_CODEX, JSON.stringify({ type: "turn.failed", error: { message } }), "");
 
   expect(run).toMatchObject({ status: "failed", report: null });
   expect(run.failureReason).toBeUndefined();
@@ -123,13 +123,13 @@ test("a non-auth Codex failure keeps its message but no key or token it quotes",
 test("non-auth Codex failures and unrelated stderr do not report authentication", async () => {
   // A usage limit is the account's quota (TECH-5113), which sets the account aside, never an auth alert.
   const turn = await ended(
-    { adapters: { worker: "codex-local" } },
+    ON_CODEX,
     '{"type":"turn.failed","error":{"message":"The model hit its usage limit."}}',
     "",
   );
   expect(turn).toMatchObject({ status: "failed", reportError: expect.stringContaining("The model hit its usage limit."), failureReason: "quota" });
 
-  const timeout = await started({ adapters: { worker: "codex-local" } });
+  const timeout = await started(ON_CODEX);
   timeout.host.docker.running = false;
   timeout.host.docker.exitCode = 124;
   timeout.host.docker.logErrors = "health probe returned 401 Unauthorized";
@@ -138,7 +138,7 @@ test("non-auth Codex failures and unrelated stderr do not report authentication"
   expect(timedOut.failureReason).toBeUndefined();
 
   const success = await ended(
-    { adapters: { worker: "codex-local" } },
+    ON_CODEX,
     '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}',
     REPORT,
     "an unrelated request returned 401 Unauthorized",
@@ -150,9 +150,9 @@ test("non-auth Codex failures and unrelated stderr do not report authentication"
 // TECH-5259: Sergeant retries a run with no usable report and counts how often each kind happens.
 test("a run's record says whether its report is missing or malformed", async () => {
   const done = '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}';
-  const missing = await ended({ adapters: { worker: "codex-local" } }, done, "");
+  const missing = await ended(ON_CODEX, done, "");
   expect(missing).toMatchObject({ status: "succeeded", report: null, reportProblem: "missing", reportError: expect.stringMatching(/^no report written/) });
-  const malformed = await ended({ adapters: { worker: "codex-local" } }, done, REPORT.replace('"summary": "s", ', ''));
+  const malformed = await ended(ON_CODEX, done, REPORT.replace('"summary": "s", ', ''));
   expect(malformed).toMatchObject({ status: "succeeded", report: null, reportProblem: "malformed" });
-  expect((await ended({ adapters: { worker: "codex-local" } }, done)).reportProblem).toBeUndefined();
+  expect((await ended(ON_CODEX, done)).reportProblem).toBeUndefined();
 });

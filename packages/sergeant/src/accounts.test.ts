@@ -13,7 +13,6 @@ test("a Codex login whose usage reports one window registers with the other unkn
     secret: "s",
     readSecret: async (ref) => secrets[ref] ?? "",
     writeSecret: async (ref, value) => void (secrets[ref] = value),
-    adapters: ["codex-local"],
     readQuota: accountQuota({ fetch }),
     log: () => undefined,
   });

@@ -21,9 +21,10 @@ const REPORT = `\`\`\`sergeant-report
 `;
 
 // TECH-5117 acceptance, among the task owner's accounts (TECH-5179): the run record shows the chosen
-// account and its readings, and the reviewer of a worker's PR runs on the other provider. The choice
-// happens at launch; Docker is faked.
-test("a launch records its quota choice, and the worker's reviewer runs on the other provider", async () => {
+// account and its readings, and the reviewer of a worker's PR runs on the other provider. With no
+// runner setting at all (TECH-5390), the registered accounts alone decide: an owner with only Claude
+// is reviewed by Claude. The choice happens at launch; Docker is faked.
+test("a launch records its quota choice, and the worker's reviewer runs on the other provider when the owner has one", async () => {
   const launched: string[] = [];
   const exec: Exec = async (cmd, args) => {
     if (cmd === "docker" && args[0] === "run") launched.push(args.join(" "));
@@ -31,8 +32,8 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
     if (cmd === "docker" && args[0] === "logs") return { code: 0, stdout: '{"is_error":false}', stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
-  // Half of each window gone: claude's pace is 1.66, and codex's 1.5 is within 20% of it for the reviewer.
-  const left: Record<Adapter, [number, number]> = { "claude-code-local": [83, 90], "codex-local": [75, 90] };
+  // Claude's pace is 1.66 and Codex's 0.6, far more than 20% behind: the reviewer still goes to Codex (TECH-5390).
+  const left: Record<Adapter, [number, number]> = { "claude-code-local": [83, 90], "codex-local": [30, 90] };
   const resetIn = (hours: number) => new Date(Date.now() + hours * 60 * 60_000).toISOString();
   const quota = async ({ id, adapter }: { id: string; adapter: Adapter }): Promise<QuotaReading> => ({
     adapter,
@@ -42,12 +43,12 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
     weekly: { remainingPercent: left[adapter][0], resetsAt: resetIn(84) },
     fiveHour: { remainingPercent: left[adapter][1], resetsAt: resetIn(2.5) },
   });
+  let registered = [annAccount("claude-code-local", "sk-ant-oat01-test"), annAccount("codex-local", '{"tokens":{"access_token":"t"}}')];
   const rootDir = await mkdtemp(join(tmpdir(), "sergeant-provider-test-"));
   const runner = containerRunner({
     rootDir,
     models: { worker: { "claude-code-local": "opus", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
-    adapters: { worker: "codex-local", reviewer: "codex-local" },
-    accounts: async (ownerId) => (ownerId === ann.id ? [annAccount("claude-code-local", "sk-ant-oat01-test"), annAccount("codex-local", '{"tokens":{"access_token":"t"}}')] : []),
+    accounts: async (ownerId) => (ownerId === ann.id ? registered : []),
     quota,
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
@@ -72,10 +73,16 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
   expect(launched[1]).toContain("codex exec");
   expect(launched[1]).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
   expect(await runner.status("run_r")).toMatchObject({ provider: "openai/codex", model: "gpt-5", providerChoice: { adapter: "codex-local" } });
+
+  // Only Claude registered: the review still runs, on Claude, and says it shares the worker's provider.
+  registered = registered.filter((a) => a.adapter === "claude-code-local");
+  await runner.start({ ...reviewer, runId: "run_r2" });
+  expect(launched[2]).toContain("claude -p");
+  expect(await runner.status("run_r2")).toMatchObject({ provider: "anthropic/claude-code", providerChoice: { adapter: "claude-code-local", sameProviderAsWorker: true } });
 });
 
 // TECH-5084: the issue's `sergeant:codex` label puts its worker on Codex though Claude is better
-// paced, and its reviewer still takes the other provider, Claude, under the diversity rule.
+// paced, and its reviewer still takes the other provider, Claude.
 test("a sergeant:codex issue's worker runs on Codex, and its reviewer on Claude", async () => {
   const launched: string[] = [];
   const exec: Exec = async (cmd, args) => {
@@ -110,12 +117,12 @@ test("a sergeant:codex issue's worker runs on Codex, and its reviewer on Claude"
   expect(await runner.status("run_w")).toMatchObject({ provider: "openai/codex", accountReason: expect.stringMatching(/^sergeant:codex: person:ann:codex-local/) });
   expect(launched[0]).toContain("codex exec");
 
-  // Codex now the better paced: the label does not hold the reviewer there; Claude is within 20% of it.
+  // Codex now the better paced: the label does not hold the reviewer there; it goes to the other provider, Claude.
   left["claude-code-local"] = 80;
   left["codex-local"] = 90;
   await runner.start({ ...reviewer, conversation: labelled });
   expect(launched[1]).toContain("claude -p");
-  expect(await runner.status("run_r")).toMatchObject({ provider: "anthropic/claude-code", accountReason: expect.stringContaining("within 20% of the best for another provider") });
+  expect(await runner.status("run_r")).toMatchObject({ provider: "anthropic/claude-code", accountReason: expect.stringContaining("the highest for another provider") });
 });
 
 // TECH-5179: a run spends only its task owner's quota. A run that fails on the account's quota sends
