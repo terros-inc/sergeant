@@ -1,5 +1,7 @@
 # Sergeant agent guide
 
+**This repository is PUBLIC** (Apache-2.0). Everything committed here—code, PRs, branches, descriptions—is visible to anyone. Do not commit or write in PRs any company-internal details: internal hostnames or URLs, cloud account/profile/log group names, instance IDs, incident notes, customer or personnel details, links to private repos or PRs, or secrets. Keep installation-specific and operator-specific material in the operator's private repos.
+
 - The design handoff and work tracking live in Linear, in the **Sergeant Control Plane** project
   (team UNF). Linear issues may be deleted once done, so a PR body must stand on its own.
 - Sergeant 1 (Rust) is not on `main`; its final source, including its ADRs, is the tag `v1-final`.
