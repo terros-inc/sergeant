@@ -42,8 +42,10 @@ export type ContainerRunnerOptions = {
    */
   githubTokens: RunGitHubTokens;
   /**
-   * Who a worker's commits are authored and committed as: the installation's human identity, never
-   * an agent's. Set through git's environment, which overrides any `user.*` config a run sets.
+   * Who a run's commits are authored and committed as when its account names no person (TECH-5593):
+   * the installation's human identity, never an agent's. A run on a person's registered account
+   * commits as that person (`commitIdentity`). Either is set through git's environment, which
+   * overrides any `user.*` config a run sets.
    */
   gitIdentity: { name: string; email: string };
   /**

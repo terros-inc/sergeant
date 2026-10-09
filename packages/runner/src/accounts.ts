@@ -10,8 +10,21 @@ import type { QuotaAccount, ReadQuota } from "./quota.ts";
 // ran out of resets if that is sooner (TECH-5213), so the next launch takes another of the owner's; the
 // set-aside lives in memory only, and losing it on a restart costs at most one more failed run.
 
-/** A model account a run may use: its credential, and whose it is. */
-export type ModelAccount = QuotaAccount & { holder: string };
+/**
+ * A model account a run may use: its credential, and whose it is. `person` is the name and email of the
+ * Linear login that registered it (TECH-5593), the task owner's own: their runs commit as them.
+ */
+export type ModelAccount = QuotaAccount & { holder: string; person?: GitIdentity };
+
+export type GitIdentity = { name: string; email: string };
+
+/**
+ * Who a run's commits are authored and committed as (TECH-5593): the person whose registered account it
+ * runs on, the task owner who delegated it, so GitHub attaches the commit to them; `fallback`, the
+ * installation's `gitIdentity`, only for an account no signed-in person registered.
+ */
+export const commitIdentity = (account: ModelAccount, fallback: GitIdentity): GitIdentity =>
+  account.person?.name && account.person.email ? { name: account.person.name, email: account.person.email } : fallback;
 
 export const SET_ASIDE_MS = 60 * 60_000;
 

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { issueRevision, parseReport, RunRecord, WorkerReport, type RunnerPort, type RunSpec } from "@terros/sergeant-contracts";
-import { hasCodexLabel, pickAccount, runAccount, setAside } from "../accounts.ts";
+import { commitIdentity, hasCodexLabel, pickAccount, runAccount, setAside } from "../accounts.ts";
 import { AGENTS, type AgentResult } from "../agents.ts";
 import { fetchAttachments } from "../attachments.ts";
 import { workerBrief } from "../brief.ts";
@@ -215,7 +215,7 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
                 region: s.region,
                 cpu: s.cpu,
                 memory: s.memory,
-                gitIdentity: opts.gitIdentity,
+                gitIdentity: commitIdentity(account, opts.gitIdentity),
                 reportNonce: l.nonce,
                 command,
               }),

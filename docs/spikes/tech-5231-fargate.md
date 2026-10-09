@@ -225,7 +225,8 @@ docker build -t $ECR:spike packages/runner/container      # on an x86 machine: d
 docker push $ECR:spike
 ```
 
-Then set what `cli.ts` reads. Use the installation's own git identity, the one `serve` gives runs:
+Then set what `cli.ts` reads. Use the installation's own git identity, the one `serve` gave runs at the time (since
+TECH-5593 a run commits as its requester, and `gitIdentity` is only the fallback):
 
 ```sh
 export SPIKE_CLUSTER=sergeant-fargate-spike SPIKE_IMAGE=$ECR:spike \

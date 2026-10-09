@@ -22,7 +22,7 @@ const settings = {
   memory: "8192",
 };
 
-async function setUp(over: { spec?: RunSpec; now?: () => Date } = {}) {
+async function setUp(over: { spec?: RunSpec; now?: () => Date; accounts?: (typeof annClaude & { person?: { name: string; email: string } })[] } = {}) {
   const aws = fakeAws();
   const calls: Parameters<Exec>[] = [];
   const exec: Exec = async (...args) => (calls.push(args), { code: 0, stdout: "abc\trefs/heads/sergeant/unf-1-old\n", stderr: "" });
@@ -33,7 +33,7 @@ async function setUp(over: { spec?: RunSpec; now?: () => Date } = {}) {
     clients: aws.clients,
     exec,
     models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
-    accounts: async () => [annClaude],
+    accounts: async () => over.accounts ?? [annClaude],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => GH,
     ...(over.now && { now: over.now }),
@@ -65,6 +65,21 @@ describe("fargateRunner", () => {
     expect(def).not.toHaveProperty("taskRoleArn");
     expect(aws.tasks).toHaveLength(1);
     expect(JSON.parse(await readFile(join(rootDir, "run_t1", "run.json"), "utf8"))).toMatchObject({ backend: "fargate", adapter: "claude-code-local" });
+  });
+
+  // TECH-5593: the task's git identity is the requester's, the person whose registered account the run
+  // is on, and the installation's `gitIdentity` only for an account no signed-in person registered.
+  it("commits as the person whose registered account the run is on, else as the installation's identity", async () => {
+    type Def = { containerDefinitions: { environment: { name: string; value: string }[] }[] };
+    const gitEnv = (aws: ReturnType<typeof fakeAws>) =>
+      ([...aws.defs.values()][0] as Def).containerDefinitions[0]?.environment.filter((e) => e.name.startsWith("GIT_")).map((e) => `${e.name}=${e.value}`);
+    const requester = await setUp({ accounts: [{ ...annClaude, person: { name: "Ann Requester", email: "ann@example.com" } }] });
+    await requester.run();
+    expect(gitEnv(requester.aws)).toEqual(["GIT_AUTHOR_NAME=Ann Requester", "GIT_AUTHOR_EMAIL=ann@example.com", "GIT_COMMITTER_NAME=Ann Requester", "GIT_COMMITTER_EMAIL=ann@example.com"]);
+
+    const fallback = await setUp();
+    await fallback.run();
+    expect(gitEnv(fallback.aws)).toEqual(["GIT_AUTHOR_NAME=Ada Example", "GIT_AUTHOR_EMAIL=ada@example.com", "GIT_COMMITTER_NAME=Ada Example", "GIT_COMMITTER_EMAIL=ada@example.com"]);
   });
 
   it("collects a finished run from its logs, its cost from the framed result line, then deletes its secret", async () => {
