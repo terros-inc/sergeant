@@ -83,7 +83,7 @@ export const InstallationConfig = z.strictObject({
   ),
   /** The Sergeant model token for reasoning; never a worker's or reviewer's (TECH-5179). */
   modelTokenSecret: SecretRef,
-  /** The installation's human commit identity; never an agent's. */
+  /** The installation's human commit identity, only for a run on an account no person registered (TECH-5593); never an agent's. */
   gitIdentity: z.strictObject({ name: z.string().min(1), email: z.email() }),
   /**
    * Who may use the client API and `sgt` (TECH-4938), each signing in with their own Linear login.

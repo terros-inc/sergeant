@@ -678,6 +678,13 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   assignee's own when the app acted for a user with the assignee's display name; any other app's
   delegation is refused. Setting it, confirming the id, and the known issue with the display-name
   match (TECH-5280) are under Before the first apply above, step 8.
+- **`gitIdentity`** is only the fallback commit identity (TECH-5593). A run's commits are authored and
+  committed as the person who requested it: the task owner, by the name and Linear login email they
+  registered their model account with (`sgt account register`), so GitHub attaches each commit to the
+  GitHub account that has that email verified. `gitIdentity` is used only for a run on an account no
+  signed-in person registered. A person whose Linear email is not a verified email of their GitHub
+  account gets commits GitHub attaches to nobody; they add it under GitHub's email settings. No
+  identity is ever an agent's, and no agent co-author trailer is added.
 - **`linear.reviewerProfiles`** (optional) maps GitHub logins to Linear profile URLs. Sergeant puts the
   URL in a re-review request so Linear renders a real user mention and sends an Inbox notification; a
   missing mapping or failed lookup leaves the plain `@github-login` text.

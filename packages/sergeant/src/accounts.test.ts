@@ -31,3 +31,22 @@ test("a Codex login whose usage reports one window registers with the other unkn
   await expect(registry.register(ada, "codex-local", "codexExpired", login("c"))).rejects.toThrow(/usage endpoint answered 401/);
   expect((await registry.list()).map((a) => a.name)).toEqual(["codexPersonal"]);
 });
+
+// TECH-5593: a run on a registered account commits as the person who registered it with their Linear
+// login, the task owner; the API's list of accounts gains nothing from it.
+test("an account carries its registrant's login name and email to the runner, not to the list", async () => {
+  const usage = { rate_limit: { primary_window: { used_percent: 40, limit_window_seconds: 604_800 }, secondary_window: null } };
+  const fetch = (async () => new Response(JSON.stringify(usage))) as typeof globalThis.fetch;
+  const secrets: Record<string, string> = { s: '{"accounts":[]}' };
+  const registry = accountRegistry({
+    secret: "s",
+    readSecret: async (ref) => secrets[ref] ?? "",
+    writeSecret: async (ref, value) => void (secrets[ref] = value),
+    readQuota: accountQuota({ fetch }),
+    log: () => undefined,
+  });
+  await registry.register({ id: "u-ada", name: "Ada Lovelace", email: "ada@example.com" }, "codex-local", "codex", JSON.stringify({ tokens: { access_token: "a" } }));
+
+  expect((await registry.of("u-ada"))[0]?.person).toEqual({ name: "Ada Lovelace", email: "ada@example.com" });
+  expect((await registry.list())[0]).not.toHaveProperty("person");
+});

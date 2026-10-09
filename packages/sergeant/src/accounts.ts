@@ -30,7 +30,7 @@ const Registered = z.object({ accounts: z.array(Entry) });
 
 export type Person = { id: string; name: string; email: string };
 /** An account as the API shows it: never its credential. */
-export type ListedAccount = Omit<ModelAccount, "credential"> & { group: "registered"; name: string; userId: string; registeredAt: string; quotaUnknown?: QuotaWindowName[] };
+export type ListedAccount = Omit<ModelAccount, "credential" | "person"> & { group: "registered"; name: string; userId: string; registeredAt: string; quotaUnknown?: QuotaWindowName[] };
 
 /** Registration refused for a reason the caller can act on; its message never quotes the credential. */
 export class AccountRefused extends Error {}
@@ -76,9 +76,10 @@ export function accountRegistry(opts: {
     return done;
   }
 
-  const account = (e: Entry): ModelAccount => ({ id: id(e), adapter: e.adapter, holder: holder(e), credential: e.credential });
+  // A run on the account commits as the person who registered it (TECH-5593).
+  const account = (e: Entry): ModelAccount => ({ id: id(e), adapter: e.adapter, holder: holder(e), credential: e.credential, person: { name: e.name, email: e.email } });
   const listed = (e: Entry): ListedAccount => {
-    const { credential: _, ...a } = account(e);
+    const { credential: _, person: __, ...a } = account(e);
     return { ...a, group: "registered", name: e.accountName, userId: e.userId, registeredAt: e.registeredAt, ...(e.quotaUnknown && { quotaUnknown: e.quotaUnknown }) };
   };
 

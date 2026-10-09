@@ -46,8 +46,11 @@ A reviewer's token is read-only and used only on the host to read the PR and che
 head; it never enters the reviewer's container. A run gets no host home, AWS, `gh` login, SSH,
 Linear, Docker socket, or Sergeant state. `node src/live-check.ts` prints what a run can see.
 
-Commits are authored and committed as `gitIdentity`, the installation's human identity, through
-`GIT_AUTHOR_*`/`GIT_COMMITTER_*`. The image's Claude Code settings turn off its co-author trailer; Codex
+Commits are authored and committed, through `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, as the person who
+requested the run (TECH-5593): the name and Linear login email the task owner registered the run's
+model account with (`ModelAccount.person`, `commitIdentity`), so GitHub attaches the commit to them.
+`gitIdentity`, the installation's human identity, is only the fallback for an account that names no
+person. The image's Claude Code settings turn off its co-author trailer; Codex
 has no equivalent setting and may add its co-author trailer. The image does not set `core.hooksPath`,
 so repository-provided hooks run normally. The brief tells agents not to add agent attribution.
 Whatever the branch commits carry, Sergeant writes every squash merge's message itself (TECH-5085):

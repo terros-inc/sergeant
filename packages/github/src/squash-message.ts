@@ -29,8 +29,8 @@ const isAgentLogin = (login: string) => login.toLowerCase().endsWith("[bot]") ||
 
 /**
  * Whether an identity is an AI agent or a bot: a known agent address, a GitHub App's `[bot]` account
- * (the worker App included), or a known agent account. Sergeant's runners commit as the
- * installation's human `gitIdentity`, which stays a co-author.
+ * (the worker App included), or a known agent account. Sergeant's runners commit as the human who
+ * requested the run, or the installation's `gitIdentity` (TECH-5593), who stays a co-author.
  */
 export function isAgentIdentity(who: { email?: string; login?: string }): boolean {
   if (who.login !== undefined && isAgentLogin(who.login)) return true;

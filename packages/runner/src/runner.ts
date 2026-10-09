@@ -13,7 +13,7 @@ import {
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ATTACHMENTS_PATH, fetchAttachments, renderAttachments } from "./attachments.ts";
-import { hasCodexLabel, pickAccount, runAccount, setAside } from "./accounts.ts";
+import { commitIdentity, hasCodexLabel, pickAccount, runAccount, setAside } from "./accounts.ts";
 import { AGENTS, CODEX_REVIEW_SCHEMA_PATH, type Adapter } from "./agents.ts";
 import { reviewerBrief, workerBrief, type ReviewSubject } from "./brief.ts";
 import { CODEX_PRICES } from "./codex-prices.ts";
@@ -221,7 +221,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           ...(attachments.files.length ? ["--volume", `${attachmentsDir}:${ATTACHMENTS_PATH}:ro`] : []),
           "--env", agent.credentialEnv,
           ...(worker ? ["--env", "GH_TOKEN"] : []),
-          ...gitIdentityEnv(opts.gitIdentity),
+          ...gitIdentityEnv(commitIdentity(account, opts.gitIdentity)),
           image, "sh", "-c", agent.script, "sh",
           String(limits.maxWallSeconds), meta.model, String(limits.maxCostUsd),
           ...(reviewSchema ? [CODEX_REVIEW_SCHEMA_PATH] : []),

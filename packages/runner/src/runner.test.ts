@@ -10,7 +10,7 @@ import { annClaude, fakeHost, GH, REPORT, spec, started, TOKEN } from "./runner-
 // The container is the hard boundary between runs and the operator's personal and control-plane
 // credentials. A generic environment pass-through let any caller add a personal GH_TOKEN, AWS, or
 // Linear keys. A worker's only GitHub credential is its worker-App token, scoped to its run's
-// repositories. Commits are the installation's human identity: the captain forbids an agent author.
+// repositories. Commits are a human's identity, never an agent's: the captain forbids an agent author.
 test("only the model token, the run's scoped worker-App token, and the human git identity enter", async () => {
   const { host, minted } = await started({ modelEnv: { GH_TOKEN: "ghp_x" }, env: { AWS_PROFILE: "lifeDev" } });
 
@@ -30,6 +30,23 @@ test("only the model token, the run's scoped worker-App token, and the human git
   expect(host.calls.flatMap((c) => c.args).join(" ")).not.toMatch(new RegExp(`${TOKEN}|${GH}`));
   const clone = host.calls.find((c) => c.cmd === "git" && c.args.includes("clone"));
   expect(clone?.opts.env?.SERGEANT_RUN_GITHUB_TOKEN).toBe(GH);
+});
+
+// TECH-5593: a run commits as the person who requested it, the owner whose registered account it runs
+// on, so GitHub attaches the commit to them and not to the installation's one identity. An account no
+// signed-in person registered (the fixture's above) keeps the installation's `gitIdentity`.
+test("a run commits as the person whose registered account it runs on", async () => {
+  const ann = { ...annClaude, person: { name: "Ann Requester", email: "ann@example.com" } };
+  const { host } = await started({ accounts: async () => [ann] });
+
+  const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
+  const passed = run?.args.flatMap((a, i, all) => (a === "--env" ? [all[i + 1]] : [])) ?? [];
+  expect(passed.filter((v) => v?.startsWith("GIT_"))).toEqual([
+    "GIT_AUTHOR_NAME=Ann Requester",
+    "GIT_AUTHOR_EMAIL=ann@example.com",
+    "GIT_COMMITTER_NAME=Ann Requester",
+    "GIT_COMMITTER_EMAIL=ann@example.com",
+  ]);
 });
 
 // `canceled` is terminal: once stored, status stops asking Docker and nothing retries the stop. If
