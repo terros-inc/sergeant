@@ -542,7 +542,8 @@ aws ssm put-parameter --name /sergeant/v2/installation-config --type String --ov
 ```
 
 Only tasks that start after the update get the new window. A task already running keeps the one it
-started with (the log says `ignoring the budget options`); only a human's "extend" reply enlarges it.
+started with (the log says `ignoring the budget options`) until its next fresh window: any human
+answer to one of its questions, "extend" included, or a human review of its PR (Budget below).
 
 A repository whose builds, tests, and CI need a longer (or cheaper) window gets its own `budget` in
 its `repositories` entry, for example
