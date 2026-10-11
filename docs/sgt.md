@@ -252,18 +252,20 @@ with the login `sgt login` saved (§4); there is nothing else to sign in to.
 
 1. Log in with `sgt login`, once, as in §4. `sgt-mcp` renews the login as `sgt` does, and reads it
    on every call, so a later `sgt login` takes effect without restarting your assistant.
-2. Register it with your assistant as a stdio server. Give the installation with `--api`: assistants
-   usually do not start it from your shell, so `SGT_API_URL` from your profile may not reach it. For
-   Claude Code:
+2. Register it with your assistant as a stdio server. Assistants usually do not start it from your
+   shell, so they may not see your shell's `PATH` or `SGT_API_URL`. Give the installation with
+   `--api`, and give Node as an absolute path: `sgt-mcp` needs Node 24 (§1), whose type stripping
+   runs its TypeScript directly, and an assistant that finds an older system `node` instead fails.
+   Use the output of `which node` in a shell where `sgt` works as `<node>`. For Claude Code:
 
    ```sh
-   claude mcp add sergeant -- node <repo>/packages/mcp/src/sgt-mcp.ts --api https://<your installation's hostname>
+   claude mcp add sergeant -- <node> <repo>/packages/mcp/src/sgt-mcp.ts --api https://<your installation's hostname>
    ```
 
    Other assistants take the same command in their MCP configuration, typically:
 
    ```json
-   { "mcpServers": { "sergeant": { "command": "node", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "https://<your installation's hostname>"] } } }
+   { "mcpServers": { "sergeant": { "command": "<node>", "args": ["<repo>/packages/mcp/src/sgt-mcp.ts", "--api", "https://<your installation's hostname>"] } } }
    ```
 
 - Each tool is one GET to the installation's client API, and returns the API's JSON unchanged as
@@ -273,5 +275,7 @@ with the login `sgt login` saved (§4); there is nothing else to sign in to.
   machine answers.
 - `--api` must be the URL you logged in to: each URL has its own login. If you set `XDG_CONFIG_HOME`,
   pass it to `sgt-mcp` too (most assistants take an `env` setting), since your login is kept under it.
+- If the server fails to start with `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`, the
+  assistant ran an older Node. Set `command` to the absolute path of Node 24, as in step 2.
 - A tool that answers `unauthorized` has no usable login: it names the `sgt login --api <url>` to run.
   Run it, then ask again. `sgt update` updates `sgt-mcp` too; restart your assistant after updating.
