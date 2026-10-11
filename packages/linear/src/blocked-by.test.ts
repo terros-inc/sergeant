@@ -29,14 +29,14 @@ test("recordBlockedBy links the blocker to the waiting issue once, and leaves an
   const linear = createLinearPort({ apiKey: "test", sergeantUserIds: [], fetch });
 
   // The lost answer reads back as made, by its id; asking again finds it.
-  expect(await linear.recordBlockedBy({ blocked: "UNF-1", blockedBy: "UNF-2" })).toEqual({ recorded: true });
-  expect(await linear.recordBlockedBy({ blocked: "UNF-1", blockedBy: "UNF-2" })).toEqual({ recorded: false });
+  expect(await linear.recordBlockedBy({ blocked: "UNF-1", blockedBy: "UNF-2" })).toEqual({ created: true });
+  expect(await linear.recordBlockedBy({ blocked: "UNF-1", blockedBy: "UNF-2" })).toEqual({ created: false });
   expect([...relations.values()].filter((r) => r.issueId === "issue-2")).toMatchObject([{ issueId: "issue-2", relatedIssueId: "issue-1", type: "blocks" }]);
   // A human's relation already says it.
-  expect(await linear.recordBlockedBy({ blocked: "UNF-1", blockedBy: "UNF-3" })).toEqual({ recorded: false });
+  expect(await linear.recordBlockedBy({ blocked: "UNF-1", blockedBy: "UNF-3" })).toEqual({ created: false });
   expect(relations.size).toBe(2);
   // The other direction is a new relation.
-  expect(await linear.recordBlockedBy({ blocked: "UNF-2", blockedBy: "UNF-1" })).toEqual({ recorded: true });
+  expect(await linear.recordBlockedBy({ blocked: "UNF-2", blockedBy: "UNF-1" })).toEqual({ created: true });
   expect(relations.size).toBe(3);
   await expect(linear.recordBlockedBy({ blocked: "UNF-1", blockedBy: "UNF-9" })).rejects.toThrow(/not found: UNF-9/);
 });

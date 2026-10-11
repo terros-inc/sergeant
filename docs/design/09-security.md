@@ -172,7 +172,8 @@ carry instructions aimed at Sergeant. A worker with a compromised context could 
   (honestly or not); that is the accepted cost of the review-need policy (06 §1), measured by the audit
   sample, narrowed by optional `alwaysReviewPaths`, and removed entirely where `mergePolicy: human`.
 - Review waivers need an approver's comment. A fresh budget window needs a human's answer to a
-  Sergeant question (or a human review of the task's PR); reasoning cannot open one itself.
+  Sergeant question (or a human review of the task's PR, or the task's last Linear blocker completed,
+  canceled, or unlinked); reasoning cannot open one itself.
 
 ## 7. Redaction, logs, and Linear
 

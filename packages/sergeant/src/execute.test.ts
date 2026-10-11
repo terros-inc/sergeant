@@ -139,7 +139,7 @@ test("a blocked-by relation is recorded only between this task's issue and anoth
   const why = "Both edit prompt.ts.";
   const { p, linked } = ports();
   for (const [blocked, blockedBy] of [["UNF-1", "UNF-7"], ["UNF-8", "UNF-1"]] as const) {
-    expect(await execute({ kind: "record_blocked_by", blocked, blockedBy, why }, situation, p)).toMatchObject({ status: "done", result: { recorded: true } });
+    expect(await execute({ kind: "record_blocked_by", blocked, blockedBy, why }, situation, p)).toMatchObject({ status: "done", result: { linked: true, created: true } });
   }
   for (const [blocked, blockedBy] of [["UNF-7", "UNF-8"], ["UNF-1", "UNF-1"]] as const) {
     expect(await execute({ kind: "record_blocked_by", blocked, blockedBy, why }, situation, p)).toMatchObject({ status: "denied", rule: "K1" });

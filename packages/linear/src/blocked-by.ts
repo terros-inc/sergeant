@@ -29,7 +29,7 @@ export function blockedByRecorder({ request, createOnce }: Pick<FollowupDeps, "r
     if (!waiting) throw new Error(`Linear issue not found: ${blocked}`);
     const { issue: blocker } = await request(issueId, { id: blockedBy }, z.object({ issue: z.object({ id: z.string() }).nullable() }));
     if (!blocker) throw new Error(`Linear issue not found: ${blockedBy}`);
-    if (waiting.inverseRelations.nodes.some((r) => r.type === "blocks" && r.issue.id === blocker.id)) return { recorded: false };
+    if (waiting.inverseRelations.nodes.some((r) => r.type === "blocks" && r.issue.id === blocker.id)) return { created: false };
     const id = commentIdFor(`blocked-by:${waiting.id}:${blocker.id}`);
     await createOnce(
       async () => {
@@ -43,6 +43,6 @@ export function blockedByRecorder({ request, createOnce }: Pick<FollowupDeps, "r
       },
       async () => (await request(relationById, { id }, z.object({ issueRelation: z.object({ id: z.string() }).nullable() }))).issueRelation?.id === id,
     );
-    return { recorded: true };
+    return { created: true };
   };
 }

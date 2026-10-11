@@ -91,7 +91,7 @@ export function linearChecks(
   ];
   const issueProbes = [
     { name: "linear issue labels and label by name (feedback label)", covers: ["TECH-5186"] },
-    { name: "linear blocked-by reads (relations, issue id, relation by id)", covers: ["TECH-5278"] },
+    { name: "linear blocked-by reads (relations, relations page, issue id, relation by id)", covers: ["TECH-5278", "TECH-5803"] },
     { name: "linear issue workflow (state moves, close)", covers: ["TECH-4947", "TECH-4989"] },
     { name: "linear comment thread and comment by id", covers: ["TECH-5052"] },
     { name: "linear follow-up and retro issue reads (origin, issue, team states, relation and document by id)", covers: ["TECH-5049", "TECH-5187"] },

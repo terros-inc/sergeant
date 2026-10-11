@@ -204,6 +204,7 @@ TaskStatus (derived, display only):
 admit_task                                   → open
 last step of a closing action (03 §10)       open → closed (done | canceled)
 a human answer to a Sergeant question        open → open, with a fresh budget window
+a human PR review, or the last blocker going open → open, with a fresh budget window (TECH-5218, TECH-5803)
 re-delegation or reopening after close       → a new Task row with a fresh budget
 ```
 

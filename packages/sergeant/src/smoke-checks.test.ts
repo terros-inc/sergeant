@@ -35,6 +35,7 @@ const linearAnswers: Record<string, unknown> = {
       assignee: { ...person, url: "https://linear.app/terros/profiles/ann" },
       labels: { nodes: [] },
       attachments: { nodes: [] },
+      inverseRelations: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
       comments: page([{ id: "c1", body: "Please do it.", createdAt: "2026-10-05T00:00:00.000Z", updatedAt: "2026-10-05T00:00:00.000Z", parentId: null, user: person, externalUser: null, botActor: null }]),
     },
   },
@@ -46,6 +47,7 @@ const linearAnswers: Record<string, unknown> = {
   SergeantUsers: { users: { nodes: [{ id: "agent", name: "Sergeant" }] } },
   SergeantIssueLabels: { issue: { id: "issue-1", team: { id: "team-1" }, labels: { nodes: [{ id: "l1", name: "bug" }] } } },
   SergeantLabelsByName: { issueLabels: { nodes: [{ id: "l2", team: null }] } },
+  SergeantInverseRelations: { issue: { inverseRelations: { nodes: [{ type: "blocks", issue: { identifier: "TECH-0", state: { type: "started" } } }], pageInfo: { hasNextPage: false, endCursor: null } } } },
   SergeantBlockedIssue: { issue: { id: "issue-1", inverseRelations: { nodes: [{ type: "blocks", issue: { id: "issue-0" } }] } } },
   SergeantIssueId: { issue: { id: "issue-1" } },
   // Linear answers "not found" for an id nothing was created with; null is the same answer.
@@ -147,7 +149,7 @@ test("every check passes over the real adapters, and nothing is written", async 
   expect(results.find((r) => r.name.includes("squash"))?.detail).toEqual({ title: "Add the thing (#7)", coAuthors: ["Trevor <trevor@terros.com>"] });
   expect(results.find((r) => r.name === "linear task owner from delegation history")?.detail).toMatchObject({ owner: person });
   expect(results.find((r) => r.name.startsWith("linear upload"))?.detail).toEqual({ status: 200, contentType: "image/png", bytes: 3 });
-  expect(results.find((r) => r.name.startsWith("linear blocked-by"))?.detail).toEqual({ blockedBy: 1, sameIssue: true, relation: "absent" });
+  expect(results.find((r) => r.name.startsWith("linear blocked-by"))?.detail).toEqual({ blockedBy: 1, pagedRelations: 1, sameIssue: true, relation: "absent" });
   expect(results.find((r) => r.name.startsWith("linear follow-up and retro"))?.detail).toMatchObject({ issue: "TECH-9", teamStates: 1, relation: "absent", document: "absent" });
   expect(results.find((r) => r.name.includes("branch-delete"))?.detail).toEqual({ ref: "sergeant/tech-9-thing", openPullRequestsUsingIt: 0, branch: "deleted" });
   // Every named Linear read query the adapter has ran (SergeantCaller reads with a human's own token, at `sgt login`).
@@ -183,7 +185,7 @@ test("a failed read, or a host on another version, fails its own line and the re
     "SKIP linear task owner from delegation history",
     "SKIP linear issue progress (close gate)",
     "SKIP linear issue labels and label by name (feedback label)",
-    "SKIP linear blocked-by reads (relations, issue id, relation by id)",
+    "SKIP linear blocked-by reads (relations, relations page, issue id, relation by id)",
     "SKIP linear issue workflow (state moves, close)",
     "SKIP linear comment thread and comment by id",
     "SKIP linear follow-up and retro issue reads (origin, issue, team states, relation and document by id)",

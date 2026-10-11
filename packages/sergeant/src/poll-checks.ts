@@ -87,8 +87,9 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
 export async function checkHolds(
   poll: { conversation: Conversation; live: string[]; unknown: { unknown: string; error: string }[]; budgetOf: () => BudgetStatus },
   configured: BudgetWindow,
-  { opts, deps, state, log, save }: PollContext,
+  ctx: PollContext,
 ): Promise<{ hold: "budget" | "unknown" | "question" } | (BudgetCheck & { hold?: undefined })> {
+  const { opts, deps, state, log, save } = ctx;
   const { conversation, live, unknown } = poll;
   // TECH-5059: a human's answer to Sergeant's latest question, the budget question included, opens a
   // fresh window from the answer, with zero spend and the installation's budget now. Only an answer
@@ -99,6 +100,7 @@ export async function checkHolds(
     await save();
     log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
   }
+  await openUnblockWindow(conversation, configured, ctx);
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a
   // crash between posting it and saving anything loses nothing. The first window's key is the task's
   // start, so an earlier task's budget question, answered or not, is never this one's (TECH-5145).
@@ -138,6 +140,27 @@ export async function checkHolds(
     return { hold: "question" };
   }
   return { budget, exhausted, budgetKey, budgetAsked };
+}
+
+/**
+ * TECH-5803: the task unblocked, its last open blocker completed or canceled or its "blocked by"
+ * relation removed, opens a fresh window from the poll that sees it, exactly as an answer does (above),
+ * however exhausted the window it replaces. Linear has no time for a removed relation, so the blockers
+ * the last poll read are kept in `state.json`, and so is the window's start (budget.ts). A blocker list
+ * Linear did not give (absent) changes nothing; one still open, or unread past its page, keeps waiting.
+ */
+async function openUnblockWindow(conversation: Conversation, configured: BudgetWindow, { state, log, save }: PollContext): Promise<void> {
+  const blockedBy = conversation.issue.blockedBy;
+  const before = state.blockedBy;
+  if (!blockedBy || (before && before.join("\n") === blockedBy.join("\n"))) return;
+  state.blockedBy = blockedBy;
+  if (before?.length && blockedBy.length === 0) {
+    const at = new Date().toISOString();
+    openWindow(state, at, configured);
+    state.unblockedAt.push(at);
+    log(`unblocked (was waiting on ${before.join(", ")}): a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
+  }
+  await save();
 }
 
 /**

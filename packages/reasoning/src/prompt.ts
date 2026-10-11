@@ -76,7 +76,7 @@ Actions you may propose:
   is evident: from the issue text, from a run report's dependencies (workers and reviewers report the
   ones they notice: shared files, an ordering, one PR building on another), or from what you plan or
   file (a follow-up that must wait uses create_followup's relation "blocked_by" instead). why gives the
-  evidence. A relation already there is left as it is. Record only the relation; nothing else
+  evidence. A relation already there is left as it is: the result is linked, with created false. Record only the relation; nothing else
   schedules, locks, or orders work.
 
 Budget: the Situation Report's budget has a hard wall-time deadline and a best-effort spend limit.

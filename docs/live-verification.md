@@ -60,7 +60,7 @@ secret.
 | linear task owner from delegation history | TECH-5192, TECH-5217 | `SergeantIssueOwnership` (creator, `botActor`, assignee) and `SergeantDelegationHistory` (`botActor`, `fromDelegate`). A refusal is a correct answer too |
 | linear issue progress (close gate) | TECH-5232 | `SergeantIssueProgress`: state type and `completedAt` |
 | linear issue labels and label by name | TECH-5186 | `SergeantIssueLabels` and `SergeantLabelsByName`, what `addLabel` reads before adding the feedback label. Shows whether that label exists in the workspace or the issue's team |
-| linear blocked-by reads | TECH-5278 | `SergeantBlockedIssue`, `SergeantIssueId`, and `SergeantBlockedByRelation` under an id nothing was created with, what `recordBlockedBy` reads |
+| linear blocked-by reads | TECH-5278, TECH-5803 | `SergeantBlockedIssue`, `SergeantIssueId`, and `SergeantBlockedByRelation` under an id nothing was created with, what `recordBlockedBy` reads; and `SergeantInverseRelations`, the relations page `openBlockers` reads past an issue query's first page |
 | linear issue workflow | TECH-4947, TECH-4989 | `SergeantIssueWorkflow`, what a move to In Progress or Todo, or a close, reads before it moves the issue |
 | linear comment thread and comment by id | TECH-5052 | `SergeantCommentThread` and `SergeantCommentById` on the issue's first comment, what `resolveThread` and a comment's retry read, plus `SergeantCommentById` under a never-created id |
 | linear follow-up and retro issue reads | TECH-5049, TECH-5187 | `SergeantFollowupOrigin`, `SergeantIssueById`, `SergeantRetroIssue`, and `SergeantRetroTeam` on the issue and its team, plus `SergeantRelationById` and `SergeantRetroDocumentById` under never-created ids: what filing a follow-up or a retro issue reads |

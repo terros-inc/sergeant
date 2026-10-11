@@ -40,8 +40,9 @@ export type TaskBudget = {
 
 /**
  * The one way a task gets a fresh budget window: from `at`, with zero spend and `window`, the
- * installation's budget now. A human's answer to one of Sergeant's questions opens one (TECH-5059);
- * so should any other human decision that resets the clock.
+ * installation's budget now. A human's answer to one of Sergeant's questions opens one (TECH-5059), as
+ * do a human's review of its PR (TECH-5218) and its last blocker going (TECH-5803); so should any other
+ * human decision that resets the clock.
  */
 export function openWindow(state: { turnCostUsd: number; runIds: string[]; budget: TaskBudget }, at: string, window: BudgetWindow): void {
   state.turnCostUsd = 0;
@@ -60,8 +61,9 @@ export const budgetQuestionKey = (issueId: string, windowStart: string) => `budg
 /**
  * TECH-5118: whether a human has replied to Sergeant's budget question, the question it asked last (or a
  * clarifying question in that question's thread). Read from the conversation alone, so it survives a
- * restart: a window opens at the task's start, at a later human comment's time, or at a later human PR
- * review's time (TECH-5218), so every budget question of this task has the key of one of those times.
+ * restart: a window opens at the task's start, at a later human comment's time, at a later human PR
+ * review's time (TECH-5218), or when the task is unblocked (TECH-5803, kept in `state.json` as Linear has no
+ * time for a removed relation), so every budget question of this task has the key of one of those times.
  *
  * TECH-5137: only a reply given in the current window counts. A reply to one of this task's questions
  * opens a window from itself (poll-checks.ts), so it is never older than `windowStart`; a reply from
@@ -72,7 +74,7 @@ export const budgetQuestionKey = (issueId: string, windowStart: string) => `budg
  */
 export function answeredBudgetQuestion(
   conversation: Conversation,
-  budget: Pick<BudgetStatus, "taskStart" | "windowStart">,
+  budget: Pick<BudgetStatus, "taskStart" | "windowStart" | "unblockedAt">,
   pullRequests: PullRequestFacts[],
 ): boolean {
   const asked = latestQuestion(conversation);
@@ -81,7 +83,7 @@ export function answeredBudgetQuestion(
   const { issue, humanComments } = conversation;
   const thread = asked.parentId ?? asked.id;
   const since = (at: string) => Date.parse(at) >= Date.parse(budget.taskStart);
-  const windows = [budget.taskStart, ...[...humanComments, ...humanReviews(pullRequests)].map((c) => c.createdAt).filter(since)];
+  const windows = [budget.taskStart, ...(budget.unblockedAt ?? []), ...[...humanComments, ...humanReviews(pullRequests)].map((c) => c.createdAt).filter(since)];
   return windows.some((windowStart) => commentIdFor(budgetQuestionKey(issue.id, windowStart)) === thread);
 }
 
@@ -90,6 +92,8 @@ export function budgetStatus(input: {
   window: BudgetWindow;
   since?: string | undefined;
   priorRuns?: string[] | undefined;
+  /** TECH-5803: the start of every window an unblock opened. */
+  unblockedAt?: string[] | undefined;
   startedAt: string;
   turnCostUsd: number;
   runs: RunRecord[];
@@ -104,6 +108,7 @@ export function budgetStatus(input: {
     window,
     taskStart: input.startedAt,
     windowStart,
+    ...(input.unblockedAt?.length ? { unblockedAt: input.unblockedAt } : {}),
     wallDeadline: new Date(Date.parse(windowStart) + window.wallMinutes * 60_000).toISOString(),
     spentUsd: round(runCost + input.turnCostUsd),
     costLimitUsd: window.costUsd,

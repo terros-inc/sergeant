@@ -70,6 +70,10 @@ const TaskState = z.looseObject({
       /** Runs of earlier windows, which this one does not count. */
       priorRuns: z.array(RunId).default([]),
     }),
+  /** TECH-5803: the issue's open blockers as the last poll read them; absent until a poll has. */
+  blockedBy: z.array(z.string()).optional(),
+  /** TECH-5803: each window an unblock opened, by its start, so a budget question asked in one stays known by its key. */
+  unblockedAt: z.array(z.iso.datetime()).default([]),
   merged: z
     .looseObject({
       repo: RepoSlug,

@@ -98,6 +98,11 @@ export const Conversation = z.object({
      * not part of the revision. Absent reads as none.
      */
     labels: z.array(z.string()).optional(),
+    /**
+     * TECH-5803: the issues blocking this one ("blocked by") that are neither completed nor canceled,
+     * as intake reads them (TECH-5066). Not part of the revision. Absent reads as unknown, never as none.
+     */
+    blockedBy: z.array(z.string()).optional(),
   }),
   /** Every human-authored comment, oldest first. Never filtered by relevance. */
   humanComments: z.array(HumanComment),
