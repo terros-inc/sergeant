@@ -6,6 +6,7 @@ import { blockedByRecorder } from "./blocked-by.ts";
 import { followupFiler, followupFinder } from "./followup.ts";
 import { labeler } from "./label.ts";
 import { linearReadProbes } from "./read-probes.ts";
+import { openBlockers } from "./relations.ts";
 import { retroLinear, type RetroLinear } from "./retro.ts";
 import {
   actor,
@@ -16,8 +17,8 @@ import {
   completedPage,
   completedQuery,
   createComment,
-  DelegatedIssue,
   delegatedPage,
+  type DelegatedIssue,
   delegatedQuery,
   issueProgress,
   issueProgressShape,
@@ -30,7 +31,7 @@ import {
   viewerQuery,
 } from "./queries.ts";
 
-export { DelegatedIssue } from "./queries.ts";
+export type { DelegatedIssue } from "./queries.ts";
 export { linearUser, type LinearUser } from "./linear-user.ts";
 
 export type LinearAdapterOptions = {
@@ -216,7 +217,9 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       let after: string | null = null;
       do {
         const { issues }: z.infer<typeof delegatedPage> = await request(delegatedQuery, { agent: agentUserId, after }, delegatedPage);
-        delegated.push(...issues.nodes);
+        for (const { inverseRelations, ...issue } of issues.nodes) {
+          delegated.push({ ...issue, blockedBy: await openBlockers(request, issue.identifier, inverseRelations) });
+        }
         after = issues.pageInfo.hasNextPage ? issues.pageInfo.endCursor : null;
       } while (after);
       return delegated;

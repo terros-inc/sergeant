@@ -10,7 +10,9 @@ const attachment = (id: string, url: string, sourceType: string | null) => ({
   updatedAt: at(0),
   creator: { id: "human", name: "Human" },
 });
-const noRelations = { nodes: [] as unknown[], pageInfo: { hasNextPage: false } };
+const relation = (type: string, identifier: string, stateType: string) => ({ type, issue: { identifier, state: { type: stateType } } });
+const related = (n: number) => Array.from({ length: n }, (_, i) => relation("related", `UNF-${i + 100}`, "started"));
+const noRelations = { nodes: [] as unknown[], pageInfo: { hasNextPage: false, endCursor: null as string | null } };
 const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | null, inverseRelations = noRelations) => ({
   data: {
     issue: {
@@ -89,19 +91,37 @@ test("reads every page, separates human-authored comments from the rest, and lin
 });
 
 // TECH-5803: the loop opens a fresh budget window when the issue's last open blocker goes. A blocker
-// completed or canceled, or its relation removed, must each read as gone; one still open, or a relation
-// past the page, as still blocking, so no window opens early.
+// completed or canceled, or its relation removed, must each read as gone; one still open as still
+// blocking, so no window opens early.
 test("readConversation lists the issue's open blockers", async () => {
-  const relation = (type: string, identifier: string, stateType: string) => ({ type, issue: { identifier, state: { type: stateType } } });
-  const read = async (nodes: unknown[], hasNextPage = false) => {
-    const fetch = async () => Response.json(issue([], false, null, { nodes, pageInfo: { hasNextPage } }));
+  const read = async (nodes: unknown[]) => {
+    const fetch = async () => Response.json(issue([], false, null, { nodes, pageInfo: { hasNextPage: false, endCursor: null } }));
     return (await createLinearPort({ apiKey: "test", sergeantUserIds: [], fetch }).readConversation("UNF-1")).issue.blockedBy;
   };
   expect(await read([relation("blocks", "UNF-2", "started"), relation("blocks", "UNF-3", "unstarted")])).toEqual(["UNF-2", "UNF-3"]);
   // Done, Canceled, removed, and a relation that is not "blocked by".
   expect(await read([relation("blocks", "UNF-2", "completed"), relation("blocks", "UNF-3", "canceled"), relation("related", "UNF-4", "started")])).toEqual([]);
   expect(await read([])).toEqual([]);
-  expect(await read([], true)).toEqual(["relations past the first 50, unread"]);
+});
+
+// TECH-5803: the issue query reads 50 relations; the rest are read page by page. A stand-in for an
+// unread page would never go, so an issue with more relations could never be unblocked.
+test("readConversation reads every page of the issue's relations", async () => {
+  const pages: Record<string, { nodes: unknown[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } }> = {
+    first: { nodes: related(50), pageInfo: { hasNextPage: true, endCursor: "c1" } },
+    c1: { nodes: [...related(99), relation("blocks", "UNF-2", "started")], pageInfo: { hasNextPage: true, endCursor: "c2" } },
+    c2: { nodes: [relation("blocks", "UNF-3", "completed"), relation("blocks", "UNF-4", "unstarted")], pageInfo: { hasNextPage: false, endCursor: null } },
+  };
+  const afters: unknown[] = [];
+  const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { id: string; after: string } };
+    if (!query.includes("SergeantInverseRelations")) return Response.json(issue([], false, null, pages.first));
+    afters.push([variables.id, variables.after]);
+    return Response.json({ data: { issue: { inverseRelations: pages[variables.after] } } });
+  };
+  const conversation = await createLinearPort({ apiKey: "test", sergeantUserIds: [], fetch }).readConversation("UNF-1");
+  expect(conversation.issue.blockedBy).toEqual(["UNF-2", "UNF-4"]);
+  expect(afters).toEqual([["issue-1", "c1"], ["issue-1", "c2"]]);
 });
 
 // The outcome comment is posted once per merge. A retry after a lost response or a crash before the
@@ -217,7 +237,7 @@ test("moveIssueToStarted moves an unstarted issue to the first started state and
 // "X blocked by Y" as Y's `blocks` relation, among X's inverse relations; any other relation, or a
 // blocker completed or canceled, must not hold it back.
 test("delegatedIssues lists each issue's unfinished blockers", async () => {
-  const blocker = (type: string, identifier: string, stateType: string) => ({ type, issue: { identifier, state: { type: stateType } } });
+  const blocker = relation;
   const linear = createLinearPort({
     apiKey: "test",
     sergeantUserIds: [],
@@ -239,7 +259,7 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
                     blocker("blocks", "UNF-4", "canceled"),
                     blocker("related", "UNF-6", "started"),
                   ],
-                  pageInfo: { hasNextPage: false },
+                  pageInfo: { hasNextPage: false, endCursor: null },
                 },
               },
             ],
@@ -251,32 +271,4 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
   expect(await linear.delegatedIssues("agent")).toEqual([
     { identifier: "UNF-5", priority: 2, createdAt: at(0), state: { name: "Todo", type: "unstarted" }, blockedBy: ["UNF-1", "UNF-2"] },
   ]);
-});
-
-// TECH-5066: only the first 20 inverse relations are read, so an issue with more must wait rather than
-// start while an unread open blocker may hold it up.
-test("delegatedIssues holds back an issue whose relations it could not read in full", async () => {
-  const relations = Array.from({ length: 20 }, (_, i) => ({ type: "related", issue: { identifier: `UNF-${i + 10}`, state: { type: "started" } } }));
-  const linear = createLinearPort({
-    apiKey: "test",
-    sergeantUserIds: [],
-    fetch: async () =>
-      Response.json({
-        data: {
-          issues: {
-            nodes: [
-              {
-                identifier: "UNF-5",
-                priority: 2,
-                createdAt: at(0),
-                state: { name: "Todo", type: "unstarted" },
-                inverseRelations: { nodes: relations, pageInfo: { hasNextPage: true } },
-              },
-            ],
-            pageInfo: { hasNextPage: false, endCursor: null },
-          },
-        },
-      }),
-  });
-  expect((await linear.delegatedIssues("agent"))[0]?.blockedBy).toEqual(["relations past the first 20, unread"]);
 });

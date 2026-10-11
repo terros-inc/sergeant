@@ -3,6 +3,7 @@ import { z } from "zod";
 import { blockedIssue, blockedIssueShape, issueId, relationById as blockedByRelation } from "./blocked-by.ts";
 import { type FollowupDeps, followupOrigin, followupOriginShape, issueById, issueRef, relationById } from "./followup.ts";
 import { issueLabelsQuery, issueLabelsShape, labelsByName, labelsByNameShape } from "./label.ts";
+import { relationsPage } from "./relations.ts";
 import { commentById, commentThread, commentThreadShape, issueWorkflow, issueWorkflowShape, workflowState } from "./queries.ts";
 import { documentById, filedIssue, oneIssue, teamStates } from "./retro.ts";
 
@@ -38,13 +39,17 @@ export function linearReadProbes({ request }: Pick<FollowupDeps, "request">) {
       const { nodes } = (await request(labelsByName, { name }, labelsByNameShape)).issueLabels;
       return { labels: found.labels.nodes.map((l) => l.name), [name]: { workspace: nodes.some((l) => l.team === null), team: nodes.some((l) => l.team?.id === found.team.id) } };
     },
-    /** What `recordBlockedBy` reads (TECH-5278): the issue's blocking relations, the blocker's id, a relation by id. */
+    /**
+     * What `recordBlockedBy` reads (TECH-5278): the issue's blocking relations, the blocker's id, a relation by id;
+     * and the relations page `openBlockers` reads past an issue query's first page (TECH-5803).
+     */
     async blockedBy(issue: string) {
       const { issue: waiting } = await request(blockedIssue, { id: issue }, blockedIssueShape);
       if (!waiting) throw new Error(`Linear issue not found: ${issue}`);
       const { issue: same } = await request(issueId, { id: issue }, z.object({ issue: z.object({ id: z.string() }).nullable() }));
       const relation = await absent(async () => (await request(blockedByRelation, { id: neverCreated("blocked-by") }, z.object({ issueRelation: z.object({ id: z.string() }).nullable() }))).issueRelation);
-      return { blockedBy: waiting.inverseRelations.nodes.filter((r) => r.type === "blocks").length, sameIssue: same?.id === waiting.id, relation };
+      const paged = await relationsPage(request, issue, null);
+      return { blockedBy: waiting.inverseRelations.nodes.filter((r) => r.type === "blocks").length, pagedRelations: paged.nodes.length, sameIssue: same?.id === waiting.id, relation };
     },
     /** What a state move or close reads (TECH-4947): the issue's state and its team's workflow. */
     async workflow(issue: string) {

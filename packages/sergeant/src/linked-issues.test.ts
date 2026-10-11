@@ -29,7 +29,7 @@ test("a hostile linked-issue description never reaches the reasoning prompt or a
             assignee: null,
             labels: { nodes: [] },
             attachments: { nodes: [] },
-            inverseRelations: { nodes: [], pageInfo: { hasNextPage: false } },
+            inverseRelations: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
             comments: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
           },
         },
