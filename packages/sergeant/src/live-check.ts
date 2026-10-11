@@ -8,7 +8,7 @@
 // Each line is a named check; the exit code is nonzero if any fails.
 import { parseArgs } from "node:util";
 import { conversationRevision, RepoSlug } from "@terros/sergeant-contracts";
-import { RUN_PERMISSIONS } from "@terros/sergeant-github";
+import { runPermissions } from "@terros/sergeant-github";
 import { z } from "zod";
 import { BranchRules } from "./branch-rules.ts";
 import { connect, loadConfig } from "./config.ts";
@@ -55,7 +55,7 @@ if (values.issue) {
 }
 
 // An installation token not narrowed by permissions shows everything the App's installation grants.
-// The worker alone deliberately has workflows:write; neither App gets the other sensitive grants.
+// Only the worker may hold workflows:write (TECH-5797); neither App gets the other sensitive grants.
 const forbidden = (permissions: Record<string, string>, allowWorkflows = false) =>
   Object.entries(permissions).filter(
     ([name, level]) => ["administration", "secrets", "environments", "deployments"].includes(name) || (!allowWorkflows && name === "workflows") || (name === "actions" && level === "write"),
@@ -98,8 +98,10 @@ if (values.pr) {
 
 // Worker App: what its installation grants, and a run token exactly as the runner mints one.
 const workerInstallation = await installation.workerApp.mint({ repositories: [repo] });
-check("worker App holds only the intended sensitive permission", forbidden(workerInstallation.permissions, true).length === 0 && workerInstallation.permissions.workflows === "write", workerInstallation.permissions);
-const run = await installation.workerApp.mint({ repositories: [repo], permissions: RUN_PERMISSIONS.write });
+// workflows:write is allowed but not required: until the captain grants it and the installation
+// accepts it, run tokens are minted without it and workers cannot push workflow changes (TECH-5797).
+check("worker App holds no forbidden permission", forbidden(workerInstallation.permissions, true).length === 0, workerInstallation.permissions);
+const run = await installation.workerApp.mint({ repositories: [repo], permissions: await runPermissions(installation.workerApp, "write") });
 check("worker run token is scoped to the repository", run.repositories.join() === repo, { repositories: run.repositories, permissions: run.permissions });
 // GitHub reports whether the calling actor may bypass each ruleset; anything but "never", or no
 // answer, fails.

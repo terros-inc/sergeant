@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/10";
+export const WORKER_RULES_VERSION = "s2-worker-rules/11";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -34,8 +34,9 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
 - **GitHub:** \`GH_TOKEN\` is a token for the repositories above only, valid for about an hour from
   the start of this run. \`git push\` over https and \`gh\` use it. It can push branches, open and
   update PRs, and read CI. It cannot push to or merge into the default branch or change workflow
-  permissions. It may change workflow files on its non-default branch; those PRs always require a
-  human review and human merge.
+  permissions. It may change workflow files on its non-default branch once the worker App holds
+  \`workflows: write\` (until then GitHub refuses that push); those PRs always require a human
+  review and human merge.
 - Not available, by design: AWS, production, IAM/org/billing, Linear, Sergeant's control plane.
 
 ## Rules (${WORKER_RULES_VERSION})

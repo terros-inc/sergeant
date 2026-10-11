@@ -38,6 +38,9 @@ test.each([
   expect(handed).toMatchObject([{ repo: pr.repo, number: 7, expectedHeadSha: head, reviewers: ["ann-gh"] }]);
   expect(handed[0]?.comment).toContain("merge policy is `human`");
   expect(handed[0]?.comment).toContain("Sergeant's reviewer (run_review) approved this head");
+  const body = outcome.status === "denied" && outcome.refused ? handoffComment(outcome.refused) : "";
+  expect(body).toContain("This repository's merge policy is `human`, so Sergeant did not approve or merge it. Review is requested from ann-gh.");
+  expect(body).not.toContain("workflow/CI");
 });
 
 test.each(["sergeant", "human"] as const)("a workflow-changing PR is handed to a human under %s mergePolicy and never merged", async (policy) => {
@@ -48,6 +51,10 @@ test.each(["sergeant", "human"] as const)("a workflow-changing PR is handed to a
   expect(handed[0]?.comment).toContain("requires human review and human merge");
   expect(handed[0]?.comment).toContain("never approves it, merges it, or enables auto-merge");
   expect(outcome).toMatchObject({ status: "denied", rule: "H1", refused: { reason: "the PR changes protected CI configuration: .github/workflows/deploy.yml" } });
+  // The issue's handoff comment names the workflow change, never the repository's policy.
+  const body = outcome.status === "denied" && outcome.refused ? handoffComment(outcome.refused) : "";
+  expect(body).toContain("This PR changes workflow/CI configuration (.github/workflows/deploy.yml), so it needs human review and human merge whatever the repository's merge policy");
+  expect(body).not.toContain("merge policy is `human`");
 });
 
 test("an ordinary PR remains mergeable under sergeant mergePolicy", async () => {

@@ -65,7 +65,7 @@ export async function handToHuman(
       headSha: pr.headSha,
       conversationRevision: ctx.liveRevision,
       reason: ctx.protectedFiles?.length ? `the PR changes protected CI configuration: ${ctx.protectedFiles.join(", ")}` : "the repository's merge policy is human",
-      human: { requested, summary },
+      human: { requested, summary, ...(ctx.protectedFiles?.length && { protectedFiles: ctx.protectedFiles }) },
       at: new Date().toISOString(),
     };
     const why = ctx.protectedFiles?.length ? "protected CI changes require human review and merge" : `${pr.repo} is merged only by humans`;

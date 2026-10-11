@@ -9,14 +9,17 @@ links PRs to the Linear issue, and merges under the Gate's rules.
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
 | **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
-| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write, checks: read, actions: read, metadata: read. Reviewers: none (the host checks out their PRs with a read-only token that never enters the run) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs |
+| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write (only while the installation holds it), checks: read, actions: read, metadata: read. Reviewers: none (the host checks out their PRs with a read-only token that never enters the run) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs |
 
 Why two: the default-branch ruleset must let Sergeant merge and must stop a worker from pushing to
 or merging into the default branch. The worker's contents write would let it merge its own green PR,
 so the ruleset requires an approving review: GitHub never lets a PR's author approve it, and only the
 control-plane App supplies that approval, inside the gated merge (§7). The worker therefore needs a
 different actor from the one that approves and merges. The worker App alone has `workflows: write`;
-neither App has administration, secrets, environments, deployments, or `actions: write` (which could
+the captain grants it to the worker App by hand and an organization owner accepts it on the
+installation. A worker token asks for it only when the installation's permissions (read before each
+mint) include it, since GitHub refuses a token asking for more than the installation holds; until
+then workers get the same token as before and cannot push workflow changes. Neither App has administration, secrets, environments, deployments, or `actions: write` (which could
 dispatch workflows) permissions.
 
 ## 2. Repository enrollment

@@ -36,7 +36,7 @@ generic environment input:
   and unsets the variable before Codex starts. A Codex run never gets the Claude token, nor the reverse.
 - For a worker only, `GH_TOKEN`: an installation token of the **worker GitHub App**, minted per run
   by the injected `githubTokens` and scoped to exactly the run's repositories with `contents`,
-  `pull_requests`, and `workflows` write and `checks`, `actions`, and `metadata` read. It is the worker's only GitHub
+  `pull_requests`, and `workflows` write (`workflows` only once the worker App's installation holds it) and `checks`, `actions`, and `metadata` read. It is the worker's only GitHub
   credential: the worker pushes its `sergeant/` branch and opens or updates its PR itself (`gh` and
   git over https use it). The repository's ruleset, where the worker App is not a bypass actor, is
   what stops it from pushing to or merging into the default branch. It may push workflow changes on

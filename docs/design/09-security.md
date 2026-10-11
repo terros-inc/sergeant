@@ -143,7 +143,8 @@ deliberately misbehaving run from using a sibling's token.
   worker App is not a bypass actor (08 §2). A compromised worker cannot push to main, and it cannot
   merge its own green PR because it cannot approve it; only the control-plane App approves, and only
   the exact head that passed the Gate (08 §7).
-- **Workflow files**: the worker App has `workflows: write`, so a worker can commit and push
+- **Workflow files**: the worker App has `workflows: write` (granted by hand and accepted on the
+  installation; a run token includes it only once the installation holds it, 08 §1), so a worker can commit and push
   `.github/workflows/*` on a non-default branch and open the PR. A live changed-file check overrides
   every repository `mergePolicy` for workflow and other protected CI configuration: Sergeant never
   approves, merges, or enables auto-merge, and hands the PR to a human for review and merge. This is
