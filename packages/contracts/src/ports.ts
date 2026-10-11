@@ -112,11 +112,11 @@ export interface LinearPort {
   findFollowupIssue?(key: string): Promise<{ identifier: string; url: string; title: string } | undefined>;
   /**
    * Records that issue `blocked` is blocked by issue `blockedBy`, both by identifier, as Linear's
-   * relation "`blockedBy` blocks `blocked`" (TECH-5278). A relation already there, by anyone, is left as
-   * it is (`recorded: false`); a retry after a crash creates no second one. Throws when either issue
-   * is not found.
+   * relation "`blockedBy` blocks `blocked`" (TECH-5278). On return the relation is in Linear either way:
+   * `created` says whether this call made it, false when it was already there, by anyone (TECH-5803);
+   * a retry after a crash creates no second one. Throws when either issue is not found.
    */
-  recordBlockedBy?(req: { blocked: string; blockedBy: string }): Promise<{ recorded: boolean }>;
+  recordBlockedBy?(req: { blocked: string; blockedBy: string }): Promise<{ created: boolean }>;
   /**
    * Moves the issue to its team's first `started` state (lowest position) when its current state type
    * is `triage`, `backlog`, or `unstarted` — the visible "In Progress" when the first worker starts

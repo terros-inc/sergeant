@@ -161,7 +161,8 @@ Reply to extend, or say stop.
 A human's answer to any of Sergeant's questions, this one included, gives the task a fresh budget
 window (TECH-5059): from the answer, with zero spend and the installation's current budget. So does a
 human's review of the task's PR, an approval, a change request, or a review comment, from the review
-(TECH-5218). Waiting on a human PR action is a human wait like a question: while the only thing left is
+(TECH-5218), and the task's unblocking: its last open "blocked by" issue completed or canceled, or that
+relation removed, from the poll that sees it (TECH-5803). Waiting on a human PR action is a human wait like a question: while the only thing left is
 a human's merge of a PR Sergeant said is ready for a human to merge (a required review it cannot give,
 such as a code owner's) or a human's re-review it asked for, a window whose wall time runs out asks no
 budget question and takes no turn; the review opens a fresh window, and the merge ends the task. An

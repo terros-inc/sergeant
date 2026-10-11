@@ -35,6 +35,7 @@ const linearAnswers: Record<string, unknown> = {
       assignee: { ...person, url: "https://linear.app/terros/profiles/ann" },
       labels: { nodes: [] },
       attachments: { nodes: [] },
+      inverseRelations: { nodes: [], pageInfo: { hasNextPage: false } },
       comments: page([{ id: "c1", body: "Please do it.", createdAt: "2026-10-05T00:00:00.000Z", updatedAt: "2026-10-05T00:00:00.000Z", parentId: null, user: person, externalUser: null, botActor: null }]),
     },
   },

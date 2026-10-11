@@ -130,6 +130,12 @@ and asks a **Question for you**: 1. Extend, 2. Accept as-is.
   the next turn carries on. Answering `Accept as-is` or `2` ends the task instead, leaving its PRs to you.
 - **A human review** (approval, change request, or comment) of the task's PR also opens a fresh window
   (TECH-5218).
+- **Unblocking a task opens a fresh window** (TECH-5803). A task waiting on a Linear "blocked by" issue
+  keeps its window's clock running, so it may run out while it waits. Once the task's last open blocker
+  is Done or Canceled, or its "blocked by" relation is removed, the next poll (within about a minute)
+  opens a fresh window from that moment, with zero spend and the installation's budget now, however
+  exhausted the old one was, and the task carries on with no comment needed. One blocker of several
+  going opens none.
 - **`sgt task wake` does not touch the budget.** It asks for a turn now, which still waits for
   anything that holds it, an exhausted budget included.
 - **There is no command to reset a budget**, not even for approvers. Changing the installation's

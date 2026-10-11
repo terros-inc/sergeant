@@ -14,8 +14,13 @@ export const BudgetStatus = z.object({
   window: z.object({ wallMinutes: z.number().positive(), costUsd: z.number().positive() }),
   /** When the task started: a re-triggered task starts anew, and its first window's budget question is its own (TECH-5145). */
   taskStart: Instant,
-  /** When the window opened: the task's start, or the latest human answer to one of Sergeant's questions. */
+  /**
+   * When the window opened: the task's start, the latest human answer to one of Sergeant's questions or
+   * human review of its PR (TECH-5218), or the poll that saw its last blocker go (TECH-5803).
+   */
   windowStart: Instant,
+  /** TECH-5803: the start of every window an unblock opened; absent when none has. */
+  unblockedAt: z.array(Instant).optional(),
   /** One window after `windowStart`. */
   wallDeadline: Instant,
   /** The reported spend of this window's runs and turns. */

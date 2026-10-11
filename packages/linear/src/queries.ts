@@ -11,6 +11,23 @@ const comment = z.object({
   externalUser: actor.nullable(),
   botActor: z.object({ id: z.string().nullable(), type: z.string(), name: z.string().nullable() }).nullable(),
 });
+/** Linear stores "X blocked by Y" as Y's `blocks` relation, so it is among X's inverse relations. */
+const inverseRelations = z.object({
+  nodes: z.array(z.object({ type: z.string(), issue: z.object({ identifier: z.string().min(1), state: z.object({ type: z.string() }) }) })),
+  pageInfo: z.object({ hasNextPage: z.boolean() }),
+});
+
+/**
+ * The issues blocking one that are neither completed nor canceled (TECH-5066). Relations past the page
+ * read count as one more, since an unread one could be an open blocker.
+ */
+export function openBlockers(relations: z.infer<typeof inverseRelations>, pageSize: number): string[] {
+  return relations.nodes
+    .filter((r) => r.type === "blocks" && r.issue.state.type !== "completed" && r.issue.state.type !== "canceled")
+    .map((r) => r.issue.identifier)
+    .concat(relations.pageInfo.hasNextPage ? [`relations past the first ${pageSize}, unread`] : []);
+}
+
 export const issuePage = z.object({
   id: z.string().min(1),
   identifier: z.string().min(1),
@@ -34,6 +51,7 @@ export const issuePage = z.object({
       }),
     ),
   }),
+  inverseRelations,
   comments: z.object({
     nodes: z.array(comment),
     pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
@@ -53,6 +71,7 @@ export const issueQuery = `
       assignee { id name url }
       labels(first: 50) { nodes { name } }
       attachments(first: 100) { nodes { id title url sourceType updatedAt creator { id name } } }
+      inverseRelations(first: 50) { nodes { type issue { identifier state { type } } } pageInfo { hasNextPage } }
       comments(first: 50, after: $after) {
         nodes {
           id body createdAt updatedAt parentId
@@ -129,18 +148,9 @@ export const DelegatedIssue = z
     priority: z.number(),
     createdAt: z.iso.datetime({ offset: true }),
     state: z.object({ name: z.string(), type: z.string() }),
-    inverseRelations: z.object({
-      nodes: z.array(z.object({ type: z.string(), issue: z.object({ identifier: z.string().min(1), state: z.object({ type: z.string() }) }) })),
-      pageInfo: z.object({ hasNextPage: z.boolean() }),
-    }),
+    inverseRelations,
   })
-  .transform(({ inverseRelations, ...issue }) => ({
-    ...issue,
-    blockedBy: inverseRelations.nodes
-      .filter((r) => r.type === "blocks" && r.issue.state.type !== "completed" && r.issue.state.type !== "canceled")
-      .map((r) => r.issue.identifier)
-      .concat(inverseRelations.pageInfo.hasNextPage ? ["relations past the first 20, unread"] : []),
-  }));
+  .transform(({ inverseRelations, ...issue }) => ({ ...issue, blockedBy: openBlockers(inverseRelations, 20) }));
 export type DelegatedIssue = z.output<typeof DelegatedIssue>;
 export const delegatedPage = z.object({
   issues: z.object({

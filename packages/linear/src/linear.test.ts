@@ -10,7 +10,8 @@ const attachment = (id: string, url: string, sourceType: string | null) => ({
   updatedAt: at(0),
   creator: { id: "human", name: "Human" },
 });
-const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | null) => ({
+const noRelations = { nodes: [] as unknown[], pageInfo: { hasNextPage: false } };
+const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | null, inverseRelations = noRelations) => ({
   data: {
     issue: {
       id: "issue-1",
@@ -32,6 +33,7 @@ const issue = (comments: unknown[], hasNextPage: boolean, endCursor: string | nu
           { ...attachment("a4", "https://uploads.linear.app/o/x/own.png", "upload"), creator: { id: "sergeant-user", name: "Sergeant" } },
         ],
       },
+      inverseRelations,
       comments: { nodes: comments, pageInfo: { hasNextPage, endCursor } },
     },
   },
@@ -84,6 +86,22 @@ test("reads every page, separates human-authored comments from the rest, and lin
   expect(conversation.agentComments.map((c) => c.id)).toEqual(["bot", "sergeant"]);
   expect(conversation.issue.linkedPullRequests).toEqual([{ repo: "o/canary", number: 7 }]);
   expect(conversation.issue.attachments?.map((a) => a.id)).toEqual(["a2", "a3"]);
+});
+
+// TECH-5803: the loop opens a fresh budget window when the issue's last open blocker goes. A blocker
+// completed or canceled, or its relation removed, must each read as gone; one still open, or a relation
+// past the page, as still blocking, so no window opens early.
+test("readConversation lists the issue's open blockers", async () => {
+  const relation = (type: string, identifier: string, stateType: string) => ({ type, issue: { identifier, state: { type: stateType } } });
+  const read = async (nodes: unknown[], hasNextPage = false) => {
+    const fetch = async () => Response.json(issue([], false, null, { nodes, pageInfo: { hasNextPage } }));
+    return (await createLinearPort({ apiKey: "test", sergeantUserIds: [], fetch }).readConversation("UNF-1")).issue.blockedBy;
+  };
+  expect(await read([relation("blocks", "UNF-2", "started"), relation("blocks", "UNF-3", "unstarted")])).toEqual(["UNF-2", "UNF-3"]);
+  // Done, Canceled, removed, and a relation that is not "blocked by".
+  expect(await read([relation("blocks", "UNF-2", "completed"), relation("blocks", "UNF-3", "canceled"), relation("related", "UNF-4", "started")])).toEqual([]);
+  expect(await read([])).toEqual([]);
+  expect(await read([], true)).toEqual(["relations past the first 50, unread"]);
 });
 
 // The outcome comment is posted once per merge. A retry after a lost response or a crash before the

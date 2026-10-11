@@ -128,7 +128,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
 
 
   const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
-    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
+    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), unblockedAt: state.unblockedAt, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
 
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };

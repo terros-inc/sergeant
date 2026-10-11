@@ -283,8 +283,9 @@ export async function execute(action: ProposedAction, situation: SituationReport
         const active = checkLive((await ports.linear.readConversation(conversation.issue.id)).issue, ports.agentUserId);
         if (!active.allowed) return denied(active);
         if (!ports.linear.recordBlockedBy) return { action, status: "failed", error: "this Sergeant cannot record a blocked-by relation" };
-        const { recorded } = await ports.linear.recordBlockedBy({ blocked: action.blocked, blockedBy: action.blockedBy });
-        return { action, status: "done", result: { recorded } };
+        // TECH-5803: the relation is in Linear either way; `created: false` only means it already was.
+        const { created } = await ports.linear.recordBlockedBy({ blocked: action.blocked, blockedBy: action.blockedBy });
+        return { action, status: "done", result: { linked: true, created } };
       }
     }
   } catch (e) {

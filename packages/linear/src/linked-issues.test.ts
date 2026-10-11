@@ -18,6 +18,7 @@ const root = (description: string, commentBodies: string[] = []) => ({
       assignee: null,
       labels: { nodes: [] },
       attachments: { nodes: [] },
+      inverseRelations: { nodes: [], pageInfo: { hasNextPage: false } },
       comments: {
         nodes: commentBodies.map((body, index) => ({
           id: `comment-${index}`,

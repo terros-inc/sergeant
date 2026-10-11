@@ -104,7 +104,7 @@ export function ports(live: { pr?: Partial<PullRequestFacts>; conversation?: Con
         filed.push(req);
         return { identifier: `UNF-${100 + filed.length}`, url: `https://linear.app/x/issue/UNF-${100 + filed.length}` };
       },
-      recordBlockedBy: async (req) => (linked.push(req), { recorded: true }),
+      recordBlockedBy: async (req) => (linked.push(req), { created: true }),
     },
     agentUserId: "agent-v2",
     workerLogin: "sergeant-worker[bot]",

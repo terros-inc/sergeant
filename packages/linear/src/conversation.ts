@@ -2,7 +2,7 @@ import { Conversation, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import type { FollowupDeps } from "./followup.ts";
 import { readLinkedIssueBackground } from "./linked-issues.ts";
-import { issuePage, issueQuery, linkedIssue, linkedIssueQuery } from "./queries.ts";
+import { issuePage, issueQuery, linkedIssue, linkedIssueQuery, openBlockers } from "./queries.ts";
 
 const pullRequestUrl = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
 
@@ -65,6 +65,7 @@ export function conversationReader({ request, sergeantUsers, log }: Omit<Followu
         assignee: first.assignee,
         linkedPullRequests: linkedPullRequests(first.attachments.nodes),
         labels: first.labels.nodes.map((l) => l.name),
+        blockedBy: openBlockers(first.inverseRelations, 50),
         // Only a human's: Sergeant's own, and an integration's with no creator, are not human input.
         attachments: first.attachments.nodes
           .filter((a) => a.creator && !sergeantUsers.has(a.creator.id))
