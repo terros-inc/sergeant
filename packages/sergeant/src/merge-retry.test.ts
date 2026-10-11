@@ -24,7 +24,7 @@ const pr: PullRequestFacts = {
   baseRef: "main",
   baseSha: "b".repeat(40),
   body: "Fixes UNF-1",
-  mergeable: true,
+  changedFiles: [], mergeable: true,
   mergeableState: "clean",
   checks: { sha: head, required: [{ name: "validate", state: "passed" }] },
   humanFeedback: [],

@@ -726,9 +726,12 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs contents
 and pull requests write, checks and commit statuses read, and metadata read. The worker App needs
-contents and pull requests write, and checks and actions read. Neither may hold administration,
-workflows, secrets, environments, deployments, or actions write, and the worker App must not be a
-ruleset bypass actor. Contents write would let the worker App merge its own green PR, so each
+contents and pull requests write, and checks and actions read; it may also hold workflows write
+(TECH-5797), which lets workers push workflow changes on non-default branches once an organization
+owner accepts it on the installation (run tokens ask for it only then). Any PR that changes protected
+CI configuration needs an independent review and is always handed to a human to review and merge.
+Neither App may hold administration, secrets, environments, deployments, or actions write, the
+control-plane App may not hold workflows, and the worker App must not be a ruleset bypass actor. Contents write would let the worker App merge its own green PR, so each
 repository's ruleset must require at least one approving review: GitHub never lets a PR's author
 approve it, and the control-plane App submits that approval on the exact gated head only after every
 Gate check passes, immediately before its SHA-guarded merge. A failed approval stops the merge. Only

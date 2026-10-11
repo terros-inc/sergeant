@@ -40,8 +40,8 @@ generic environment input:
   credential: the worker pushes its `sergeant/` branch and opens or updates its PR itself (`gh` and
   git over https use it). The repository's ruleset, where the worker App is not a bypass actor, is
   what stops it from pushing to or merging into the default branch. It may push workflow changes on
-  a non-default branch; Sergeant's deterministic gate always hands such a PR to a human and never
-  merges it or enables auto-merge.
+  a non-default branch; Sergeant's deterministic gate requires an independent review of such a PR's
+  exact head, always hands it to a human, and never merges it or enables auto-merge.
 
 A reviewer's token is read-only and used only on the host to read the PR and check out its exact
 head; it never enters the reviewer's container. A run gets no host home, AWS, `gh` login, SSH,

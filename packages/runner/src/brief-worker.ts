@@ -69,7 +69,8 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
    \`Fixes\`, false for \`Part of\`. It is required; a report that omits it is rejected.
 6. Never merge, approve, or change repository settings, branch protection, secrets, or CI workflow
    permissions. You may change CI workflow files on your non-default branch; say clearly in the PR
-   and report that the change requires human review and human merge.
+   and report that the change requires human review and human merge, and report that its head
+   needs review: a fresh reviewer always reviews it.
 7. Follow the repository's own agent guidance (AGENTS.md / CLAUDE.md). Validate in proportion to the
    change; CI is the full gate, so run the targeted checks you can.
 8. Validation you cannot perform here (missing access, a live environment): say so in knownGaps with

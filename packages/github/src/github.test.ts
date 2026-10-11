@@ -163,10 +163,10 @@ test("approves the exact head, then merges with GitHub's expected-head guard", a
   };
 
   expect(await adapter(fetch).mergePullRequest(merge)).toEqual({ mergedSha: "b".repeat(40) });
-  expect(calls.map((call) => call.path.replace(/^.*\/pulls\/7/, ""))).toEqual(["/reviews", "", "/commits?per_page=100&page=1", "/merge"]);
-  expect(calls[0]?.body).toMatchObject({ commit_id: head, event: "APPROVE" });
+  expect(calls.map((call) => call.path.replace(/^.*\/pulls\/7/, ""))).toEqual(["/files?per_page=100&page=1", "/reviews", "", "/commits?per_page=100&page=1", "/merge"]);
+  expect(calls[1]?.body).toMatchObject({ commit_id: head, event: "APPROVE" });
   const message = "Does the thing.\n\nFixes TECH-1\n\nBuilt by Sergeant (worker: Claude, review: Codex)\n";
-  expect(calls[3]?.body).toEqual({ sha: head, merge_method: "squash", commit_title: "Fix the thing (#7)", commit_message: message });
+  expect(calls[4]?.body).toEqual({ sha: head, merge_method: "squash", commit_title: "Fix the thing (#7)", commit_message: message });
 });
 
 test("a failed approval prevents the merge", async () => {

@@ -173,7 +173,7 @@ Before reasoning can merge a head, it records that head's disposition (01 `Revie
 | D1 | all | the PR is linked to this task, its repository is in the task's set, and `prHeadSha` equals the PR's live head |
 | D2 | `reviewed` | `reviewRunId` is a succeeded **separate reviewer run** of this task whose final report lists this PR at `prHeadSha` |
 | D3 | `reviewed` | every blocking finding of that report has a `FindingResolution` in `acceptedFindings`: `disputed` (with reason and evidence) or, for findings not in category `acceptance`, `accepted_nonblocking` |
-| D4 | `not_required` | a worker run of this task reported this PR at exactly `prHeadSha` in its final report with `review.required = false` and a non-empty reason, and the PR's changed files match none of the repository's `alwaysReviewPaths` |
+| D4 | `not_required` | a worker run of this task reported this PR at exactly `prHeadSha` in its final report with `review.required = false` and a non-empty reason, and the PR's changed files match none of the repository's `alwaysReviewPaths`. Built today: a PR changing protected CI configuration, or whose changed files are unknown, never gets it (08 §7, M15) |
 | D5 | `not_required` after a review | if any reviewer run of this task reviewed this PR at an earlier head and reported blocking findings, `sinceReviewedSha` names the latest such head, and each of that review's blocking findings is either `fixed` in the worker's `addressedFindings` or resolved in `acceptedFindings` under D3's kinds. No ancestry check: rebases rewrite history; materiality is judgment |
 | D6 | `waived` | the cited comment is on this task's issue, its author is an approver, and it was posted after the head was pushed |
 

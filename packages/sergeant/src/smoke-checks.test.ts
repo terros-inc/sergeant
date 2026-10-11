@@ -77,7 +77,7 @@ const pr = {
   state: "open",
   draft: false,
   merged_at: null,
-  mergeable: true,
+  changedFiles: [], mergeable: true,
   mergeable_state: "clean",
   merge_commit_sha: null,
   head: { ref: "sergeant/tech-9-thing", sha: head, repo: { full_name: repo } },

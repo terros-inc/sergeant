@@ -57,6 +57,17 @@ test.each(["sergeant", "human"] as const)("a workflow-changing PR is handed to a
   expect(body).not.toContain("merge policy is `human`");
 });
 
+// M15: the worker's "no review needed" never covers a workflow change, under either policy; nothing is
+// handed over or merged until an independent reviewer approves the exact head.
+test.each(["sergeant", "human"] as const)("a workflow-changing PR whose worker skipped review is refused under %s mergePolicy", async (policy) => {
+  const { p, merged, handed } = humanPorts(() => policy, { pr: { changedFiles: [".github/workflows/deploy.yml"] } });
+  const skipped = { ...situation, runs: situation.runs.map((r) => (r.role === "worker" && r.report && "pullRequests" in r.report ? { ...r, report: { ...r.report, pullRequests: r.report.pullRequests.map((x) => ({ ...x, review: { required: false, reason: "small" } })) } } : r)) };
+  const outcome = await execute({ ...merge, reviewStanding: { kind: "not_required", workerRunId: "run_worker" } }, skipped, p);
+  expect(outcome).toMatchObject({ status: "denied", rule: "M15" });
+  expect(merged).toEqual([]);
+  expect(handed).toEqual([]);
+});
+
 test("an ordinary PR remains mergeable under sergeant mergePolicy", async () => {
   const { p, merged, handed } = humanPorts(() => "sergeant", { pr: { changedFiles: ["src/app.ts"] } });
   expect(await execute(merge, situation, p)).toMatchObject({ status: "done" });

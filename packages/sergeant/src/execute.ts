@@ -9,6 +9,7 @@ import {
   NoModelAccount,
   conversationRevision,
   issueRevision,
+  protectedCiFiles,
   reportedClosing,
   type FollowupCategory,
   type ProposedAction,
@@ -20,7 +21,6 @@ import { askHuman } from "./ask-human.ts";
 import { answeredBudgetQuestion } from "./budget.ts";
 import { builtByLine } from "./built-by.ts";
 import { handToHuman } from "./human-merge.ts";
-import { protectedCiFiles } from "./protected-ci.ts";
 import type { ActionOutcome, Ports } from "./execute-types.ts";
 import { accountQuestion, notOwned } from "./owner.ts";
 import { questionKey } from "./question.ts";

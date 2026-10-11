@@ -124,7 +124,7 @@ live GitHub and Linear facts at execution time:
 | M12 | GitHub has not already refused merging this PR at `expectedHeadSha` by repository policy against the same live conversation revision (see below) |
 | M13 | the run whose review or skip gives the head its standing started from the issue's current title and description (its recorded `issueRevision` equals the live one), so the work is judged against the current acceptance criteria, not the text the worker started from (TECH-5034). A record without one, from before runs recorded it, is not judged |
 | M14 | every input a run reported it could not read (`unreadableInputs`: an auth-gated link, a missing file or attachment, an issue file not downloaded) is named in a Sergeant question on the issue (a comment starting with "**Question for you**"; other bot comments do not count): reasoning asked a human about it. Q1 then holds the task only until a human next changes the conversation, which need not be an answer; M14 checks that the question was asked, and the turn that follows judges whether the change answers it (TECH-5034) |
-| M15 | if the PR changes `.github/workflows/**` or another protected CI definition (`.github/actions/**`, `.circleci/**`, `.buildkite/**`, `.gitlab-ci.yml`, or a `Jenkinsfile`), override every `mergePolicy`: Sergeant never approves, merges, or enables auto-merge and uses the human handoff below |
+| M15 | if the PR changes `.github/workflows/**` or another protected CI definition (`.github/actions/**`, `.circleci/**`, `.buildkite/**`, `.gitlab-ci.yml`, or a `Jenkinsfile`), or its changed-file list is unknown (fails closed), the standing must be an independent reviewer's approval of this exact head, never the worker's `not_required`; and whatever the `mergePolicy`, Sergeant never approves, merges, or enables auto-merge and uses the human handoff below. One matcher (`protectedCiFiles` in contracts) serves the Gate, `execute`, and the adapter, each reading the live changed files |
 
 Plus G1–G3 (not paused, task open, PR belongs to the task). Budget exhaustion does not block a merge:
 merging spends nothing, and landing finished work is the cheapest way to stop.
@@ -161,7 +161,7 @@ and waits. A human merge triggers automation as usual. Built (TECH-5244, after S
 merged a production change in a repository whose ruleset its own approval satisfied):
 
 - Reasoning proposes `merge_pr` as anywhere else. `execute` reads the repository's live policy, and
-  in a `human` repository applies the same preflight (A1, A2, M1–M14, B1; M7 lets a draft through,
+  in a `human` repository applies the same preflight (A1, A2, M1–M15, B1; M7 lets a draft through,
   since the handoff marks it ready), then hands the head to a human instead of merging: the
   control-plane App marks the PR ready for review if it is a draft, requests review from the issue's
   assignee (their GitHub login from `linear.reviewerProfiles`) only when GitHub shows nobody's review
@@ -174,11 +174,14 @@ merged a production change in a repository whose ruleset its own approval satisf
   budget window (TECH-5218), and a human's review or comment is feedback as always (M8, M10).
 - Once a human merges the closing PR, the task goes on as after Sergeant's own merge: the outcome
   comment, the audit draw, and the wait for Done that releases its slot.
-- For protected CI, the handoff says plainly that the workflow or CI change requires human review and
-  human merge. Sergeant has no auto-merge action and does not enable it.
+- For protected CI, the handoff on the PR and on the issue says plainly that the workflow or CI change
+  requires human review and human merge, whatever the repository's policy. Sergeant has no auto-merge
+  action and does not enable it.
 - Defense in depth: the GitHub adapter rereads the live policy as the first step of every merge, before
   the approval and the merge calls, and refuses with no GitHub call unless it is `sergeant`, whatever
-  asked it to merge. The approval exists only inside that merge.
+  asked it to merge. It then rereads the PR's changed files and refuses, again before any approval or
+  merge call, if one is protected CI configuration (M15) or the list cannot be read. The approval
+  exists only inside that merge.
 
 ## 8. Moved bases and conflicts
 

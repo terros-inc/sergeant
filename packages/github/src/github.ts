@@ -1,4 +1,4 @@
-import { PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
+import { protectedCiFiles, PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
@@ -295,6 +295,12 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       // here, before the approval or the merge call, and a `human` repository gets neither.
       if (config.mergePolicy !== "sergeant") {
         throw new Error(`${repo} is a human-merge repository (mergePolicy ${config.mergePolicy}): Sergeant never approves or merges in it`);
+      }
+      // TECH-5797, the same defense for a PR that changes CI configuration: its changed files are read
+      // again here, and a failed read throws, so neither an approval nor a merge call follows.
+      const protectedFiles = protectedCiFiles({ changedFiles: await readChangedFiles(repo, number) });
+      if (protectedFiles.length > 0) {
+        throw new Error(`${repo}#${number} changes protected CI configuration (${protectedFiles.join(", ")}): only a human approves and merges it`);
       }
       // The ruleset requires one approving review, which the worker App cannot give its own PR, so
       // only this approval (after every Gate check) lets the merge through. A failed approval must

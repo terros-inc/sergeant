@@ -146,9 +146,11 @@ deliberately misbehaving run from using a sibling's token.
 - **Workflow files**: the worker App has `workflows: write` (granted by hand and accepted on the
   installation; a run token includes it only once the installation holds it, 08 §1), so a worker can commit and push
   `.github/workflows/*` on a non-default branch and open the PR. A live changed-file check overrides
-  every repository `mergePolicy` for workflow and other protected CI configuration: Sergeant never
-  approves, merges, or enables auto-merge, and hands the PR to a human for review and merge. This is
-  safe only with the production-secret boundary below.
+  every repository `mergePolicy` for workflow and other protected CI configuration, and an unreadable
+  file list counts as one (08 §7, M15): the head needs an independent reviewer's approval (never the
+  worker's "review not required"), then Sergeant hands the PR to a human for review and merge and
+  never approves, merges, or enables auto-merge; the GitHub adapter rechecks the files before any
+  approval or merge call. This is safe only with the production-secret boundary below.
 - **CI secrets**: worker-authored code runs in CI. Workflows triggered by `pull_request` or non-default
   pushes must not have production secrets. Production deploy credentials live in protected GitHub
   environments usable only from the default branch with required approval. This is an enrollment

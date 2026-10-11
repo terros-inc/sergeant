@@ -448,7 +448,8 @@ Product content, versioned and iterated with evals. Required content:
    credentials: ask an approver or release). Otherwise choose the repository set and brief the primary
    worker with an outcome-level objective. Before the first worker run, check the issue's requirements
    against what a worker can do (its brief's Environment, 05): workflow-file changes are allowed on a
-   non-default branch and their PRs are deterministically handed to a human for review and merge;
+   non-default branch, and their PRs get a fresh reviewer (M15) and are deterministically handed to a
+   human for review and merge;
    live AWS or production access or evidence (a real `sst diff` against prod, a live AWS proof), or a
    change to live operator-only config (the installation-config SSM parameter, 10) is beyond any worker by
    design. Ask the owner first, naming each such non-workflow requirement, with two options: split off the operator
