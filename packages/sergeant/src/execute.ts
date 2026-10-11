@@ -9,6 +9,7 @@ import {
   NoModelAccount,
   conversationRevision,
   issueRevision,
+  protectedCiFiles,
   reportedClosing,
   type FollowupCategory,
   type ProposedAction,
@@ -164,7 +165,8 @@ export async function execute(action: ProposedAction, situation: SituationReport
         const liveRevision = conversationRevision(live, situation.pullRequests.map((p) => (p.repo === pr.repo && p.number === pr.number ? pr : p)));
         // TECH-5244: the repository's live merge policy. In a `human` one the same preflight decides
         // whether the head is ready, and a ready head is handed to a human, never approved or merged.
-        const policy = enrolledRepositories.includes(action.repo) ? (ports.github.mergePolicy?.(action.repo) ?? "human") : "human";
+        const protectedFiles = protectedCiFiles(pr);
+        const policy = protectedFiles.length > 0 ? "human" : enrolledRepositories.includes(action.repo) ? (ports.github.mergePolicy?.(action.repo) ?? "human") : "human";
         // The shared "may merge now?" preflight (TECH-5065): A1/A2 on the live issue, the merge gate, and
         // B1 again as of now, the same one a re-review request is asked against (rereview.ts).
         const verdict = checkMayMerge(
@@ -197,7 +199,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
           await ports.handoff?.(moved);
           return denied({ rule: "O1", reason: moved });
         }
-        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports });
+        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports, protectedFiles });
         // Whether the squash commit may close the issue is the worker's report, the one M9 just checked
         // the body against, never a re-reading of the body (TECH-5085).
         const squash = { issueIdentifier: live.issue.identifier, closesIssue: reportedClosing(runs, pr) === true, builtBy: builtByLine(runs) };

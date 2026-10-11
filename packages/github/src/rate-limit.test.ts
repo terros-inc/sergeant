@@ -96,11 +96,11 @@ test("a secondary limit's retry-after pauses calls even where a 403 is otherwise
 // unchanged PR's reviews and comments, and its unreadable protection, are not asked again.
 test("an unchanged PR is reread conditionally: a 304 answers with the earlier facts", async () => {
   const budget = { "x-ratelimit-limit": "5000", "x-ratelimit-remaining": "4321", "x-ratelimit-reset": String(RESET) };
-  const etagged = (path: string) => path.endsWith("/pulls/7") || path.includes("/check-runs") || path.endsWith("/status?per_page=100");
+  const etagged = (path: string) => path.endsWith("/pulls/7") || path.includes("/check-runs") || path.endsWith("/status?per_page=100") || path.includes("/pulls/7/files?");
   const { port, calls } = github((path, headers) => {
     if (!etagged(path)) return new Response(null, { status: 599 });
     if (headers.get("if-none-match") === `"${path}"`) return new Response(null, { status: 304, headers: budget });
-    const body = path.endsWith("/pulls/7") ? pr : path.includes("/check-runs") ? { total_count: 0, check_runs: [] } : { state: "success", total_count: 0, statuses: [] };
+    const body = path.endsWith("/pulls/7") ? pr : path.includes("/check-runs") ? { total_count: 0, check_runs: [] } : path.includes("/pulls/7/files?") ? [] : { state: "success", total_count: 0, statuses: [] };
     return Response.json(body, { headers: { ...budget, etag: `"${path}"` } });
   });
 
@@ -110,7 +110,7 @@ test("an unchanged PR is reread conditionally: a 304 answers with the earlier fa
 
   expect(after).toEqual(before);
   const second = calls.slice(firstPass);
-  expect(second.map((c) => c.path)).toEqual([`/repos/${repo}/pulls/7`, `/repos/${repo}/commits/${head}/check-runs?per_page=100`, `/repos/${repo}/commits/${head}/status?per_page=100`, `/repos/${repo}/rules/branches/main?per_page=100`]);
-  expect(second.slice(0, 3).map((c) => c.headers.get("if-none-match"))).toEqual(second.slice(0, 3).map((c) => `"${c.path}"`));
+  expect(second.map((c) => c.path)).toEqual([`/repos/${repo}/pulls/7`, `/repos/${repo}/commits/${head}/check-runs?per_page=100`, `/repos/${repo}/commits/${head}/status?per_page=100`, `/repos/${repo}/rules/branches/main?per_page=100`, `/repos/${repo}/pulls/7/files?per_page=100&page=1`]);
+  expect([...second.slice(0, 3), second[4]!].map((c) => c.headers.get("if-none-match"))).toEqual([...second.slice(0, 3), second[4]!].map((c) => `"${c.path}"`));
   expect(port.rateLimit?.()).toMatchObject({ limit: 5000, remaining: 4321, pausedUntil: null });
 });

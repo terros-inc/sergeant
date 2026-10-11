@@ -28,8 +28,10 @@ export const RefusedMerge = z.object({
    * TECH-5244: no merge was tried: the repository's `mergePolicy` is `human`, so the gated head was
    * handed to a human instead, with review requested from these GitHub logins or teams (none when
    * nobody could be asked) and the review summary posted on the PR, and posted on the issue with it.
+   * TECH-5797: `protectedFiles` lists the CI configuration files that forced the handoff whatever the
+   * repository's policy; absent, the repository's policy did.
    */
-  human: z.object({ requested: z.array(z.string()), summary: z.string() }).optional(),
+  human: z.object({ requested: z.array(z.string()), summary: z.string(), protectedFiles: z.array(z.string()).optional() }).optional(),
   /** A `human` repository's handoff failed at this step, rather than a merge being attempted. */
   humanFailure: z.enum(["read pull request", "mark ready", "re-read pull request", "request reviewers", "post review summary", "complete handoff"]).optional(),
   at: z.iso.datetime({ offset: true }),

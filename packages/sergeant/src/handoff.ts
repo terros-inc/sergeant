@@ -13,10 +13,14 @@ export function handoffComment(r: RefusedMerge): string {
   // TECH-5244: a human-merge repository's head was never approved or merged; it was handed over.
   if (r.human) {
     const asked = r.human.requested.length > 0 ? `Review is requested from ${r.human.requested.join(", ")}.` : "GitHub shows nobody's review requested on it.";
+    // TECH-5797: a PR changing CI configuration goes to a human whatever the repository's policy.
+    const why = r.human.protectedFiles?.length
+      ? `This PR changes workflow/CI configuration (${r.human.protectedFiles.join(", ")}), so it needs human review and human merge whatever the repository's merge policy; Sergeant did not approve or merge it and never enables auto-merge.`
+      : "This repository's merge policy is `human`, so Sergeant did not approve or merge it.";
     return [
       "**Ready for a human to merge**",
       "",
-      `${ready}. This repository's merge policy is \`human\`, so Sergeant did not approve or merge it. ${asked}`,
+      `${ready}. ${why} ${asked}`,
       "",
       r.human.summary,
       "",

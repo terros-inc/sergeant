@@ -44,6 +44,7 @@ export const pullRequestReviewers = z.object({
 });
 export const graphqlErrors = z.object({ errors: z.array(z.object({ message: z.string() })).optional() });
 export const pullRequestList = z.array(z.object({ number: z.number().int().positive() }));
+export const pullRequestFiles = z.array(z.object({ filename: z.string().min(1), previous_filename: z.string().min(1).optional() }));
 export const gitRef = z.object({ object: z.object({ sha: z.string() }) });
 export const checkRun = z.object({
   name: z.string().min(1),

@@ -1,7 +1,7 @@
-import { PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
+import { protectedCiFiles, PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
-import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
+import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 import { handToHuman } from "./hand-to-human.ts";
 import { rateLimiter } from "./rate-limit.ts";
 import { readSquashMessage } from "./squash-message.ts";
@@ -127,6 +127,16 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     return pullRequest.parse(await request(`/repos/${repo}/pulls/${number}`));
   };
 
+  const readChangedFiles = async (repo: string, number: number) => {
+    const files: string[] = [];
+    for (let page = 1; ; page += 1) {
+      const batch = pullRequestFiles.parse(await request(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`));
+      files.push(...batch.flatMap(({ filename, previous_filename }) => previous_filename ? [filename, previous_filename] : [filename]));
+      if (batch.length < 100) return [...new Set(files)];
+      if (page === 30) throw new Error("GitHub PR file list exceeds 3000 files");
+    }
+  };
+
   const readObservedChecks = async (repo: string, sha: string): Promise<ObservedCheck[]> => {
     const [runsPayload, statusesPayload] = await Promise.all([
       request(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`),
@@ -225,10 +235,11 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const key = `${repo}#${number}`;
       const memo = feedbackMemo.get(key);
       const fresh = memo && live.updated_at && memo.headSha === headSha && memo.updatedAt === live.updated_at && now() - memo.at < FEEDBACK_MEMO_MS;
-      const [observed, declared, humanFeedback] = await Promise.all([
+      const [observed, declared, humanFeedback, changedFiles] = await Promise.all([
         readObservedChecks(repo, headSha),
         readRequiredChecks(repo, live.base.ref),
         fresh ? memo.feedback : readHumanFeedback((path) => request(path), repo, number),
+        readChangedFiles(repo, number),
       ]);
       if (!fresh && live.updated_at) feedbackMemo.set(key, { headSha, updatedAt: live.updated_at, at: now(), feedback: humanFeedback });
       // Only the base branch's declared required checks count; one that never reported is
@@ -259,6 +270,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         baseRef: live.base.ref,
         baseSha: live.base.sha,
         body: live.body ?? "",
+        changedFiles,
         mergeable: live.mergeable,
         mergeableState: live.mergeable_state,
         checks: { sha: headSha, required },
@@ -283,6 +295,12 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       // here, before the approval or the merge call, and a `human` repository gets neither.
       if (config.mergePolicy !== "sergeant") {
         throw new Error(`${repo} is a human-merge repository (mergePolicy ${config.mergePolicy}): Sergeant never approves or merges in it`);
+      }
+      // TECH-5797, the same defense for a PR that changes CI configuration: its changed files are read
+      // again here, and a failed read throws, so neither an approval nor a merge call follows.
+      const protectedFiles = protectedCiFiles({ changedFiles: await readChangedFiles(repo, number) });
+      if (protectedFiles.length > 0) {
+        throw new Error(`${repo}#${number} changes protected CI configuration (${protectedFiles.join(", ")}): only a human approves and merges it`);
       }
       // The ruleset requires one approving review, which the worker App cannot give its own PR, so
       // only this approval (after every Gate check) lets the merge through. A failed approval must

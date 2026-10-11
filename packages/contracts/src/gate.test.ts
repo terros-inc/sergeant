@@ -79,7 +79,7 @@ const facts = (over: Over = {}): MergePreflightFacts => ({
     mergedSha: null,
     baseRef: "main",
     body: "Fixes UNF-1",
-    mergeable: true,
+    changedFiles: [], mergeable: true,
     // What every PR waiting for Sergeant reads: only the merge's own approval satisfies the ruleset.
     mergeableState: "blocked",
     checks: { sha: head, required: [{ name: "ci", state: "passed" }] },
@@ -279,4 +279,15 @@ test("asks no one to re-review while the budget is exhausted or the live issue s
     expect(ask(over)).toEqual([]);
   }
   expect(checkMayMerge(merge, facts())).toEqual({ allowed: true });
+});
+
+// M15 (TECH-5797): a head that changes CI configuration, or whose changed files were never read,
+// needs an independent reviewer's approval of that exact head; the worker's "no review needed" is refused.
+test("a protected CI change needs a reviewer's approval of its exact head; an unknown file list counts as one", () => {
+  const skip = { ...merge, reviewStanding: { kind: "not_required", workerRunId: "run_worker" } } as const;
+  const workflow = { changedFiles: ["src/a.ts", ".github/workflows/deploy.yml"] };
+  expect(checkMerge(skip, facts({ pr: workflow, runs: [worker(false)] }))).toMatchObject({ allowed: false, rule: "M15", reason: expect.stringContaining(".github/workflows/deploy.yml") });
+  expect(checkMerge(skip, facts({ pr: { changedFiles: undefined }, runs: [worker(false)] }))).toMatchObject({ allowed: false, rule: "M15", reason: expect.stringContaining("changed files unknown") });
+  expect(checkMerge(merge, facts({ pr: workflow }))).toEqual({ allowed: true });
+  expect(checkMerge(merge, facts({ pr: workflow, runs: [reviewer({ reviewed: [{ ...pr, headSha: moved }] }), worker(true)] }))).toMatchObject({ allowed: false, rule: "M6" });
 });

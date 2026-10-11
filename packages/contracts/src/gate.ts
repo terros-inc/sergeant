@@ -3,6 +3,7 @@ import type { HumanPullRequestFeedback, PullRequestFacts } from "./github.ts";
 import type { MergePr, ReviewStanding } from "./actions.ts";
 import type { RunRecord } from "./runs.ts";
 import { checkBudget, type BudgetStatus } from "./budget.ts";
+import { protectedCiFiles } from "./protected-ci.ts";
 import type { RefusedMerge } from "./situation.ts";
 import { checkLive, isOwned, type GateVerdict, type Ownership } from "./action-gate.ts";
 
@@ -136,7 +137,8 @@ export function unaskedInputs(runs: RunRecord[], agentComments: AgentComment[]):
  * L1 (no unreviewed, red, or unmergeable merge), M2 (only this task's PRs), M9 (no early or missing completion),
  * L4 (no merge that overtakes unseen human input or a human's requested changes), M12 (no retry
  * after a bounded merge handoff while nothing changed), M13 (no review standing given against an
- * earlier title or description), and M14 (no merge past an input a run could not read, unasked).
+ * earlier title or description), M14 (no merge past an input a run could not read, unasked), and M15
+ * (no protected CI change without an independent review of its exact head).
  * `conversationRevision` is the one the proposing turn saw, attached by the core, not by reasoning.
  */
 export function checkMerge(
@@ -164,6 +166,13 @@ export function checkMerge(
 
   const standing = checkStanding(action.reviewStanding, { repo, number, sha }, facts.runs);
   if (standing) return deny("M6", standing);
+  // M15 (TECH-5797): a head that changes CI configuration, or whose changed files are unknown, needs an
+  // independent reviewer's approval of this exact head; the worker's "no review needed" never covers it.
+  // A human still reviews and merges it: execute hands it over whatever the repository's mergePolicy.
+  const protectedFiles = protectedCiFiles(pr);
+  if (protectedFiles.length > 0 && action.reviewStanding.kind !== "reviewed") {
+    return deny("M15", `${repo}#${number} changes protected CI configuration (${protectedFiles.join(", ")}); a reviewer run must approve head ${sha} first`);
+  }
 
   // M13: the standing must judge the work against the current acceptance criteria. A run that started
   // before the title or description changed checked it against the old text (07 §10). A record made

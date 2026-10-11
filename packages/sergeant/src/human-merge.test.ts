@@ -38,6 +38,41 @@ test.each([
   expect(handed).toMatchObject([{ repo: pr.repo, number: 7, expectedHeadSha: head, reviewers: ["ann-gh"] }]);
   expect(handed[0]?.comment).toContain("merge policy is `human`");
   expect(handed[0]?.comment).toContain("Sergeant's reviewer (run_review) approved this head");
+  const body = outcome.status === "denied" && outcome.refused ? handoffComment(outcome.refused) : "";
+  expect(body).toContain("This repository's merge policy is `human`, so Sergeant did not approve or merge it. Review is requested from ann-gh.");
+  expect(body).not.toContain("workflow/CI");
+});
+
+test.each(["sergeant", "human"] as const)("a workflow-changing PR is handed to a human under %s mergePolicy and never merged", async (policy) => {
+  const { p, merged, handed } = humanPorts(() => policy, { pr: { changedFiles: ["src/app.ts", ".github/workflows/deploy.yml"] } });
+  const outcome = await execute(merge, situation, p);
+  expect(merged).toEqual([]);
+  expect(handed).toHaveLength(1);
+  expect(handed[0]?.comment).toContain("requires human review and human merge");
+  expect(handed[0]?.comment).toContain("never approves it, merges it, or enables auto-merge");
+  expect(outcome).toMatchObject({ status: "denied", rule: "H1", refused: { reason: "the PR changes protected CI configuration: .github/workflows/deploy.yml" } });
+  // The issue's handoff comment names the workflow change, never the repository's policy.
+  const body = outcome.status === "denied" && outcome.refused ? handoffComment(outcome.refused) : "";
+  expect(body).toContain("This PR changes workflow/CI configuration (.github/workflows/deploy.yml), so it needs human review and human merge whatever the repository's merge policy");
+  expect(body).not.toContain("merge policy is `human`");
+});
+
+// M15: the worker's "no review needed" never covers a workflow change, under either policy; nothing is
+// handed over or merged until an independent reviewer approves the exact head.
+test.each(["sergeant", "human"] as const)("a workflow-changing PR whose worker skipped review is refused under %s mergePolicy", async (policy) => {
+  const { p, merged, handed } = humanPorts(() => policy, { pr: { changedFiles: [".github/workflows/deploy.yml"] } });
+  const skipped = { ...situation, runs: situation.runs.map((r) => (r.role === "worker" && r.report && "pullRequests" in r.report ? { ...r, report: { ...r.report, pullRequests: r.report.pullRequests.map((x) => ({ ...x, review: { required: false, reason: "small" } })) } } : r)) };
+  const outcome = await execute({ ...merge, reviewStanding: { kind: "not_required", workerRunId: "run_worker" } }, skipped, p);
+  expect(outcome).toMatchObject({ status: "denied", rule: "M15" });
+  expect(merged).toEqual([]);
+  expect(handed).toEqual([]);
+});
+
+test("an ordinary PR remains mergeable under sergeant mergePolicy", async () => {
+  const { p, merged, handed } = humanPorts(() => "sergeant", { pr: { changedFiles: ["src/app.ts"] } });
+  expect(await execute(merge, situation, p)).toMatchObject({ status: "done" });
+  expect(merged).toHaveLength(1);
+  expect(handed).toEqual([]);
 });
 
 test("a head the merge checks refuse is not handed over either, and a draft is handed over only in a human repository", async () => {

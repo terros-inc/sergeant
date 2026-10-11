@@ -63,7 +63,7 @@ export function fakes(issues: DelegatedIssue[], withPr?: string) {
     github: {
       readPullRequest: async (repo, number) => {
         const checks = { sha, required: [{ name: "ci", state: ci.state }] };
-        return { repo, number, url: "https://github.com/o/r/pull/1", author: "sergeant-worker[bot]", state: "open", draft: false, headSha: sha, mergedSha: null, baseRef: "main", body: "Fixes WAITS", mergeable: true, mergeableState: "clean", checks, humanFeedback: [...feedback] };
+        return { repo, number, url: "https://github.com/o/r/pull/1", author: "sergeant-worker[bot]", state: "open", draft: false, headSha: sha, mergedSha: null, baseRef: "main", body: "Fixes WAITS", changedFiles: [], mergeable: true, mergeableState: "clean", checks, humanFeedback: [...feedback] };
       },
       closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no merge configured")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no run")), cancel: async () => {} },

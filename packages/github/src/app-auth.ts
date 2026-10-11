@@ -30,6 +30,17 @@ export const RUN_PERMISSIONS: Record<"write" | "read", Permissions> = {
   read: { contents: "read", pull_requests: "read", metadata: "read" },
 };
 
+/**
+ * TECH-5797: a worker token also gets `workflows: write`, so a worker can push workflow changes, but
+ * only once the worker App's installation holds it: GitHub refuses a token asking for more than the
+ * installation was granted, and the captain grants it by hand, after which an owner accepts it.
+ */
+export async function runPermissions(workerApp: Pick<GitHubApp, "installationPermissions">, access: "write" | "read"): Promise<Permissions> {
+  if (access === "read") return RUN_PERMISSIONS.read;
+  const held = await workerApp.installationPermissions();
+  return held.workflows === "write" ? { ...RUN_PERMISSIONS.write, workflows: "write" } : RUN_PERMISSIONS.write;
+}
+
 const base64url = (data: string | Buffer) => Buffer.from(data).toString("base64url");
 
 export function githubApp(options: GitHubAppOptions) {
@@ -54,6 +65,14 @@ export function githubApp(options: GitHubAppOptions) {
       });
       if (!res.ok) throw new Error(`GitHub App ${options.appId} could not read itself (${res.status})`);
       return `${z.object({ slug: z.string().min(1) }).parse(await res.json()).slug}[bot]`;
+    },
+    /** What the App's installation currently grants, as accepted on the installation. */
+    async installationPermissions(): Promise<Record<string, string>> {
+      const res = await fetchFn(`${apiUrl}/app/installations/${options.installationId}`, {
+        headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${jwt()}`, "X-GitHub-Api-Version": "2022-11-28" },
+      });
+      if (!res.ok) throw new Error(`GitHub App ${options.appId} could not read its installation (${res.status})`);
+      return z.object({ permissions: z.record(z.string(), z.string()).default({}) }).parse(await res.json()).permissions;
     },
     /** An installation token, optionally narrowed to `repositories` (all of one owner) and `permissions`. */
     async mint(scope: { repositories?: RepoSlug[]; permissions?: Permissions } = {}): Promise<InstallationToken> {
@@ -97,4 +116,4 @@ export function cachedToken(mint: () => Promise<InstallationToken>, marginMs = 5
 export const runTokens =
   (workerApp: GitHubApp): RunGitHubTokens =>
   async ({ repositories, access }) =>
-    (await workerApp.mint({ repositories, permissions: RUN_PERMISSIONS[access] })).token;
+    (await workerApp.mint({ repositories, permissions: await runPermissions(workerApp, access) })).token;

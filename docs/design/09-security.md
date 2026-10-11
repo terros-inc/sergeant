@@ -143,10 +143,14 @@ deliberately misbehaving run from using a sibling's token.
   worker App is not a bypass actor (08 §2). A compromised worker cannot push to main, and it cannot
   merge its own green PR because it cannot approve it; only the control-plane App approves, and only
   the exact head that passed the Gate (08 §7).
-- **Workflow files**: neither App has the `workflows` permission, so a worker cannot change
-  `.github/workflows/*`. Without this, a worker could edit a PR workflow to print repository secrets.
-  A task that needs a workflow change ends `blocked_by_environment` and a human applies it (settled,
-  `14` §A).
+- **Workflow files**: the worker App has `workflows: write` (granted by hand and accepted on the
+  installation; a run token includes it only once the installation holds it, 08 §1), so a worker can commit and push
+  `.github/workflows/*` on a non-default branch and open the PR. A live changed-file check overrides
+  every repository `mergePolicy` for workflow and other protected CI configuration, and an unreadable
+  file list counts as one (08 §7, M15): the head needs an independent reviewer's approval (never the
+  worker's "review not required"), then Sergeant hands the PR to a human for review and merge and
+  never approves, merges, or enables auto-merge; the GitHub adapter rechecks the files before any
+  approval or merge call. This is safe only with the production-secret boundary below.
 - **CI secrets**: worker-authored code runs in CI. Workflows triggered by `pull_request` or non-default
   pushes must not have production secrets. Production deploy credentials live in protected GitHub
   environments usable only from the default branch with required approval. This is an enrollment
@@ -194,7 +198,7 @@ misled:
 
 | Compromised | Can | Cannot |
 |---|---|---|
-| **Any run in the runner zone** (worker or reviewer) | read and write non-default branches and PRs in **every enrolled repository granted to any concurrent run** (it can read sibling runs' tokens); read that code; use dev/stage AWS within the permission boundary: create, change, or delete dev resources, read dev data, run up dev/stage cost; trigger CI and call paid engineering tools whose cost is outside Sergeant's model budget; keep using a token it already holds until it expires (up to an hour); copy the model credential it runs on, its task owner's, and use it outside Sergeant until its holder revokes it with the provider (§3a); run arbitrary code on the runner host as `sergeant-runner`; mislead reasoning through its report (including a false "review not required") | touch production; administer IAM, org, or billing; push or merge to a protected default branch; change workflow files; read control-plane credentials or the ledger; post to Linear; use any human's personal credentials other than the registered model credential it runs on (§3a) |
+| **Any run in the runner zone** (worker or reviewer) | read and write non-default branches and PRs in **every enrolled repository granted to any concurrent run** (it can read sibling runs' tokens); read that code; change workflow files on non-default branches; use dev/stage AWS within the permission boundary: create, change, or delete dev resources, read dev data, run up dev/stage cost; trigger CI and call paid engineering tools whose cost is outside Sergeant's model budget; keep using a token it already holds until it expires (up to an hour); copy the model credential it runs on, its task owner's, and use it outside Sergeant until its holder revokes it with the provider (§3a); run arbitrary code on the runner host as `sergeant-runner`; mislead reasoning through its report (including a false "review not required") | touch production; administer IAM, org, or billing; push or merge to a protected default branch; cause Sergeant to approve, merge, or enable auto-merge for a PR that changes protected CI configuration; read control-plane credentials or the ledger; post to Linear; use any human's personal credentials other than the registered model credential it runs on (§3a) |
 | **Sergeant's reasoning** (prompt-injected) | start and cancel runs within the time and concurrency limits; post comments within rate limits; ask questions; create follow-ups within limits; record dispositions the Gate's evidence rules accept, including `not_required` on a worker's word; merge PRs in `mergePolicy: sergeant` repositories whose required checks are green; release tasks | merge red heads or heads with no recorded disposition; overtake a human comment or edit no turn has seen; exceed the wall-clock or concurrency limits; open itself a fresh budget window or waive review; touch production or change enrollment |
 | **A team member's Linear account** | delegate work, answer questions (each answer to a Sergeant question opens a fresh budget window), steer tasks; if an approver, waive review | anything a run cannot do |
 
