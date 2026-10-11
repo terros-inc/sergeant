@@ -40,6 +40,23 @@ test.each([
   expect(handed[0]?.comment).toContain("Sergeant's reviewer (run_review) approved this head");
 });
 
+test.each(["sergeant", "human"] as const)("a workflow-changing PR is handed to a human under %s mergePolicy and never merged", async (policy) => {
+  const { p, merged, handed } = humanPorts(() => policy, { pr: { changedFiles: ["src/app.ts", ".github/workflows/deploy.yml"] } });
+  const outcome = await execute(merge, situation, p);
+  expect(merged).toEqual([]);
+  expect(handed).toHaveLength(1);
+  expect(handed[0]?.comment).toContain("requires human review and human merge");
+  expect(handed[0]?.comment).toContain("never approves it, merges it, or enables auto-merge");
+  expect(outcome).toMatchObject({ status: "denied", rule: "H1", refused: { reason: "the PR changes protected CI configuration: .github/workflows/deploy.yml" } });
+});
+
+test("an ordinary PR remains mergeable under sergeant mergePolicy", async () => {
+  const { p, merged, handed } = humanPorts(() => "sergeant", { pr: { changedFiles: ["src/app.ts"] } });
+  expect(await execute(merge, situation, p)).toMatchObject({ status: "done" });
+  expect(merged).toHaveLength(1);
+  expect(handed).toEqual([]);
+});
+
 test("a head the merge checks refuse is not handed over either, and a draft is handed over only in a human repository", async () => {
   const red = humanPorts(() => "human", { pr: { checks: { sha: head, required: [{ name: "ci", state: "failed" }] } } });
   expect(await execute(merge, situation, red.p)).toMatchObject({ status: "denied", rule: "M5" });

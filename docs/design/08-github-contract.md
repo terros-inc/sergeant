@@ -9,15 +9,15 @@ links PRs to the Linear issue, and merges under the Gate's rules.
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
 | **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
-| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, checks: read, actions: read, metadata: read. Reviewers: none (the host checks out their PRs with a read-only token that never enters the run) | pushing branches, opening and updating PRs, reading CI logs |
+| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write, checks: read, actions: read, metadata: read. Reviewers: none (the host checks out their PRs with a read-only token that never enters the run) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs |
 
 Why two: the default-branch ruleset must let Sergeant merge and must stop a worker from pushing to
 or merging into the default branch. The worker's contents write would let it merge its own green PR,
 so the ruleset requires an approving review: GitHub never lets a PR's author approve it, and only the
 control-plane App supplies that approval, inside the gated merge (§7). The worker therefore needs a
-different actor from the one that approves and merges. Neither App has administration, secrets,
-environments, deployments, `workflows`, or `actions: write` (which could dispatch workflows)
-permissions.
+different actor from the one that approves and merges. The worker App alone has `workflows: write`;
+neither App has administration, secrets, environments, deployments, or `actions: write` (which could
+dispatch workflows) permissions.
 
 ## 2. Repository enrollment
 
@@ -36,6 +36,8 @@ can through the API):
 4. **No production secret is reachable by workflows that run for pull requests or non-default
    branches.** Worker-authored code runs in CI. Production deploy credentials belong in protected
    environments that only default-branch workflows with approval can use (09 §5).
+   This is the hard boundary that makes worker-authored workflow changes safe: code on a worker
+   branch can run with development CI authority, but cannot reach production credentials.
 5. The Linear GitHub integration is connected, so a merged PR with `Fixes <IDENTIFIER>` closes the
    issue (07 §7).
 6. `mergePolicy` is set deliberately: `sergeant` or `human`. **If merging to the default branch
@@ -119,6 +121,7 @@ live GitHub and Linear facts at execution time:
 | M12 | GitHub has not already refused merging this PR at `expectedHeadSha` by repository policy against the same live conversation revision (see below) |
 | M13 | the run whose review or skip gives the head its standing started from the issue's current title and description (its recorded `issueRevision` equals the live one), so the work is judged against the current acceptance criteria, not the text the worker started from (TECH-5034). A record without one, from before runs recorded it, is not judged |
 | M14 | every input a run reported it could not read (`unreadableInputs`: an auth-gated link, a missing file or attachment, an issue file not downloaded) is named in a Sergeant question on the issue (a comment starting with "**Question for you**"; other bot comments do not count): reasoning asked a human about it. Q1 then holds the task only until a human next changes the conversation, which need not be an answer; M14 checks that the question was asked, and the turn that follows judges whether the change answers it (TECH-5034) |
+| M15 | if the PR changes `.github/workflows/**` or another protected CI definition (`.github/actions/**`, `.circleci/**`, `.buildkite/**`, `.gitlab-ci.yml`, or a `Jenkinsfile`), override every `mergePolicy`: Sergeant never approves, merges, or enables auto-merge and uses the human handoff below |
 
 Plus G1–G3 (not paused, task open, PR belongs to the task). Budget exhaustion does not block a merge:
 merging spends nothing, and landing finished work is the cheapest way to stop.
@@ -150,7 +153,7 @@ only action outcome that leaves the fingerprint uncommitted, so the question can
 next poll or a restart. The Linear issue's Done state follows from automation, not from Sergeant
 (07 §7).
 
-Where `mergePolicy` is `human`, Sergeant gets the PR ready (green, reviewed, disposition recorded),
+Where `mergePolicy` is `human`, or M15 finds protected CI configuration, Sergeant gets the PR ready (green, reviewed, disposition recorded),
 and waits. A human merge triggers automation as usual. Built (TECH-5244, after Sergeant approved and
 merged a production change in a repository whose ruleset its own approval satisfied):
 
@@ -168,6 +171,8 @@ merged a production change in a repository whose ruleset its own approval satisf
   budget window (TECH-5218), and a human's review or comment is feedback as always (M8, M10).
 - Once a human merges the closing PR, the task goes on as after Sergeant's own merge: the outcome
   comment, the audit draw, and the wait for Done that releases its slot.
+- For protected CI, the handoff says plainly that the workflow or CI change requires human review and
+  human merge. Sergeant has no auto-merge action and does not enable it.
 - Defense in depth: the GitHub adapter rereads the live policy as the first step of every merge, before
   the approval and the merge calls, and refuses with no GitHub call unless it is `sergeant`, whatever
   asked it to merge. The approval exists only inside that merge.

@@ -89,6 +89,7 @@ const githubAnswer = (path: string): unknown => {
   if (path === `/repos/${repo}`) return { default_branch: "main" };
   if (path === `/repos/${repo}/branches/main`) return { commit: { sha: "c".repeat(40) } };
   if (path.endsWith("/pulls/7")) return pr;
+  if (path.includes("/pulls/7/files?")) return [{ filename: "src/thing.ts" }];
   if (path.includes("/pulls?state=open")) return [{ number: 7 }];
   if (path.includes("/check-runs")) return { total_count: 1, check_runs: [{ name: "v2", status: "completed", conclusion: "success", app: { id: 15368 } }] };
   if (path.includes("/status")) return { state: "success", total_count: 0, statuses: [] };

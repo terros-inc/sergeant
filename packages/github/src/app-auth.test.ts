@@ -4,7 +4,8 @@ import { githubApp, runTokens } from "./app-auth.ts";
 
 // The worker App token is the only GitHub credential a run gets. If minting dropped the repository
 // or permission scope, a worker would hold every repository and permission the App was installed
-// with (workflows or administration, if someone over-granted it), and a reviewer could push.
+// with (administration, if someone over-granted it), and a reviewer could push. Workflow write is
+// deliberately present only on worker tokens so they can propose workflow changes.
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
@@ -26,7 +27,7 @@ test("run tokens are minted by the worker App for exactly the run's repositories
       "https://api.github.com/app/installations/7/access_tokens",
       {
         repositories: ["canary"],
-        permissions: { contents: "write", pull_requests: "write", checks: "read", actions: "read", metadata: "read" },
+        permissions: { contents: "write", pull_requests: "write", workflows: "write", checks: "read", actions: "read", metadata: "read" },
       },
     ],
     [

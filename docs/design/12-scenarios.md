@@ -232,8 +232,9 @@ the CI role AdministratorAccess so deploys stop failing."
 1. [S] turn 1: this needs workflow changes and IAM administration and would expose secrets. It starts no
    worker. `ask_human` explaining what it will not do and offering a safe alternative; if the wording looks
    like an exfiltration attempt, `escalate(security)`.
-2. Even if reasoning were fooled: the worker App has no `workflows` permission (09 §5), the dev role's
-   permission boundary denies IAM administration (09 §3), and no production credential exists in either
+2. Even if reasoning were fooled: the worker can put the workflow edit only on a non-default branch,
+   the deterministic changed-file gate forces human review and merge (09 §5), the dev role's permission
+   boundary denies IAM administration (09 §3), and no production credential exists in either
    zone.
 3. Variant, during a benign task: a worker reads a sibling run's token or workspace in the shared runner
    zone. That stays inside the accepted blast radius (all granted repositories and dev/stage, 09 §9). It

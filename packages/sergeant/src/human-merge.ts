@@ -24,11 +24,14 @@ export function reviewSummary(standing: MergePr["reviewStanding"], head: Pick<Pu
 }
 
 /** The comment on the PR itself; GitHub posts it once per head, since the head is in it. */
-export function prHandoffComment(pr: Pick<PullRequestFacts, "headSha">, summary: string): string {
+export function prHandoffComment(pr: Pick<PullRequestFacts, "headSha">, summary: string, protectedFiles: string[] = []): string {
+  const reason = protectedFiles.length
+    ? `This PR changes protected CI configuration (${protectedFiles.join(", ")}), so it requires human review and human merge; Sergeant never approves it, merges it, or enables auto-merge.`
+    : "This repository's merge policy is `human`, so Sergeant does not approve or merge it: a human reviews and merges it.";
   return [
     "**Ready for a human to merge**",
     "",
-    `Sergeant's merge gate passed on head \`${pr.headSha}\`: its required checks are green and it has review standing. This repository's merge policy is \`human\`, so Sergeant does not approve or merge it: a human reviews and merges it.`,
+    `Sergeant's merge gate passed on head \`${pr.headSha}\`: its required checks are green and it has review standing. ${reason}`,
     "",
     summary,
   ].join("\n");
@@ -39,7 +42,7 @@ export async function handToHuman(
   action: MergePr,
   pr: PullRequestFacts,
   issue: Conversation["issue"],
-  ctx: { runs: RunRecord[]; liveRevision: string; ports: Ports },
+  ctx: { runs: RunRecord[]; liveRevision: string; ports: Ports; protectedFiles?: string[] },
 ): Promise<ActionOutcome> {
   const { ports } = ctx;
   try {
@@ -52,7 +55,7 @@ export async function handToHuman(
       number: pr.number,
       expectedHeadSha: pr.headSha,
       reviewers: assignee ? [assignee] : [],
-      comment: prHandoffComment(pr, summary),
+      comment: prHandoffComment(pr, summary, ctx.protectedFiles),
     }));
     ports.log?.(`${pr.repo}#${pr.number}: handed to a human to merge; review requested from ${requested.join(", ") || "nobody"}`);
     const refused: RefusedMerge = {
@@ -61,11 +64,12 @@ export async function handToHuman(
       url: pr.url,
       headSha: pr.headSha,
       conversationRevision: ctx.liveRevision,
-      reason: "the repository's merge policy is human",
+      reason: ctx.protectedFiles?.length ? `the PR changes protected CI configuration: ${ctx.protectedFiles.join(", ")}` : "the repository's merge policy is human",
       human: { requested, summary },
       at: new Date().toISOString(),
     };
-    return { action, status: "denied", rule: "H1", reason: `${pr.repo} is merged only by humans: handed to a human, review requested from ${requested.join(", ") || "nobody"}`, refused };
+    const why = ctx.protectedFiles?.length ? "protected CI changes require human review and merge" : `${pr.repo} is merged only by humans`;
+    return { action, status: "denied", rule: "H1", reason: `${why}: handed to a human, review requested from ${requested.join(", ") || "nobody"}`, refused };
   } catch (e) {
     if (e instanceof HumanHandoffError) return { action, status: "failed", error: e.message, handoffStep: e.step };
     return { action, status: "failed", error: (e as Error).message, handoffStep: "complete handoff" };

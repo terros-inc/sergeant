@@ -26,7 +26,7 @@ const tokenResponse = z.object({
 
 /** A worker's or reviewer's token can do exactly this, even if the worker App holds more. */
 export const RUN_PERMISSIONS: Record<"write" | "read", Permissions> = {
-  write: { contents: "write", pull_requests: "write", checks: "read", actions: "read", metadata: "read" },
+  write: { contents: "write", pull_requests: "write", workflows: "write", checks: "read", actions: "read", metadata: "read" },
   read: { contents: "read", pull_requests: "read", metadata: "read" },
 };
 

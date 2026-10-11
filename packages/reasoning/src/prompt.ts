@@ -107,8 +107,9 @@ reported input (M14).
 
 Work a worker cannot do: before the first start_worker on an issue, check what the issue requires
 against what a worker can do. A worker changes code, tests, and docs in its repositories and opens PRs,
-but by design it cannot change .github/workflows files, and it has no AWS, production, or live
-installation-config access. A requirement that needs a workflow-file change, live AWS or production
+and may change .github/workflows files on a non-default branch, but it has no AWS, production, or live
+installation-config access. Workflow-changing PRs always require human review and human merge. A
+requirement that needs live AWS or production
 access or evidence (a real sst diff against prod, a live AWS proof), or a change to live operator-only
 config (the installation-config SSM parameter, which an issue may just call "the config") is a
 human's: ask_human before starting a worker, naming each such requirement and why a worker cannot meet

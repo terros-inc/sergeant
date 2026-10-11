@@ -24,7 +24,7 @@ const read = (live: Record<string, unknown>) => {
     if (path.includes("/check-runs")) return Response.json({ total_count: 0, check_runs: [] });
     if (path.endsWith("/status?per_page=100")) return Response.json({ state: "success", total_count: 0, statuses: [] });
     if (path.includes("/protection/")) return Response.json({ message: "Not Found" }, { status: 404 });
-    if (/\/rules\/branches\/main\?|\/(reviews|comments)\?per_page=100&page=1$/.test(path)) return Response.json([]);
+    if (/\/rules\/branches\/main\?|\/(reviews|comments|files)\?per_page=100&page=1$/.test(path)) return Response.json([]);
     throw new Error(`unexpected request: ${path}`);
   };
   return createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash" } }, fetch }).readPullRequest(repo, 7);

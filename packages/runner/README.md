@@ -35,12 +35,13 @@ generic environment input:
   `CODEX_CREDENTIAL`. The container turns it into its own `~/.codex/auth.json` (outside the workspace)
   and unsets the variable before Codex starts. A Codex run never gets the Claude token, nor the reverse.
 - For a worker only, `GH_TOKEN`: an installation token of the **worker GitHub App**, minted per run
-  by the injected `githubTokens` and scoped to exactly the run's repositories with `contents` and
-  `pull_requests` write and `checks`, `actions`, and `metadata` read. It is the worker's only GitHub
+  by the injected `githubTokens` and scoped to exactly the run's repositories with `contents`,
+  `pull_requests`, and `workflows` write and `checks`, `actions`, and `metadata` read. It is the worker's only GitHub
   credential: the worker pushes its `sergeant/` branch and opens or updates its PR itself (`gh` and
   git over https use it). The repository's ruleset, where the worker App is not a bypass actor, is
-  what stops it from pushing to or merging into the default branch; it cannot change workflows
-  because the App lacks that permission.
+  what stops it from pushing to or merging into the default branch. It may push workflow changes on
+  a non-default branch; Sergeant's deterministic gate always hands such a PR to a human and never
+  merges it or enables auto-merge.
 
 A reviewer's token is read-only and used only on the host to read the PR and check out its exact
 head; it never enters the reviewer's container. A run gets no host home, AWS, `gh` login, SSH,

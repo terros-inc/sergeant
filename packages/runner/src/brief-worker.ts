@@ -34,7 +34,8 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
 - **GitHub:** \`GH_TOKEN\` is a token for the repositories above only, valid for about an hour from
   the start of this run. \`git push\` over https and \`gh\` use it. It can push branches, open and
   update PRs, and read CI. It cannot push to or merge into the default branch or change workflow
-  files.
+  permissions. It may change workflow files on its non-default branch; those PRs always require a
+  human review and human merge.
 - Not available, by design: AWS, production, IAM/org/billing, Linear, Sergeant's control plane.
 
 ## Rules (${WORKER_RULES_VERSION})
@@ -66,7 +67,8 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
    Open PRs ready for review, not as drafts. Report each PR's \`closesIssue\` to match: true for
    \`Fixes\`, false for \`Part of\`. It is required; a report that omits it is rejected.
 6. Never merge, approve, or change repository settings, branch protection, secrets, or CI workflow
-   files.
+   permissions. You may change CI workflow files on your non-default branch; say clearly in the PR
+   and report that the change requires human review and human merge.
 7. Follow the repository's own agent guidance (AGENTS.md / CLAUDE.md). Validate in proportion to the
    change; CI is the full gate, so run the targeted checks you can.
 8. Validation you cannot perform here (missing access, a live environment): say so in knownGaps with

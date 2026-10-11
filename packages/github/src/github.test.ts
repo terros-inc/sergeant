@@ -22,9 +22,9 @@ const merge = { repo, number: 7, expectedHeadSha: head, squash: { issueIdentifie
 
 const json = (value: unknown, status = 200, headers?: HeadersInit) =>
   Response.json(value, { status, ...(headers && { headers }) });
-/** A PR's human-feedback and commit lists are empty unless a test's `fetch` answers them. */
+/** A PR's human-feedback, commit, and changed-file lists are empty unless a test's `fetch` answers them. */
 const noFeedback = (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) =>
-  /\/(reviews|comments|commits)\?per_page=100&page=1$/.test(String(input)) && !init?.method ? fetch(input, init).catch(() => json([])) : fetch(input, init);
+  /\/(reviews|comments|commits|files)\?per_page=100&page=1$/.test(String(input)) && !init?.method ? fetch(input, init).catch(() => json([])) : fetch(input, init);
 const adapter = (fetch: typeof globalThis.fetch, observedChecksFallback = false) =>
   createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash", mergePolicy: "sergeant", observedChecksFallback } }, fetch: noFeedback(fetch) });
 

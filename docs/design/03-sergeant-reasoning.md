@@ -447,10 +447,11 @@ Product content, versioned and iterated with evals. Required content:
    human can resolve (ask), or outside the development zone (production, IAM/billing, personal
    credentials: ask an approver or release). Otherwise choose the repository set and brief the primary
    worker with an outcome-level objective. Before the first worker run, check the issue's requirements
-   against what a worker can do (its brief's Environment, 05): a workflow-file change (`.github/workflows`),
+   against what a worker can do (its brief's Environment, 05): workflow-file changes are allowed on a
+   non-default branch and their PRs are deterministically handed to a human for review and merge;
    live AWS or production access or evidence (a real `sst diff` against prod, a live AWS proof), or a
    change to live operator-only config (the installation-config SSM parameter, 10) is beyond any worker by
-   design. Ask the owner first, naming each such requirement, with two options: split off the operator
+   design. Ask the owner first, naming each such non-workflow requirement, with two options: split off the operator
    step for a human to do, or waive it; then brief the worker on the rest (TECH-5257). This is a reasoning
    judgment, with no Gate rule behind it.
 4. **The primary worker.** One at a time. Send it findings, answers, and redirections. If it ended,

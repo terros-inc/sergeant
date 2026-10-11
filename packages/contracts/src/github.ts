@@ -74,6 +74,8 @@ export const PullRequestFacts = z.object({
   baseSha: Sha.optional(),
   /** The PR description; GitHub's empty body is "". M9 reads its closing reference. */
   body: z.string(),
+  /** Every path changed by this head, used by the deterministic protected-CI merge override. */
+  changedFiles: z.array(z.string().min(1)).optional(),
   /** null while GitHub has not computed mergeability yet. */
   mergeable: z.boolean().nullable(),
   /** Why GitHub would or would not merge it now; M7 reads it. */
