@@ -69,9 +69,10 @@ exit $code
 `;
 
 /** The keys of a run's secret, each one environment variable of its container. */
-export const secretKeys = (adapter: Adapter, attachments: boolean) => [
+export const secretKeys = (adapter: Adapter, attachments: boolean, denylist: boolean) => [
   "SERGEANT_BRIEF",
   ...(attachments ? ["SERGEANT_ATTACHMENTS"] : []),
+  ...(denylist ? ["PUBLIC_DATA_DENYLIST"] : []),
   "GH_TOKEN",
   AGENTS[adapter].credentialEnv,
 ];
@@ -84,6 +85,8 @@ export type TaskDefinitionInput = {
   secretArn: string;
   /** Whether the secret holds `SERGEANT_ATTACHMENTS`: a reference to a missing key fails the task's start. */
   attachments: boolean;
+  /** Whether the secret holds `PUBLIC_DATA_DENYLIST`, the customer names the pre-push hook refuses (TECH-5914). */
+  denylist: boolean;
   executionRoleArn: string;
   logGroup: string;
   region: string;
@@ -122,7 +125,7 @@ export function taskDefinition(i: TaskDefinitionInput) {
         command: i.command,
         stopTimeout: 30,
         linuxParameters: { capabilities: { drop: ["ALL"] }, initProcessEnabled: true },
-        secrets: secretKeys(i.adapter, i.attachments).map(fromSecret),
+        secrets: secretKeys(i.adapter, i.attachments, i.denylist).map(fromSecret),
         environment: [
           plain("SERGEANT_AGENT_SCRIPT", AGENTS[i.adapter].script),
           plain("SERGEANT_REPORT_NONCE", i.reportNonce),

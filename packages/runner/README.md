@@ -42,6 +42,23 @@ generic environment input:
   what stops it from pushing to or merging into the default branch. It may push workflow changes on
   a non-default branch; Sergeant's deterministic gate requires an independent review of such a PR's
   exact head, always hands it to a human, and never merges it or enables auto-merge.
+- For a worker only, when the installation names one (`publicDataDenylistSecret`, TECH-5914),
+  `PUBLIC_DATA_DENYLIST`: the customer names its push to a public repository must not carry. It is no
+  credential, but it is private, so it travels like one (on Fargate, in the run's secret).
+
+## Public-data push check (TECH-5914)
+
+Every clone a worker pushes from carries a `pre-push` hook from the image's git template
+(`container/git-template`): the host clones with `git clone --template`, and a clone the agent makes
+in the container gets it from the image's `init.templateDir`. Unless GitHub reports the repository
+private, the hook runs `container/check-public-data.mjs` (copied into the image) over the branch name
+and every commit the remote lacks: their messages, added lines, and file paths. It refuses Terros IDs,
+emails, phone numbers, and the denylisted customer names, and lets synthetic placeholders
+(`C.example`, `user@example.test`) through. It never prints a denylisted name. A repository that sets
+its own `core.hooksPath` replaces the hook, and `git push --no-verify` skips it; the repository's CI
+and Sergeant's reviewer are the gates after it. PR titles and bodies are not pushes, so CI and the
+reviewer check those. The same script is this repository's CI check (`.github/workflows/public-data.yml`)
+and its pre-push hook (`.githooks/pre-push`).
 
 A reviewer's token is read-only and used only on the host to read the PR and check out its exact
 head; it never enters the reviewer's container. A run gets no host home, AWS, `gh` login, SSH,

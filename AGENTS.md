@@ -2,12 +2,22 @@
 
 **This repository is PUBLIC** (Apache-2.0). Everything committed here—code, PRs, branches, descriptions—is visible to anyone. Do not commit or write in PRs any company-internal details: internal hostnames or URLs, cloud account/profile/log group names, instance IDs, incident notes, customer or personnel details, links to private repos or PRs, or secrets. Keep installation-specific and operator-specific material in the operator's private repos.
 
+**Customer data never enters this repository** (TECH-5914). Never put customer or company names,
+people's names, Terros IDs (`C.`, `U.`, `Program.`, `Account.` and so on), emails, phone numbers,
+addresses, internal Slack or Linear links to customer cases, or customer business details into code,
+tests, fixtures, docs, commit messages, branch names, PR titles or bodies, or review comments. Use
+synthetic placeholders (`C.example`, `user@example.test`, "Acme Solar") and describe a real case
+generically ("a customer's CRM sync sent a false alert"). A Linear issue's real case stays in Linear.
+A pushed PR stays public record even after an edit, so check before you push: `git config
+core.hooksPath .githooks` turns on the pre-push check, which CI (`public-data.yml`) repeats. Both
+read the customer-name denylist from `PUBLIC_DATA_DENYLIST`, kept privately and never committed here.
+
 - The design handoff and work tracking live in Linear, in the **Sergeant Control Plane** project
   (team UNF). Linear issues may be deleted once done, so a PR body must stand on its own.
 - Sergeant 1 (Rust) is not on `main`; its final source, including its ADRs, is the tag `v1-final`.
   Never restore or depend on V1 code. `docs/design/13-s1-supersession.md` says which S1 decisions
   still apply.
-- CI is `.github/workflows/v2.yml`.
+- CI is `.github/workflows/v2.yml`, and `public-data.yml` checks each PR for customer data.
 - Expect other tasks to land in parallel. Rebase rather than merge, and never resolve a conflict
   by reverting a sibling's change.
 - Sergeant is a TypeScript workspace. Implementation follows [`docs/design/`](docs/design/README.md);

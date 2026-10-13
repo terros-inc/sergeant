@@ -10,6 +10,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "check-file-size": "node scripts/check-file-size.mjs",
+    "check-public-data": "node packages/runner/container/check-public-data.mjs",
     "install-sgt": "node scripts/install-sgt.mjs"
   },
   "devDependencies": {

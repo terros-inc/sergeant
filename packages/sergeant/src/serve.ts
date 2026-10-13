@@ -91,6 +91,7 @@ const runnerOptions = {
   gitIdentity: config.gitIdentity,
   githubTokens: installation.githubTokens,
   fetchUpload: installation.linear.fetchUpload,
+  ...(installation.publicDataDenylist && { publicDataDenylist: installation.publicDataDenylist }),
   asides: setAside(),
 };
 const runner = byRole(runsDir, {

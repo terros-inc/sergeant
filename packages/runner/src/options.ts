@@ -49,6 +49,12 @@ export type ContainerRunnerOptions = {
    */
   gitIdentity: { name: string; email: string };
   /**
+   * Customer names a worker's push to a public repository must not carry (TECH-5914), one per line:
+   * its pre-push hook (container/check-public-data.mjs) reads them as `PUBLIC_DATA_DENYLIST`. The list
+   * comes from the installation's private secret and is never committed to a repository.
+   */
+  publicDataDenylist?: string;
+  /**
    * Codex list prices by model, over `CODEX_PRICES` (TECH-5021): a Codex run on a priced model records
    * an estimated cost from its tokens; one on any other model keeps its cost unknown.
    */

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Refuses a push that carries customer data into this public repository (TECH-5914). Enable it once per
+# clone with `git config core.hooksPath .githooks`. The customer-name denylist is private: set
+# PUBLIC_DATA_DENYLIST or PUBLIC_DATA_DENYLIST_FILE from wherever you keep it, never from this repository.
+exec node "$(git rev-parse --show-toplevel)/packages/runner/container/check-public-data.mjs" pre-push "$@"

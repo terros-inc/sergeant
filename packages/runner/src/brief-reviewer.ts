@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/8";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/9";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -19,6 +19,8 @@ export type ReviewSubject = {
   number: number;
   url: string;
   baseRef: string;
+  /** Unless GitHub said the repository is private: its PR must carry no customer data (TECH-5914). */
+  public: boolean;
   headSha: Sha;
   title: string;
   body: string;
@@ -46,7 +48,7 @@ export function reviewerBrief(
   files = "",
 ): string {
   const what = subjects
-    .map((s) => `- ${s.url} — base \`${s.baseRef}\` — head \`${s.headSha}\` (review exactly this SHA)
+    .map((s) => `- ${s.url}${s.public ? " — **public repository**" : ""} — base \`${s.baseRef}\` — head \`${s.headSha}\` (review exactly this SHA)
   Checked out at \`${s.path}\` (detached at the head; \`origin/${s.baseRef}\` is the base). Diff: \`git diff origin/${s.baseRef}...HEAD\``)
     .join("\n");
   const human = renderSubjectFeedback(spec.pullRequests);
@@ -127,6 +129,15 @@ ${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
     PR building on another), or another depends on this one, list it in \`dependencies\` with its
     identifier and \`why\`: \`blocked_by\` when this issue must wait for it, \`blocks\` when it must
     wait for this one. Sergeant records each as a Linear "blocked by" relation.
+15. In a PR marked public repository above, check the diff, every commit message (\`git log
+    --format=%B origin/<base>..HEAD\`), and the PR title and body for customer or company names,
+    people's names, Terros IDs (\`C.\`, \`U.\`, \`Program.\`, \`Account.\` and so on), emails, phone
+    numbers, addresses, internal Slack or Linear links to customer cases, and customer business details;
+    the Task's own real case is what to look for first. Synthetic placeholders (\`C.example\`,
+    \`user@example.test\`, "Acme Solar") and a real case described generically ("a customer's CRM sync
+    sent a false alert") are fine. Report each occurrence as a blocking finding and request changes. Name
+    its location and kind only, never the data itself: your report may be quoted on the PR, and a public
+    PR stays public record.
 
 ## Report
 
