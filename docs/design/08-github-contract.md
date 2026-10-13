@@ -209,8 +209,8 @@ Webhooks (`pull_request`, `pull_request_review`, `pull_request_review_comment`, 
 PR, `check_suite`, `check_run`, `status`, `push`)
 are verified by signature and translated into wake reasons for the owning task. Nothing else happens
 on a webhook. A reconcile poll every 5 minutes refreshes facts for linked PRs of open tasks, so a
-missed webhook delays a turn but loses nothing. Without a GitHub webhook secret, every task poll
-rereads its PRs.
+missed webhook delays a turn but loses nothing. While GitHub's deliveries arrive (TECH-5942), that poll
+is a 15-minute safety interval instead. Without a GitHub webhook secret, every task poll rereads its PRs.
 
 The control-plane App's installation stays within GitHub's API rate limits (TECH-5336). Every read
 is conditional on the ETag of its last answer, so an unchanged one is a 304 that GitHub does not
@@ -219,7 +219,8 @@ minutes; unreadable classic protection is asked again hourly. A rate-limit refus
 call until `x-ratelimit-reset` (primary) or `retry-after` (secondary, else a minute), logged once; a
 task loop that fails on it resumes after that time, not at the next intake, and until then its task
 shows as `paused` with the provider and reset time, not `failed` (TECH-5941). `sgt admin status` shows
-the calls left, the reset, and any pause.
+the calls left, the reset, and any pause, and GitHub and Linear calls per hour by what made them
+(TECH-5942).
 
 ## 10. Humans on GitHub
 

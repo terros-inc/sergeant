@@ -238,7 +238,7 @@ Three plain facts keep a human decision from being silently abandoned (L4):
 1. **Every Linear change wakes a turn.** Webhooks append `linear_comment` or `linear_issue_changed`. The
    intake reconcile (every 2 minutes, 07 §5) recomputes each open task's conversation revision and wakes
    the task if it differs from the revision its last completed turn saw, which catches missed webhooks
-   and failed turns. The wake coalesces and does not shorten a failure backoff.
+   and failed turns; while webhooks deliver, a task at rest is reread every 15 minutes (TECH-5942). The wake coalesces and does not shorten a failure backoff.
 2. **Every turn sees every human comment.** The Situation Report lists all of them, marking those created
    or edited since the last completed turn (01 `SituationReport`).
 3. **Merge and completion carry the proposing turn's revision.** M10 and X5 re-read Linear and refuse if

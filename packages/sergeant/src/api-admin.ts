@@ -8,6 +8,8 @@ import {
   RetroTarget,
   type AdminRequestResponse,
   type AdminStatus,
+  type ApiCallCount,
+  type WebhookHealth,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { body, notFound, ok, parse, Refusal, type Reply } from "./api-http.ts";
@@ -37,6 +39,10 @@ export type HostAdmin = {
   runs: () => Promise<AdminStatus["runs"]>;
   /** The control-plane App's GitHub API budget and any rate-limit pause (TECH-5336). */
   github?: () => AdminStatus["github"];
+  /** TECH-5942: GitHub and Linear API calls by source, this hour and the last (api-calls.ts). */
+  apiCalls?: () => ApiCallCount[];
+  /** TECH-5942: each webhook source's deliveries and any alert (webhook-health.ts). */
+  webhooks?: () => WebhookHealth[];
 };
 
 export async function adminRoute(
@@ -101,7 +107,7 @@ async function status(admin: HostAdmin, enrollment: Enrollment | undefined): Pro
     admin.config(),
     admin.runs(),
   ]);
-  return { serve: admin.serve, release, pending, last, config, runs, github: admin.github?.() ?? null, retro: enrollment?.retroTarget() ?? null };
+  return { serve: admin.serve, release, pending, last, config, runs, github: admin.github?.() ?? null, retro: enrollment?.retroTarget() ?? null, apiCalls: admin.apiCalls?.() ?? [], webhooks: admin.webhooks?.() ?? [] };
 }
 
 /** sergeant-update's `ref=…`, `sha=…`, `at=…` lines. */

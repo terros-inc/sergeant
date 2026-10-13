@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { GitHubRateLimitedError, isRateLimited, type TaskSummary } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
+import { withSource } from "./api-calls.ts";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
@@ -14,6 +15,7 @@ import { createServiceServer } from "./service-http.ts";
 import type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
 import { serviceWebhooks } from "./service-webhooks.ts";
 import { Wake } from "./wake.ts";
+import { webhookHealth } from "./webhook-health.ts";
 
 // The long-running Sergeant 2 process (UNF-719): a thin shell over the per-task loop, not a workflow
 // engine. Intake polls Linear for open issues delegated to the V2 agent (UNF-724) and runs each one's
@@ -23,11 +25,11 @@ import { Wake } from "./wake.ts";
 // resumes at every intake, listed or not, holding no slot until it has work to do: its loop's own live
 // checks continue it, stop it (cancel.ts), or see it through after its merge. Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
-// when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) only ends a loop's wait
-// or runs an intake sooner. Nothing is kept but each task's own `state.json` and a
-// recorded stop not yet done (`cancel.json`, cancel.ts): a loop that ends (idle, failed) resumes on a
-// later intake, and a restarted process rereads everything and continues, repeating some work. One
-// process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
+// when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) ends a loop's wait or runs
+// an intake sooner, and while both sources deliver, polls slow to a safety interval (TECH-5942).
+// Nothing is kept but each task's own `state.json` and a recorded stop not yet done (`cancel.json`,
+// cancel.ts): a loop that ends (idle, failed) resumes on a later intake, and a restarted process
+// rereads everything and continues, repeating some work. One process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
 // The same server answers the client API (api.ts) that the `sgt` CLI uses. Feedback that arrives
 // after a task's work landed is swept separately (feedback.ts) and may file an ordinary Backlog
 // follow-up, which nothing here starts: a human moves it to Todo and delegates it, like any issue.
@@ -69,6 +71,18 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   };
   // Ends the intake loop's wait: a webhook naming a delegated issue with no loop, or a delegation change.
   const intakeWake = new Wake();
+  // TECH-5942: while both webhook sources deliver, polling is only their backup, at `slowPollMinutes`.
+  const health = webhookHealth(opts.webhookSecrets ?? {}, log);
+  const slowPollMs = (opts.slowPollMinutes ?? 15) * 60_000;
+  const webhooksDelivering = () => health.delivering("github") && health.delivering("linear");
+  // A loop that ended (idle, say) is resumed, or readmitted from Todo, at every intake, a full reread of
+  // its issue and PRs, unless webhooks deliver: then only once one names it, a human wakes it, or
+  // `slowPollMs` after it ended.
+  const resting = (issueId: string) => {
+    const end = ended.get(issueId);
+    const wake = wakes.get(issueId);
+    return webhooksDelivering() && end !== undefined && Date.now() - end.at < slowPollMs && !wake?.github && !wake?.linear && !wake?.pending;
+  };
 
   /** Runs the task's loop; `released`, it holds no slot until it has work to do (`Slot.work`). */
   const admit = (issueId: string, released = false) => {
@@ -78,7 +92,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     let outcome: LoopResult["outcome"] | "failed" | "paused" = "failed";
     let detail = "";
     let paused: Paused | undefined;
-    const loop = runLoop(
+    const loop = withSource("task loop", () => runLoop(
       {
         issueId,
         enrolledRepositories: opts.enrolledRepositories,
@@ -86,6 +100,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         ...(opts.pollSeconds !== undefined && { pollSeconds: opts.pollSeconds }),
         // TECH-5336: GitHub's webhooks wake a loop whose PRs change, so between them it polls GitHub less.
         ...(opts.webhookSecrets?.github && { githubPollSeconds: opts.githubPollSeconds ?? 300 }),
+        // TECH-5942: and while both sources deliver, a loop with nothing in flight polls only this often.
+        webhooks: { delivering: health.delivering, both: webhooksDelivering },
+        slowPollSeconds: slowPollMs / 1000,
         ...(opts.waitingGraceMinutes !== undefined && { waitingGraceMinutes: opts.waitingGraceMinutes }),
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
         ...(opts.budget && { budget: opts.budget }),
@@ -98,7 +115,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         slot,
       },
       { ...deps, exclusive: (step) => locked(issueId, step) },
-    )
+    ))
       .then(
         (result) => {
           ({ outcome, detail } = result);
@@ -143,7 +160,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     const woken = (id: string) => (wakes.get(id)?.pending ? 0 : 1);
     const queued = [
       ...[...slots].filter(([, s]) => s.wanted).map(([id]) => id).sort(byRank),
-      ...freshIssues.map((issue) => issue.identifier).filter((id) => !active.has(id) && (ended.get(id)?.at ?? 0) < intakeStartedAt && !rateLimited(id)),
+      ...freshIssues.map((issue) => issue.identifier).filter((id) => !active.has(id) && (ended.get(id)?.at ?? 0) < intakeStartedAt && !rateLimited(id) && !resting(id)),
     ].sort((a, b) => woken(a) - woken(b));
     for (const issueId of queued) {
       if (free-- <= 0) break;
@@ -203,7 +220,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     // A loop that already ended resumes cheaply and asks for a slot only if its live checks find work.
     // This leaves the same intake free to admit newly listed Todo work instead of letting unchanged
     // local tasks reclaim every slot on each periodic intake.
-    for (const ref of resumable.sort(byRank)) if (!rateLimited(ref)) admit(ref, ended.has(ref) || freeSlots() <= 0);
+    for (const ref of resumable.sort(byRank)) if (!rateLimited(ref) && !resting(ref)) admit(ref, ended.has(ref) || freeSlots() <= 0);
     if (failed) throw failed;
     ordered = await newWork(opts.stateDir, listed, { blocked, active, woken: (ref) => wakes.get(ref)?.pending === true }, log);
     delegated = ordered.map((issue) => issue.identifier);
@@ -214,8 +231,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const intakeLoop = (async () => {
     while (!abort.signal.aborted) {
       const at = new Date().toISOString();
+      health.check();
       try {
-        await intake();
+        await withSource("intake", intake);
         lastIntake = { at };
       } catch (e) {
         lastIntake = { at, error: (e as Error).message };
@@ -225,10 +243,11 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   })();
 
-  const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal);
+  const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal, webhooksDelivering);
   // The retro checks hourly whether one is due, and at once when a human asks (`sgt retro`).
   const retroWake = new Wake();
-  const retroLoop = deps.retro ? retroEvery(60 * 60_000, retroWake, { stateDir: opts.stateDir, log, signal: abort.signal }, deps.retro) : Promise.resolve();
+  const retro = deps.retro;
+  const retroLoop = retro ? withSource("retro", () => retroEvery(60 * 60_000, retroWake, { stateDir: opts.stateDir, log, signal: abort.signal }, retro)) : Promise.resolve();
 
   const api = apiHandler({
     stateDir: opts.stateDir,
@@ -262,15 +281,15 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     ...(opts.humans?.approverNames && { approverNames: opts.humans.approverNames }),
     trustLoopback: opts.trustLoopback ?? false,
     ...(opts.accounts && { accounts: opts.accounts }),
-    ...(opts.admin && { admin: opts.admin }),
+    ...(opts.admin && { admin: { ...opts.admin, webhooks: () => health.status() } }),
     ...(opts.enrollment && { enrollment: opts.enrollment }),
     ...(deps.retro && { requestRetro: () => (deps.retro?.target() ? (retroWake.request(), true) : false) }),
   });
-  const webhooks = serviceWebhooks(opts, deps, log, { wakes, active, delegated: () => delegated, intakeWake });
+  const webhooks = serviceWebhooks(opts, deps, log, { wakes, active, delegated: () => delegated, intakeWake, health });
   const server =
     opts.port === undefined
       ? undefined
-      : createServiceServer({ abort, lastIntake: () => lastIntake, slots, active, webhooks, api });
+      : createServiceServer({ abort, lastIntake: () => lastIntake, slots, active, webhooks, api: (req, res) => withSource("sgt API", () => api(req, res)) });
   if (server) await new Promise<void>((resolve) => server.listen(opts.port, opts.host ?? "127.0.0.1", resolve));
   const address = server?.address();
 

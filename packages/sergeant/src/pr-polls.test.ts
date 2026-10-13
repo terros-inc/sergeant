@@ -15,7 +15,7 @@ test("with webhooks, PRs are reread on an event naming them, a mergeability stil
   const deps = { github: { readPullRequest: async () => (reads++, live) } } as unknown as Ports;
   const clock = { now: 0 };
   const wake = new Wake();
-  const polls = pullRequestPolls(300_000, wake, () => clock.now);
+  const polls = pullRequestPolls(() => 300_000, wake, () => clock.now);
   const read = () => polls.read([], [{ repo: pr.repo, number: pr.number }], [pr.repo], deps);
 
   await read();
@@ -43,7 +43,7 @@ test("with webhooks, PRs are reread on an event naming them, a mergeability stil
   expect(reads).toBe(6);
 
   // Without webhooks, every pass reads.
-  const every = pullRequestPolls(undefined, wake, () => clock.now);
+  const every = pullRequestPolls(() => undefined, wake, () => clock.now);
   await every.read([], [{ repo: pr.repo, number: pr.number }], [pr.repo], deps);
   await every.read([], [{ repo: pr.repo, number: pr.number }], [pr.repo], deps);
   expect(reads).toBe(8);

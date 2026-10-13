@@ -1,4 +1,5 @@
 import type { Conversation, LinearPerson, LinearPort, NoModelAccount, ProposedAction, TaskOwnerCheck } from "@terros/sergeant-contracts";
+import { withSource } from "./api-calls.ts";
 
 // Who pays for a task's model usage (TECH-5179). A task belongs to one human: the issue's assignee,
 // admitted only when Linear's history shows that same person most recently delegated it to Sergeant,
@@ -34,7 +35,7 @@ export function reassigned(owner: LinearPerson, issue: Conversation["issue"]): s
  * Throws when the history is unreadable: the caller then starts nothing new.
  */
 export async function redelegated(owner: TaskOwner, issueId: string, deps: { linear: LinearPort; agentUserId: string }): Promise<string | undefined> {
-  const check = await deps.linear.readTaskOwner(issueId, deps.agentUserId);
+  const check = await readOwner(issueId, deps);
   if (!("owner" in check)) return `Linear no longer shows ${owner.name} delegated this task (${check.refused}), so it stops; delegating it again starts a new task`;
   if (check.owner.id !== owner.id) return `${check.owner.name}, not ${owner.name}, now owns the issue, so this task stops; delegating it again starts a new task`;
   if (owner.delegatedAt && check.delegatedAt !== owner.delegatedAt) return `the Linear issue was delegated to Sergeant again, so this task stops; the new delegation starts a new task`;
@@ -86,7 +87,7 @@ export function ownerRefusal(issueId: string, check: Exclude<TaskOwnerCheck, { o
 export async function admitOwner(issueId: string, deps: { linear: LinearPort; agentUserId: string }, log: (line: string) => void): Promise<TaskOwner | { refused: string; unreadable?: true }> {
   let check: TaskOwnerCheck;
   try {
-    check = await deps.linear.readTaskOwner(issueId, deps.agentUserId);
+    check = await readOwner(issueId, deps);
   } catch (e) {
     return { refused: `not started: who delegated ${issueId} is unreadable: ${(e as Error).message}`, unreadable: true };
   }
@@ -129,3 +130,7 @@ export function accountRefusal(issueId: string, owner: TaskOwner, e: NoModelAcco
     body: `Sergeant starts no new runs: ${e.message}. ${owner.name}: register or fix another model account with \`sgt account register <claude|codex>\`, ${wake}.`,
   };
 }
+
+/** Linear's delegation history: most of a poll's Linear cost (TECH-5923), so counted on its own (TECH-5942). */
+const readOwner = (issueId: string, deps: { linear: LinearPort; agentUserId: string }) =>
+  withSource("ownership check", () => deps.linear.readTaskOwner(issueId, deps.agentUserId));

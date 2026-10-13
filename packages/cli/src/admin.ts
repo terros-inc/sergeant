@@ -1,4 +1,4 @@
-import type { AdminRequest, AdminResult, AdminStatus, ApiFailure, ApiResult } from "@terros/sergeant-contracts";
+import type { AdminRequest, AdminResult, AdminStatus, ApiCallCount, ApiFailure, ApiResult, WebhookHealth } from "@terros/sergeant-contracts";
 
 // `sgt admin restart` and `sgt admin update` (TECH-5195) hand the host a request and then wait for its
 // outcome, reading `GET /v1/admin/status` until the outcome names their request. serve is down for part of
@@ -65,6 +65,8 @@ export function showStatus(s: AdminStatus): string {
   const config = s.config;
   if (s.runs) lines.push(`runs     ${s.runs.count} in ${gb(s.runs.bytes)}; data volume ${gb(s.runs.volumeFreeBytes)} free of ${gb(s.runs.volumeBytes)}`);
   if (s.github) lines.push(`github   ${githubBudget(s.github)}`);
+  s.webhooks.forEach((w, i) => lines.push(`${i === 0 ? "webhooks" : "        "} ${webhook(w)}`));
+  apiCalls(s.apiCalls).forEach((line, i) => lines.push(`${i === 0 ? "api" : "   "}      ${line}`));
   if (config) lines.push(`config   ${staleConfig(s) ?? (config.current === null ? `version ${config.loaded}; serve cannot read the parameter now (serve.log says why)` : `version ${config.loaded}, as serve has it`)}`);
   return lines.join("\n");
 }
@@ -75,6 +77,29 @@ function githubBudget(g: NonNullable<AdminStatus["github"]>): string {
   const reset = g.resetAt ? `, resets ${g.resetAt}` : "";
   const seen = g.observedAt ? ` (as of ${g.observedAt})` : "";
   return `${left}${reset}${seen}${g.pausedUntil ? `; rate limited, no GitHub calls until ${g.pausedUntil}` : ""}`;
+}
+
+/** TECH-5942: whether a webhook source's deliveries arrive, and its alert first when they do not. */
+function webhook(w: WebhookHealth): string {
+  const accepted = w.lastAcceptedAt ? `${w.accepted} accepted, last ${w.lastAcceptedAt}` : "none accepted";
+  const refused = w.refused ? `; ${w.refused} refused, last ${w.lastRefusedAt} (${w.lastRefusal})` : "";
+  const state = w.delivering ? "delivering, polling at the slow safety interval" : "not delivering, polling at the ordinary interval";
+  return `${w.source}: ${w.alert ? `ALERT: ${w.alert} ` : ""}${state}; ${accepted} since serve started${refused}`;
+}
+
+/** TECH-5942: each hour's API calls per provider, then by source, most first. */
+function apiCalls(counts: ApiCallCount[]): string[] {
+  const hours = [...new Set(counts.map((c) => c.hour))].sort();
+  return hours.flatMap((hour) =>
+    (["github", "linear"] as const).flatMap((provider) => {
+      const of = counts.filter((c) => c.hour === hour && c.provider === provider).sort((a, b) => b.calls - a.calls);
+      if (of.length === 0) return [];
+      const total = of.reduce((n, c) => n + c.calls, 0);
+      const notModified = of.reduce((n, c) => n + c.notModified, 0);
+      const sources = of.map((c) => `${c.source} ${c.calls}${c.notModified ? ` (304: ${c.notModified})` : ""}`).join(", ");
+      return [`${provider} from ${hour}: ${total} calls${notModified ? `, ${notModified} of them 304s GitHub does not count` : ""}: ${sources}`];
+    }),
+  );
 }
 
 const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;

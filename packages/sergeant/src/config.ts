@@ -127,7 +127,12 @@ export type Installation = {
  * Resolves every secret reference and builds the direct effectors for `repositories`. The effectors read
  * `repositories` and the returned `repositoryConfigs` live, so enrollment.ts can change them in place.
  */
-export async function connect(config: InstallationConfig, repositories: RepoSlug[]): Promise<Installation> {
+export async function connect(
+  config: InstallationConfig,
+  repositories: RepoSlug[],
+  /** TECH-5942: the adapters' `fetch`, so serve can count their API calls (api-calls.ts). */
+  fetchFor: { github?: typeof globalThis.fetch; linear?: typeof globalThis.fetch } = {},
+): Promise<Installation> {
   const enrolled = repositories.map((r) => [r, config.repositories[r]] as const);
   const unknown = enrolled.filter(([, c]) => !c).map(([r]) => r);
   if (unknown.length > 0) throw new Error(`not enrolled in the installation config: ${unknown.join(", ")}`);
@@ -149,7 +154,7 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
   const linearAuthorization = linearToken.startsWith("lin_api_") ? linearToken : `Bearer ${linearToken}`;
 
   const { agentUserId, otherAgentUserIds, delegatingAppIds } = config.linear;
-  const linear = createLinearPort({ apiKey: linearAuthorization, sergeantUserIds: [agentUserId, ...otherAgentUserIds], delegatingAppIds });
+  const linear = createLinearPort({ apiKey: linearAuthorization, sergeantUserIds: [agentUserId, ...otherAgentUserIds], delegatingAppIds, ...(fetchFor.linear && { fetch: fetchFor.linear }) });
   // Every Linear read and write uses this one token, so it must be the V2 agent: a V1 or personal
   // token would let Sergeant act as someone else.
   const viewer = await linear.viewer();
@@ -171,7 +176,12 @@ export async function connect(config: InstallationConfig, repositories: RepoSlug
     linearOrganizationId: viewer.organizationId,
     workerLogin,
     // A rate-limit pause is logged once as it starts (TECH-5336), in serve's log format.
-    github: createGitHubPort({ token: controlPlaneToken, repositories: repositoryConfigs, log: (line) => console.log(`[${new Date().toISOString()}] ${line}`) }),
+    github: createGitHubPort({
+      token: controlPlaneToken,
+      repositories: repositoryConfigs,
+      log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
+      ...(fetchFor.github && { fetch: fetchFor.github }),
+    }),
     controlPlaneApp,
     workerApp,
     githubTokens: runTokens(workerApp),

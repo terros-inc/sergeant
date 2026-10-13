@@ -2,10 +2,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
-// Linear and GitHub webhooks (TECH-4937, 11 §3): latency only. A verified event names the issue or
-// PR it is about, and serve ends the wait of the task loop watching it, or runs an intake now; the
-// loop then rereads Linear, GitHub, and its runs as it does every poll and takes a turn only if they
-// changed. Nothing here reads a comment, decides anything, or touches Linear or GitHub, and nothing is
+// Linear and GitHub webhooks (TECH-4937, 11 §3). A verified event names the issue or PR it is about,
+// and serve ends the wait of the task loop watching it, or runs an intake now; the loop then rereads
+// Linear, GitHub, and its runs as it does every poll and takes a turn only if they changed. While
+// deliveries arrive, polls slow to a safety interval (TECH-5942, webhook-health.ts), so webhooks are the
+// primary signal and polling only their backup. Nothing here reads a comment, decides anything, or touches Linear or GitHub, and nothing is
 // recorded: a dropped, duplicated, or replayed delivery costs at most one extra reread, and the polls
 // still find every change. The body is read only up to `MAX_BODY` and parsed only once its signature
 // verifies; a Linear delivery whose signed `webhookTimestamp` is over `LINEAR_REPLAY_MS` from now is
@@ -37,6 +38,8 @@ export type WebhookOptions = {
   enrolledRepositories: string[];
   nudge: (nudge: Nudge, source: "linear" | "github") => void;
   log: (line: string) => void;
+  /** TECH-5942: told of each delivery verified and each refused (webhook-health.ts). */
+  health?: { accepted(source: "linear" | "github"): void; refused(source: "linear" | "github", reason: string): void };
 };
 
 /** Handles `POST /webhooks/linear` and `POST /webhooks/github`. */
@@ -50,15 +53,15 @@ export function webhookHandler(opts: WebhookOptions): (req: IncomingMessage, res
     const body = await readBody(req);
     if (!body) return 413;
     const signature = source === "linear" ? header(req, "linear-signature") : header(req, "x-hub-signature-256")?.replace(/^sha256=/, "");
-    if (!verifySignature(secret, body, signature)) {
-      opts.log(`${source} webhook refused: bad signature`);
+    const refuse = (reason: string) => {
+      opts.log(`${source} webhook refused: ${reason}`);
+      opts.health?.refused(source, reason);
       return 401;
-    }
+    };
+    if (!verifySignature(secret, body, signature)) return refuse("bad signature");
     const payload: unknown = JSON.parse(body.toString("utf8"));
-    if (source === "linear" && !fresh(payload)) {
-      opts.log("linear webhook refused: missing or stale webhookTimestamp");
-      return 401;
-    }
+    if (source === "linear" && !fresh(payload)) return refuse("missing or stale webhookTimestamp");
+    opts.health?.accepted(source);
     const enrolled = new Set(opts.enrolledRepositories.map((r) => r.toLowerCase()));
     const nudge = source === "linear" ? linearNudge(payload, opts.agentUserId) : githubNudge(header(req, "x-github-event") ?? "", payload, enrolled);
     if (nudge) opts.nudge(nudge, source);

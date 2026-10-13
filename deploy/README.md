@@ -186,9 +186,16 @@ mutation:
 
 ### Webhooks
 
-Webhooks only make Sergeant notice a Linear or GitHub change sooner; without them every change is
-still found by the intake (2 minutes) and each task's poll (1 minute). Set them up once per
-installation, in this order, and expect deliveries made in between to fail harmlessly:
+Webhooks are Sergeant's primary signal, and polling their backup (TECH-5942). While both Linear's and
+GitHub's deliveries arrive (one accepted in the last 30 minutes each), a task with nothing in flight
+polls, rereads its PRs, and is resumed once its loop ended only every 15 minutes unless an event names
+it, and the post-merge feedback sweep runs every 30 minutes. Without deliveries every change is still
+found, as fast as before: by the intake (2 minutes), each task's poll (1 minute), and its PR reread
+(5 minutes). `sgt admin status` shows each source's deliveries and whether it is delivering; a source
+refused 5 times in a row, or with no delivery accepted for 6 hours (its secret configured but never
+delivered to included), is logged once as `WARNING: <source> webhook: ...` and shown there as an
+alert until a delivery is accepted. Set them up once per installation, in this order, and expect
+deliveries made in between to fail harmlessly:
 
 1. **Secrets.** Create two Secrets Manager secrets: the GitHub one with a value you generate
    (`openssl rand -hex 32`), and the Linear one, whose value is the signing secret Linear shows for the
@@ -210,7 +217,8 @@ installation, in this order, and expect deliveries made in between to fail harml
    Status events (its existing permissions cover them). Review and comment events only shorten the
    wait: polling reads human PR feedback either way.
 7. **Check** each one's recent deliveries: Linear's webhook page and the App's Advanced tab should show
-   `200`. A `401` means the secret differs (serve logs `bad signature`) or, for Linear, the delivery is
+   `200`, serve logs `<source> webhook: first delivery accepted`, and `sgt admin status` shows the
+   source `delivering`. A `401` means the secret differs (serve logs `bad signature`) or, for Linear, the delivery is
    over a minute old (serve logs `stale webhookTimestamp`: check the host's clock); a `404`, that the
    config does not name the secret or the host was not updated.
 
@@ -431,8 +439,9 @@ access:
 sgt admin restart          # reread the installation config, restart serve on the release it runs
 sgt admin update           # move to what the release channel would choose (main's green head without one)
 sgt admin update v2.1.0    # or to a branch, tag, or commit: only a commit on main whose v2 check passed
-sgt admin status           # the release, when serve started, the last restart or update, and whether
-                           # the installation-config parameter changed since serve started
+sgt admin status           # the release, when serve started, the last restart or update, whether
+                           # the installation-config parameter changed since serve started, each
+                           # webhook source's health, and GitHub and Linear API calls by source
 ```
 
 `restart` and `update` each print the outcome when the host has one, including why it failed, waiting

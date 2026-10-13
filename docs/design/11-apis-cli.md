@@ -79,7 +79,10 @@ otherwise made tolerant of a missing field.
 | `POST /webhooks/github` | GitHub signature | a wake reason for the task owning the PR (08 §9). Unknown PRs are dropped |
 
 Webhook handlers are idempotent: they only append wake reasons or trigger an intake check, both of
-which coalesce. Reconcile polls make missed webhooks harmless.
+which coalesce. Reconcile polls make missed webhooks harmless. Webhooks are the primary signal and
+polls their backup (TECH-5942): while both sources deliver, the per-task polls slow to a safety
+interval; each source's health, and an alert when deliveries keep being refused or stop, is in
+`sgt admin status` and logged once.
 
 ## 4. Runner API
 
@@ -107,7 +110,7 @@ Each is supervised and reported by `/health/loops` (S1 UNF-555, kept).
 | Loop | Cadence | Does |
 |---|---|---|
 | intake | webhooks + every 2 min | admit, close on undelegation/cancel/Done, wake on Linear changes, including a conversation revision that differs from the last completed turn's (07 §5, §8; 03 §5) |
-| github-reconcile | webhooks + every 5 min | refresh linked-PR facts; wake owners on change |
+| github-reconcile | webhooks + every 5 min (15 while webhooks deliver) | refresh linked-PR facts; wake owners on change |
 | run-reconcile | every 60 s | `RunManager.reconcile` for non-terminal runs (04 §6) |
 | budget-meter | every 60 s | compute `BudgetStatus`; wake on soft/exhausted; `enforce_budget` (§6) |
 | scheduler | continuous | start due turns within concurrency (03 §2) |

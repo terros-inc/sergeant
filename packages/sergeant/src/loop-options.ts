@@ -23,6 +23,14 @@ export type LoopOptions = {
    * unless an event names them (poll.ts `pullRequestPolls`). Absent, every poll rereads them.
    */
   githubPollSeconds?: number;
+  /**
+   * TECH-5942: whether each webhook source, and both, are delivering (webhook-health.ts). While GitHub's
+   * is, PRs no event names are reread only every `slowPollSeconds`; while both are, so is a wait with
+   * nothing in flight. Absent, neither is.
+   */
+  webhooks?: { delivering(source: "linear" | "github"): boolean; both(): boolean };
+  /** The safety interval while webhooks deliver (default 15 minutes). */
+  slowPollSeconds?: number;
   /** The service's existing waiting grace; also delays the one bounded retry after a merge failure. */
   waitingGraceMinutes?: number;
   /**

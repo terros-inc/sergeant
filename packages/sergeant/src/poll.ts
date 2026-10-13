@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { mergeRefusal, reportedClosing, type PullRequestFacts, type PullRequestRef, type RefusedMerge, type RepoSlug, type RunId, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { withSource } from "./api-calls.ts";
 import type { ActionOutcome, Ports } from "./execute.ts";
+import type { LoopOptions } from "./loop-options.ts";
 import type { Wake } from "./wake.ts";
 
 // What the loop reads and compares on each poll (loop.ts).
@@ -68,21 +70,22 @@ export async function readPullRequests(runs: RunRecord[], linked: PullRequestRef
 }
 
 /**
- * TECH-5336: a task loop's PR reads. With GitHub's webhooks delivered (TECH-4937), `everyMs` is set and
+ * TECH-5336: a task loop's PR reads. With a GitHub webhook secret (TECH-4937), `everyMs()` is set and
  * the loop rereads its PRs when a GitHub event names one of them or its head (`Wake.github`), and
- * otherwise only every `everyMs`, polling being the reliability fallback. They are also reread when the
- * PRs to read or a run's status changed, after a turn (`forget`), at a human's wake, and while GitHub
- * is still computing a PR's mergeability, which no webhook announces. Without `everyMs`, every pass.
+ * otherwise only every `everyMs()`, polling being the reliability fallback: 5 minutes, or the slow
+ * safety interval while deliveries arrive (TECH-5942). They are also reread when the PRs to read or a
+ * run's status changed, after a turn (`forget`), at a human's wake, and while GitHub is still computing
+ * a PR's mergeability, which no webhook announces. Without `everyMs()`, every pass.
  */
-export function pullRequestPolls(everyMs: number | undefined, wake: Wake | undefined, now: () => number = Date.now) {
+export function pullRequestPolls(everyMs: () => number | undefined, wake: Wake | undefined, now: () => number = Date.now) {
   let last: { at: number; key: string; prs: PullRequestFacts[] } | undefined;
   return {
     async read(runs: RunRecord[], linked: PullRequestRef[], enrolled: RepoSlug[], deps: Ports): Promise<PullRequestFacts[]> {
       const key = JSON.stringify([runs.map((r) => [r.runId, r.status]), linked.map((p) => `${p.repo}#${p.number}`).sort()]);
-      const settled = last?.prs.every((p) => p.state !== "open" || (p.mergeable !== null && p.mergeableState !== "unknown"));
-      if (everyMs !== undefined && last && last.key === key && settled && !wake?.github && !wake?.pending && now() - last.at < everyMs) return last.prs;
+      const every = everyMs();
+      if (every !== undefined && last && last.key === key && mergeabilityKnown(last.prs) && !wake?.github && !wake?.pending && now() - last.at < every) return last.prs;
       if (wake) wake.github = false;
-      const prs = await readPullRequests(runs, linked, enrolled, deps);
+      const prs = await withSource("task PR reads", () => readPullRequests(runs, linked, enrolled, deps));
       last = { at: now(), key, prs };
       return prs;
     },
@@ -90,6 +93,29 @@ export function pullRequestPolls(everyMs: number | undefined, wake: Wake | undef
       last = undefined;
     },
   };
+}
+
+/**
+ * TECH-5942: how often a task loop rereads PRs no event names: every pass without a GitHub webhook
+ * secret, `githubPollSeconds` with one, and the slow safety interval while GitHub's deliveries arrive.
+ */
+export const pullRequestPollMs = (opts: Pick<LoopOptions, "githubPollSeconds" | "webhooks" | "slowPollSeconds">) => (): number | undefined => {
+  if (opts.githubPollSeconds === undefined) return undefined;
+  const ms = opts.githubPollSeconds * 1000;
+  return opts.webhooks?.delivering("github") ? Math.max(ms, (opts.slowPollSeconds ?? 900) * 1000) : ms;
+};
+
+/** No open PR whose mergeability GitHub is still computing, which no webhook announces. */
+export const mergeabilityKnown = (prs: PullRequestFacts[]) => prs.every((p) => p.state !== "open" || (p.mergeable !== null && p.mergeableState !== "unknown"));
+
+/**
+ * TECH-5942: how long a waiting task loop sleeps before its next poll: the slow safety interval while
+ * both webhook sources deliver and nothing is in flight that no webhook announces (a run, a
+ * mergeability GitHub is computing, a merge retry coming due), else the ordinary poll interval. A
+ * webhook naming the task, a human's wake, or a slot ends the wait sooner.
+ */
+export function waitMs(opts: Pick<LoopOptions, "webhooks" | "slowPollSeconds">, pollMs: number, inFlight: boolean): number {
+  return !inFlight && opts.webhooks?.both() ? Math.max(pollMs, (opts.slowPollSeconds ?? 900) * 1000) : pollMs;
 }
 
 /**

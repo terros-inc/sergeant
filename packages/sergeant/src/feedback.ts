@@ -84,10 +84,19 @@ export type FeedbackOptions = {
   signal?: AbortSignal;
 };
 
-/** Sweeps every `intervalMs` until `opts.signal` aborts; a failed sweep is logged and retried next time. */
-export async function sweepFeedbackEvery(intervalMs: number, opts: FeedbackOptions, deps: FeedbackDeps): Promise<void> {
+/**
+ * Sweeps every `intervalMs` until `opts.signal` aborts; a failed sweep is logged and retried next time.
+ * TECH-5942: while `slow.when()` holds (webhooks delivering), a sweep is skipped until `slow.intervalMs`
+ * after the last one: the sweep rereads every recently landed issue and its PRs, and its findings only
+ * file Backlog follow-ups, so slower is fine.
+ */
+export async function sweepFeedbackEvery(intervalMs: number, opts: FeedbackOptions, deps: FeedbackDeps, slow?: { intervalMs: number; when: () => boolean }): Promise<void> {
+  let last = -Infinity;
   while (!opts.signal?.aborted) {
-    await sweepFeedback(opts, deps).catch((e: Error) => opts.log(`feedback sweep failed, retrying next interval: ${e.message}`));
+    if (!slow?.when() || Date.now() - last >= slow.intervalMs - 1000) {
+      last = Date.now();
+      await sweepFeedback(opts, deps).catch((e: Error) => opts.log(`feedback sweep failed, retrying next interval: ${e.message}`));
+    }
     await pause(intervalMs, opts.signal);
   }
 }

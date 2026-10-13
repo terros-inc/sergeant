@@ -49,6 +49,12 @@ export type ServiceOptions = {
    */
   githubPollSeconds?: number;
   /**
+   * TECH-5942: while both webhook sources deliver (webhook-health.ts), how often a task loop with nothing
+   * in flight polls, rereads its PRs, or resumes once ended, when no event names it; default 15 minutes.
+   * The feedback sweep then runs every twice this. Without deliveries, polling is as fast as before.
+   */
+  slowPollMinutes?: number;
+  /**
    * Who may call the client API with a Linear login, the client id `sgt login` uses (auth.ts), and the
    * approvers' names, which `whoami` tells people to ask (TECH-5202).
    */

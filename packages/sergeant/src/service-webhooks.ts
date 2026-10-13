@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ServiceDeps, ServiceOptions } from "./service-options.ts";
 import type { Wake } from "./wake.ts";
+import type { WebhookHealthTracker } from "./webhook-health.ts";
 import { webhookHandler, type Nudge } from "./webhooks.ts";
 
 /**
@@ -11,7 +12,7 @@ export function serviceWebhooks(
   opts: ServiceOptions,
   deps: ServiceDeps,
   log: (line: string) => void,
-  input: { wakes: Map<string, Wake>; active: Map<string, Promise<void>>; delegated: () => string[]; intakeWake: Wake },
+  input: { wakes: Map<string, Wake>; active: Map<string, Promise<void>>; delegated: () => string[]; intakeWake: Wake; health: WebhookHealthTracker },
 ): (req: IncomingMessage, res: ServerResponse) => void {
   const { wakes, active, intakeWake } = input;
   // A webhook ends the wait of each loop watching what it names, and runs an intake for a task or a
@@ -39,5 +40,6 @@ export function serviceWebhooks(
     enrolledRepositories: opts.enrolledRepositories,
     nudge,
     log,
+    health: input.health,
   });
 }
