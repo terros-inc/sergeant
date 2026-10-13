@@ -1,4 +1,4 @@
-import { commentIdFor, outstandingChangeRequests, type BudgetStatus, type HumanPullRequestFeedback, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, outstandingChangeRequests, type HumanComment, type HumanPullRequestFeedback, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
 import { handoffKey } from "./handoff.ts";
 import { rereviewKey } from "./rereview.ts";
 
@@ -7,15 +7,36 @@ import { rereviewKey } from "./rereview.ts";
 // opens a fresh window from the review, exactly as an answer does. Both are read from GitHub and Linear
 // every poll; nothing new is stored.
 
-/** The human reviews and inline review comments on the task's PRs: each may have opened a window. */
-export const humanReviews = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] =>
-  pullRequests.flatMap((p) => p.humanFeedback).filter((f) => f.kind === "review" || f.kind === "review_comment");
+/** Every human review or inline review comment: each may open a window without an escalation. */
+export const humanPrFeedback = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] =>
+  pullRequests.flatMap((p) => p.humanFeedback).filter((f) => f.kind !== "comment");
 
-/** The newest human review or inline review comment on the task's PRs: what opens a fresh window. */
-export function latestHumanReview(pullRequests: PullRequestFacts[]): HumanPullRequestFeedback | undefined {
-  return humanReviews(pullRequests)
-    .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-    .at(-1);
+/** Human PR and issue feedback that opens a review window. Keep every reader of window starts here. */
+export function reviewWindowFeedback(situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">): (HumanPullRequestFeedback | HumanComment)[] {
+  const escalatedComments = situation.pullRequests.flatMap((pr) => {
+    const escalations = escalationComments(situation, pr);
+    const at = escalations.toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1)?.createdAt;
+    return at ? pr.humanFeedback.filter((f) => f.kind === "comment" && Date.parse(f.createdAt) > Date.parse(at)) : [];
+  });
+  const issueResponse = latestIssueResponseToPrWait(situation);
+  return [...humanPrFeedback(situation.pullRequests), ...escalatedComments, ...(issueResponse ? [issueResponse] : [])];
+}
+
+function escalationComments(situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">, pr: PullRequestFacts) {
+  const { issue, agentComments } = situation.conversation;
+  // The handoff comment's key is durable even after changed conversation facts correctly drop the
+  // refusal record that enforced M12. Keep using that head-keyed comment as the escalation anchor.
+  const keys = [handoffKey(issue.id, pr), ...(outstandingChangeRequests(pr.humanFeedback).length > 0 ? [rereviewKey(issue.id, pr)] : [])];
+  return keys.flatMap((key) => agentComments.filter((c) => c.id === commentIdFor(key)));
+}
+
+/** The newest issue comment after a head-keyed handoff or re-review request. */
+function latestIssueResponseToPrWait(situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">): HumanComment | undefined {
+  const { humanComments } = situation.conversation;
+  const waits = situation.pullRequests.flatMap((pr) => escalationComments(situation, pr));
+  const lastWait = waits.toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
+  if (!lastWait) return undefined;
+  return humanComments.filter((c) => Date.parse(c.createdAt) > Date.parse(lastWait.createdAt)).toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
 }
 
 /**
@@ -28,14 +49,9 @@ export function awaitedHumanPrAction(situation: SituationReport): string | undef
   const { issue, agentComments } = situation.conversation;
   const posted = (key: string) => agentComments.some((c) => c.id === commentIdFor(key));
   for (const pr of situation.pullRequests.filter((p) => p.state === "open")) {
-    const refused = situation.refusedMerges.find((r) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha);
-    if (refused && posted(handoffKey(issue.id, refused))) return `a human to merge ${pr.repo}#${pr.number}`;
+    if (posted(handoffKey(issue.id, pr))) return `a human to merge ${pr.repo}#${pr.number}`;
     const reviewers = outstandingChangeRequests(pr.humanFeedback);
     if (reviewers.length > 0 && posted(rereviewKey(issue.id, pr))) return `${reviewers.join(", ")} to re-review ${pr.repo}#${pr.number}`;
   }
   return undefined;
 }
-
-/** Whether only the wall time is exhausted: spend is never a human wait. */
-export const onlyWallTimeExhausted = (budget: BudgetStatus, now: Date) =>
-  now.getTime() >= Date.parse(budget.wallDeadline) && budget.spentUsd < budget.costLimitUsd;

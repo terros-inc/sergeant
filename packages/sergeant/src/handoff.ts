@@ -6,7 +6,7 @@ import type { LinearPort, RefusedMerge } from "@terros/sergeant-contracts";
 // that fails twice with nothing changed waits the same way (TECH-5077).
 
 /** Once per PR head: the comment's id is derived from this key, so a retry posts nothing new. */
-export const handoffKey = (issueId: string, r: RefusedMerge) => `merge-handoff:${issueId}:${r.repo}#${r.number}:${r.headSha}`;
+export const handoffKey = (issueId: string, r: Pick<RefusedMerge, "repo" | "number" | "headSha">) => `merge-handoff:${issueId}:${r.repo}#${r.number}:${r.headSha}`;
 
 export function handoffComment(r: RefusedMerge): string {
   const ready = `[${r.repo}#${r.number}](${r.url}) at head \`${r.headSha}\` is reviewed and its required checks are green`;
@@ -41,7 +41,10 @@ export function handoffComment(r: RefusedMerge): string {
   const [why, who] = r.temporary
     ? [`, but Sergeant's merge failed twice with nothing changing in between: ${r.reason.trim()}`, "A human can merge it."]
     : [`, but GitHub refused Sergeant's merge: ${r.reason.trim()}`, "This repository needs a human to merge it."];
-  return ["**Ready for a human to merge**", "", ready + why, "", `${who} Sergeant won't try again unless the PR, its reviews, or this issue change.`].join("\n");
+  const reviewers = r.temporary ? [] : [r.requested?.length
+    ? `Review is requested from ${r.requested.join(", ")}.`
+    : "GitHub did not identify a code owner or configured reviewer to request.", ""];
+  return ["**Ready for a human to merge**", "", ready + why, "", ...reviewers, `${who} Sergeant won't try again unless the PR, its reviews, or this issue change.`].join("\n");
 }
 
 /** Posts a refusal's comment, at most once however often it is retried; false if Linear failed. */

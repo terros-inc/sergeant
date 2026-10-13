@@ -22,6 +22,8 @@ export const RefusedMerge = z.object({
   conversationRevision: ConversationRevision,
   /** GitHub's own words, or the error of a failed merge call. */
   reason: z.string(),
+  /** Reviewers GitHub requested for this policy-refused head (normally CODEOWNERS). */
+  requested: z.array(z.string()).optional(),
   /** The merge call failed (a network error, a temporary 405) rather than GitHub refusing it by policy. */
   temporary: z.literal(true).optional(),
   /**

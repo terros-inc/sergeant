@@ -207,7 +207,25 @@ export async function execute(action: ProposedAction, situation: SituationReport
         if ("refused" in result) {
           // Repository policy, not a fault. The loop gives it the same one bounded re-check as a
           // failed merge call, then hands it to a human if nothing changed (TECH-5077).
-          const refused = { repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: liveRevision, reason: result.refused, at: new Date().toISOString() };
+          // A policy refusal commonly means a required CODEOWNERS approval. Reuse the handoff read to
+          // preserve reviewers GitHub already requested; with no such owners, request nobody rather
+          // than substituting the issue requester/assignee. The issue escalation below says plainly
+          // when GitHub identifies nobody.
+          let requested: string[] = [];
+          if (ports.github.handToHuman) {
+            try {
+              ({ requested } = await ports.github.handToHuman({
+                repo: pr.repo,
+                number: pr.number,
+                expectedHeadSha: pr.headSha,
+                reviewers: [],
+                comment: `**Human review required**\n\nGitHub refused Sergeant's merge of head \`${pr.headSha}\`: ${result.refused}`,
+              }));
+            } catch (error) {
+              ports.log?.(`${pr.repo}#${pr.number}: could not determine code owners after merge refusal: ${(error as Error).message}`);
+            }
+          }
+          const refused = { repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: liveRevision, reason: result.refused, requested, at: new Date().toISOString() };
           return { action, status: "denied", rule: "GitHub", reason: `refused by repository policy: ${result.refused}`, refused };
         }
         return { action, status: "done", result: { mergedSha: result.mergedSha }, merged: { pr, mergedSha: result.mergedSha } };
@@ -219,7 +237,7 @@ export async function execute(action: ProposedAction, situation: SituationReport
       case "accept_as_is": {
         // No effect: the loop ends the task (TECH-5118). Only a human's reply to the budget question
         // can accept the work as it is; an answer to any other question leaves the task going.
-        if (!answeredBudgetQuestion(conversation, situation.budget, situation.pullRequests)) {
+        if (!answeredBudgetQuestion(situation, situation.budget)) {
           return denied({ rule: "Q2", reason: "no human has replied to Sergeant's budget question in this budget window" });
         }
         // Ending is terminal, so it is decided on the live conversation, not the turn's: an "extend" or
