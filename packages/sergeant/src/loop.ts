@@ -179,6 +179,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     watch(conversation.issue.linkedPullRequests);
     // Before the stop check (TECH-5082): a failure seen on the poll that stops the task is alerted too.
     await postAuthAlerts(conversation.issue.id, runs, conversation.agentComments, deps.linear, log);
+    if (opts.wake?.linear) {
+      delete ctx.ownerProvenAt;
+      opts.wake.linear = false;
+    }
     const stop = await checkStop(conversation, runs, ctx);
     if (typeof stop === "object") {
       await wait(pollMs);

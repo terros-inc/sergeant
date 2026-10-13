@@ -15,6 +15,8 @@ export class Wake {
   watched: string[] = [];
   /** A GitHub webhook named what it watches since the loop last read its PRs (TECH-5336). */
   github = false;
+  /** A Linear webhook named this issue since its owner was last proven (TECH-5923). */
+  linear = false;
   #interrupt = new AbortController();
   #lastNudge = 0;
   #trailing: NodeJS.Timeout | undefined;

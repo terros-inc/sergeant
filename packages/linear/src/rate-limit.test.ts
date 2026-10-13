@@ -35,28 +35,42 @@ const linear = (answer: () => Response) => {
   return { port, clock, logs, calls: () => calls };
 };
 
-test("a RATELIMITED refusal pauses every Linear call until the spent budget resets, logged once", async () => {
+test("a RATELIMITED refusal pauses every Linear call until the latest advertised reset, logged once", async () => {
   let limited = true;
   const { port, clock, logs, calls } = linear(() => (limited ? rateLimited() : Response.json({ data: { issue: { state: { type: "started" }, completedAt: null } } })));
-  const until = new Date(RESET).toISOString();
+  const until = new Date(T0 + 50 * 60_000).toISOString();
 
   const first = await port.issueProgress("UNF-1").catch((e: unknown) => e);
   expect(first).toBeInstanceOf(LinearRateLimitedError);
   expect((first as LinearRateLimitedError).until).toBe(until);
 
   // While paused, a call throws at once and never reaches Linear.
-  clock.now = RESET - 1000;
+  clock.now = T0 + 50 * 60_000 - 1000;
   await expect(port.issueProgress("UNF-1")).rejects.toThrow(LinearRateLimitedError);
   expect(calls()).toBe(1);
   expect(logs).toEqual([`Linear API rate limit: no Linear calls until ${until}`]);
 
   limited = false;
-  clock.now = RESET;
+  clock.now = T0 + 50 * 60_000;
   await expect(port.issueProgress("UNF-1")).resolves.toEqual({ stateType: "started", completedAt: null });
   expect(calls()).toBe(2);
 });
 
-test("a refusal without a spent budget's reset pauses a minute", async () => {
+test("a far-future reset cannot pause Linear calls for more than an hour", async () => {
+  const farFuture = T0 + 24 * 60 * 60_000;
+  const { port } = linear(() =>
+    Response.json(
+      { errors: [{ message: "Rate limit exceeded", extensions: { code: "RATELIMITED" } }] },
+      { status: 400, headers: { "x-ratelimit-requests-reset": String(farFuture) } },
+    ),
+  );
+
+  const error = await port.issueProgress("UNF-1").catch((e: unknown) => e);
+
+  expect((error as LinearRateLimitedError).until).toBe(new Date(T0 + 60 * 60_000).toISOString());
+});
+
+test("a refusal without an advertised reset pauses a minute", async () => {
   const { port } = linear(() => Response.json({ errors: [{ message: "Rate limit exceeded", extensions: { code: "RATELIMITED" } }] }, { status: 400 }));
 
   const error = await port.issueProgress("UNF-1").catch((e: unknown) => e);

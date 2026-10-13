@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ApiError } from "@terros/sergeant-contracts";
+import { LinearRateLimitedError, type ApiError } from "@terros/sergeant-contracts";
 import type { z } from "zod";
 import type { ApiControl } from "./api.ts";
 import { CallerRefused, type Caller } from "./auth.ts";
@@ -39,6 +39,7 @@ export async function callerOf(req: IncomingMessage, ctl: ApiControl): Promise<C
     if (!ctl.callerOf) throw new Refusal(401, "unauthorized", "this Sergeant has no Linear login configured (installation config `humans`)");
     return ctl.callerOf(token).catch((e: Error) => {
       if (e instanceof CallerRefused) throw new Refusal(e.status, e.status === 401 ? "unauthorized" : "forbidden", e.message);
+      if (e instanceof LinearRateLimitedError) throw new Refusal(503, "unavailable", `Linear is rate limiting; try again after ${e.until}`);
       throw new Refusal(503, "unavailable", `cannot check the caller's Linear login: ${e.message}`);
     });
   }
