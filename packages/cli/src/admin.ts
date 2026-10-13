@@ -7,7 +7,7 @@ import type { AdminRequest, AdminResult, AdminStatus, ApiFailure, ApiResult } fr
 // neither pending nor the latest outcome, an outcome other than the one current when it was made (another
 // action's, or an automatic update's) replaced its own before it was read: that ends the wait too.
 
-/** Long enough for serve's graceful stop (up to 15 minutes), an install, and a rollback. */
+/** Long enough for serve's bounded graceful stop, an install, and a rollback. */
 export const WAIT_MINUTES = 45;
 const EVERY_MS = 5000;
 

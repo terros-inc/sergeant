@@ -226,8 +226,9 @@ sgt admin status           # its release, when it last restarted, the last resta
   Sergeant is unreachable for part of it; that is expected and waited out.
 - An `update` with nothing newer to install changes nothing, not even the config: if the installation
   config changed in AWS since Sergeant started, it says so, and `sgt admin restart` rereads it.
-- The restart is graceful: Sergeant stops taking new work, ends each task at its next poll (up to 15
-  minutes), and leaves running workers and reviewers running; the new process picks them up.
+- The restart is bounded: Sergeant stops taking new work and asks each task to end at its next poll,
+  then forces its own exit after five seconds if shutdown stalls. Running workers and reviewers are
+  left running; the new process picks them up.
 - One action at a time: another is refused until the host has finished the first. The host keeps only
   its latest outcome, so if an automatic update starts before `sgt` reads yours, `sgt` says so (exit 1)
   instead of waiting. Every request, and

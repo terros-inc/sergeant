@@ -272,13 +272,20 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   return {
     port: typeof address === "object" && address ? address.port : undefined,
     async stop() {
+      // Stop accepting before waiting for task loops. `close()` alone waits for active HTTP requests,
+      // so close idle keep-alives now and force any connection still active once the loops have ended.
+      const serverClosed = server
+        ? new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())))
+        : Promise.resolve();
+      server?.closeIdleConnections();
       abort.abort();
       await intakeLoop;
       await feedbackLoop;
       await retroLoop;
       await Promise.all(active.values());
       await Promise.allSettled(locks.values());
-      if (server) await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+      server?.closeAllConnections();
+      await serverClosed;
       await release();
     },
   };

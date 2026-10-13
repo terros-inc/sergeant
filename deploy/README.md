@@ -395,8 +395,9 @@ aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
   --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
 ```
 
-The restart sends SIGTERM: `serve` stops intake and ends each task at its next poll (up to 15
-minutes, then systemd kills it). Running worker and reviewer containers keep running and the new
+The restart sends SIGTERM: `serve` stops intake and ends each task at its next poll, but exits after
+an internal five-second deadline if graceful shutdown stalls; systemd has a 15-second final backstop.
+Running worker and reviewer containers keep running and the new
 process picks them up from the state dir. `cat /etc/sergeant/release` on the host shows the deployed
 ref and commit. To roll back, update to the previous commit; with automatic updates on, first pause
 them or remove `release` (Automatic updates, Pin or roll back), or the next tick moves the host
@@ -623,7 +624,7 @@ under `/var/lib/sergeant/state/runs/`, and `sudo docker ps --filter label=sergea
 
 ### Stop
 
-`sudo systemctl stop sergeant` on the host stops intake and ends each task at its next poll; running
+`sudo systemctl stop sergeant` on the host stops intake and gives each task up to five seconds to end; running
 containers are left alone. `sudo systemctl start sergeant` resumes from the state dir.
 
 ## Reference
@@ -1056,8 +1057,9 @@ shell over the canary's per-task loop, not a workflow engine:
   its `since` (the first sweep) keeps feedback from before the rollout out. Per issue, at most 3
   follow-ups are filed and 10 pieces of feedback judged; past that, or after 3 failed attempts at one
   piece, Sergeant says so in a comment on the issue rather than dropping it silently.
-- **Signals and restarts.** SIGINT or SIGTERM stops intake and ends each loop at its next poll, never
-  mid-turn; a second signal exits at once. A restart rereads Linear, GitHub, the runner, and each
+- **Signals and restarts.** SIGINT or SIGTERM stops intake, closes the HTTP listener and connections,
+  and asks each loop to end at its next poll. If that has not completed in five seconds the process
+  exits; a second signal exits at once. A restart rereads Linear, GitHub, the runner, and each
   task's `state.json`, and continues, accepting some repeated work. One process serves a state
   directory: it holds an OS file lock on `<state dir>/service.lock` (released when it exits, however
   it exits), and a second start is refused while it does. `GET /health` on `--host` (127.0.0.1) and

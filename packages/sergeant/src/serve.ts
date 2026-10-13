@@ -11,7 +11,8 @@
 // `sgt admin repo add|remove`, which serve takes in place (enrollment.ts). Credentials come from the config's secret
 // references exactly as for the canary (canary.ts). `--max-tasks` and `--waiting-grace-minutes`, when
 // given, win over the config's `maxTasks` and `waitingGraceMinutes` (TECH-5008). SIGINT or SIGTERM
-// stops intake and lets each task loop end at its next poll; a second signal exits at once. `GET /health` reports only
+// stops intake and lets each task loop end at its next poll, bounded by a five-second process deadline;
+// a second signal exits at once. `GET /health` reports only
 // whether it is healthy; `GET /status` adds its tasks and latest intake, for loopback only. With the
 // config's webhook secrets, `POST /webhooks/linear` and `/webhooks/github` wake tasks early. The client
 // API admits the Linear users the config's `humans` names (auth.ts); `--trust-loopback` also admits an
@@ -31,6 +32,7 @@ import { connect, fargateSettings, githubLoginLookup, loadConfig, repoBudget, re
 import { decimalFlag, integerFlag } from "./cli-numbers.ts";
 import { appsReach, configParameter, enrolledIn, enrollment } from "./enrollment.ts";
 import { startService } from "./service.ts";
+import { stopBeforeDeadline } from "./shutdown.ts";
 
 const { values } = parseArgs({
   options: {
@@ -194,13 +196,26 @@ void pruneWorkspaces(runsDir).then(
 );
 console.log(`Sergeant ${version}${fallback ? ` (${fallback})` : ""} serving ${repositories.join(", ")}; GET http://${values.host}:${service.port}/health`);
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    console.log(`${signal}: stopping after each task's current step`);
-    process.once(signal, () => process.exit(1));
-    void service.stop().then(() => process.exit(0));
-  });
-}
+const shutdownDeadlineMs = 5_000;
+let stopping = false;
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => {
+  if (stopping) {
+    console.error(`${signal}: forced exit during shutdown`);
+    process.exit(1);
+  }
+  stopping = true;
+  console.log(`${signal}: stopping after each task's current step (deadline ${shutdownDeadlineMs / 1_000}s)`);
+  void stopBeforeDeadline(() => service.stop(), shutdownDeadlineMs).then(
+    (stopped) => {
+      if (!stopped) console.error(`${signal}: graceful shutdown exceeded ${shutdownDeadlineMs / 1_000}s; forcing exit`);
+      process.exit(stopped ? 0 : 1);
+    },
+    (error: Error) => {
+      console.error(`${signal}: graceful shutdown failed: ${error.message}`);
+      process.exit(1);
+    },
+  );
+});
 
 /** The parameter's version install.sh recorded beside `file` when it installed it; undefined when there is none. */
 async function installedVersion(file: string): Promise<number | undefined> {

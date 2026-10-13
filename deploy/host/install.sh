@@ -92,7 +92,7 @@ amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cl
 # previous installation stays and serve is not restarted (install-config.sh). ---
 "$here/install-config.sh" /etc/sergeant
 
-# --- Restart serve. SIGTERM lets each task end at its next poll; running workers keep running and
+# --- Restart serve. SIGTERM gives each task a bounded graceful stop; running workers keep running and
 # the new process picks them up. ---
 systemctl daemon-reload
 systemctl enable sergeant
