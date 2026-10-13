@@ -68,6 +68,7 @@ function summarize(ctl: ApiControl, { ref, state }: Task): TaskSummary {
     ref,
     status: loop?.status ?? (merged ? "merged" : "inactive"),
     statusDetail: loop?.detail,
+    paused: loop?.paused,
     startedAt: state?.startedAt,
     turns: state?.turns ?? 0,
     lastTurnAt: state?.lastTurnAt,

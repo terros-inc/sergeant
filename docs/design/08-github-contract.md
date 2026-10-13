@@ -217,7 +217,8 @@ is conditional on the ETag of its last answer, so an unchanged one is a 304 that
 count; a PR whose head and `updated_at` are unchanged keeps its reviews and comments for up to 10
 minutes; unreadable classic protection is asked again hourly. A rate-limit refusal stops every GitHub
 call until `x-ratelimit-reset` (primary) or `retry-after` (secondary, else a minute), logged once; a
-task loop that fails on it resumes after that time, not at the next intake. `sgt admin status` shows
+task loop that fails on it resumes after that time, not at the next intake, and until then its task
+shows as `paused` with the provider and reset time, not `failed` (TECH-5941). `sgt admin status` shows
 the calls left, the reset, and any pause.
 
 ## 10. Humans on GitHub

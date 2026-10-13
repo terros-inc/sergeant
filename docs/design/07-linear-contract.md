@@ -362,6 +362,6 @@ Not required by this design; recorded as `14` V3.
 - Runs keep working; GitHub-side facts keep flowing.
 - Linear's rate limit (`RATELIMITED`, answered with HTTP 400) stops every Linear call until the latest
   advertised `x-ratelimit-*-reset`, capped at one hour, else a minute, logged once (TECH-5923). A task
-  loop that fails on it resumes after that time, not at the next intake, and the feedback sweep ends
-  its pass. A login checked during that pause gets a 503 naming when to retry. Any other refusal names
+  loop that fails on it resumes after that time, not at the next intake, and shows as `paused` with
+  the reset time until then, not `failed` (TECH-5941); the feedback sweep ends its pass. A login checked during that pause gets a 503 naming when to retry. Any other refusal names
   Linear's error code and message.
