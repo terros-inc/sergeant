@@ -2,7 +2,9 @@ name: public-data
 
 # This repository is public: a PR's commits, branch name, title, and body must carry no customer data
 # (TECH-5914). The check refuses Terros IDs, emails, phone numbers, and the customer names in the
-# PUBLIC_DATA_DENYLIST secret, which is never committed here; it never prints a denylisted name.
+# PUBLIC_DATA_DENYLIST secret, which is never committed here; it never prints a denylisted name. Keep the
+# secret on one line, names separated by commas: Actions masks a secret's whole value in this public log,
+# and a multi-line value may not be masked line by line.
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]

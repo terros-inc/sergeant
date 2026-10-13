@@ -747,7 +747,8 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   `secret_names` too. Each worker gets the list as `PUBLIC_DATA_DENYLIST`, read only by the pre-push
   hook the runner image installs in its clones (`packages/runner/container/check-public-data.mjs`); the
   hook also refuses Terros IDs, emails, and phone numbers, with or without the list. Keep the same list
-  as the `PUBLIC_DATA_DENYLIST` Actions secret of each public repository whose CI runs that check.
+  as the `PUBLIC_DATA_DENYLIST` Actions secret of each public repository whose CI runs that check,
+  written there on one line with commas, so Actions masks it whole in the public log.
 
 ### GitHub Apps and rulesets
 
