@@ -62,10 +62,15 @@ if (!config.registeredAccountsSecret && hostRegisteredAccounts) config.registere
 const configParameterName = values["config-parameter"] ?? process.env.SERGEANT_CONFIG_PARAMETER;
 const parameter = configParameterName ? configParameter(config, configParameterName) : undefined;
 const log = (line: string) => console.log(`[${new Date().toISOString()}] ${line}`);
-// The parameter is the only record of an approver's change: a restart before the next update keeps it.
+// The parameter is the only record of an approver's change: a restart before the next update keeps it,
+// its repositories and its retro target, or none when an approver turned retros off (TECH-5940).
 // Its version serve has is the one install.sh recorded with `--config` unless that copy is current (TECH-5206).
 const started = parameter && (await enrolledIn(parameter, log, { config: JSON.parse(await readFile(configFile, "utf8")), version: await installedVersion(configFile) }));
-if (started) config.repositories = started.repositories;
+if (started) {
+  config.repositories = started.repositories;
+  if (started.retro) config.retro = started.retro;
+  else delete config.retro;
+}
 const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"));
 const runsDir = join(stateDir, "runs");
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
