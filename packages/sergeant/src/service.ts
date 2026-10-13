@@ -259,7 +259,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     ...(opts.accounts && { accounts: opts.accounts }),
     ...(opts.admin && { admin: opts.admin }),
     ...(opts.enrollment && { enrollment: opts.enrollment }),
-    ...(deps.retro && { requestRetro: () => retroWake.request() }),
+    ...(deps.retro && { requestRetro: () => (deps.retro?.target() ? (retroWake.request(), true) : false) }),
   });
   const webhooks = serviceWebhooks(opts, deps, log, { wakes, active, delegated: () => delegated, intakeWake });
   const server =

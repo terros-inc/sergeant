@@ -52,6 +52,7 @@ export function showOutcome(r: AdminResult): string {
 
 export function showStatus(s: AdminStatus): string {
   const lines = [`serve    ${s.serve.version}, started ${s.serve.startedAt}`];
+  lines.push(s.retro ? `retro    project ${s.retro.projectId}, team ${s.retro.teamId}` : "retro    none");
   lines.push(s.release ? `release  ${s.release.ref === s.release.sha ? s.release.sha : `${s.release.ref} at ${s.release.sha}`}, installed ${s.release.at}` : "release  unknown");
   if (s.pending) lines.push(`pending  ${s.pending.action}${s.pending.ref ? ` to ${s.pending.ref}` : ""} by ${s.pending.by}, asked ${s.pending.at}`);
   const last = s.last;

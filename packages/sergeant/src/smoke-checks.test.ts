@@ -60,6 +60,7 @@ const linearAnswers: Record<string, unknown> = {
   SergeantIssueById: { issue: { identifier: "TECH-9", url: "https://linear.app/terros/issue/TECH-9" } },
   SergeantRetroIssue: { issue: { identifier: "TECH-9", title: "Controlled issue", url: "https://linear.app/terros/issue/TECH-9", createdAt: "2026-10-05T00:00:00.000Z", state: { name: "Todo", type: "unstarted" } } },
   SergeantRetroTeam: { team: { states: { nodes: [{ id: "s1", name: "Todo", type: "unstarted", position: 1 }] } } },
+  SergeantRetroTarget: { project: { id: "project" }, team: { id: "team-1" } },
   SergeantRetroDocumentById: { document: null },
 };
 const notFound = new Set(["SergeantRelationById"]);
@@ -140,7 +141,7 @@ test("every check passes over the real adapters, and nothing is written", async 
   const f = fakes();
   const results = await runChecks([
     ...hostChecks({ statusUrl: "http://127.0.0.1:8080/status", localVersion: "2.0.90+abc1234", fetch: status("2.0.90+abc1234") }),
-    ...linearChecks(f.linear, { agentUserId: "agent", issue: "TECH-9", retroProjectId: "project", upload: "https://uploads.linear.app/org/a/shot.png" }),
+    ...linearChecks(f.linear, { agentUserId: "agent", issue: "TECH-9", retroProjectId: "project", retroTeamId: "team-1", upload: "https://uploads.linear.app/org/a/shot.png" }),
     ...githubChecks(f.github, f.probes, { repo, mergePolicy: "sergeant", pr: 7, issue: "TECH-9" }),
   ]);
   expect(f.writes).toEqual([]);

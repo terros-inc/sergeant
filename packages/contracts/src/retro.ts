@@ -77,3 +77,9 @@ export type RetroAnswer = z.infer<typeof RetroAnswer>;
 /** `POST /v1/retro` (`sgt retro`): a human asks for a retro now; it runs in the background. */
 export const RetroRequestResponse = z.object({ requested: z.literal(true) });
 export type RetroRequestResponse = z.infer<typeof RetroRequestResponse>;
+
+/** The installation-config target an approver may change through `sgt admin retro`. */
+export const RetroTarget = z.strictObject({ projectId: z.string().min(1), teamId: z.string().min(1) });
+export type RetroTarget = z.infer<typeof RetroTarget>;
+export const RetroTargetChange = z.object({ changed: z.boolean(), retro: RetroTarget.nullable() });
+export type RetroTargetChange = z.infer<typeof RetroTargetChange>;

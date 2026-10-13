@@ -62,6 +62,7 @@ const createdIssues = `
 const createdPage = z.object({ issues: z.object({ nodes: z.array(filedIssue), pageInfo }) });
 export const oneIssue = `query SergeantRetroIssue($id: String!) { issue(id: $id) { ${filedFields} } }`;
 export const teamStates = `query SergeantRetroTeam($id: String!) { team(id: $id) { states(first: 100) { nodes { id name type position } } } }`;
+const retroTarget = `query SergeantRetroTarget($projectId: String!, $teamId: String!) { project(id: $projectId) { id } team(id: $teamId) { id } }`;
 const createIssue = `
   mutation SergeantRetroIssueCreate($input: IssueCreateInput!) {
     issueCreate(input: $input) { success issue { identifier url } }
@@ -92,6 +93,11 @@ export function retroLinear({ request, createOnce, sergeantUsers }: Pick<Followu
   }
 
   return {
+    /** Both ids resolve through this installation's Linear credential, hence in its workspace. */
+    async validateTarget(projectId: string, teamId: string): Promise<"project" | "team" | undefined> {
+      const found = await request(retroTarget, { projectId, teamId }, z.object({ project: z.object({ id: z.string() }).nullable(), team: z.object({ id: z.string() }).nullable() }));
+      return !found.project ? "project" : !found.team ? "team" : undefined;
+    },
     /** The project's newest retro document, or null before the first retro. */
     async lastRetro(projectId: string): Promise<{ title: string; content: string; createdAt: string } | null> {
       const docs = await paged(async (after) => (await request(retroDocuments, { project: projectId, title: RETRO_TITLE, after }, retroDocumentsPage)).documents);

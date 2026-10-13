@@ -2,16 +2,17 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { RepoSlug, safeJson, type MergePolicy, type RepositoryChange } from "@terros/sergeant-contracts";
+import { RepoSlug, safeJson, type MergePolicy, type RepositoryChange, type RetroTarget, type RetroTargetChange } from "@terros/sergeant-contracts";
 import type { GitHubApp } from "@terros/sergeant-github";
 import { z } from "zod";
 import { InstallationConfig, run } from "./config.ts";
 
-// Enrolling and removing repositories with an approver's own Linear login (TECH-5193), with no AWS
+// Enrolling and removing repositories (TECH-5193), and setting the retro target (TECH-5838), with an
+// approver's own Linear login, with no AWS
 // session and no host update. The installation-config SSM parameter is the only record: each change
 // rewrites it, the one parameter the host's role may write (deploy/terraform), changing only its
-// `repositories` and naming who made the change in the new version's description, and `serve` takes
-// its `repositories` from it at startup (serve.ts), so no restart can bring back an older list. The
+// `repositories` or `retro` and naming who made the change in the new version's description. `serve`
+// takes its `repositories` from it at startup (serve.ts), so no restart can bring back an older list. The
 // running service takes a change in place: every loop, the API, webhooks, and the GitHub port read the
 // same live list and settings. A change the parameter already has (a retry after a write whose answer
 // was lost, say) writes nothing and brings the live list up to it. Budgets, secret references,
@@ -65,11 +66,11 @@ export async function enrolledIn(
 }
 
 /** The parameter's raw JSON, valid as an installation config, and its version. A failure's message never quotes it. */
-async function readConfig(parameter: ConfigParameter, log: (line: string) => void): Promise<{ config: { repositories: Record<string, unknown> }; version: number }> {
+async function readConfig(parameter: ConfigParameter, log: (line: string) => void): Promise<{ config: { repositories: Record<string, unknown>; retro?: RetroTarget }; version: number }> {
   const { value, version } = await aws(parameter.read(), "read", log);
   const config = safeJson(value);
   if (!InstallationConfig.safeParse(config).success) throw new Error("the installation-config parameter is not a valid installation config: fix it in AWS first");
-  return { config: config as { repositories: Record<string, unknown> }, version };
+  return { config: config as { repositories: Record<string, unknown>; retro?: RetroTarget }, version };
 }
 
 /** An AWS CLI call whose failure is logged with only the CLI's own stderr: the error's message would quote its arguments. */
@@ -105,10 +106,13 @@ export function enrollment(opts: {
   version?: number | undefined;
   /** The repository's own `owner/name` once both GitHub Apps reach it; throws `EnrollmentRefused` otherwise. */
   reach: (repo: RepoSlug) => Promise<RepoSlug>;
+  /** Live retro target and validation in this installation's Linear workspace. */
+  retro: { target: RetroTarget | undefined; validate: (target: RetroTarget) => Promise<"project" | "team" | undefined> };
   log: (line: string) => void;
   now?: () => number;
 }) {
   const now = opts.now ?? Date.now;
+  const retro = opts.retro;
   // One change at a time, so two cannot overwrite each other's read-modify-write.
   let changes: Promise<unknown> = Promise.resolve();
   let loaded = opts.version;
@@ -121,13 +125,14 @@ export function enrollment(opts: {
    * Reads the parameter and applies `edit` to its `repositories`: a description of the change, or
    * undefined when the parameter already has it. Writes a change, then brings the live list up to the parameter.
    */
-  function change(edit: (repositories: Record<string, unknown>) => string | undefined): Promise<boolean> {
+  function change(edit: (config: { repositories: Record<string, unknown>; retro?: RetroTarget }) => string | undefined): Promise<boolean> {
     const parameter = opts.parameter;
-    if (!parameter) return Promise.reject(new EnrollmentRefused("this Sergeant cannot change its enrolled repositories: serve runs without --config-parameter"));
+    if (!parameter) return Promise.reject(new EnrollmentRefused("this Sergeant cannot change its installation config: serve runs without --config-parameter"));
     const done = changes.then(async () => {
       const { config, version } = await readConfig(parameter, opts.log);
-      const what = edit(config.repositories);
+      const what = edit(config);
       const next = InstallationConfig.parse(config).repositories;
+      const nextRetro = InstallationConfig.parse(config).retro;
       if (what) {
         const written = await aws(parameter.write(JSON.stringify(config, null, 2), what), "write", opts.log);
         // Over a version serve does not have, the write carries that version's other changes, which serve still lacks.
@@ -138,6 +143,7 @@ export function enrollment(opts: {
       for (const r of Object.keys(opts.configs)) delete opts.configs[r];
       Object.assign(opts.configs, next);
       opts.repositories.splice(0, opts.repositories.length, ...Object.keys(next));
+      retro.target = nextRetro;
       if (what) opts.log(`${what}: the installation-config parameter and the running service have it`);
       return what !== undefined;
     });
@@ -166,13 +172,35 @@ export function enrollment(opts: {
 
     list: () => Object.entries(opts.configs).map(([repo, c]) => ({ repo, mergeMethod: c.mergeMethod, mergePolicy: c.mergePolicy })),
 
+    retroTarget: () => retro.target,
+
+    async setRetro(target: RetroTarget, by: string): Promise<RetroTargetChange> {
+      const invalid = await retro.validate(target);
+      if (invalid) throw new EnrollmentRefused(`Linear ${invalid} not found in this Sergeant's workspace: ${target[`${invalid}Id`]}`);
+      const changed = await change((config) => {
+        if (isDeepStrictEqual(config.retro, target)) return undefined;
+        config.retro = target;
+        return `${by} set the retro target to project ${target.projectId}, team ${target.teamId}`;
+      });
+      return { changed, retro: retro.target ?? null };
+    },
+
+    async disableRetro(by: string): Promise<RetroTargetChange> {
+      const changed = await change((config) => {
+        if (!config.retro) return undefined;
+        delete config.retro;
+        return `${by} turned retros off`;
+      });
+      return { changed, retro: retro.target ?? null };
+    },
+
     /**
      * Enrolls `repo` once both GitHub Apps reach it, `human`-merged unless `mergePolicy` says otherwise
      * (TECH-5244). One already enrolled stays as it is, except that a `mergePolicy` given sets its policy.
      */
     async add(repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy | undefined, by: string): Promise<RepositoryChange> {
       let own = await opts.reach(repo);
-      const changed = await change((current) => {
+      const changed = await change(({ repositories: current }) => {
         const enrolled = keyOf(current, own);
         if (enrolled) {
           own = enrolled;
@@ -190,7 +218,7 @@ export function enrollment(opts: {
     /** Removes `repo` from the enrolled list; one not enrolled stays so. */
     async remove(repo: RepoSlug, by: string): Promise<RepositoryChange> {
       let removed = repo;
-      const changed = await change((current) => {
+      const changed = await change(({ repositories: current }) => {
         const enrolled = keyOf(current, repo);
         if (!enrolled) return undefined;
         delete current[enrolled];

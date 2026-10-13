@@ -13,7 +13,7 @@ export type SmokeResult = { name: string; covers: string[]; status: "PASS" | "FA
 type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
   "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
-> & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "lastRetro" | "feedbackTasks" | "filedIssues"> };
+> & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "validateTarget" | "lastRetro" | "feedbackTasks" | "filedIssues"> };
 type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
 
@@ -42,10 +42,10 @@ export function hostChecks(input: { statusUrl: string; localVersion: string; fet
 
 export function linearChecks(
   linear: LinearReads,
-  input: { agentUserId: string; issue?: string | undefined; retroProjectId?: string | undefined; upload?: string | undefined; now?: Date },
+  input: { agentUserId: string; issue?: string | undefined; retroProjectId?: string | undefined; retroTeamId?: string | undefined; upload?: string | undefined; now?: Date },
 ): SmokeCheck[] {
   const since = new Date((input.now ?? new Date()).getTime() - 14 * DAY_MS).toISOString();
-  const { issue, retroProjectId, upload } = input;
+  const { issue, retroProjectId, retroTeamId, upload } = input;
   const needsIssue = "needs --issue <a controlled issue delegated to the agent>";
   const uploadCheck = { name: "linear upload download (attachment reading)", covers: ["TECH-4994", "TECH-5042"] };
   const checks: SmokeCheck[] = [
@@ -82,6 +82,7 @@ export function linearChecks(
           name: "linear retro reads (documents, feedback, filed issues)",
           covers: ["TECH-5187"],
           run: async () => ({
+            target: retroTeamId ? (await linear.retro.validateTarget(retroProjectId, retroTeamId)) ?? "valid" : "team id not configured",
             lastRetro: (await linear.retro.lastRetro(retroProjectId))?.title ?? null,
             feedbackTasks: (await linear.retro.feedbackTasks(since)).length,
             filedIssues: (await linear.retro.filedIssues(input.agentUserId, since)).length,

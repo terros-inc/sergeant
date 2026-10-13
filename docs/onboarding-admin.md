@@ -9,7 +9,8 @@ Who does what:
 - A **Linear admin** manages Linear team membership.
 - An **approver** is listed by Linear user id in the installation config's `humans.approvers`, and can
   run `sgt admin` with their own login (`sgt whoami` says `, an approver`).
-- An **operator** edits the installation config in AWS. Every config change below is: edit the
+- An **operator** edits the installation config in AWS. Except for repository enrollment and the
+  retro target, which approvers change live with `sgt admin`, every config change below is: edit the
   parameter, then `sgt admin restart` (an approver) or an Update
   ([`deploy/README.md`](../deploy/README.md), "Restart or update with `sgt`").
 

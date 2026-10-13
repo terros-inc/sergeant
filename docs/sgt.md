@@ -101,7 +101,8 @@ sgt run report <run>                           # the run's Markdown report
 ```
 
 `sgt retro` asks Sergeant for a retro across tasks now, after a big architecture change, say; it is
-posted as a `Sergeant retro <date>` document in the Sergeant project. Otherwise retros run by themselves.
+posted as a `Sergeant retro <date>` document in the configured Sergeant project. Otherwise retros run
+by themselves. An approver can set or disable that target with `sgt admin retro` (§7).
 
 Approvers also have `sgt admin` (§7).
 
@@ -219,8 +220,14 @@ sgt admin update           # move to the newest green main commit its release ch
 sgt admin update v2.1.0    # or to a branch, tag, or commit, which must be on main with a green check
 sgt admin status           # its release, when it last restarted, the last restart or update, and
                            # whether the installation config changed since (then: sgt admin restart),
-                           # and GitHub API calls left this hour, the reset, and any rate-limit pause
+                           # the retro target (or none), and GitHub API calls left this hour
+sgt admin retro set <projectId> <teamId> # validate both in Linear, then use the target at once
+sgt admin retro off                     # remove the target and stop scheduling retros at once
 ```
+
+The retro commands write only the installation config's `retro` block, and the parameter version
+names the approver who changed it. They do not require AWS access or a restart. `set` refuses a
+project or team id that does not exist in the installation's Linear workspace.
 
 - `restart` and `update` wait for the outcome and print it, with the reason when it failed (exit 1).
   Sergeant is unreachable for part of it; that is expected and waited out.

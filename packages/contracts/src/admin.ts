@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GitHubRateLimit } from "./github.ts";
+import { RetroTarget } from "./retro.ts";
 
 // `/v1/admin` (TECH-5195): an approver restarts or updates the Sergeant host through `sgt admin`, with no
 // AWS access. `serve` never runs a privileged command: it leaves one validated request where the host's
@@ -83,6 +84,8 @@ export const AdminStatus = z.object({
    * absent from a serve older than TECH-5336.
    */
   github: GitHubRateLimit.nullable().default(null),
+  /** The live retro target, or null when retros are off. */
+  retro: RetroTarget.nullable().default(null),
 });
 export type AdminStatus = z.infer<typeof AdminStatus>;
 

@@ -37,7 +37,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 | Reasoning | model, max turn cost and seconds, max sleep, session mode, compaction threshold | |
 | Review | audit sample rate (default 0.2), progress comment after each review round (`progressComments`, default on, TECH-5227), review-quality budget per day | 06; subagent reviews never count until the captain decides (06 §5) |
 | Follow-ups | max depth, auto-delegate | |
-| Retro | the Sergeant project and team its documents and issues go to; absent, no retro | TECH-5187 |
+| Retro | the Sergeant project and team its documents and issues go to; absent, no retro | approvers use `sgt admin retro set <projectId> <teamId>` or `off` (TECH-5838) |
 | Human waits | remind after hours | |
 | Approvers | Linear user ids | waivers, escalations |
 | AWS | runner dev role ARN, artifact bucket, CloudWatch log group | |
@@ -46,6 +46,10 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 `sgt config set` validates the whole resulting document: unknown keys, types, references only (no
 literal credentials, as ADR-0042 already enforces), repository slugs well-formed, profiles naming
 known adapters, default profiles existing and supporting their role, approvers non-empty.
+
+These `sgt config` commands describe the installation-management design and are not implemented as a
+general CLI. The built, retro-only approver surface is `sgt admin retro set|off`; `sgt admin status`
+shows its live target.
 
 Removed compared with Sergeant 1's runtime keys: retry, fix, rethink, and deep-assurance budgets;
 phase and preflight settings; planner and test-run settings; capability and tool authorizations;
