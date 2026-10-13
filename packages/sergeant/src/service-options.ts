@@ -31,7 +31,7 @@ export type ServiceOptions = {
   auditSampleRate?: number;
   /** Whether each task loop posts a progress comment after a review round (loop.ts); omitted, it does. */
   progressComments?: boolean;
-  /** Minutes between post-merge feedback sweeps (feedback.ts), when `deps.feedback` is given. */
+  /** Minutes between post-merge feedback sweeps (feedback.ts), when `deps.feedback` is given; default twice `slowPollMinutes`. */
   feedbackSweepMinutes?: number;
   /** How long after work lands its feedback is still watched. */
   feedbackLookbackDays?: number;
@@ -49,9 +49,10 @@ export type ServiceOptions = {
    */
   githubPollSeconds?: number;
   /**
-   * TECH-5942: while both webhook sources deliver (webhook-health.ts), how often a task loop with nothing
-   * in flight polls, rereads its PRs, or resumes once ended, when no event names it; default 15 minutes.
-   * The feedback sweep then runs every twice this. Without deliveries, polling is as fast as before.
+   * TECH-5942: the safety interval behind webhooks: how often a task loop with nothing in flight polls,
+   * rereads its PRs, or resumes once ended, when no event names it, whether or not webhooks deliver;
+   * default 15 minutes. Only a run in flight, a mergeability GitHub is computing, or a merge retry
+   * coming due keeps the `pollSeconds` poll, since no webhook announces those.
    */
   slowPollMinutes?: number;
   /**

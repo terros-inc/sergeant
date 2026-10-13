@@ -70,12 +70,12 @@ export async function readPullRequests(runs: RunRecord[], linked: PullRequestRef
 }
 
 /**
- * TECH-5336: a task loop's PR reads. With a GitHub webhook secret (TECH-4937), `everyMs()` is set and
- * the loop rereads its PRs when a GitHub event names one of them or its head (`Wake.github`), and
- * otherwise only every `everyMs()`, polling being the reliability fallback: 5 minutes, or the slow
- * safety interval while deliveries arrive (TECH-5942). They are also reread when the PRs to read or a
- * run's status changed, after a turn (`forget`), at a human's wake, and while GitHub is still computing
- * a PR's mergeability, which no webhook announces. Without `everyMs()`, every pass.
+ * TECH-5336: a task loop's PR reads. With `everyMs()` set (TECH-5942: the safety interval, at least
+ * 15 minutes) the loop rereads its PRs when a GitHub event names one of them or its head (`Wake.github`,
+ * with a GitHub webhook secret, TECH-4937), and otherwise only every `everyMs()`, polling being the
+ * webhooks' backup. They are also reread when the PRs to read or a run's status changed, after a turn
+ * (`forget`), at a human's wake, and while GitHub is still computing a PR's mergeability, which no
+ * webhook announces. Without `everyMs()`, every pass.
  */
 export function pullRequestPolls(everyMs: () => number | undefined, wake: Wake | undefined, now: () => number = Date.now) {
   let last: { at: number; key: string; prs: PullRequestFacts[] } | undefined;
@@ -96,26 +96,26 @@ export function pullRequestPolls(everyMs: () => number | undefined, wake: Wake |
 }
 
 /**
- * TECH-5942: how often a task loop rereads PRs no event names: every pass without a GitHub webhook
- * secret, `githubPollSeconds` with one, and the slow safety interval while GitHub's deliveries arrive.
+ * TECH-5942: how often a task loop rereads PRs no event names: the safety interval (`slowPollSeconds`)
+ * whether or not webhooks deliver, or `githubPollSeconds` if that is longer. Without either, every pass.
  */
-export const pullRequestPollMs = (opts: Pick<LoopOptions, "githubPollSeconds" | "webhooks" | "slowPollSeconds">) => (): number | undefined => {
-  if (opts.githubPollSeconds === undefined) return undefined;
-  const ms = opts.githubPollSeconds * 1000;
-  return opts.webhooks?.delivering("github") ? Math.max(ms, (opts.slowPollSeconds ?? 900) * 1000) : ms;
+export const pullRequestPollMs = (opts: Pick<LoopOptions, "githubPollSeconds" | "slowPollSeconds">) => (): number | undefined => {
+  const ms = [opts.githubPollSeconds, opts.slowPollSeconds].filter((s) => s !== undefined).map((s) => s * 1000);
+  return ms.length === 0 ? undefined : Math.max(...ms);
 };
 
 /** No open PR whose mergeability GitHub is still computing, which no webhook announces. */
 export const mergeabilityKnown = (prs: PullRequestFacts[]) => prs.every((p) => p.state !== "open" || (p.mergeable !== null && p.mergeableState !== "unknown"));
 
 /**
- * TECH-5942: how long a waiting task loop sleeps before its next poll: the slow safety interval while
- * both webhook sources deliver and nothing is in flight that no webhook announces (a run, a
- * mergeability GitHub is computing, a merge retry coming due), else the ordinary poll interval. A
- * webhook naming the task, a human's wake, or a slot ends the wait sooner.
+ * TECH-5942: how long a waiting task loop sleeps before its next poll: the safety interval
+ * (`slowPollSeconds`) whether or not webhooks deliver, since falling back to fast polling when they stop
+ * would multiply Linear and GitHub load at the worst time; the ordinary poll interval only while
+ * something is in flight that no webhook announces (a run, a mergeability GitHub is computing, a merge
+ * retry coming due). A webhook naming the task, a human's wake, or a slot ends the wait sooner.
  */
-export function waitMs(opts: Pick<LoopOptions, "webhooks" | "slowPollSeconds">, pollMs: number, inFlight: boolean): number {
-  return !inFlight && opts.webhooks?.both() ? Math.max(pollMs, (opts.slowPollSeconds ?? 900) * 1000) : pollMs;
+export function waitMs(opts: Pick<LoopOptions, "slowPollSeconds">, pollMs: number, inFlight: boolean): number {
+  return !inFlight && opts.slowPollSeconds !== undefined ? Math.max(pollMs, opts.slowPollSeconds * 1000) : pollMs;
 }
 
 /**

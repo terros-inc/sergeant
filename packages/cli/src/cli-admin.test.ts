@@ -107,8 +107,8 @@ test("admin status shows each webhook source's health and the API calls by sourc
     "GET /v1/admin/status": { json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-13T09:00:00.000Z" }, release: null, pending: null, last: null, webhooks, apiCalls } },
   });
   const { out } = await sgt(api, "admin", "status");
-  expect(out).toContain("webhooks linear: ALERT: 128 deliveries in a row refused (bad signature): the secret differs. not delivering, polling at the ordinary interval; none accepted since serve started; 128 refused");
-  expect(out).toContain("         github: delivering, polling at the slow safety interval; 40 accepted, last 2026-10-13T16:31:00.000Z since serve started\n");
+  expect(out).toContain("webhooks linear: ALERT: 128 deliveries in a row refused (bad signature): the secret differs. not delivering; none accepted since serve started; 128 refused");
+  expect(out).toContain("         github: delivering; 40 accepted, last 2026-10-13T16:31:00.000Z since serve started\n");
   expect(out).toContain("api      github from 2026-10-13T15:00:00.000Z: 3000 calls, 300 of them 304s GitHub does not count: feedback sweep 2100, task PR reads 900 (304: 300)\n");
   expect(out).toContain("         linear from 2026-10-13T15:00:00.000Z: 400 calls: task loop 400\n");
 });

@@ -39,7 +39,7 @@ test("a loop that failed on Linear's rate limit is not readmitted before the lim
     },
     runner: { status: async () => Promise.reject(new Error("no runs")) },
   } as unknown as ServiceDeps;
-  const service = await startService({ enrolledRepositories: [], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, log: () => {} }, deps);
+  const service = await startService({ enrolledRepositories: [], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, slowPollMinutes: 0.0001, log: () => {} }, deps);
   try {
     await vi.waitFor(() => expect(reads).toHaveLength(1), { timeout: 5_000 });
     // Dozens of intakes while the limit holds: none readmits the loop.
@@ -76,7 +76,7 @@ test("a rate-limited task is listed as paused until its reset, then active again
     },
     runner: { status: async () => Promise.reject(new Error("no runs")) },
   } as unknown as ServiceDeps;
-  const service = await startService({ enrolledRepositories: [], stateDir: dir, intakeSeconds: 0.05, pollSeconds: 0, port: 0, trustLoopback: true, log: () => {} }, deps);
+  const service = await startService({ enrolledRepositories: [], stateDir: dir, intakeSeconds: 0.05, pollSeconds: 0, slowPollMinutes: 0.0001, port: 0, trustLoopback: true, log: () => {} }, deps);
   const tasks = async () => Object.fromEntries((await call(service.port ?? 0, "GET", "/v1/tasks")).json.tasks.map((t: { ref: string }) => [t.ref, t]));
   try {
     await vi.waitFor(async () => {

@@ -26,7 +26,7 @@ import { webhookHealth } from "./webhook-health.ts";
 // checks continue it, stop it (cancel.ts), or see it through after its merge. Each task loop already re-reads its runs,
 // its PRs and their checks, and the Linear conversation every poll, and takes a reasoning turn only
 // when those changed, so no webhook is needed: one (webhooks.ts, TECH-4937) ends a loop's wait or runs
-// an intake sooner, and while both sources deliver, polls slow to a safety interval (TECH-5942).
+// an intake sooner, and polling is only their backup, at a safety interval (TECH-5942).
 // Nothing is kept but each task's own `state.json` and a recorded stop not yet done (`cancel.json`,
 // cancel.ts): a loop that ends (idle, failed) resumes on a later intake, and a restarted process
 // rereads everything and continues, repeating some work. One process per state directory, held by an OS file lock, so the task limit and one turn per task hold.
@@ -71,17 +71,17 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   };
   // Ends the intake loop's wait: a webhook naming a delegated issue with no loop, or a delegation change.
   const intakeWake = new Wake();
-  // TECH-5942: while both webhook sources deliver, polling is only their backup, at `slowPollMinutes`.
+  // TECH-5942: webhooks are the primary signal and polling only their backup, at `slowPollMinutes`
+  // whether or not they deliver: falling back to fast polling when they stop would multiply Linear and
+  // GitHub load at the worst time. Their health is logged and in `sgt admin status`.
   const health = webhookHealth(opts.webhookSecrets ?? {}, log);
   const slowPollMs = (opts.slowPollMinutes ?? 15) * 60_000;
-  const webhooksDelivering = () => health.delivering("github") && health.delivering("linear");
-  // A loop that ended (idle, say) is resumed, or readmitted from Todo, at every intake, a full reread of
-  // its issue and PRs, unless webhooks deliver: then only once one names it, a human wakes it, or
-  // `slowPollMs` after it ended.
+  // A loop that ended (idle, say) is not resumed, nor readmitted from Todo, at every intake for a full
+  // reread of its issue and PRs: only once a webhook names it, a human wakes it, or `slowPollMs` after it ended.
   const resting = (issueId: string) => {
     const end = ended.get(issueId);
     const wake = wakes.get(issueId);
-    return webhooksDelivering() && end !== undefined && Date.now() - end.at < slowPollMs && !wake?.github && !wake?.linear && !wake?.pending;
+    return end !== undefined && Date.now() - end.at < slowPollMs && !wake?.github && !wake?.linear && !wake?.pending;
   };
 
   /** Runs the task's loop; `released`, it holds no slot until it has work to do (`Slot.work`). */
@@ -100,8 +100,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         ...(opts.pollSeconds !== undefined && { pollSeconds: opts.pollSeconds }),
         // TECH-5336: GitHub's webhooks wake a loop whose PRs change, so between them it polls GitHub less.
         ...(opts.webhookSecrets?.github && { githubPollSeconds: opts.githubPollSeconds ?? 300 }),
-        // TECH-5942: and while both sources deliver, a loop with nothing in flight polls only this often.
-        webhooks: { delivering: health.delivering, both: webhooksDelivering },
+        // TECH-5942: and a loop with nothing in flight polls only this often.
         slowPollSeconds: slowPollMs / 1000,
         ...(opts.waitingGraceMinutes !== undefined && { waitingGraceMinutes: opts.waitingGraceMinutes }),
         ...(opts.idleMinutes !== undefined && { idleMinutes: opts.idleMinutes }),
@@ -243,7 +242,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     }
   })();
 
-  const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal, webhooksDelivering);
+  const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal);
   // The retro checks hourly whether one is due, and at once when a human asks (`sgt retro`).
   const retroWake = new Wake();
   const retro = deps.retro;

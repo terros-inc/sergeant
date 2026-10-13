@@ -79,7 +79,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
   };
   const start = () =>
     startService(
-      { enrolledRepositories: ["o/r"], stateDir: dir, maxTasks: 2, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 0, port: 0, log: (l) => logs.push(l) },
+      { enrolledRepositories: ["o/r"], stateDir: dir, maxTasks: 2, intakeSeconds: 0.01, pollSeconds: 0, slowPollMinutes: 0.0001, idleMinutes: 0, port: 0, log: (l) => logs.push(l) },
       deps,
     );
 
@@ -137,7 +137,7 @@ function oneIssue(ids: string[], turnMs: number) {
   return { deps, counts };
 }
 
-const options = () => ({ enrolledRepositories: ["o/r" as const], stateDir: dir, maxTasks: 2, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 60, log: () => {} });
+const options = () => ({ enrolledRepositories: ["o/r" as const], stateDir: dir, maxTasks: 2, intakeSeconds: 0.01, pollSeconds: 0, slowPollMinutes: 0.0001, idleMinutes: 60, log: () => {} });
 
 test("an issue listed twice in one intake still runs one turn at a time", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-service-test-"));

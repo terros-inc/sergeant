@@ -83,7 +83,7 @@ function githubBudget(g: NonNullable<AdminStatus["github"]>): string {
 function webhook(w: WebhookHealth): string {
   const accepted = w.lastAcceptedAt ? `${w.accepted} accepted, last ${w.lastAcceptedAt}` : "none accepted";
   const refused = w.refused ? `; ${w.refused} refused, last ${w.lastRefusedAt} (${w.lastRefusal})` : "";
-  const state = w.delivering ? "delivering, polling at the slow safety interval" : "not delivering, polling at the ordinary interval";
+  const state = w.delivering ? "delivering" : "not delivering";
   return `${w.source}: ${w.alert ? `ALERT: ${w.alert} ` : ""}${state}; ${accepted} since serve started${refused}`;
 }
 

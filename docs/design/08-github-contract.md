@@ -208,9 +208,9 @@ Sergeant does not rebase, merge main into branches, or resolve anything itself.
 Webhooks (`pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment` on a
 PR, `check_suite`, `check_run`, `status`, `push`)
 are verified by signature and translated into wake reasons for the owning task. Nothing else happens
-on a webhook. A reconcile poll every 5 minutes refreshes facts for linked PRs of open tasks, so a
-missed webhook delays a turn but loses nothing. While GitHub's deliveries arrive (TECH-5942), that poll
-is a 15-minute safety interval instead. Without a GitHub webhook secret, every task poll rereads its PRs.
+on a webhook. A reconcile poll every 15 minutes, whether or not deliveries arrive (TECH-5942),
+refreshes facts for linked PRs of open tasks, so a missed webhook delays a turn but loses nothing. A PR
+whose mergeability GitHub is still computing, which no webhook announces, is reread every task poll.
 
 The control-plane App's installation stays within GitHub's API rate limits (TECH-5336). Every read
 is conditional on the ETag of its last answer, so an unchanged one is a 304 that GitHub does not

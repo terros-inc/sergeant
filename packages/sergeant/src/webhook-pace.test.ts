@@ -7,17 +7,14 @@ import { Wake } from "./wake.ts";
 import { DELIVERING_MS, REFUSED_IN_A_ROW, SILENT_MS, webhookHealth } from "./webhook-health.ts";
 
 // TECH-5942: Sergeant hit GitHub's rate limit every few hours while its webhooks were not delivering at
-// all. Webhooks are now the primary signal: while both sources deliver, a waiting task polls and rereads
-// its PRs only at the slow safety interval. Polling is the backup, so once deliveries stop it must return
-// to the ordinary interval, or a broken webhook would leave tasks a quarter of an hour behind.
-test("polling drops to the slow interval while webhooks deliver, and returns to the ordinary one when they stop", async () => {
+// all. Webhooks are now the primary signal and polling only their backup: a waiting task polls and
+// rereads its PRs at the slow safety interval whether or not deliveries arrive, since falling back to
+// fast polling when they stop would multiply Linear and GitHub load at the worst time. Only what no
+// webhook announces (a run in flight, a mergeability GitHub is computing, a merge retry) polls fast.
+test("a waiting task polls at the slow safety interval whether or not webhooks deliver", async () => {
   const clock = { now: 0 };
   const health = webhookHealth({ linear: "l", github: "g" }, () => {}, () => clock.now);
-  const opts: Pick<LoopOptions, "githubPollSeconds" | "webhooks" | "slowPollSeconds"> = {
-    githubPollSeconds: 300,
-    slowPollSeconds: 900,
-    webhooks: { delivering: health.delivering, both: () => health.delivering("github") && health.delivering("linear") },
-  };
+  const opts: Pick<LoopOptions, "githubPollSeconds" | "slowPollSeconds"> = { githubPollSeconds: 300, slowPollSeconds: 900 };
   let reads = 0;
   const deps = { github: { readPullRequest: async () => (reads++, pr) } } as unknown as Ports;
   const polls = pullRequestPolls(pullRequestPollMs(opts), new Wake(), () => clock.now);
@@ -31,23 +28,25 @@ test("polling drops to the slow interval while webhooks deliver, and returns to 
     return { passes, reads: reads - before };
   };
 
-  // No delivery yet: a poll every minute, PRs every 5 minutes, as before TECH-5942.
-  expect(await over(60)).toEqual({ passes: 60, reads: 12 });
+  // No delivery yet: two polls and two PR reads in the half hour, not 30 polls and 6 reads.
+  expect(await over(30)).toEqual({ passes: 2, reads: 2 });
 
-  // Both sources deliver: over the half hour a delivery stays fresh, two polls and two PR reads.
+  // Both sources deliver: the same.
   health.accepted("github");
   health.accepted("linear");
   expect(await over(30)).toEqual({ passes: 2, reads: 2 });
+
+  // Deliveries stop: still the same, so the drop to polling does not multiply the load.
+  clock.now += DELIVERING_MS;
+  expect([health.delivering("github"), health.delivering("linear")]).toEqual([false, false]);
+  expect(await over(30)).toEqual({ passes: 2, reads: 2 });
+
   // A run, a mergeability being computed, or a merge retry coming due keeps the ordinary poll.
   expect(waitMs(opts, 60_000, true)).toBe(60_000);
-
-  // Only GitHub's still delivers: PRs are reread slowly, but the task polls every minute for Linear.
-  health.accepted("github");
-  expect([waitMs(opts, 60_000, false), pullRequestPollMs(opts)()]).toEqual([60_000, 900_000]);
-
-  // Deliveries stop: back to the ordinary intervals.
-  clock.now += DELIVERING_MS;
-  expect(await over(60)).toEqual({ passes: 60, reads: 12 });
+  // Without a GitHub webhook secret, PRs are reread at the safety interval too, not every pass.
+  expect(pullRequestPollMs({ slowPollSeconds: 900 })()).toBe(900_000);
+  // A longer configured poll stays longer.
+  expect(waitMs(opts, 1_800_000, false)).toBe(1_800_000);
 });
 
 test("a webhook source refused again and again, or silent for hours, is said once until a delivery is accepted", () => {

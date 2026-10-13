@@ -76,7 +76,7 @@ export const WebhookHealth = z.object({
   lastRefusedAt: z.string().nullable(),
   /** Why the latest delivery was refused: `bad signature`, say. */
   lastRefusal: z.string().nullable(),
-  /** A delivery was accepted recently, so task polls are at their slow safety interval. */
+  /** A delivery was accepted in the last 30 minutes. */
   delivering: z.boolean(),
   /** What is wrong, when deliveries keep being refused or none arrive: also logged once as a warning. */
   alert: z.string().nullable(),

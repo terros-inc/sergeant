@@ -8,11 +8,11 @@ export function startFeedbackLoop(
   deps: ServiceDeps,
   log: (line: string) => void,
   signal: AbortSignal,
-  webhooksDelivering: () => boolean,
 ): Promise<void> {
   const feedback = deps.feedback;
   if (!feedback) return Promise.resolve();
-  const intervalMs = (opts.feedbackSweepMinutes ?? 10) * 60_000;
+  // TECH-5942: by default every twice the task loops' safety interval, whether or not webhooks deliver.
+  const intervalMs = (opts.feedbackSweepMinutes ?? 2 * (opts.slowPollMinutes ?? 15)) * 60_000;
   return withSource("feedback sweep", () => sweepFeedbackEvery(
     intervalMs,
     {
@@ -30,7 +30,5 @@ export function startFeedbackLoop(
       agentUserId: deps.agentUserId,
       workerLogin: deps.workerLogin,
     },
-    // TECH-5942: while webhooks deliver, every twice the task loops' safety interval.
-    { intervalMs: Math.max(intervalMs, 2 * (opts.slowPollMinutes ?? 15) * 60_000), when: webhooksDelivering },
   ));
 }

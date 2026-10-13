@@ -1,11 +1,11 @@
 import type { WebhookHealth } from "@terros/sergeant-contracts";
 
-// TECH-5942: whether each webhook source with a signing secret is delivering. Polling only backs up
-// webhooks that arrive: while both sources delivered recently, task loops and the feedback sweep poll at
-// a slow safety interval, and otherwise as fast as before. Accepted deliveries are logged at most hourly,
-// as a count. Deliveries refused again and again, or none for hours (a secret configured but never
+// TECH-5942: whether each webhook source with a signing secret is delivering. Polling only backs up the
+// webhooks, at a slow safety interval whether or not they deliver, so a webhook that stops delivering
+// leaves tasks up to that interval behind: it must not go unnoticed. Accepted deliveries are logged at
+// most hourly, as a count. Deliveries refused again and again, or none for hours (a secret configured but never
 // delivered to included), is said once as a warning in the log and stays in `sgt admin status` until a
-// delivery is accepted. Only in memory: a restart starts afresh, polling fast until a delivery arrives.
+// delivery is accepted. Only in memory: a restart starts afresh.
 
 export type WebhookSource = WebhookHealth["source"];
 

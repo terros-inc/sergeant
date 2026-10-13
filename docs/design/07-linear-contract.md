@@ -142,9 +142,9 @@ highest Linear priority first, then oldest delegation. No comment is posted for 
 Delegation arrives by webhook; a reconcile poll (every 2 minutes, and at startup) catches anything
 missed (S1 ADR-0040's "nothing missed while down", kept). The same poll recomputes each open task's
 conversation revision and wakes the task when it differs from the revision its last completed turn saw,
-so a missed comment webhook or a failed turn never leaves human input unread (03 §5). While both
-webhook sources deliver, a task whose loop ended is reread that way only when an event names it or every
-15 minutes (TECH-5942).
+so a missed comment webhook or a failed turn never leaves human input unread (03 §5). A task whose
+loop ended is reread that way only when an event names it or every 15 minutes, whether or not webhooks
+deliver (TECH-5942).
 
 On admission the task row is created with the default budget and an empty repository set, and the
 task is woken with `admitted`. The issue moves to the team's first `started` state when the first

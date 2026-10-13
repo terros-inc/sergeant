@@ -8,9 +8,9 @@ import type { Conversation } from "@terros/sergeant-contracts";
 import { startService, type Service, type ServiceDeps } from "./service.ts";
 
 // TECH-5942: every intake resumed every task whose loop had ended (idle, waiting on a human's review,
-// say) for a full reread of its issue and PRs: every 2 minutes, for each such task. While webhooks
-// deliver, a change to the task arrives as one, so intake leaves it resting until one names it. Missing
-// that wake would leave a human's comment unread for the safety interval.
+// say) for a full reread of its issue and PRs: every 2 minutes, for each such task. A change to the task
+// arrives as a webhook, so intake leaves it resting until one names it, or for the safety interval,
+// whether or not deliveries arrive. Missing that wake would leave a human's comment unread that long.
 
 const agent = { id: "agent-v2", name: "Sergeant" };
 const secrets = { linear: "linear-secret", github: "github-secret" };
@@ -31,7 +31,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-test("while webhooks deliver, intake leaves an ended task resting until a webhook names it", async () => {
+test("intake leaves an ended task resting until a webhook names it, whether or not webhooks deliver", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-resting-test-"));
   let reads = 0;
   const deps: ServiceDeps = {
@@ -61,16 +61,20 @@ test("while webhooks deliver, intake leaves an ended task resting until a webhoo
     return fetch(`http://127.0.0.1:${service?.port}/webhooks/${source}`, { method: "POST", headers, body }).then((r) => r.status);
   };
 
-  // No deliveries yet: every intake resumes the ended task, which rereads its issue.
-  await vi.waitFor(() => expect(reads).toBeGreaterThan(5), { timeout: 5_000 });
-
-  // Both sources deliver, about other things: the task rests.
-  expect(await post("linear", { type: "Reaction", action: "create", data: { issueId: "i-OTHER" } })).toBe(200);
-  expect(await post("github", { repository: { full_name: "other/repo" }, pull_request: { number: 1 } })).toBe(200);
+  // No deliveries yet: admitted, its loop reads the issue and ends, and the following intakes leave it resting.
+  await vi.waitFor(() => expect(reads).toBeGreaterThan(0), { timeout: 5_000 });
   await sleep(150);
   const resting = reads;
   await sleep(400);
   expect(reads - resting).toBeLessThanOrEqual(1);
+
+  // Both sources deliver, about other things: it still rests.
+  expect(await post("linear", { type: "Reaction", action: "create", data: { issueId: "i-OTHER" } })).toBe(200);
+  expect(await post("github", { repository: { full_name: "other/repo" }, pull_request: { number: 1 } })).toBe(200);
+  await sleep(150);
+  const stillResting = reads;
+  await sleep(400);
+  expect(reads - stillResting).toBeLessThanOrEqual(1);
 
   // A comment on its issue resumes it at once.
   const before = reads;
