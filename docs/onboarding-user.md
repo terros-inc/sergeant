@@ -77,8 +77,9 @@ To fix any of these, assign the issue to yourself, then remove the delegate and 
 in Linear. With no usable model account
 registered, it says that instead (step 3).
 
-**Budget.** Each task gets a budget window (`sgt task show` prints it). When it runs out, Sergeant
-stops its runs and asks a **Question for you** with the options to extend or accept the work as it is.
+**Budget.** Each task gets a budget window (`sgt task show` prints it). When active work runs out,
+Sergeant stops its runs and asks a **Question for you** with the options to extend or accept the work
+as it is. If only an escalated human review is pending, Sergeant waits quietly instead.
 
 **Questions.** When only a human can decide, Sergeant posts a comment headed **Question for you** and
 does nothing more until someone replies. Reply on the issue in your own words; when it lists numbered

@@ -1,4 +1,4 @@
-import { commentIdFor, outstandingChangeRequests, type BudgetStatus, type HumanPullRequestFeedback, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, outstandingChangeRequests, type HumanComment, type HumanPullRequestFeedback, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
 import { handoffKey } from "./handoff.ts";
 import { rereviewKey } from "./rereview.ts";
 
@@ -7,15 +7,27 @@ import { rereviewKey } from "./rereview.ts";
 // opens a fresh window from the review, exactly as an answer does. Both are read from GitHub and Linear
 // every poll; nothing new is stored.
 
-/** The human reviews and inline review comments on the task's PRs: each may have opened a window. */
-export const humanReviews = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] =>
-  pullRequests.flatMap((p) => p.humanFeedback).filter((f) => f.kind === "review" || f.kind === "review_comment");
+/** Every human review or comment on the task's PRs: each may have opened a window. */
+export const humanPrFeedback = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] => pullRequests.flatMap((p) => p.humanFeedback);
 
-/** The newest human review or inline review comment on the task's PRs: what opens a fresh window. */
-export function latestHumanReview(pullRequests: PullRequestFacts[]): HumanPullRequestFeedback | undefined {
-  return humanReviews(pullRequests)
+/** The newest human review or comment on the task's PRs: what opens a fresh window. */
+export function latestHumanPrFeedback(pullRequests: PullRequestFacts[]): HumanPullRequestFeedback | undefined {
+  return humanPrFeedback(pullRequests)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
+}
+
+/** The newest issue comment after a head-keyed handoff or re-review request. */
+export function latestIssueResponseToPrWait(situation: SituationReport): HumanComment | undefined {
+  const { issue, agentComments, humanComments } = situation.conversation;
+  const waits = situation.pullRequests.flatMap((pr) => {
+    const refused = situation.refusedMerges.find((r) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha);
+    const keys = [...(refused ? [handoffKey(issue.id, refused)] : []), ...(outstandingChangeRequests(pr.humanFeedback).length > 0 ? [rereviewKey(issue.id, pr)] : [])];
+    return keys.flatMap((key) => agentComments.filter((c) => c.id === commentIdFor(key)));
+  });
+  const lastWait = waits.toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
+  if (!lastWait) return undefined;
+  return humanComments.filter((c) => Date.parse(c.createdAt) > Date.parse(lastWait.createdAt)).toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
 }
 
 /**
@@ -35,7 +47,3 @@ export function awaitedHumanPrAction(situation: SituationReport): string | undef
   }
   return undefined;
 }
-
-/** Whether only the wall time is exhausted: spend is never a human wait. */
-export const onlyWallTimeExhausted = (budget: BudgetStatus, now: Date) =>
-  now.getTime() >= Date.parse(budget.wallDeadline) && budget.spentUsd < budget.costLimitUsd;

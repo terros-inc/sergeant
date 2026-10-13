@@ -366,8 +366,9 @@ history pointers to older comments, review dispositions, and actions.
 - The first human answer after any Sergeant question opens a fresh window from the answer, with zero
   spend and the installation's current budget. Continuing after a budget question needs no separate
   action or approval rule.
-- A human's review of the task's PR opens a fresh window from the review too, and waiting on a human's
-  merge or re-review spends none of the window (TECH-5218, 07 §6).
+- Human feedback on the task's PR, or an issue comment after Sergeant escalated the review, opens a
+  fresh window too. Waiting on a human's merge or re-review never causes a budget question, whether
+  wall time or spend is exhausted (TECH-5218, TECH-5913, 07 §6).
 - So does the task's unblocking, its last open "blocked by" issue completed or canceled or that relation
   removed, from the poll that sees it (TECH-5803, 07 §6).
 - Over the soft threshold, turns run normally and the Situation Report says so.

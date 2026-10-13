@@ -6,7 +6,6 @@ import {
   type BudgetStatus,
   type Conversation,
   type GateVerdict,
-  type PullRequestFacts,
   type RunRecord,
   type SituationReport,
 } from "@terros/sergeant-contracts";
@@ -16,7 +15,7 @@ import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
 import { reassigned, redelegated } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
-import { latestHumanReview } from "./pr-wait.ts";
+import { latestHumanPrFeedback, latestIssueResponseToPrWait } from "./pr-wait.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -164,16 +163,20 @@ async function openUnblockWindow(conversation: Conversation, configured: BudgetW
 }
 
 /**
- * TECH-5218: a human's review of the task's PR (an approval, a change request, or a review comment)
- * opens a fresh window from the review, exactly as an answer does (above). Only a review newer than the
- * window's start does, so it opens one window once, across restarts too. Returns whether it opened one.
+ * TECH-5218, TECH-5913: human feedback on the task's PR, or an issue comment after Sergeant's review
+ * escalation, opens a fresh window exactly as an answer does. Only input newer than the window's start
+ * does, so it opens one window once, across restarts too. Returns whether it opened one.
  */
-export async function openReviewWindow(pullRequests: PullRequestFacts[], configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
-  const review = latestHumanReview(pullRequests);
-  if (!review || Date.parse(review.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
-  openWindow(state, review.createdAt, configured);
+export async function openReviewWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
+  const feedback = [latestHumanPrFeedback(situation.pullRequests), latestIssueResponseToPrWait(situation)]
+    .filter((item) => item !== undefined)
+    .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .at(-1);
+  if (!feedback || Date.parse(feedback.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
+  openWindow(state, feedback.createdAt, configured);
   await save();
-  log(`${review.author} reviewed (${review.url}): a fresh budget window of ${JSON.stringify(configured)} from ${review.createdAt}`);
+  const source = "url" in feedback ? `${feedback.author} responded on the PR (${feedback.url})` : `${feedback.author.name} commented on the issue`;
+  log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${feedback.createdAt}`);
   return true;
 }
 
@@ -185,7 +188,7 @@ export async function holdForBudget(
   situation: SituationReport,
   conversation: Conversation,
   check: BudgetCheck,
-  { opts, deps, log }: PollContext,
+  { opts, deps, state, log }: PollContext,
   humanWait?: string,
 ): Promise<boolean> {
   const { exhausted, budgetAsked } = check;
@@ -196,6 +199,11 @@ export async function holdForBudget(
   if (!exhausted.allowed && !budgetAsked && !humanWait) {
     const asked = await askHuman(budgetQuestion(situation, exhausted.reason), situation, deps, check.budgetKey);
     log(`budget exhausted (${exhausted.reason}): asking whether to continue: ${describeOutcome(asked)}`);
+    return true;
+  }
+  if (!exhausted.allowed && humanWait) {
+    opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
+    log(`budget exhausted (${exhausted.reason}), but the task is waiting on ${humanWait}; parking quietly`);
     return true;
   }
   if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {

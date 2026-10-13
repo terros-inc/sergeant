@@ -41,7 +41,8 @@ flowchart LR
 - **Humans** are asked only for genuine judgment, with a **Question for you** comment on the issue. In
   repositories configured for human merges, Sergeant gets the pull request ready and you merge it.
 
-Each task has a time and spend budget. When it runs out, Sergeant stops and asks whether to extend it.
+Each task has a time and spend budget. When active work runs out of budget, Sergeant stops and asks
+whether to extend it; a task waiting only on an escalated human review waits quietly instead.
 The design is in [`docs/design/`](docs/design/README.md).
 
 ## Getting started

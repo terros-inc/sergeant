@@ -1,5 +1,5 @@
 import { commentIdFor, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
-import { humanReviews } from "./pr-wait.ts";
+import { humanPrFeedback } from "./pr-wait.ts";
 import { latestAnswer, latestQuestion } from "./question.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
@@ -83,7 +83,7 @@ export function answeredBudgetQuestion(
   const { issue, humanComments } = conversation;
   const thread = asked.parentId ?? asked.id;
   const since = (at: string) => Date.parse(at) >= Date.parse(budget.taskStart);
-  const windows = [budget.taskStart, ...(budget.unblockedAt ?? []), ...[...humanComments, ...humanReviews(pullRequests)].map((c) => c.createdAt).filter(since)];
+  const windows = [budget.taskStart, ...(budget.unblockedAt ?? []), ...[...humanComments, ...humanPrFeedback(pullRequests)].map((c) => c.createdAt).filter(since)];
   return windows.some((windowStart) => commentIdFor(budgetQuestionKey(issue.id, windowStart)) === thread);
 }
 
