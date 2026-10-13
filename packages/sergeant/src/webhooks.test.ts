@@ -63,6 +63,7 @@ async function start() {
   const live = new Map([["UNF-1", conversation("UNF-1")]]);
   const delegated = ["UNF-1"];
   const counts = { reads: new Map<string, number>(), ownerReads: 0, intakes: 0, turns: [] as string[] };
+  const logs: string[] = [];
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
@@ -87,7 +88,7 @@ async function start() {
     },
   };
   service = await startService(
-    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, webhookGapSeconds: webhookGapMs / 1000, log: () => {} },
+    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, idleMinutes: 60, port: 0, webhookSecrets: secrets, webhookGapSeconds: webhookGapMs / 1000, log: (line) => logs.push(line) },
     deps,
   );
   const port = service.port;
@@ -105,11 +106,11 @@ async function start() {
   await vi.waitFor(() => expect(counts.turns).toEqual(["UNF-1"]), { timeout: 5_000 });
   // The poll after the turn rereads once more, then waits an hour.
   await vi.waitFor(() => expect(reads("UNF-1")).toBe(2), { timeout: 5_000 });
-  return { live, delegated, counts, post, reads };
+  return { live, delegated, counts, post, reads, logs };
 }
 
 test("a signed event wakes the loop watching its issue or PR; an unsigned or unwatched one does nothing", async () => {
-  const { live, counts, post, reads } = await start();
+  const { live, counts, post, reads, logs } = await start();
   const before = reads("UNF-1");
   const comment = { type: "Comment", action: "create", data: { id: "c1", issueId: "i-UNF-1", body: "Also update the README." } };
 
@@ -125,6 +126,8 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
   expect(await post("github", { repository: { full_name: "other/repo" }, pull_request: { number: 7 } }, { event: "pull_request" })).toBe(200);
   await sleep(200);
   expect(reads("UNF-1")).toBe(before);
+  // TECH-5942: a GitHub delivery, refused or accepted, leaves a line in the log, accepted ones once an hour.
+  expect(logs.filter((l) => l.includes("github webhook"))).toEqual(["github webhook refused: bad signature", "github webhook: first delivery accepted"]);
 
   // A check on the PR's watched head rereads at once, but nothing changed, so no turn.
   expect(await post("github", { repository: { full_name: "O/R" }, check_suite: { head_sha: head, pull_requests: [] } })).toBe(200);

@@ -28,6 +28,7 @@ import { linearUser } from "@terros/sergeant-linear";
 import { claudeCliFeedbackJudge, claudeCliReasoner, claudeCliRetro } from "@terros/sergeant-reasoning";
 import { byRole, containerRunner, fargateRunner, pruneWorkspaces, reasoningFiles, runsUsage, setAside } from "@terros/sergeant-runner";
 import { modelAccounts } from "./accounts.ts";
+import { apiCalls } from "./api-calls.ts";
 import { linearCallers } from "./auth.ts";
 import { connect, fargateSettings, githubLoginLookup, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { decimalFlag, integerFlag } from "./cli-numbers.ts";
@@ -75,7 +76,9 @@ const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"))
 const runsDir = join(stateDir, "runs");
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
 
-const installation = await connect(config, repositories);
+// TECH-5942: every GitHub and Linear API call serve makes, counted per hour by what made it.
+const calls = apiCalls(log);
+const installation = await connect(config, repositories, { github: calls.counting("github"), linear: calls.counting("linear") });
 // People's registered model accounts: a task's runs use only its owner's (TECH-5179).
 const accounts = modelAccounts(config, log);
 // Workers on Fargate when the config says so (TECH-5237); reviewers always on this host. Both runners
@@ -131,6 +134,7 @@ const admin = existsSync(release)
       config: enrolled.versions,
       runs: () => runsUsage(runsDir).catch(() => null),
       github: () => installation.github.rateLimit?.() ?? null,
+      apiCalls: () => calls.status(),
     }
   : undefined;
 

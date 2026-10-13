@@ -134,7 +134,7 @@ export const start = async (
   for (const { identifier, state } of await deps.delegatedIssues()) if (state.type === "started") await underway(identifier);
   await setup?.();
   service = await startService(
-    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 0, log: (l) => logs.push(l), ...opts },
+    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, slowPollMinutes: 0.0001, idleMinutes: 0, log: (l) => logs.push(l), ...opts },
     deps,
   );
 };

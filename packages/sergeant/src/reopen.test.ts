@@ -35,7 +35,7 @@ async function reopened(saved: object, check: () => TaskOwnerCheck) {
   const start = deps.runner.start;
   deps.runner.start = async (spec) => (owners.push(spec.owner.id), start(spec));
   const lines: string[] = [];
-  const service = await startService({ enrolledRepositories: [repo], stateDir, intakeSeconds: 0.01, pollSeconds: 0.01, port: 0, log: (l) => void lines.push(l) }, deps);
+  const service = await startService({ enrolledRepositories: [repo], stateDir, intakeSeconds: 0.01, pollSeconds: 0.01, slowPollMinutes: 0.0001, port: 0, log: (l) => void lines.push(l) }, deps);
   const state = async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as Record<string, unknown>;
   return { live, seen, dir, service, owners, lines, state, checks: () => checks, intakes: () => intakes };
 }

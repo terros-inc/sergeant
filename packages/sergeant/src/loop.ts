@@ -16,7 +16,7 @@ import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
 import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
-import { describePr, fingerprintOf, landedOf, pullRequestPolls, unsettledMerges } from "./poll.ts";
+import { describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, unsettledMerges, waitMs } from "./poll.ts";
 import { awaitedHumanPrAction } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
@@ -120,7 +120,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
   // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
   const resolvedThreads = new Set<string>();
-  const prPolls = pullRequestPolls(opts.githubPollSeconds === undefined ? undefined : opts.githubPollSeconds * 1000, opts.wake);
+  const prPolls = pullRequestPolls(pullRequestPollMs(opts), opts.wake);
   const resolveDue = (conversation: Conversation) => resolveAnswered(conversation, state.actedThrough, deps.linear, resolvedThreads, log);
 
   const recordReviews = (runs: RunRecord[]) =>
@@ -196,7 +196,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length) }, configured, ctx);
     if (holds.hold) {
       if (holds.hold === "question") unposted = undefined;
-      await wait(pollMs);
+      // An open question waits on a human's reply, which Linear's webhook announces.
+      await wait(waitMs(opts, pollMs, holds.hold !== "question"));
       continue;
     }
     const { budget } = holds;
@@ -246,7 +247,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const currentWindowCanceledWork = runs.some((r) => r.status === "canceled" && !state.budget.priorRuns.includes(r.runId));
     const humanWait = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable ? awaitedHumanPrAction(situation) : undefined;
     if (await holdForBudget(situation, conversation, holds, ctx, humanWait)) {
-      await wait(pollMs);
+      await wait(waitMs(opts, pollMs, live.length > 0));
       continue;
     }
 
@@ -278,7 +279,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       if (running.length > 0) opts.slot?.work();
       else opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
       log(running.length > 0 ? `waiting: ${running.join(", ")} running` : unchangedHumanWait ? `waiting on ${unchangedHumanWait}` : "waiting: nothing changed since the last turn");
-      await wait(pollMs);
+      // TECH-5942: a run's end, a mergeability GitHub computes, and a merge retry's grace announce no webhook.
+      await wait(waitMs(opts, pollMs, running.length > 0 || !mergeabilityKnown(pullRequests) || state.mergeRetries.length > 0));
       continue;
     }
     // A task whose slot was released while it waited queues for one before its turn.

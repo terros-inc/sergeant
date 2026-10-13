@@ -220,7 +220,9 @@ sgt admin update           # move to the newest green main commit its release ch
 sgt admin update v2.1.0    # or to a branch, tag, or commit, which must be on main with a green check
 sgt admin status           # its release, when it last restarted, the last restart or update, and
                            # whether the installation config changed since (then: sgt admin restart),
-                           # the retro target (or none), and GitHub API calls left this hour
+                           # the retro target (or none), GitHub API calls left this hour, whether
+                           # each webhook source is delivering (or an alert when it is not), and
+                           # GitHub and Linear API calls this hour and last by what made them
 sgt admin retro set <projectId> <teamId> # validate both in Linear, then use the target at once
 sgt admin retro off                     # remove the target and stop scheduling retros at once
 ```

@@ -17,6 +17,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { closedComment, closedKey } from "./accepted.ts";
+import { withSource } from "./api-calls.ts";
 import { askHuman } from "./ask-human.ts";
 import { answeredBudgetQuestion } from "./budget.ts";
 import { builtByLine } from "./built-by.ts";
@@ -41,7 +42,12 @@ const categoryLabel: Record<FollowupCategory, string> = {
  * Performs one proposed action if the Gate allows it. This is the only path from reasoning to an
  * effect. Merge facts are re-read live here, never taken from the turn's snapshot.
  */
-export async function execute(action: ProposedAction, situation: SituationReport, ports: Ports): Promise<ActionOutcome> {
+export function execute(action: ProposedAction, situation: SituationReport, ports: Ports): Promise<ActionOutcome> {
+  // TECH-5942: a merge's live reads and calls are counted apart from the other effects of a turn.
+  return withSource(action.kind === "merge_pr" ? "merge preflight" : "turn actions", () => effect(action, situation, ports));
+}
+
+async function effect(action: ProposedAction, situation: SituationReport, ports: Ports): Promise<ActionOutcome> {
   const denied = (v: { rule: string; reason: string }): ActionOutcome => ({ action, status: "denied", rule: v.rule, reason: v.reason });
   const { conversation, runs, enrolledRepositories } = situation;
   // B1 before every new effect: once the wall time or the observed spend is exhausted, only asking the

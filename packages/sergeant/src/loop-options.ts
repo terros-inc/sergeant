@@ -23,6 +23,12 @@ export type LoopOptions = {
    * unless an event names them (poll.ts `pullRequestPolls`). Absent, every poll rereads them.
    */
   githubPollSeconds?: number;
+  /**
+   * TECH-5942: the safety interval. A wait with nothing in flight that no webhook announces polls, and
+   * PRs no event names are reread, only this often, whether or not webhooks deliver. Absent, a wait
+   * polls every `pollSeconds` and PRs are reread as `githubPollSeconds` says.
+   */
+  slowPollSeconds?: number;
   /** The service's existing waiting grace; also delays the one bounded retry after a merge failure. */
   waitingGraceMinutes?: number;
   /**

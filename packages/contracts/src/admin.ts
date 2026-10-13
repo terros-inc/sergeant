@@ -54,6 +54,35 @@ export const AdminResult = z.object({
 });
 export type AdminResult = z.infer<typeof AdminResult>;
 
+/** One provider's API calls from one source of Sergeant's in one clock hour (TECH-5942). */
+export const ApiCallCount = z.object({
+  /** The clock hour's start. */
+  hour: z.string(),
+  provider: z.enum(["github", "linear"]),
+  /** What made them: `task PR reads`, `feedback sweep`, `intake`, `ownership check`, `merge preflight`, and so on. */
+  source: z.string(),
+  calls: z.number().int(),
+  /** Of them, answered 304 Not Modified: GitHub's rate limit does not count those. */
+  notModified: z.number().int(),
+});
+export type ApiCallCount = z.infer<typeof ApiCallCount>;
+
+/** A webhook source's deliveries since serve started (TECH-5942). */
+export const WebhookHealth = z.object({
+  source: z.enum(["linear", "github"]),
+  accepted: z.number().int(),
+  lastAcceptedAt: z.string().nullable(),
+  refused: z.number().int(),
+  lastRefusedAt: z.string().nullable(),
+  /** Why the latest delivery was refused: `bad signature`, say. */
+  lastRefusal: z.string().nullable(),
+  /** A delivery was accepted in the last 30 minutes. */
+  delivering: z.boolean(),
+  /** What is wrong, when deliveries keep being refused or none arrive: also logged once as a warning. */
+  alert: z.string().nullable(),
+});
+export type WebhookHealth = z.infer<typeof WebhookHealth>;
+
 export const AdminStatus = z.object({
   /** This `serve` process: its version and when it started, which is when the host last restarted it. */
   serve: z.object({ version: z.string(), startedAt: z.string() }),
@@ -86,6 +115,13 @@ export const AdminStatus = z.object({
   github: GitHubRateLimit.nullable().default(null),
   /** The live retro target, or null when retros are off. */
   retro: RetroTarget.nullable().default(null),
+  /**
+   * TECH-5942: GitHub and Linear API calls this clock hour and the one before, by what made them. Empty
+   * before serve's first call, and absent from a serve older than TECH-5942.
+   */
+  apiCalls: z.array(ApiCallCount).default([]),
+  /** TECH-5942: each webhook source with a signing secret, and whether its deliveries arrive. */
+  webhooks: z.array(WebhookHealth).default([]),
 });
 export type AdminStatus = z.infer<typeof AdminStatus>;
 

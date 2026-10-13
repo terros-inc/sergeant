@@ -57,7 +57,7 @@ test("a task accepted while its issue is in Todo is not started again until a hu
     },
   };
   const service = await startService(
-    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, idleMinutes: 60, budget: { wallMinutes: 120, costUsd: 25 }, log: (l) => logs.push(l) },
+    { enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, slowPollMinutes: 0.0001, idleMinutes: 60, budget: { wallMinutes: 120, costUsd: 25 }, log: (l) => logs.push(l) },
     deps,
   );
   try {

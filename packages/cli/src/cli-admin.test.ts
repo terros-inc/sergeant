@@ -91,6 +91,28 @@ test("admin status says when the installation config changed since serve started
   expect(older.out).not.toContain("runs");
 });
 
+// TECH-5942: a broken webhook secret went unnoticed for two days, and nobody could say which part of
+// Sergeant spent GitHub's rate limit. Status shows both, the alert first.
+test("admin status shows each webhook source's health and the API calls by source", async () => {
+  const webhooks = [
+    { source: "linear", accepted: 0, lastAcceptedAt: null, refused: 128, lastRefusedAt: "2026-10-13T16:30:00.000Z", lastRefusal: "bad signature", delivering: false, alert: "128 deliveries in a row refused (bad signature): the secret differs." },
+    { source: "github", accepted: 40, lastAcceptedAt: "2026-10-13T16:31:00.000Z", refused: 0, lastRefusedAt: null, lastRefusal: null, delivering: true, alert: null },
+  ];
+  const apiCalls = [
+    { hour: "2026-10-13T15:00:00.000Z", provider: "github", source: "task PR reads", calls: 900, notModified: 300 },
+    { hour: "2026-10-13T15:00:00.000Z", provider: "github", source: "feedback sweep", calls: 2100, notModified: 0 },
+    { hour: "2026-10-13T15:00:00.000Z", provider: "linear", source: "task loop", calls: 400, notModified: 0 },
+  ];
+  const { api } = await fakeApi({
+    "GET /v1/admin/status": { json: { serve: { version: "2.1.70+abc1234", startedAt: "2026-10-13T09:00:00.000Z" }, release: null, pending: null, last: null, webhooks, apiCalls } },
+  });
+  const { out } = await sgt(api, "admin", "status");
+  expect(out).toContain("webhooks linear: ALERT: 128 deliveries in a row refused (bad signature): the secret differs. not delivering; none accepted since serve started; 128 refused");
+  expect(out).toContain("         github: delivering; 40 accepted, last 2026-10-13T16:31:00.000Z since serve started\n");
+  expect(out).toContain("api      github from 2026-10-13T15:00:00.000Z: 3000 calls, 300 of them 304s GitHub does not count: feedback sweep 2100, task PR reads 900 (304: 300)\n");
+  expect(out).toContain("         linear from 2026-10-13T15:00:00.000Z: 400 calls: task loop 400\n");
+});
+
 test("admin retro set and off report the live target, and status shows it or none", async () => {
   const target = { projectId: "project-sergeant", teamId: "team-tech" };
   const { api, seen } = await fakeApi({

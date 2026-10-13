@@ -186,9 +186,18 @@ mutation:
 
 ### Webhooks
 
-Webhooks only make Sergeant notice a Linear or GitHub change sooner; without them every change is
-still found by the intake (2 minutes) and each task's poll (1 minute). Set them up once per
-installation, in this order, and expect deliveries made in between to fail harmlessly:
+Webhooks are Sergeant's primary signal, and polling only their backup (TECH-5942). A task with nothing
+in flight polls, rereads its PRs, and is resumed once its loop ended only every 15 minutes unless an
+event names it, and the post-merge feedback sweep runs every 30 minutes. That holds whether or not
+deliveries arrive: falling back to fast polling when webhooks stop would multiply Linear and GitHub
+load at the worst time, so without them every change is still found, but up to 15 minutes late. Only
+what no webhook announces keeps the 1-minute poll (`--poll-seconds`): a run in flight, a PR whose
+mergeability GitHub is still computing, and a pending merge retry. The intake still lists delegated
+issues every 2 minutes. `sgt admin status` shows each source's deliveries and whether it is delivering
+(one accepted in the last 30 minutes); a source refused 5 times in a row, or with no delivery accepted for 6 hours (its secret configured but never
+delivered to included), is logged once as `WARNING: <source> webhook: ...` and shown there as an
+alert until a delivery is accepted. Set them up once per installation, in this order, and expect
+deliveries made in between to fail harmlessly:
 
 1. **Secrets.** Create two Secrets Manager secrets: the GitHub one with a value you generate
    (`openssl rand -hex 32`), and the Linear one, whose value is the signing secret Linear shows for the
@@ -210,9 +219,17 @@ installation, in this order, and expect deliveries made in between to fail harml
    Status events (its existing permissions cover them). Review and comment events only shorten the
    wait: polling reads human PR feedback either way.
 7. **Check** each one's recent deliveries: Linear's webhook page and the App's Advanced tab should show
-   `200`. A `401` means the secret differs (serve logs `bad signature`) or, for Linear, the delivery is
+   `200`, serve logs `<source> webhook: first delivery accepted`, and `sgt admin status` shows the
+   source `delivering`. A `401` means the secret differs (serve logs `bad signature`) or, for Linear, the delivery is
    over a minute old (serve logs `stale webhookTimestamp`: check the host's clock); a `404`, that the
    config does not name the secret or the host was not updated.
+
+A host that slowed polling itself through a systemd drop-in overriding `ExecStart` with
+`--poll-seconds 900` no longer needs it once an install with TECH-5942 has run: the default already
+polls every 15 minutes, and the drop-in would also slow the polls that must stay fast (a run in flight,
+a mergeability being computed, a merge retry). Find it with `systemctl cat sergeant`, delete it, and
+reload, as for `--max-tasks` below, then check that `systemctl cat sergeant | grep ExecStart` shows no
+`--poll-seconds`.
 
 ### A Codex reviewer
 
@@ -431,8 +448,9 @@ access:
 sgt admin restart          # reread the installation config, restart serve on the release it runs
 sgt admin update           # move to what the release channel would choose (main's green head without one)
 sgt admin update v2.1.0    # or to a branch, tag, or commit: only a commit on main whose v2 check passed
-sgt admin status           # the release, when serve started, the last restart or update, and whether
-                           # the installation-config parameter changed since serve started
+sgt admin status           # the release, when serve started, the last restart or update, whether
+                           # the installation-config parameter changed since serve started, each
+                           # webhook source's health, and GitHub and Linear API calls by source
 ```
 
 `restart` and `update` each print the outcome when the host has one, including why it failed, waiting
@@ -1027,13 +1045,16 @@ shell over the canary's per-task loop, not a workflow engine:
   loop's own live checks then continue it, stop it (undelegated, or in Backlog, Canceled, or Done
   without its closing PR merged), or see it through after the merge; a stop never needs a task slot,
   and a task seen through is not resumed again. A loop that ends (idle, a failed read) is admitted
-  again on a later intake while the issue is still delegated: an unchanged task takes no turn, a
+  again while the issue is still delegated, at the first intake after a webhook names it, a human's
+  `sgt task wake`, or 15 minutes after it ended (TECH-5942): an unchanged task takes no turn, a
   changed one does. A failed intake is logged and retried next interval.
-- **Each task loop** is the canary's: every `--poll-seconds` (60) it re-reads its runs, the PRs Linear
-  links to the issue or a worker reported, with their checks, and the Linear conversation, and takes a
-  reasoning turn only when they changed, so a missed webhook costs only latency. Its state is
+- **Each task loop** is the canary's: it re-reads its runs, the PRs Linear links to the issue or a
+  worker reported, with their checks, and the Linear conversation, and takes a reasoning turn only when
+  they changed, so a missed webhook costs only latency. It polls every 15 minutes, or every
+  `--poll-seconds` (60) while a run is in flight, GitHub is still computing a PR's mergeability, or a
+  merge retry is pending (TECH-5942); its PRs are reread every 15 minutes unless an event names one. Its state is
   `<state dir>/tasks/<issue>/`; runs live under `<state dir>/runs/`.
-- **Webhooks** are a latency optimization, never the source of truth. `POST /webhooks/linear` and
+- **Webhooks** are the primary signal, never the source of truth. `POST /webhooks/linear` and
   `POST /webhooks/github` refuse a delivery whose signature (HMAC-SHA256 of the body,
   `Linear-Signature` or `X-Hub-Signature-256`) does not verify, before parsing it, and a Linear
   delivery whose signed `webhookTimestamp` is over a minute from now. A verified event about an issue's
@@ -1045,7 +1066,7 @@ shell over the canary's per-task loop, not a workflow engine:
   seconds), an issue or PR no task watches is ignored, and the polls still find every change.
 - **Post-merge feedback.** While a task is active, a human's comment is part of its conversation. Once
   its completing PR (`Fixes`) merged or its issue is Done, the loop takes no more turns, so a sweep
-  every 10 minutes reads those issues (delegated to `agentUserId` and completed in the last 14 days,
+  every 30 minutes reads those issues (delegated to `agentUserId` and completed in the last 14 days,
   open and delegated, or merged by this host in that time): human comments on the issue after the work
   landed, and comments, review comments, and reviews on its merged worker-App PRs after their merge
   from the repository's owners, members, and collaborators. A reasoning call judges each one; an
