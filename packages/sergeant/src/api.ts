@@ -81,7 +81,7 @@ export type ApiControl = {
   /** Lists and changes the enrolled repositories (TECH-5193, api-repositories.ts). */
   enrollment?: Enrollment;
   /** Asks the retro loop for a retro now (TECH-5187, retro.ts); absent when this Sergeant has no retro configured. */
-  requestRetro?: () => void;
+  requestRetro?: () => boolean;
 };
 
 /** Handles `/v1/*`; anything else is a 404. */
@@ -130,6 +130,8 @@ export const V1_ROUTES: readonly { method: "GET" | "POST"; path: string; public?
   { method: "GET", path: "/v1/admin/status" },
   { method: "POST", path: "/v1/admin/restart" },
   { method: "POST", path: "/v1/admin/update" },
+  { method: "POST", path: "/v1/admin/retro/set" },
+  { method: "POST", path: "/v1/admin/retro/off" },
   { method: "GET", path: "/v1/repositories" },
   { method: "POST", path: "/v1/repositories/add" },
   { method: "POST", path: "/v1/repositories/remove" },
@@ -188,12 +190,11 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   }
   if (noun === "retro" && id === undefined && post) {
     parse(z.strictObject({}), await body(req));
-    if (!ctl.requestRetro) throw new Refusal(404, "not_found", "this Sergeant has no retro configured (installation config `retro`)");
-    ctl.requestRetro();
+    if (!ctl.requestRetro?.()) throw new Refusal(404, "not_found", "this Sergeant has no retro configured (installation config `retro`)");
     ctl.log(`retro requested by ${callerName(caller)}`);
     return ok({ requested: true } satisfies RetroRequestResponse);
   }
-  if (noun === "admin") return adminRoute(ctl.admin, caller, req, { id, verb, pathname: url.pathname }, ctl.log);
+  if (noun === "admin") return adminRoute(ctl.admin, ctl.enrollment, caller, req, { id, verb, pathname: url.pathname }, ctl.log);
   if (noun === "repositories") return repositoriesRoute(ctl.enrollment, caller, req, { id, verb, pathname: url.pathname });
   if (noun === "accounts") return accountsRoute(ctl.accounts, caller, req, { id, verb, pathname: url.pathname }, () => allRuns(ctl));
   throw notFound(url.pathname);

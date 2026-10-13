@@ -8,7 +8,8 @@
 // Every repository in the installation config is enrolled. With `--config-parameter` (else the host's
 // `SERGEANT_CONFIG_PARAMETER`), the installation-config SSM parameter `--config` was installed from, the
 // enrolled repositories are that parameter's, read at startup, and an approver can change them with
-// `sgt admin repo add|remove`, which serve takes in place (enrollment.ts). Credentials come from the config's secret
+// `sgt admin repo add|remove`, or change the retro target with `sgt admin retro set|off`; serve takes
+// both in place (enrollment.ts). Credentials come from the config's secret
 // references exactly as for the canary (canary.ts). `--max-tasks` and `--waiting-grace-minutes`, when
 // given, win over the config's `maxTasks` and `waitingGraceMinutes` (TECH-5008). SIGINT or SIGTERM
 // stops intake and lets each task loop end at its next poll, bounded by a five-second process deadline;
@@ -103,12 +104,17 @@ const { version, fallback } = sergeantVersion();
 // On the Sergeant host, where sergeant-update records its release, approvers restart and update it
 // through `/v1/admin` (TECH-5195): its automatic-update service takes their requests (deploy/README.md).
 const release = "/etc/sergeant/release";
+const retro = {
+  target: config.retro,
+  validate: ({ projectId, teamId }: { projectId: string; teamId: string }) => installation.linear.retro.validateTarget(projectId, teamId),
+};
 const enrolled = enrollment({
   repositories,
   configs: installation.repositoryConfigs,
   parameter,
   version: started?.version,
   reach: appsReach({ "control-plane": installation.controlPlaneApp, worker: installation.workerApp }),
+  retro,
   log,
 });
 const admin = existsSync(release)
@@ -175,14 +181,12 @@ const service = await startService(
     },
     undelegate: (issueId) => installation.linear.undelegate(issueId),
     // Sergeant's own reasoning on its model token, on this host: never a worker's capacity (TECH-5187).
-    ...(config.retro && {
-      retro: {
-        linear: installation.linear.retro,
-        reasoning: claudeCliRetro({ model: values["reasoning-model"] }),
-        agentUserId: installation.agentUserId,
-        ...config.retro,
-      },
-    }),
+    retro: {
+      linear: installation.linear.retro,
+      reasoning: claudeCliRetro({ model: values["reasoning-model"] }),
+      agentUserId: installation.agentUserId,
+      target: () => retro.target,
+    },
   },
 );
 // TECH-5229: ended runs' workspaces an older serve kept, or a crash left, are removed in the background:

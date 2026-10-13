@@ -32,8 +32,7 @@ function fixture(opts: { last?: { title: string; content: string; createdAt: str
   let failPosts = 0;
   const deps: RetroDeps = {
     agentUserId: "sergeant",
-    projectId: "project-sergeant",
-    teamId: "team-tech",
+    target: () => ({ projectId: "project-sergeant", teamId: "team-tech" }),
     reasoning: {
       async retro(input) {
         asked.push(input);

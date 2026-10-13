@@ -37,6 +37,7 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | `GET /v1/admin/status` | → this `serve`'s version and start time, the release `sergeant-update` last checked out, a request the host has not taken, the host's latest restart or update outcome, and the installation-config parameter's version `serve` has beside its version now (TECH-5205) | — | approvers | TECH-5195; 404 off the Sergeant host |
 | `POST /v1/admin/restart` | → the request (`id`, `by`, `at`) | leaves one request file for the host (below); the host reruns `sergeant-update` on its current release, rereading the installation config, and restarts `serve` gracefully | approvers | one action at a time: `409` while a request waits or the latest outcome is running |
 | `POST /v1/admin/update` | `ref?` → the request | as restart, to `ref` (a commit on `main` whose `v2` check passed) or, without one, what the release channel would choose; a failed install reinstalls the previous release | approvers | as restart |
+| `POST /v1/admin/retro/set` / `off` | `{projectId, teamId}` / `{}` → the live target | validates the ids in Linear, then writes or removes only installation config `retro`; serve takes it at once | approvers | TECH-5838 |
 | `POST /v1/pause` / `POST /v1/resume` | `reason` → state | writes `system_state.pause`; audit action | approvers | resume of a pause is idempotent |
 | `POST /v1/drain`, `POST /v1/drain/cancel` | owned drain token (ADR-0040, kept) | stop starting turns and runs; ready when no start or turn is mid-flight | no | deploys quiesce in seconds; runs survive restarts |
 | `GET /v1/review-quality` | `since?, by?` → metrics (06 §9) | — | yes | |
@@ -152,6 +153,7 @@ sgt review quality [--since 30d] [--by category|provider|mode]
 
 sgt pause --reason "…" | sgt resume                  # approvers
 sgt admin restart | update [<ref>] | status          # approvers: restart or update the host, wait for the outcome
+sgt admin retro set <projectId> <teamId> | off       # approvers: change the live retro target
 
 # installation administration (AWS credentials), unchanged mechanisms
 sgt init <installation> [--bootstrap | --check]

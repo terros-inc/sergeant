@@ -5,12 +5,14 @@ import {
   AdminRequest,
   AdminResult,
   AdminUpdateRequest,
+  RetroTarget,
   type AdminRequestResponse,
   type AdminStatus,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { body, notFound, ok, parse, Refusal, type Reply } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
+import { EnrollmentRefused, type Enrollment } from "./enrollment.ts";
 
 // `/v1/admin` (TECH-5195, contracts' admin.ts): an approver restarts or updates the Sergeant host. serve
 // runs nothing privileged and changes nothing itself: it records who asked in its log and leaves one
@@ -39,14 +41,23 @@ export type HostAdmin = {
 
 export async function adminRoute(
   admin: HostAdmin | undefined,
+  enrollment: Enrollment | undefined,
   caller: Caller,
   req: IncomingMessage,
   at: { id: string | undefined; verb: string | undefined; pathname: string },
   log: (line: string) => void,
 ): Promise<Reply> {
+  if (!caller.approver) throw new Refusal(403, "forbidden", "only an approver changes the retro target, restarts or updates the Sergeant host, or reads its status");
+  if (at.id === "retro" && req.method === "POST" && (at.verb === "set" || at.verb === "off")) {
+    if (!enrollment) throw new Refusal(404, "not_found", "this Sergeant cannot change its installation config");
+    const by = callerName(caller);
+    const change = at.verb === "set" ? enrollment.setRetro(parse(RetroTarget, await body(req)), by) : (parse(z.strictObject({}), await body(req)), enrollment.disableRetro(by));
+    return ok(await change.catch((e: Error) => {
+      throw e instanceof EnrollmentRefused ? new Refusal(400, "bad_request", e.message) : new Refusal(503, "unavailable", e.message);
+    }));
+  }
   if (!admin) throw new Refusal(404, "not_found", "this Sergeant is not on a Sergeant host (deploy/README.md), so it cannot restart or update itself");
-  if (!caller.approver) throw new Refusal(403, "forbidden", "only an approver restarts or updates the Sergeant host, or reads its status");
-  if (at.verb === undefined && at.id === "status" && req.method === "GET") return ok(await status(admin));
+  if (at.verb === undefined && at.id === "status" && req.method === "GET") return ok(await status(admin, enrollment));
   if (at.verb === undefined && at.id === "restart" && req.method === "POST") {
     parse(z.strictObject({}), await body(req));
     return ok(await hand(admin, { action: "restart" }, caller, log));
@@ -82,7 +93,7 @@ async function hand(admin: HostAdmin, what: Pick<AdminRequest, "action" | "ref">
   return { request, last: busy };
 }
 
-async function status(admin: HostAdmin): Promise<AdminStatus> {
+async function status(admin: HostAdmin, enrollment: Enrollment | undefined): Promise<AdminStatus> {
   const [release, pending, last, config, runs] = await Promise.all([
     readFile(admin.releaseFile, "utf8").then(parseRelease, () => null),
     readJson(admin.requestFile, AdminRequest),
@@ -90,7 +101,7 @@ async function status(admin: HostAdmin): Promise<AdminStatus> {
     admin.config(),
     admin.runs(),
   ]);
-  return { serve: admin.serve, release, pending, last, config, runs, github: admin.github?.() ?? null };
+  return { serve: admin.serve, release, pending, last, config, runs, github: admin.github?.() ?? null, retro: enrollment?.retroTarget() ?? null };
 }
 
 /** sergeant-update's `ref=…`, `sha=…`, `at=…` lines. */

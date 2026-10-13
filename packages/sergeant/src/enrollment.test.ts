@@ -34,6 +34,7 @@ const CONFIG = {
   humans: { linearClientId: "client", teams: ["ENG"], approvers: ["u-grace"] },
   budget: { usd: 10 },
 };
+const noRetro = () => ({ target: undefined, validate: async () => undefined });
 
 let server: Server | undefined;
 afterEach(async () => {
@@ -70,6 +71,10 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
   };
   const logs: string[] = [];
   const clock = { ms: 0 };
+  const retro = {
+    target: undefined as { projectId: string; teamId: string } | undefined,
+    validate: async ({ projectId, teamId }: { projectId: string; teamId: string }) => (projectId === "missing-project" ? "project" as const : teamId === "missing-team" ? "team" as const : undefined),
+  };
   const enrolled = enrollment({
     repositories,
     configs,
@@ -77,6 +82,7 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
     version: parameter.version,
     // GitHub's own name for the repository; `unreachable` is on no installation.
     reach: async (repo) => (repo.includes("unreachable") ? Promise.reject(new EnrollmentRefused(`the worker GitHub App cannot reach ${repo}`)) : (repo.toLowerCase() as RepoSlug)),
+    retro,
     log: (line) => logs.push(line),
     now: () => clock.ms,
   });
@@ -103,8 +109,28 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
       req.on("error", reject);
       req.end(body === undefined ? undefined : JSON.stringify(body));
     });
-  return { call, parameter, repositories, configs, logs, enrolled, clock };
+  return { call, parameter, repositories, configs, logs, enrolled, clock, retro };
 }
+
+test("an approver sets and disables the live retro target; invalid ids and non-approvers are refused", async () => {
+  const { call, parameter, retro } = await serve();
+  const target = { projectId: "project-sergeant", teamId: "team-tech" };
+
+  expect(await call("POST", "/v1/admin/retro/set", "ada", target)).toMatchObject({ status: 403 });
+  expect(await call("POST", "/v1/admin/retro/set", "grace", { ...target, projectId: "missing-project" })).toMatchObject({ status: 400, json: { error: { message: expect.stringContaining("project not found") } } });
+  expect(await call("POST", "/v1/admin/retro/set", "grace", { ...target, teamId: "missing-team" })).toMatchObject({ status: 400, json: { error: { message: expect.stringContaining("team not found") } } });
+  expect(parameter.version).toBe(1);
+
+  expect(await call("POST", "/v1/admin/retro/set", "grace", target)).toMatchObject({ status: 200, json: { changed: true, retro: target } });
+  expect([JSON.parse(parameter.value).retro, retro.target]).toEqual([target, target]);
+  expect(parameter.descriptions).toEqual(["Grace Example set the retro target to project project-sergeant, team team-tech"]);
+  expect(await call("POST", "/v1/admin/retro/set", "grace", target)).toMatchObject({ status: 200, json: { changed: false } });
+
+  expect(await call("POST", "/v1/admin/retro/off", "grace", {})).toMatchObject({ status: 200, json: { changed: true, retro: null } });
+  expect(JSON.parse(parameter.value).retro).toBeUndefined();
+  expect(retro.target).toBeUndefined();
+  expect(parameter.descriptions.at(-1)).toBe("Grace Example turned retros off");
+});
 
 test("an approver's add and remove change only the parameter's repositories, then the live list", async () => {
   const { call, parameter, repositories, configs, logs } = await serve();
@@ -202,7 +228,7 @@ test("serve's own changes keep the version it has; a change made in AWS stays on
   expect(await enrolled.versions()).toEqual({ loaded: 2, current: 3 });
   await call("POST", "/v1/repositories/remove", "grace", { repo: "terros-inc/two" });
   expect(await enrolled.versions()).toEqual({ loaded: 2, current: 4 });
-  expect(await enrollment({ repositories: [], configs: {}, parameter: undefined, reach: async (r) => r, log: () => {} }).versions()).toBeNull();
+  expect(await enrollment({ repositories: [], configs: {}, parameter: undefined, reach: async (r) => r, retro: noRetro(), log: () => {} }).versions()).toBeNull();
 });
 
 // TECH-5208: someone changes the parameter in AWS between serve's read and its write, which then lands
@@ -235,7 +261,7 @@ test("serve restarted on an older installed copy has that copy's version, and on
   const restarted = async (copy: { config: unknown; version: number | undefined }) => {
     const logs: string[] = [];
     const started = await enrolledIn(parameter, (line) => logs.push(line), copy);
-    const versions = await enrollment({ repositories: [], configs: {}, parameter, version: started.version, reach: async (r) => r, log: () => {} }).versions();
+    const versions = await enrollment({ repositories: [], configs: {}, parameter, version: started.version, reach: async (r) => r, retro: noRetro(), log: () => {} }).versions();
     return { repositories: Object.keys(started.repositories), versions, logs };
   };
 

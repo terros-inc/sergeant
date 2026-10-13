@@ -1,4 +1,4 @@
-import { AdminRequestResponse, AdminStatus } from "@terros/sergeant-contracts";
+import { AdminRequestResponse, AdminStatus, RetroTargetChange } from "@terros/sergeant-contracts";
 import { showOutcome, showStatus, staleConfig, waitForOutcome } from "./admin.ts";
 import { answered, type Command, type Context, callAnswer, client, Failure, print, settle } from "./cli-call.ts";
 
@@ -20,6 +20,21 @@ export const adminCommands: Record<string, Command> = {
     args: 0,
     optional: 1,
     run: (ctx, [ref]) => adminRequest(ctx, "update", ref === undefined ? {} : { ref }),
+  },
+  "admin retro set": {
+    args: 2,
+    usage: "admin retro set <projectId> <teamId>",
+    run: async (ctx, [projectId, teamId]) => {
+      const { value, answer } = await callAnswer(ctx, "POST", "/v1/admin/retro/set", RetroTargetChange, { projectId, teamId });
+      print(ctx, answer, () => `${value.changed ? "set" : "already set:"} retro project ${value.retro?.projectId}, team ${value.retro?.teamId}; serve is using it now`);
+    },
+  },
+  "admin retro off": {
+    args: 0,
+    run: async (ctx) => {
+      const { value, answer } = await callAnswer(ctx, "POST", "/v1/admin/retro/off", RetroTargetChange, {});
+      print(ctx, answer, () => (value.changed ? "retros off; serve stopped scheduling them" : "retros already off"));
+    },
   },
 };
 

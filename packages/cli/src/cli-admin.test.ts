@@ -90,3 +90,18 @@ test("admin status says when the installation config changed since serve started
   expect(older.out).not.toContain("config");
   expect(older.out).not.toContain("runs");
 });
+
+test("admin retro set and off report the live target, and status shows it or none", async () => {
+  const target = { projectId: "project-sergeant", teamId: "team-tech" };
+  const { api, seen } = await fakeApi({
+    "POST /v1/admin/retro/set": { json: { changed: true, retro: target } },
+    "POST /v1/admin/retro/off": { json: { changed: true, retro: null } },
+  });
+  expect((await sgt(api, "admin", "retro", "set", target.projectId, target.teamId)).out).toBe("set retro project project-sergeant, team team-tech; serve is using it now\n");
+  expect((await sgt(api, "admin", "retro", "off")).out).toBe("retros off; serve stopped scheduling them\n");
+  expect(seen.map(({ method, url, body }) => [method, url, JSON.parse(body)])).toEqual([
+    ["POST", "/v1/admin/retro/set", target],
+    ["POST", "/v1/admin/retro/off", {}],
+  ]);
+  expect((await sgt(api, "admin", "retro", "set", target.projectId)).code).toBe(2);
+});

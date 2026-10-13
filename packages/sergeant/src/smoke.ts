@@ -51,7 +51,7 @@ if (values.config) {
     return process.exit(1);
   });
   checks.push(
-    ...linearChecks(installation.linear, { agentUserId: installation.agentUserId, issue: values.issue, retroProjectId: config.retro?.projectId, upload: values.upload }),
+    ...linearChecks(installation.linear, { agentUserId: installation.agentUserId, issue: values.issue, retroProjectId: config.retro?.projectId, retroTeamId: config.retro?.teamId, upload: values.upload }),
     ...githubChecks(installation.github, githubReadProbes({ token: cachedToken(() => installation.controlPlaneApp.mint({ repositories: [repo] })) }), {
       repo,
       mergePolicy: config.repositories[repo]?.mergePolicy ?? "human",

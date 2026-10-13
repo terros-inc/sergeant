@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { RetroAnswer, type RetroCase, type RetroFiledIssue } from "@terros/sergeant-contracts";
+import { RetroAnswer, type RetroCase, type RetroFiledIssue, type RetroTarget } from "@terros/sergeant-contracts";
 import { RETRO_TITLE, type RetroLinear } from "@terros/sergeant-linear";
 import type { Retro } from "@terros/sergeant-reasoning";
 import { z } from "zod";
@@ -33,9 +33,8 @@ export type RetroDeps = {
   reasoning: Retro;
   /** Sergeant's agent: the issues it created are the ones Sergeant filed. */
   agentUserId: string;
-  /** The Sergeant project, where the retro is posted and its issues go, and the team they are filed in. */
-  projectId: string;
-  teamId: string;
+  /** The live target; absent means retros are off. */
+  target: () => RetroTarget | undefined;
 };
 
 export type RetroOptions = {
@@ -67,9 +66,11 @@ export async function retroEvery(intervalMs: number, wake: Wake, opts: RetroOpti
 
 /** One check: runs the retro when it is due or asked for. Returns the document's URL when it posted one. */
 export async function runRetro(opts: RetroOptions, deps: RetroDeps, { manual }: { manual: boolean }): Promise<string | undefined> {
+  const target = deps.target();
+  if (!target) return undefined;
   const now = opts.now?.() ?? new Date();
   const file = join(opts.stateDir, "retro.json");
-  const last = await deps.linear.lastRetro(deps.projectId);
+  const last = await deps.linear.lastRetro(target.projectId);
   // A saved answer is for the window since the newest retro; once a newer one is posted, it was posted.
   const lastUntil = last && (windowEnd(last.content) ?? last.createdAt);
   const saved = await readPending(file);
@@ -97,8 +98,8 @@ export async function runRetro(opts: RetroOptions, deps: RetroDeps, { manual }: 
   const filed = [];
   for (const issue of pending.answer.issues) {
     const ref = await deps.linear.fileIssue({
-      teamId: deps.teamId,
-      projectId: deps.projectId,
+      teamId: target.teamId,
+      projectId: target.projectId,
       title: issue.title,
       description: `${issue.description}\n\n---\n\n**Evidence:** ${issue.evidence.join(", ")}\n\nFiled in Backlog by ${title}. A human promotes it to Todo if they agree.`,
       key: `retro:${pending.since}:${issue.key}`,
@@ -106,7 +107,7 @@ export async function runRetro(opts: RetroOptions, deps: RetroDeps, { manual }: 
     filed.push({ ...ref, title: issue.title, kind: issue.kind });
   }
   const content = retroDocument(pending, feedbackTasks.length, filedIssues.length, filed);
-  const { url } = await deps.linear.postDocument({ projectId: deps.projectId, title, content, key: `retro:${pending.since}` });
+  const { url } = await deps.linear.postDocument({ projectId: target.projectId, title, content, key: `retro:${pending.since}` });
   await rm(file, { force: true });
   opts.log(`retro: posted ${url}${filed.length ? `, filed ${filed.map((f) => f.identifier).join(", ")} in Backlog` : ""}`);
   return url;
