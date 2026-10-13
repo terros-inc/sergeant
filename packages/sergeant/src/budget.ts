@@ -1,5 +1,5 @@
-import { commentIdFor, type BudgetStatus, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
-import { humanPrFeedback } from "./pr-wait.ts";
+import { commentIdFor, type BudgetStatus, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { reviewWindowFeedback } from "./pr-wait.ts";
 import { latestAnswer, latestQuestion } from "./question.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
@@ -73,17 +73,17 @@ export const budgetQuestionKey = (issueId: string, windowStart: string) => `budg
  * earlier task's budget question this task's, whatever was said after it.
  */
 export function answeredBudgetQuestion(
-  conversation: Conversation,
+  situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">,
   budget: Pick<BudgetStatus, "taskStart" | "windowStart" | "unblockedAt">,
-  pullRequests: PullRequestFacts[],
 ): boolean {
+  const { conversation } = situation;
   const asked = latestQuestion(conversation);
   const reply = latestAnswer(conversation);
   if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(budget.windowStart)) return false;
   const { issue, humanComments } = conversation;
   const thread = asked.parentId ?? asked.id;
   const since = (at: string) => Date.parse(at) >= Date.parse(budget.taskStart);
-  const windows = [budget.taskStart, ...(budget.unblockedAt ?? []), ...[...humanComments, ...humanPrFeedback(pullRequests)].map((c) => c.createdAt).filter(since)];
+  const windows = [budget.taskStart, ...(budget.unblockedAt ?? []), ...[...humanComments, ...reviewWindowFeedback(situation)].map((c) => c.createdAt).filter(since)];
   return windows.some((windowStart) => commentIdFor(budgetQuestionKey(issue.id, windowStart)) === thread);
 }
 

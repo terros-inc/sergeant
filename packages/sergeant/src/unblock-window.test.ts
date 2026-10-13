@@ -109,6 +109,7 @@ test("a reply to a budget question asked in an unblock's window is a reply to th
   const replyAt = ago(1);
   const conversation: Conversation = { issue, agentComments: [asked], humanComments: [human("c1", replyAt, "Accept it as it is.")] };
   // The reply has opened a window of its own by the time a turn reads it.
-  expect(answeredBudgetQuestion(conversation, { taskStart: startedAt, windowStart: replyAt, unblockedAt: [unblockedAt] }, [])).toBe(true);
-  expect(answeredBudgetQuestion(conversation, { taskStart: startedAt, windowStart: replyAt }, [])).toBe(false);
+  const situation = { conversation, pullRequests: [], refusedMerges: [] };
+  expect(answeredBudgetQuestion(situation, { taskStart: startedAt, windowStart: replyAt, unblockedAt: [unblockedAt] })).toBe(true);
+  expect(answeredBudgetQuestion(situation, { taskStart: startedAt, windowStart: replyAt })).toBe(false);
 });

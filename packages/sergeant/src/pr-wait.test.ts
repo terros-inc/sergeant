@@ -116,24 +116,43 @@ test("active work started after review feedback still asks the budget question w
   expect(posted[0]).toContain("Continue?");
 });
 
-test.each(["PR", "issue"])("a human %s comment after the escalation resumes the task in a fresh window", async (where) => {
+test.each(waits.flatMap(([waitName, waitOf]) => (["PR", "issue"] as const).map((where) => ({ waitName, waitOf, where }))))(
+  "a $where comment resumes a task waiting on $waitName in a fresh window",
+  async ({ waitOf, where }) => {
+    const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
+    const responseAt = new Date(Date.now() - 60_000).toISOString();
+    const wait = waitOf(startedAt);
+    let turns = 0;
+    const { posted } = await scenario({
+      state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges },
+      conversation: { agentComments: wait.agentComments, ...(where === "issue" && { humanComments: [human("c1", responseAt, "I reviewed the PR.")] }) },
+      runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
+      reasoner: async () => (turns++, turnOf([])),
+      pullRequest: () => ({ ...pr, humanFeedback: [...wait.feedback, ...(where === "PR" ? [prComment("captain", responseAt)] : [])] }),
+      onPoll: stopAfter(5),
+      loop: { idleMinutes: 24 * 60 },
+    });
+
+    expect(posted).toEqual([]);
+    expect(turns).toBe(1);
+    expect((await saved()).budget.since).toBe(responseAt);
+  },
+);
+
+test("a changed PR fingerprint during an exhausted review wait asks the budget question", async () => {
   const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
-  const responseAt = new Date(Date.now() - 60_000).toISOString();
   const wait = waits[0]![1](startedAt);
-  let turns = 0;
   const { posted } = await scenario({
-    state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges },
-    conversation: { agentComments: wait.agentComments, ...(where === "issue" && { humanComments: [human("c1", responseAt, "I reviewed the PR.")] }) },
+    state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges, lastFingerprint: "the-pr-before-it-changed" },
+    conversation: { agentComments: wait.agentComments },
     runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
-    reasoner: async () => (turns++, turnOf([])),
-    pullRequest: () => ({ ...pr, humanFeedback: where === "PR" ? [prComment("captain", responseAt)] : [] }),
-    onPoll: stopAfter(5),
+    reasoner: async () => turnOf([]),
+    onPoll: stopAfter(3),
     loop: { idleMinutes: 24 * 60 },
   });
 
-  expect(posted).toEqual([]);
-  expect(turns).toBe(1);
-  expect((await saved()).budget.since).toBe(responseAt);
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toContain("Continue?");
 });
 
 test("a task waiting on no human PR action still asks the budget question when its window runs out", async () => {
@@ -167,6 +186,24 @@ test("an accept-as-is reply to a budget question asked in a window a review open
     runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
     reasoner: async () => turnOf([{ kind: "accept_as_is" }]),
     pullRequest: (): PullRequestFacts => ({ ...pr, humanFeedback: [approval] }),
+    onPoll: (_poll, live) => live,
+  });
+
+  expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
+});
+
+test("an accept-as-is reply is recognized in a window opened by a post-escalation PR comment", async () => {
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const startedAt = ago(300);
+  const wait = waits[0]![1](startedAt);
+  const response = prComment("captain", ago(250));
+  const asked = { ...agentComment(budgetQuestionKey(issue.id, response.createdAt), ago(60)), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted (wall time exhausted). Continue?` };
+  const { result } = await scenario({
+    state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges, turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: response.createdAt, priorRuns: [] } },
+    conversation: { agentComments: [...wait.agentComments, asked], humanComments: [human("c1", ago(1), "Accept it as it is.")] },
+    runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
+    reasoner: async () => turnOf([{ kind: "accept_as_is" }]),
+    pullRequest: () => ({ ...pr, humanFeedback: [response] }),
     onPoll: (_poll, live) => live,
   });
 

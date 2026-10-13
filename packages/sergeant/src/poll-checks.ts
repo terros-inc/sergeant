@@ -15,7 +15,7 @@ import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
 import { reassigned, redelegated } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
-import { latestHumanPrFeedback, latestIssueResponseToPrWait } from "./pr-wait.ts";
+import { reviewWindowFeedback } from "./pr-wait.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -168,8 +168,7 @@ async function openUnblockWindow(conversation: Conversation, configured: BudgetW
  * does, so it opens one window once, across restarts too. Returns whether it opened one.
  */
 export async function openReviewWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
-  const feedback = [latestHumanPrFeedback(situation), latestIssueResponseToPrWait(situation)]
-    .filter((item) => item !== undefined)
+  const feedback = reviewWindowFeedback(situation)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
   if (!feedback || Date.parse(feedback.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;

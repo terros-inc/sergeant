@@ -91,6 +91,21 @@ test.each(["read pull request", "mark ready", "re-read pull request", "request r
   },
 );
 
+test("a temporary merge-failure handoff does not claim GitHub looked up reviewers", () => {
+  const body = handoffComment({
+    repo,
+    number: pr.number,
+    url: pr.url,
+    headSha: head,
+    conversationRevision: "revision",
+    reason: "GitHub was unavailable",
+    temporary: true,
+    at: new Date().toISOString(),
+  });
+
+  expect(body).not.toContain("GitHub did not identify a code owner or configured reviewer");
+});
+
 test("a merge refused by repository policy gets one ready-for-human-merge comment and no retry until something changes", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-handoff-test-"));
   await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 0, runIds: ["run_worker", "run_review"], recentTurns: [] }));
