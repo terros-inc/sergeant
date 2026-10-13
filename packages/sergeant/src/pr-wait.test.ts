@@ -27,7 +27,7 @@ const waits: [string, (startedAt: string) => Wait][] = [
     "a code owner's review and a human merge",
     (startedAt) => {
       const refused = { repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: "0".repeat(64), reason: "Changes must be approved by a code owner", at: startedAt };
-      return { feedback: [], refusedMerges: [{ ...refused, commentPostedAt: startedAt } as RefusedMerge], agentComments: [agentComment(handoffKey(issue.id, refused), startedAt)] };
+      return { feedback: [], refusedMerges: [{ ...refused, commentPostedAt: startedAt, fingerprint: "fingerprint-before-human-feedback" } as RefusedMerge], agentComments: [agentComment(handoffKey(issue.id, refused), startedAt)] };
     },
   ],
   [

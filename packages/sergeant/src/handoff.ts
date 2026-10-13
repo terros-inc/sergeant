@@ -6,7 +6,7 @@ import type { LinearPort, RefusedMerge } from "@terros/sergeant-contracts";
 // that fails twice with nothing changed waits the same way (TECH-5077).
 
 /** Once per PR head: the comment's id is derived from this key, so a retry posts nothing new. */
-export const handoffKey = (issueId: string, r: RefusedMerge) => `merge-handoff:${issueId}:${r.repo}#${r.number}:${r.headSha}`;
+export const handoffKey = (issueId: string, r: Pick<RefusedMerge, "repo" | "number" | "headSha">) => `merge-handoff:${issueId}:${r.repo}#${r.number}:${r.headSha}`;
 
 export function handoffComment(r: RefusedMerge): string {
   const ready = `[${r.repo}#${r.number}](${r.url}) at head \`${r.headSha}\` is reviewed and its required checks are green`;

@@ -24,8 +24,9 @@ export function reviewWindowFeedback(situation: Pick<SituationReport, "conversat
 
 function escalationComments(situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">, pr: PullRequestFacts) {
   const { issue, agentComments } = situation.conversation;
-  const refused = situation.refusedMerges.find((r) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha);
-  const keys = [...(refused ? [handoffKey(issue.id, refused)] : []), ...(outstandingChangeRequests(pr.humanFeedback).length > 0 ? [rereviewKey(issue.id, pr)] : [])];
+  // The handoff comment's key is durable even after changed conversation facts correctly drop the
+  // refusal record that enforced M12. Keep using that head-keyed comment as the escalation anchor.
+  const keys = [handoffKey(issue.id, pr), ...(outstandingChangeRequests(pr.humanFeedback).length > 0 ? [rereviewKey(issue.id, pr)] : [])];
   return keys.flatMap((key) => agentComments.filter((c) => c.id === commentIdFor(key)));
 }
 
@@ -48,8 +49,7 @@ export function awaitedHumanPrAction(situation: SituationReport): string | undef
   const { issue, agentComments } = situation.conversation;
   const posted = (key: string) => agentComments.some((c) => c.id === commentIdFor(key));
   for (const pr of situation.pullRequests.filter((p) => p.state === "open")) {
-    const refused = situation.refusedMerges.find((r) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha);
-    if (refused && posted(handoffKey(issue.id, refused))) return `a human to merge ${pr.repo}#${pr.number}`;
+    if (posted(handoffKey(issue.id, pr))) return `a human to merge ${pr.repo}#${pr.number}`;
     const reviewers = outstandingChangeRequests(pr.humanFeedback);
     if (reviewers.length > 0 && posted(rereviewKey(issue.id, pr))) return `${reviewers.join(", ")} to re-review ${pr.repo}#${pr.number}`;
   }
