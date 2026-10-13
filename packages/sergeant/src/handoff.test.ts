@@ -126,6 +126,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
           live = { ...live, issue: { ...live.issue, state: "Done", stateType: "completed" } };
           return { mergedSha: "c".repeat(40) };
         },
+        handToHuman: async () => ({ requested: ["terros-inc/owners"] }),
       },
       runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
       reasoner: {
@@ -155,6 +156,7 @@ test("a merge refused by repository policy gets one ready-for-human-merge commen
   expect(handoffs[0]?.body).toContain(pr.url);
   expect(handoffs[0]?.body).toContain(head);
   expect(handoffs[0]?.body).toContain("GitHub refused Sergeant's merge: Waiting on code owner review from terros-inc/owners.");
+  expect(handoffs[0]?.body).toContain("Review is requested from terros-inc/owners.");
   expect(handoffs[0]?.body).toContain("This repository needs a human to merge it.");
   expect(comments.map((c) => c.key.split(":")[0])).toEqual(["merge-handoff", "outcome"]);
 });

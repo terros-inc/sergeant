@@ -36,12 +36,15 @@ export function handoffComment(r: RefusedMerge): string {
       "The PR is ready for a human to take over the handoff by hand. Sergeant won't try again unless the PR, its reviews, or this issue change.",
     ].join("\n");
   }
+  const reviewers = r.requested?.length
+    ? `Review is requested from ${r.requested.join(", ")}.`
+    : "GitHub did not identify a code owner or configured reviewer to request.";
   // TECH-5090: a merge call that failed twice with nothing changed is handed over too (TECH-5077); no
   // policy blocked it, so the comment must not say GitHub refused it or that the repository needs a human.
   const [why, who] = r.temporary
     ? [`, but Sergeant's merge failed twice with nothing changing in between: ${r.reason.trim()}`, "A human can merge it."]
     : [`, but GitHub refused Sergeant's merge: ${r.reason.trim()}`, "This repository needs a human to merge it."];
-  return ["**Ready for a human to merge**", "", ready + why, "", `${who} Sergeant won't try again unless the PR, its reviews, or this issue change.`].join("\n");
+  return ["**Ready for a human to merge**", "", ready + why, "", reviewers, "", `${who} Sergeant won't try again unless the PR, its reviews, or this issue change.`].join("\n");
 }
 
 /** Posts a refusal's comment, at most once however often it is retried; false if Linear failed. */

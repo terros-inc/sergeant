@@ -168,7 +168,7 @@ async function openUnblockWindow(conversation: Conversation, configured: BudgetW
  * does, so it opens one window once, across restarts too. Returns whether it opened one.
  */
 export async function openReviewWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
-  const feedback = [latestHumanPrFeedback(situation.pullRequests), latestIssueResponseToPrWait(situation)]
+  const feedback = [latestHumanPrFeedback(situation), latestIssueResponseToPrWait(situation)]
     .filter((item) => item !== undefined)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);

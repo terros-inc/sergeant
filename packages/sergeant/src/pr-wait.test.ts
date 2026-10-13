@@ -94,6 +94,28 @@ test("a spend-exhausted review wait stays quiet across repeated polls", async ()
   expect(posted).toEqual([]);
 });
 
+test("active work started after review feedback still asks the budget question when spend is exhausted", async () => {
+  const startedAt = new Date().toISOString();
+  const wait = waits[0]![1](startedAt);
+  let canceled = false;
+  const { posted } = await scenario({
+    state: { startedAt, runIds: ["run_worker"], refusedMerges: wait.refusedMerges },
+    conversation: { agentComments: wait.agentComments },
+    runner: {
+      start: async () => {},
+      status: async () => ({ runId: "run_worker", role: "worker", status: canceled ? "canceled" : "running", provider: "p", model: "m", costUsd: 25, report: null }),
+      cancel: async () => { canceled = true; },
+    },
+    reasoner: async () => turnOf([]),
+    onPoll: stopAfter(3),
+    loop: { idleMinutes: 24 * 60 },
+  });
+
+  expect(canceled).toBe(true);
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toContain("Continue?");
+});
+
 test.each(["PR", "issue"])("a human %s comment after the escalation resumes the task in a fresh window", async (where) => {
   const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
   const responseAt = new Date(Date.now() - 60_000).toISOString();

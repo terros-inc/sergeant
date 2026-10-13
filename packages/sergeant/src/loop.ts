@@ -235,7 +235,12 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // merge or re-review is a human wait, like a question: no budget question and no turn. The human's
     // review opens a fresh window (above); their merge is the task's end. Anything else that changes
     // asks the budget question as before.
-    const humanWait = retryDue.length === 0 ? awaitedHumanPrAction(situation) : undefined;
+    // Quiet parking is only for a stable wait with no active or unreadable run. A changed PR (red,
+    // behind, conflicted, or pushed) and work still in flight remain ordinary active work and ask the
+    // existing budget question when exhausted.
+    const stable = state.lastFingerprint === undefined || fingerprint === state.lastFingerprint;
+    const currentWindowCanceledWork = runs.some((r) => r.status === "canceled" && !state.budget.priorRuns.includes(r.runId));
+    const humanWait = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable ? awaitedHumanPrAction(situation) : undefined;
     if (await holdForBudget(situation, conversation, holds, ctx, humanWait)) {
       await wait(pollMs);
       continue;

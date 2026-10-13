@@ -7,24 +7,33 @@ import { rereviewKey } from "./rereview.ts";
 // opens a fresh window from the review, exactly as an answer does. Both are read from GitHub and Linear
 // every poll; nothing new is stored.
 
-/** Every human review or comment on the task's PRs: each may have opened a window. */
-export const humanPrFeedback = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] => pullRequests.flatMap((p) => p.humanFeedback);
+/** Every human review or inline review comment: each may open a window without an escalation. */
+export const humanPrFeedback = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] =>
+  pullRequests.flatMap((p) => p.humanFeedback).filter((f) => f.kind !== "comment");
 
 /** The newest human review or comment on the task's PRs: what opens a fresh window. */
-export function latestHumanPrFeedback(pullRequests: PullRequestFacts[]): HumanPullRequestFeedback | undefined {
-  return humanPrFeedback(pullRequests)
+export function latestHumanPrFeedback(situation: SituationReport): HumanPullRequestFeedback | undefined {
+  const escalatedComments = situation.pullRequests.flatMap((pr) => {
+    const escalations = escalationComments(situation, pr);
+    const at = escalations.toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1)?.createdAt;
+    return at ? pr.humanFeedback.filter((f) => f.kind === "comment" && Date.parse(f.createdAt) > Date.parse(at)) : [];
+  });
+  return [...humanPrFeedback(situation.pullRequests), ...escalatedComments]
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
 }
 
+function escalationComments(situation: SituationReport, pr: PullRequestFacts) {
+  const { issue, agentComments } = situation.conversation;
+  const refused = situation.refusedMerges.find((r) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha);
+  const keys = [...(refused ? [handoffKey(issue.id, refused)] : []), ...(outstandingChangeRequests(pr.humanFeedback).length > 0 ? [rereviewKey(issue.id, pr)] : [])];
+  return keys.flatMap((key) => agentComments.filter((c) => c.id === commentIdFor(key)));
+}
+
 /** The newest issue comment after a head-keyed handoff or re-review request. */
 export function latestIssueResponseToPrWait(situation: SituationReport): HumanComment | undefined {
-  const { issue, agentComments, humanComments } = situation.conversation;
-  const waits = situation.pullRequests.flatMap((pr) => {
-    const refused = situation.refusedMerges.find((r) => r.repo === pr.repo && r.number === pr.number && r.headSha === pr.headSha);
-    const keys = [...(refused ? [handoffKey(issue.id, refused)] : []), ...(outstandingChangeRequests(pr.humanFeedback).length > 0 ? [rereviewKey(issue.id, pr)] : [])];
-    return keys.flatMap((key) => agentComments.filter((c) => c.id === commentIdFor(key)));
-  });
+  const { humanComments } = situation.conversation;
+  const waits = situation.pullRequests.flatMap((pr) => escalationComments(situation, pr));
   const lastWait = waits.toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
   if (!lastWait) return undefined;
   return humanComments.filter((c) => Date.parse(c.createdAt) > Date.parse(lastWait.createdAt)).toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
