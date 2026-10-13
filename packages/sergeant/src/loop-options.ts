@@ -1,5 +1,6 @@
 import type { RepoSlug } from "@terros/sergeant-contracts";
 import type { BudgetWindow } from "./budget.ts";
+import type { OwnerReadPacer } from "./owner-pace.ts";
 import type { Slot } from "./slots.ts";
 import type { Wake } from "./wake.ts";
 
@@ -55,6 +56,8 @@ export type LoopOptions = {
   signal?: AbortSignal;
   /** A human asking for a turn now (`sgt task wake`). */
   wake?: Wake;
+  /** TECH-5974: the service's shared pacer, spacing every loop's delegation-history rereads. */
+  ownerReads?: OwnerReadPacer;
   /** The task's slot (TECH-5008): told when the task waits on a human, and asked before each turn. */
   slot?: Slot;
 };

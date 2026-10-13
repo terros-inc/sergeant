@@ -47,7 +47,8 @@ export const OWNER_RECHECK_MS = 10 * 60_000;
 
 /**
  * TECH-5974: an extra per-issue slice of up to this long is added to the recheck window, so proofs that
- * expire together (after a restart, say) reread spread out over it, not all at once in one Linear burst.
+ * expire together drift apart. It cannot spread loops whose polls fall on the same ~15-minute tick, so the
+ * rereads themselves are paced too (owner-pace.ts).
  */
 export const OWNER_RECHECK_JITTER_MS = 5 * 60_000;
 
@@ -96,13 +97,15 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], c
   // Linear's durable history is reread too: a newer delegation, or someone else's, is a new episode.
   // Unreadable, nothing new starts this poll (fails closed). TECH-5974: the proof is kept in state.json,
   // so a still-valid one survives a restart and is not redone; past the recheck window (with its per-issue
-  // jitter) it is reread as a safety net for a missed delegation webhook, spread so a restart's proofs do
-  // not expire into one Linear burst. A delegation webhook clears the proof to force a fresh read (loop.ts),
+  // jitter) it is reread as a safety net for a missed delegation webhook, paced service-wide so a restart's
+  // proofs do not expire into one Linear burst. A delegation webhook clears the proof to force a fresh read (loop.ts),
   // and an effect that spends the owner's quota rereads live regardless (notOwned).
   if (!active.allowed || !state.owner) return undefined;
   const at = Date.now();
   const provenAt = state.ownerProvenAt ? Date.parse(state.ownerProvenAt) : undefined;
   if (provenAt !== undefined && at - provenAt < OWNER_RECHECK_MS + ownerRecheckJitter(opts.issueId)) return undefined;
+  // TECH-5974: loops whose rechecks fall due on the same poll tick take turns (owner-pace.ts).
+  await opts.ownerReads?.turn(opts.signal);
   let changed: string | undefined;
   try {
     changed = await redelegated(state.owner, opts.issueId, deps);
@@ -114,7 +117,7 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], c
     await recordStop(opts.dir, changed, { handoff: { delegatedAt: state.owner.delegatedAt } });
     return changed;
   }
-  state.ownerProvenAt = new Date(at).toISOString();
+  state.ownerProvenAt = new Date().toISOString();
   await save();
   return undefined;
 }

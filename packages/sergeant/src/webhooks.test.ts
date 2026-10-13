@@ -167,17 +167,21 @@ test("a Linear delegation event rechecks ownership now; a plain comment does not
   await vi.waitFor(() => expect(counts.ownerReads).toBe(before + 1), { timeout: 2_000 });
 });
 
-test("a burst of delegation events for one task coalesces into about one ownership reread (TECH-5974)", async () => {
+test("a burst of delegation events for one task causes at most one ownership reread (TECH-5974)", async () => {
   const { counts, post } = await start();
   const before = counts.ownerReads;
 
-  // Ten delegation events in a tight burst: without the per-task gap each would redo the history read.
+  // Ten delegation events, a tight burst and then a trickle spanning several webhook gaps: without the
+  // per-task debounce each gap would redo the history read.
   const delegation = () => post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-1", identifier: "UNF-1", delegateId: agent.id }, updatedFrom: { delegateId: "someone-else" } });
-  await Promise.all(Array.from({ length: 10 }, delegation));
+  await Promise.all(Array.from({ length: 5 }, delegation));
+  for (let i = 0; i < 5; i++) {
+    await sleep(webhookGapMs / 2);
+    expect(await delegation()).toBe(200);
+  }
   await vi.waitFor(() => expect(counts.ownerReads).toBeGreaterThan(before), { timeout: 2_000 });
-  await sleep(200);
-  // The gap coalesces the burst to one reread, plus at most one trailing read for an event past the gap.
-  expect(counts.ownerReads - before).toBeLessThanOrEqual(2);
+  await sleep(webhookGapMs * 6);
+  expect(counts.ownerReads - before).toBe(1);
 });
 
 test("a delegation to the V2 agent runs an intake now, which admits the issue", async () => {

@@ -29,9 +29,9 @@ export function serviceWebhooks(
       // Any Linear event naming it ends its rest (webhook-health.ts `resting`), so a human's comment is read
       // promptly. TECH-5974: only one that may have changed the delegation (not a plain comment) also rereads
       // the delegation history now; the recheck window otherwise catches a missed one, and a burst coalesces
-      // into one reread because both are flags the next pass clears (loop.ts).
+      // into one reread: the recheck is debounced per task (`Wake.recheckOwnerAfter`).
       if (source === "linear") wake.linear = true;
-      if (source === "linear" && recheckOwner) wake.recheckOwner = true;
+      if (source === "linear" && recheckOwner && active.has(issueId)) wake.recheckOwnerAfter(gapMs);
       if (active.has(issueId)) wake.nudge(gapMs);
       else admit = true;
     }

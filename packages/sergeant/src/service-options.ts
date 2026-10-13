@@ -55,6 +55,8 @@ export type ServiceOptions = {
    * coming due keeps the `pollSeconds` poll, since no webhook announces those.
    */
   slowPollMinutes?: number;
+  /** TECH-5974: the least time between two loops' delegation-history rereads, past a few at once (owner-pace.ts); default 10. */
+  ownerReadSpacingSeconds?: number;
   /**
    * Who may call the client API with a Linear login, the client id `sgt login` uses (auth.ts), and the
    * approvers' names, which `whoami` tells people to ask (TECH-5202).

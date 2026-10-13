@@ -131,8 +131,10 @@ A guardrail admits an issue when **all** of these hold (deterministic):
    the delegation names the issue (a plain comment does not), or at most every ~10 minutes as a fallback,
    avoiding the bulk of a poll's Linear cost (TECH-5923). The proof is kept in the task's `state.json`
    (TECH-5974), so a restart does not redo a still-valid one — the stampede of dozens of loops each rereading
-   their full history at once used to trip Linear's rate limit — and a reread that does fall due is spread
-   by a small per-issue jitter; the fallback window is the safety net for a missed delegation webhook, and
+   their full history at once used to trip Linear's rate limit — and rereads that fall due together are
+   paced by one service-wide pacer (a few at once, then one every 10 seconds), since loops' polls align on
+   the ~15-minute safety-net tick; a burst of delegation webhooks for one task is debounced into one reread.
+   The fallback window is the safety net for a missed delegation webhook, and
    every effect that spends the owner's quota or lands their work still rereads it first. Each refusal
    (no human assignee; someone else delegated it; the delegation is
    not attributable) is one comment saying what to do, keyed by what Linear showed, so a poll never

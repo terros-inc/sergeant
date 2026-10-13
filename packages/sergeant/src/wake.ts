@@ -21,11 +21,13 @@ export class Wake {
    * TECH-5974: a Linear webhook that may have changed this issue's delegation (not a plain comment) named
    * it since its owner was last proven, so the loop rereads the delegation history instead of waiting out
    * the recheck window. A plain comment sets only `linear`, which does not redo the history read.
+   * Set only through `recheckOwnerAfter`, so a burst sets it once.
    */
   recheckOwner = false;
   #interrupt = new AbortController();
   #lastNudge = 0;
   #trailing: NodeJS.Timeout | undefined;
+  #recheck: NodeJS.Timeout | undefined;
 
   request(): void {
     this.pending = true;
@@ -52,6 +54,21 @@ export class Wake {
     const wait = this.#lastNudge + gapMs - Date.now();
     if (wait <= 0) fire();
     else this.#trailing = setTimeout(fire, wait).unref();
+  }
+
+  /**
+   * TECH-5974: a delegation event's owner recheck, debounced: each event restarts a `gapMs` timer, and only
+   * when it runs out, the burst over, is `recheckOwner` set and the loop woken. So a burst of events for one
+   * task costs one history reread. The event's own `nudge` still wakes the loop at once, whose live check
+   * stops an undelegated task without waiting for this.
+   */
+  recheckOwnerAfter(gapMs: number): void {
+    clearTimeout(this.#recheck);
+    this.#recheck = setTimeout(() => {
+      this.#recheck = undefined;
+      this.recheckOwner = true;
+      this.interrupt();
+    }, gapMs).unref();
   }
 
   async sleep(ms: number, signal?: AbortSignal): Promise<void> {
