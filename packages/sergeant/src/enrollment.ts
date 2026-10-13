@@ -12,7 +12,8 @@ import { InstallationConfig, run } from "./config.ts";
 // session and no host update. The installation-config SSM parameter is the only record: each change
 // rewrites it, the one parameter the host's role may write (deploy/terraform), changing only its
 // `repositories` or `retro` and naming who made the change in the new version's description. `serve`
-// takes its `repositories` from it at startup (serve.ts), so no restart can bring back an older list. The
+// takes its `repositories` and `retro` from it at startup (serve.ts), so no restart can bring back an
+// older list or retro target (TECH-5940). The
 // running service takes a change in place: every loop, the API, webhooks, and the GitHub port read the
 // same live list and settings. A change the parameter already has (a retry after a write whose answer
 // was lost, say) writes nothing and brings the live list up to it. Budgets, secret references,
@@ -28,8 +29,8 @@ import { InstallationConfig, run } from "./config.ts";
 //
 // TECH-5206: serve runs the host's copy of the parameter from its last install, which systemd may
 // restart after a crash long after the parameter changed. So serve starts with the parameter's version
-// only when that copy matches it apart from `repositories`, which serve takes from the parameter
-// anyway; otherwise it has the version install.sh recorded with the copy.
+// only when that copy matches it apart from `repositories` and `retro`, which serve takes from the
+// parameter anyway; otherwise it has the version install.sh recorded with the copy.
 
 /** How long `sgt admin status` may show the parameter's version now from an earlier read. */
 export const VERSION_MS = 30_000;
@@ -48,21 +49,22 @@ export type ConfigParameter = {
 export class EnrollmentRefused extends Error {}
 
 /**
- * The parameter's `repositories`, validated with the rest of it, and the version `serve` has: the
- * parameter's when `installed`, the host's copy serve runs, matches it but for `repositories`; else the
- * version installed with that copy, 0 when none was recorded.
+ * The parameter's `repositories` and `retro` (undefined when it has none: retros are off), validated
+ * with the rest of it, and the version `serve` has: the parameter's when `installed`, the host's copy
+ * serve runs, matches it but for those two; else the version installed with that copy, 0 when none was recorded.
  */
 export async function enrolledIn(
   parameter: ConfigParameter,
   log: (line: string) => void,
   installed?: { config: unknown; version: number | undefined },
-): Promise<{ repositories: InstallationConfig["repositories"]; version: number }> {
+): Promise<{ repositories: InstallationConfig["repositories"]; retro: RetroTarget | undefined; version: number }> {
   const { config, version } = await readConfig(parameter, log);
-  const repositories = InstallationConfig.parse(config).repositories;
-  if (!installed || isDeepStrictEqual({ ...(installed.config as object), repositories: {} }, { ...config, repositories: {} })) return { repositories, version };
+  const { repositories, retro } = InstallationConfig.parse(config);
+  const rest = (c: object) => ({ ...c, repositories: {}, retro: undefined });
+  if (!installed || isDeepStrictEqual(rest(installed.config as object), rest(config))) return { repositories, retro, version };
   const loaded = installed.version ?? 0;
   log(`the installation config serve runs is version ${loaded}, not the parameter's version ${version}: \`sgt admin restart\` installs it`);
-  return { repositories, version: loaded };
+  return { repositories, retro, version: loaded };
 }
 
 /** The parameter's raw JSON, valid as an installation config, and its version. A failure's message never quotes it. */

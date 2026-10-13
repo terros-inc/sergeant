@@ -37,7 +37,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 | Reasoning | model, max turn cost and seconds, max sleep, session mode, compaction threshold | |
 | Review | audit sample rate (default 0.2), progress comment after each review round (`progressComments`, default on, TECH-5227), review-quality budget per day | 06; subagent reviews never count until the captain decides (06 §5) |
 | Follow-ups | max depth, auto-delegate | |
-| Retro | the Sergeant project and team its documents and issues go to; absent, no retro | approvers use `sgt admin retro set <projectId> <teamId>` or `off` (TECH-5838) |
+| Retro | the Sergeant project and team its documents and issues go to; absent, no retro | approvers use `sgt admin retro set <projectId> <teamId>` or `off` (TECH-5838); serve takes it from the installation-config parameter at every start, so a restart keeps their change (TECH-5940) |
 | Human waits | remind after hours | |
 | Approvers | Linear user ids | waivers, escalations |
 | AWS | runner dev role ARN, artifact bucket, CloudWatch log group | |

@@ -226,7 +226,8 @@ sgt admin retro off                     # remove the target and stop scheduling 
 ```
 
 The retro commands write only the installation config's `retro` block, and the parameter version
-names the approver who changed it. They do not require AWS access or a restart. `set` refuses a
+names the approver who changed it. They do not require AWS access or a restart, and a restart keeps
+them: Sergeant takes its retro target from the parameter at every start. `set` refuses a
 project or team id that does not exist in the installation's Linear workspace.
 
 - `restart` and `update` wait for the outcome and print it, with the reason when it failed (exit 1).

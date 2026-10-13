@@ -282,6 +282,25 @@ test("serve restarted on an older installed copy has that copy's version, and on
   expect((await restarted({ config: JSON.parse(parameter.value), version: 3 })).versions).toEqual({ loaded: 3, current: 3 });
 });
 
+// TECH-5940: an approver's `sgt admin retro set` or `off`, then a restart on the host's older copy. Serve
+// takes the retro target from the parameter as it does repositories, so the stale copy's never comes back.
+test("serve restarted on an older installed copy has the parameter's retro target, or none once retros are off", async () => {
+  const { call, parameter } = await serve();
+  const installed = { config: { ...CONFIG, retro: { projectId: "old-project", teamId: "old-team" } }, version: 1 };
+  const restarted = async () => {
+    const started = await enrolledIn(parameter, () => {}, installed);
+    // As serve.ts: the live target is the parameter's, never the installed copy's.
+    const enrolled = enrollment({ repositories: [], configs: {}, parameter, version: started.version, reach: async (r) => r, retro: { target: started.retro, validate: async () => undefined }, log: () => {} });
+    return { retro: enrolled.retroTarget(), versions: await enrolled.versions() };
+  };
+
+  expect(await call("POST", "/v1/admin/retro/set", "grace", { projectId: "new-project", teamId: "new-team" })).toMatchObject({ status: 200, json: { changed: true } });
+  expect(await restarted()).toEqual({ retro: { projectId: "new-project", teamId: "new-team" }, versions: { loaded: 2, current: 2 } });
+
+  expect(await call("POST", "/v1/admin/retro/off", "grace", {})).toMatchObject({ status: 200, json: { changed: true } });
+  expect(await restarted()).toEqual({ retro: undefined, versions: { loaded: 3, current: 3 } });
+});
+
 // TECH-5209: `sgt admin restart` and `update` read the status every 5 seconds for up to 45 minutes. A
 // slow or failing AWS must neither run the AWS CLI on every poll nor add a serve.log line to each.
 test("the version now is read at most once a while, and a failing read is logged once until one succeeds", async () => {
