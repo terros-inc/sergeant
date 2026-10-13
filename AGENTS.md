@@ -11,6 +11,14 @@ generically ("a customer's CRM sync sent a false alert"). A Linear issue's real 
 A pushed PR stays public record even after an edit, so check before you push: `git config
 core.hooksPath .githooks` turns on the pre-push check, which CI (`public-data.yml`) repeats. Both
 read the customer-name denylist from `PUBLIC_DATA_DENYLIST`, kept privately and never committed here.
+The check (`packages/runner/container/check-public-data.mjs`) reads every commit's message, added
+lines and file paths, merge commits included (what a merge adds beyond git's own merge of its
+parents). It flags a Terros ID by this exact rule: a prefix `C`, `U`, `Program`, `Account`, `Role`,
+`Group` or `Team`, not after a letter, digit, `_` or `.`; then `.` or `:`; then a key of 4 or more
+letters, digits, `_` or `-`, not followed by `(`, that names no placeholder (example, placeholder,
+sample, fake, test, dummy) and has a digit or mixes case with two or more capitals. So `C.example`,
+`Role.manager`, `Role.ADMIN`, `Team.teamId` and `Program.Status` pass; an all-lowercase or all-capital
+key without a digit passes too, so still read your diff.
 
 - The design handoff and work tracking live in Linear, in the **Sergeant Control Plane** project
   (team UNF). Linear issues may be deleted once done, so a PR body must stand on its own.

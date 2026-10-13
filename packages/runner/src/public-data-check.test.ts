@@ -58,11 +58,58 @@ test("synthetic placeholders and ordinary code pass", () => {
     [
       `const company = { id: "C.example", name: "Acme Solar", owner: "U.example1" };`,
       `const rep = { email: "rep@example.test", other: "user@example.com", phone: "(555) 555-0123", e164: "+15555550100" };`,
-      `if (role === Role.manager || Team.teamId || Program.Status) git.push("git@github.com:org/repo.git");`,
+      `if (role === Role.manager || role === Role.ADMIN || Team.teamId || Program.Status) git.push("git@github.com:org/repo.git");`,
+      `const account = Account.findById(id); const c = C.map((x) => x); const u = "U.example-owner";`,
       `const when = "2026-10-13T01:56:59.581Z"; const sha = "253039287a7aeee36148f3090ca39c98dab50143";`,
     ].join("\n"),
   );
   expect(check(r.dir, ["range", r.base, "HEAD"])).toEqual({ code: 0, out: "" });
+});
+
+test("every Terros ID form fails: short keys, long keys, UUIDs, letters-only mixed case, either separator", () => {
+  // Joined at run time, so this file itself passes the check it tests.
+  const ids = [
+    ["C", "ab12"],
+    ["Program", "Qx7Lp2Rk9Tz4Nw8Bv1m"],
+    ["Account", "3f2b8c1e-9d4a-4b6e-8f0a-1c2d3e4f5a6b"],
+    ["U", "QxLpRkTz"],
+    ["Group", "Tz4_Nw8"],
+  ].map(([prefix, key], i) => [prefix, key].join(i % 2 ? ":" : "."));
+  for (const id of ids) {
+    const r = repo();
+    r.commit("ids.ts", `const id = "${id}";\n`);
+    expect(check(r.dir, ["range", r.base, "HEAD"]).out, id).toMatch(/ids\.ts:1: Terros ID/);
+  }
+});
+
+test("a merge commit's message and the content it adds beyond its parents are checked", () => {
+  const r = repo();
+  r.git("checkout", "--quiet", "-b", "side");
+  r.commit("side.md", "Side change\n");
+  r.git("checkout", "--quiet", "main");
+  r.commit("main.md", "Main change\n");
+  // A clean merge whose message names the customer.
+  r.git("merge", "--quiet", "--no-ff", "-m", "Merge the Zephyr Roofing fix", "side");
+  const named = check(r.dir, ["range", r.base, "HEAD"]);
+  expect(named.code).toBe(1);
+  expect(named.out).toMatch(/message:1: denylisted customer name/);
+
+  // An evil merge: the ID appears only in the merge commit, not in either parent.
+  const e = repo();
+  e.git("checkout", "--quiet", "-b", "side");
+  e.commit("side.md", "Side change\n");
+  e.git("checkout", "--quiet", "main");
+  e.commit("main.md", "Main change\n");
+  e.git("merge", "--quiet", "--no-ff", "--no-commit", "side");
+  writeFileSync(join(e.dir, "main.md"), `Main change for ${COMPANY_ID}\n`);
+  e.git("add", "main.md");
+  e.git("commit", "--quiet", "-m", "Merge side");
+  const evil = check(e.dir, ["range", e.base, "HEAD"]);
+  expect(evil.code).toBe(1);
+  expect(evil.out).toMatch(/main\.md:1: Terros ID/);
+  // From either parent, as a pre-push from a clone that has it, the merge's addition still fails.
+  expect(check(e.dir, ["range", "HEAD^1", "HEAD"]).out).toMatch(/main\.md:1: Terros ID/);
+  expect(check(e.dir, ["range", "HEAD^2", "HEAD"]).code).toBe(1);
 });
 
 test("emails, phone numbers, PR text and branch names are checked", () => {

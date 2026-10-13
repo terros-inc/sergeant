@@ -52,8 +52,9 @@ Every clone a worker pushes from carries a `pre-push` hook from the image's git 
 (`container/git-template`): the host clones with `git clone --template`, and a clone the agent makes
 in the container gets it from the image's `init.templateDir`. Unless GitHub reports the repository
 private, the hook runs `container/check-public-data.mjs` (copied into the image) over the branch name
-and every commit the remote lacks: their messages, added lines, and file paths. It refuses Terros IDs,
-emails, phone numbers, and the denylisted customer names, and lets synthetic placeholders
+and every commit the remote lacks, merge commits included: their messages, added lines (for a merge,
+what it adds beyond git's own merge of its parents), and file paths. It refuses Terros IDs (the exact
+rule is in the script and `AGENTS.md`), emails, phone numbers, and the denylisted customer names, and lets synthetic placeholders
 (`C.example`, `user@example.test`) through. It never prints a denylisted name. A repository that sets
 its own `core.hooksPath` replaces the hook, and `git push --no-verify` skips it; the repository's CI
 and Sergeant's reviewer are the gates after it. PR titles and bodies are not pushes, so CI and the

@@ -4,7 +4,8 @@
 // never committed to a public repository. Synthetic placeholders (`C.example`, `user@example.test`,
 // 555-01xx numbers) pass. It never prints a denylisted name, only where it was found.
 //
-//   check-public-data.mjs range <base> <head>       commits in base..head: messages, added lines, file paths
+//   check-public-data.mjs range <base> <head>       commits in base..head, merges included: messages,
+//                                                   added lines, file paths
 //   check-public-data.mjs text <label>              stdin, for example a PR title and body or a branch name
 //   check-public-data.mjs pre-push <remote> [<url>] as a git pre-push hook: refs on stdin
 //
@@ -15,16 +16,23 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+const PLACEHOLDER_ID = /example|placeholder|sample|fake|test|dummy/i;
 const ID_PREFIXES = ["C", "U", "Program", "Account", "Role", "Group", "Team"];
-// An ID's random part: 8–12 characters with a digit, or mixed case with two or more capitals, so
-// ordinary identifiers (`Role.manager`, `Team.teamId`) pass.
-const ID = new RegExp(`(?<![\\w.])(?:${ID_PREFIXES.join("|")})[.:]([A-Za-z0-9_-]{8,12})(?![\\w-]|\\()`, "g");
+// A Terros ID, the exact rule: one of ID_PREFIXES, then `.` or `:`, then its key, the whole run of
+// letters, digits, `_` and `-` that follows (any length, so short keys and UUIDs too). The prefix must not
+// follow a letter, digit, `_` or `.`, and the key must not be followed by `(` (a method call). The key is
+// a Terros ID when it is 4 or more characters, names no placeholder (PLACEHOLDER_ID), and either has a
+// digit or mixes case with two or more capitals. So keys such as `Qx7Lp2Rk`, `ab12`, `QxLpRkTz` or a
+// UUID fail after any prefix, while `C.example`, `Role.manager`, `Team.teamId`, `Role.ADMIN`,
+// `Program.Status`, `Account.findById(` and bare SHAs or timestamps (no prefix) pass. An all-lowercase
+// or all-capital key with no digit cannot be told from an ordinary property name, so it passes.
+const ID = new RegExp(`(?<![\\w.])(?:${ID_PREFIXES.join("|")})[.:]([A-Za-z0-9_-]{4,})(?![\\w-]|\\()`, "g");
+const isId = (key) => !PLACEHOLDER_ID.test(key) && (/\d/.test(key) || (/[A-Z].*[A-Z]/.test(key) && /[a-z]/.test(key)));
 const EMAIL = /[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})\b/g;
 // North American numbers with separators, so digit runs (SHAs, timestamps, IDs) are not numbers.
 const PHONE = /(?<![\w.+-])(?:\+?1[\s.-]?)?\(?[2-9]\d{2}\)?[\s.-]?(\d{3})[\s.-](\d{4})(?![\w-])/g;
 const E164 = /(?<![\w+])\+\d{10,15}(?!\w)/g;
 
-const PLACEHOLDER_ID = /example|placeholder|sample|fake|test|dummy/i;
 const PLACEHOLDER_DOMAIN = /(^|\.)(example\.(com|org|net)|example|test|invalid|localhost)$/i;
 // Public machine addresses: git's SSH user, no-reply senders, and coding agents' commit identities.
 const PLACEHOLDER_ADDRESS = /^(git@github\.com|[^@]*no-?reply@.*|.*@users\.noreply\.github\.com|codex@openai\.com|cursoragent@cursor\.com)$/i;
@@ -42,7 +50,7 @@ function denylist(env = process.env) {
 /** The kinds of customer data in one line of text; never the denylisted name itself. */
 function findings(line, names) {
   const found = [];
-  for (const m of line.matchAll(ID)) if (!PLACEHOLDER_ID.test(m[1]) && /\d|[A-Z].*[A-Z]/.test(m[1]) && /[a-z\d]/.test(m[1])) found.push("Terros ID");
+  for (const m of line.matchAll(ID)) if (isId(m[1])) found.push("Terros ID");
   for (const m of line.matchAll(EMAIL)) if (!PLACEHOLDER_DOMAIN.test(m[1]) && !PLACEHOLDER_ADDRESS.test(m[0])) found.push("email address");
   for (const m of line.matchAll(PHONE)) if (!(m[1] === "555" && m[2].startsWith("01"))) found.push("phone number");
   for (const m of line.matchAll(E164)) if (!/^\+1\d{3}55501\d\d$/.test(m[0])) found.push("phone number");
@@ -57,15 +65,18 @@ function scanText(text, where, names) {
   return text.split("\n").flatMap((line, i) => findings(line, names).map((kind) => `${where}:${i + 1}: ${kind}`));
 }
 
-/** Findings in commits: each message, each added file path, and each added line. */
+/** Findings in commits: each message, each added file path, and each added line. A merge commit's
+ * content is what it adds beyond git's own merge of its parents (`--remerge-diff`): a conflict
+ * resolution or an evil merge. Its parents' commits are in the same range, or already on the remote. */
 function scanCommits(shas, names) {
   const out = [];
   for (const sha of shas) {
     const short = sha.slice(0, 12);
     out.push(...scanText(git("log", "-1", "--format=%B", sha), `commit ${short} message`, names));
+    const merge = git("rev-list", "--no-walk", "--parents", sha).trim().split(" ").length > 2;
     let file = "";
     let line = 0;
-    for (const l of git("show", "--format=", "--no-color", "--no-ext-diff", "--unified=0", "--diff-filter=d", sha).split("\n")) {
+    for (const l of git("show", "--format=", "--no-color", "--no-ext-diff", "--unified=0", "--diff-filter=d", ...(merge ? ["--remerge-diff"] : []), sha).split("\n")) {
       if (l.startsWith("+++ ")) {
         file = l.slice(4).replace(/^b\//, "");
         out.push(...findings(file, names).map((kind) => `commit ${short} ${file} (file path): ${kind}`));
@@ -79,7 +90,7 @@ function scanCommits(shas, names) {
   return out;
 }
 
-const commitsIn = (...revs) => git("rev-list", "--no-merges", ...revs).split("\n").filter(Boolean);
+const commitsIn = (...revs) => git("rev-list", ...revs).split("\n").filter(Boolean);
 
 function prePush(remote, input, names) {
   const out = [];
