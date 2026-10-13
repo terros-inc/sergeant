@@ -41,10 +41,6 @@ export const issuePage = z.object({
     pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
   }),
 });
-export const response = z.object({
-  data: z.unknown().optional(),
-  errors: z.array(z.object({ message: z.string() })).optional(),
-});
 
 export const issueQuery = `
   query SergeantIssue($id: String!, $after: String) {

@@ -67,6 +67,26 @@ export class GitHubRateLimitedError extends Error {
   }
 }
 
+/**
+ * Linear refused a call for its rate limit (`RATELIMITED`, which Linear answers with HTTP 400), or
+ * Sergeant is waiting one out (TECH-5923): no Linear call is made until `until`. Like GitHub's, a task
+ * loop that fails on it resumes after `until`, not on the next intake.
+ */
+export class LinearRateLimitedError extends Error {
+  readonly until: string;
+
+  constructor(until: string, message = `Linear API rate limit: no Linear calls until ${until}`) {
+    super(message);
+    this.until = until;
+    this.name = "LinearRateLimitedError";
+  }
+}
+
+/** A refusal for GitHub's or Linear's rate limit: whatever made the call waits until its `until`. */
+export function isRateLimited(e: unknown): e is GitHubRateLimitedError | LinearRateLimitedError {
+  return e instanceof GitHubRateLimitedError || e instanceof LinearRateLimitedError;
+}
+
 export interface LinearPort {
   /** The issue, every human-authored comment, and bounded explicit linked-issue background, live. */
   readConversation(issueId: string): Promise<Conversation>;

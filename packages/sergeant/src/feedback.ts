@@ -3,6 +3,7 @@ import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   hasClosingReference,
+  isRateLimited,
   type Conversation,
   type Feedback,
   type GitHubPort,
@@ -91,7 +92,7 @@ export async function sweepFeedbackEvery(intervalMs: number, opts: FeedbackOptio
   }
 }
 
-/** One pass over recently landed work. A failure on one issue is logged and retried next pass. */
+/** One pass over recently landed work. A failure on one issue is logged and retried next pass; a rate limit ends the pass. */
 export async function sweepFeedback(opts: FeedbackOptions, deps: FeedbackDeps): Promise<void> {
   const file = join(opts.stateDir, "feedback.json");
   const record = await readRecord(file, opts.log);
@@ -112,7 +113,11 @@ export async function sweepFeedback(opts: FeedbackOptions, deps: FeedbackDeps): 
   const candidates = new Set([...(await deps.completedIssues(lookback)), ...open, ...recent]);
   for (const issueId of candidates) {
     if (opts.signal?.aborted) return;
-    await sweepIssue(issueId, Date.parse(lookback), record, save, opts, deps).catch((e: Error) => opts.log(`feedback on ${issueId}: not swept, retrying next pass: ${e.message}`));
+    await sweepIssue(issueId, Date.parse(lookback), record, save, opts, deps).catch((e: Error) => {
+      // TECH-5923: a rate limit ends the pass; reading on would only spend the budget it waits for.
+      if (isRateLimited(e)) throw e;
+      opts.log(`feedback on ${issueId}: not swept, retrying next pass: ${e.message}`);
+    });
   }
 }
 
@@ -192,6 +197,8 @@ async function sweepIssue(issueId: string, lookback: number, record: FeedbackRec
           opts.log(`feedback ${item.key} on ${origin.issue.identifier}: not actionable: ${outcome.reason}`);
         }
       } catch (e) {
+        // A rate limit is not the feedback's failure: no attempt is spent, and the pass ends.
+        if (isRateLimited(e)) throw e;
         const attempts = (record.failures[item.key] ?? 0) + 1;
         const error = (e as Error).message;
         if (attempts < MAX_FEEDBACK_ATTEMPTS) {

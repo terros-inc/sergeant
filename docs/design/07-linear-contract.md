@@ -127,7 +127,9 @@ A guardrail admits an issue when **all** of these hold (deterministic):
    resumes on its own, and the new assignee's own delegation starts a new episode (§9), checked
    afresh, with the earlier PRs and branches there to continue. The history is read in
    full on every admission attempt, so a missed webhook or downtime cannot skip the check; anything it
-   cannot prove refuses. Each refusal (no human assignee; someone else delegated it; the delegation is
+   cannot prove refuses. A running task's poll rereads it at most every 10 minutes, the bulk of a
+   poll's Linear cost (TECH-5923); every effect that spends the owner's quota or lands their work still
+   rereads it first. Each refusal (no human assignee; someone else delegated it; the delegation is
    not attributable) is one comment saying what to do, keyed by what Linear showed, so a poll never
    repeats it. An owner with no usable model account is asked, when a run would start, through the
    ordinary question (§4), so their reply resumes the task in a fresh budget window (TECH-5217).
@@ -356,3 +358,7 @@ Not required by this design; recorded as `14` V3.
   reasoning without the brief.
 - Linear effects fail and are retried by the Effector; abandoned ones surface to Sergeant later.
 - Runs keep working; GitHub-side facts keep flowing.
+- Linear's rate limit (`RATELIMITED`, answered with HTTP 400) stops every Linear call until the spent
+  budget's `x-ratelimit-*-reset`, else a minute, logged once (TECH-5923). A task loop that fails on it
+  resumes after that time, not at the next intake, and the feedback sweep ends its pass. Any other
+  refusal names Linear's error code and message.

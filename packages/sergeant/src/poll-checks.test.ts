@@ -1,12 +1,12 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { BudgetStatus, Conversation } from "@terros/sergeant-contracts";
 import { DEFAULT_BUDGET } from "./budget.ts";
 import type { Ports } from "./execute.ts";
 import { runLoop } from "./loop.ts";
-import { checkHolds, type PollContext } from "./poll-checks.ts";
+import { checkHolds, checkStop, OWNER_RECHECK_MS, type PollContext } from "./poll-checks.ts";
 import { Slot } from "./slots.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -103,4 +103,31 @@ test("a recorded run whose status rejects holds the loop as unknown", async () =
   expect(result.outcome).toBe("stopped");
   expect(turns).toBe(0);
   expect(logs).toContain("waiting: status unavailable for run_gone (runner unreachable)");
+});
+
+// TECH-5923: the delegation-history reread was two thirds of every poll's Linear cost, and with ~50 tasks
+// polling each minute it ran the installation past Linear's hourly budget.
+test("a poll rereads the owner's delegation history at most once per OWNER_RECHECK_MS", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    let reads = 0;
+    const live = {
+      issue: { id: "i-1", identifier: "T-1", stateType: "started", delegate: { id: "agent-v2", name: "Sergeant" }, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [] },
+      humanComments: [],
+      agentComments: [],
+    } as unknown as Conversation;
+    const deps = { agentUserId: "agent-v2", linear: { readTaskOwner: async () => (reads++, { owner: { id: "user-ann", name: "Ann" } }) } } as unknown as Ports;
+    const ctx = { opts: { issueId: "T-1", enrolledRepositories: [] }, deps, state: { owner: { id: "user-ann", name: "Ann", admittedAt: now } }, log: () => {}, save: async () => {} } as unknown as PollContext;
+
+    expect(await checkStop(live, [], ctx)).toBeUndefined();
+    vi.advanceTimersByTime(OWNER_RECHECK_MS - 1);
+    expect(await checkStop(live, [], ctx)).toBeUndefined();
+    expect(reads).toBe(1);
+
+    vi.advanceTimersByTime(1);
+    expect(await checkStop(live, [], ctx)).toBeUndefined();
+    expect(reads).toBe(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -1,10 +1,11 @@
-import { commentIdFor, type LinearPort } from "@terros/sergeant-contracts";
+import { commentIdFor, LinearRateLimitedError, type LinearPort } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { conversationReader } from "./conversation.ts";
 import { taskOwnerReader } from "./delegation.ts";
 import { blockedByRecorder } from "./blocked-by.ts";
 import { followupFiler, followupFinder } from "./followup.ts";
 import { labeler } from "./label.ts";
+import { linearFailure } from "./rate-limit.ts";
 import { linearReadProbes } from "./read-probes.ts";
 import { openBlockers } from "./relations.ts";
 import { retroLinear, type RetroLinear } from "./retro.ts";
@@ -26,7 +27,6 @@ import {
   issueWorkflowShape,
   moveState,
   resolveComment,
-  response,
   usersQuery,
   viewerQuery,
 } from "./queries.ts";
@@ -47,6 +47,7 @@ export type LinearAdapterOptions = {
   fetch?: typeof globalThis.fetch;
   /** Where the adapter's warnings go; defaults to the console, timestamped like the service's log. */
   log?: (line: string) => void;
+  now?: () => number;
 };
 
 /** The minimal live Linear surface for the walking skeleton, as the token's own identity. */
@@ -84,16 +85,29 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   const sergeantUsers = new Set(options.sergeantUserIds);
   const log = options.log ?? ((line: string) => console.log(`[${new Date().toISOString()}] ${line}`));
 
+  const now = options.now ?? Date.now;
+  // TECH-5923 (rate-limit.ts): while a Linear rate limit is waited out, a call throws at once, never
+  // reaching Linear, and the pause is logged once, when it starts.
+  let pausedUntil = 0;
+
   const request = async <T>(query: string, variables: Record<string, unknown>, data: z.ZodType<T>): Promise<T> => {
+    if (now() < pausedUntil) throw new LinearRateLimitedError(new Date(pausedUntil).toISOString());
     const res = await fetchFn(apiUrl, {
       method: "POST",
       headers: { Authorization: options.apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
-    if (!res.ok) throw new Error(`Linear API request failed (${res.status})`);
-    const parsed = response.parse(await res.json());
-    if (parsed.errors?.length) throw new Error(`Linear API error: ${parsed.errors.map((e) => e.message).join("; ")}`);
-    return data.parse(parsed.data);
+    const json: unknown = await res.json().catch(() => undefined);
+    const failure = linearFailure(res, json, now());
+    if (failure instanceof LinearRateLimitedError) {
+      const started = now() >= pausedUntil;
+      pausedUntil = Math.max(pausedUntil, Date.parse(failure.until));
+      const paused = new LinearRateLimitedError(new Date(pausedUntil).toISOString());
+      if (started) log(paused.message);
+      throw paused;
+    }
+    if (failure) throw failure;
+    return data.parse((json as { data?: unknown } | undefined)?.data);
   };
 
   /**
