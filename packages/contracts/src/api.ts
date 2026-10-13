@@ -21,10 +21,11 @@ export const ApiError = z.object({
 export type ApiError = z.infer<typeof ApiError>;
 
 /**
- * `active`: its loop is running. `queued`: delegated, waiting for a free task slot. Otherwise how its
- * loop last ended in this process, `merged` when its closing PR merged before that, or `inactive`.
+ * `active`: its loop is running. `queued`: delegated, waiting for a free task slot. `paused`: its loop
+ * ended on GitHub's or Linear's rate limit and resumes on its own after the reset (TECH-5941). Otherwise
+ * how its loop last ended in this process, `merged` when its closing PR merged before that, or `inactive`.
  */
-export const TaskStatus = z.enum(["active", "queued", "done", "merged_not_done", "stopped", "accepted", "idle", "failed", "merged", "inactive"]);
+export const TaskStatus = z.enum(["active", "queued", "paused", "done", "merged_not_done", "stopped", "accepted", "idle", "failed", "merged", "inactive"]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
 export const TaskSummary = z.object({
@@ -32,6 +33,8 @@ export const TaskSummary = z.object({
   status: TaskStatus,
   /** How its loop last ended, when it has in this process. */
   statusDetail: z.string().optional(),
+  /** `paused`: whose rate limit it waits out, and until when; the next intake after `until` resumes it. */
+  paused: z.object({ provider: z.enum(["GitHub", "Linear"]), until: z.string() }).optional(),
   startedAt: z.string().optional(),
   turns: z.number().int(),
   lastTurnAt: z.string().optional(),

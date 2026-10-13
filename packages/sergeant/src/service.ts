@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { isRateLimited } from "@terros/sergeant-contracts";
+import { GitHubRateLimitedError, isRateLimited, type TaskSummary } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost } from "./auth.ts";
@@ -46,10 +46,11 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const slots = new Map<string, Slot>();
   // When and how each task loop last ended: an unchanged ending (an idle task readmitted every intake,
   // say) is not logged again, and a loop that ended since the latest intake waits for the next.
-  // `resumeAt`: a loop that failed on GitHub's or Linear's rate limit is not resumed before it resets
-  // (TECH-5336, TECH-5923).
-  const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string; resumeAt?: number }>();
-  const rateLimited = (issueId: string) => (ended.get(issueId)?.resumeAt ?? 0) > Date.now();
+  // `paused`: a loop that ended on GitHub's or Linear's rate limit is not resumed before it resets
+  // (TECH-5336, TECH-5923), and shows as paused until then, not failed (TECH-5941).
+  type Paused = NonNullable<TaskSummary["paused"]>;
+  const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed" | "paused"; detail: string; paused?: Paused }>();
+  const rateLimited = (issueId: string) => Date.parse(ended.get(issueId)?.paused?.until ?? "") > Date.now();
   let lastIntake: { at: string; error?: string } | undefined;
   let intakeStartedAt = 0;
   // The delegated issues intake would run at the last intake, in admission order, and each task's wake (API).
@@ -74,9 +75,9 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     if (active.has(issueId)) return;
     const slot = new Slot(() => schedule());
     slot.released = released;
-    let outcome: LoopResult["outcome"] | "failed" = "failed";
+    let outcome: LoopResult["outcome"] | "failed" | "paused" = "failed";
     let detail = "";
-    let resumeAt: number | undefined;
+    let paused: Paused | undefined;
     const loop = runLoop(
       {
         issueId,
@@ -107,14 +108,17 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         // waits for its reset instead, and the GitHub or Linear adapter has already logged the pause once.
         (e: Error) => {
           detail = e.message;
-          if (isRateLimited(e)) resumeAt = Date.parse(e.until);
-          else log(`${issueId}: loop failed, retrying on a later intake: ${detail}`);
+          if (isRateLimited(e)) {
+            outcome = "paused";
+            paused = { provider: e instanceof GitHubRateLimitedError ? "GitHub" : "Linear", until: e.until };
+            detail = `rate-limited by ${paused.provider} until ${e.until}`;
+          } else log(`${issueId}: loop failed, retrying on a later intake: ${detail}`);
         },
       )
       .finally(() => {
         if (active.get(issueId) === loop) active.delete(issueId);
         if (slots.get(issueId) === slot) slots.delete(issueId);
-        ended.set(issueId, { at: Date.now(), outcome, detail, ...(resumeAt !== undefined && { resumeAt }) });
+        ended.set(issueId, { at: Date.now(), outcome, detail, ...(paused && { paused }) });
         schedule();
       });
     active.set(issueId, loop);
@@ -235,7 +239,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     loop: (ref) => {
       if (active.has(ref)) return { status: "active" };
       const end = ended.get(ref);
-      if (end) return { status: end.outcome, detail: end.detail };
+      if (end) return { status: end.outcome, detail: end.detail, ...(end.paused && { paused: end.paused }) };
       return delegated.includes(ref) ? { status: "queued" } : undefined;
     },
     // A task stopped in this process stays known, so its stop shows.

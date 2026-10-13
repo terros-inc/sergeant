@@ -15,6 +15,7 @@ import {
   type RetroRequestResponse,
   type RepoSlug,
   type TaskStatus,
+  type TaskSummary,
   type WakeResponse,
   type WhoAmI,
 } from "@terros/sergeant-contracts";
@@ -59,7 +60,7 @@ export type ApiControl = {
   repositoryBudget?: (repo: RepoSlug) => Partial<BudgetWindow> | undefined;
   log: (line: string) => void;
   /** The task's loop in this process: running, waiting for a slot, or how it last ended. */
-  loop(ref: TaskRef): { status: TaskStatus; detail?: string } | undefined;
+  loop(ref: TaskRef): { status: TaskStatus; detail?: string; paused?: TaskSummary["paused"] } | undefined;
   /** Tasks this process knows without reading the state directory: running or delegated. */
   known(): string[];
   /** Owes the task a turn now: `not_delegated` when there is no loop to run it. */

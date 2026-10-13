@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { fakeApi, sgt } from "./fake-api.ts";
 
 const detail = {
@@ -85,4 +85,24 @@ test("task cancel lists the PRs the cancel closed", async () => {
   const stopping = await sgt(api, "task", "cancel", "UNF-14", "--reason", "wrong approach");
   expect(stopping).toMatchObject({ code: 0, out: expect.stringContaining("Sergeant keeps canceling: run_w1") });
   expect(stopping.out).toContain("Its open PRs are closed once they stop.");
+});
+
+// TECH-5941: a task waiting out a rate limit resumes on its own; it must not read like a failure.
+test("a task paused on a rate limit shows whose and until when, in local time", async () => {
+  vi.stubEnv("TZ", "America/Los_Angeles");
+  const paused = { ...detail.task, status: "paused", statusDetail: "rate-limited by GitHub until 2026-10-13T16:13:06.000Z", paused: { provider: "GitHub", until: "2026-10-13T16:13:06.000Z" } };
+  const { api } = await fakeApi({
+    "GET /v1/tasks": { json: { tasks: [paused, { ...detail.task, ref: "UNF-13", status: "failed", statusDetail: "boom" }] } },
+    "GET /v1/tasks/UNF-12": { json: { ...detail, task: paused } },
+  });
+  try {
+    const list = await sgt(api, "task", "list");
+    expect(list.out).toMatch(/^UNF-12\s+paused: rate-limited by GitHub until 9:13 AM PDT\s+2 turns/m);
+    expect(list.out).toMatch(/^UNF-13\s+failed\s+2 turns/m);
+    const show = await sgt(api, "task", "show", "UNF-12");
+    expect(show.out).toContain("UNF-12  paused  Fix the login");
+    expect(show.out).toContain("paused: rate-limited by GitHub until 9:13 AM PDT; it resumes on its own after that\n");
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

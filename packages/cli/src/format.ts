@@ -15,7 +15,13 @@ const minute = (iso: string | undefined) => (iso ? `${iso.slice(0, 16).replace("
 const usd = (n: number | undefined) => (n === undefined ? "-" : `$${n.toFixed(2)}`);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-export const taskRow = (t: TaskSummary) => [t.ref, `${t.status}${t.acceptedEnding ? ", ending accepted" : ""}`, plural(t.turns, "turn"), plural(t.runs, "run"), minute(t.lastTurnAt), clip(t.lastSummary, 60)];
+/** The local time of day, as "9:13 AM PDT": a rate-limit pause lasts an hour at most. */
+const clock = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).replace(/\s/g, " ");
+/** TECH-5941: a task paused on a rate limit, which resumes on its own after the reset, says whose and until when. */
+const pausedFor = (t: TaskSummary) => t.paused && `rate-limited by ${t.paused.provider} until ${clock(t.paused.until)}`;
+
+export const taskRow = (t: TaskSummary) => [t.ref, `${t.status}${t.paused ? `: ${pausedFor(t)}` : ""}${t.acceptedEnding ? ", ending accepted" : ""}`, plural(t.turns, "turn"), plural(t.runs, "run"), minute(t.lastTurnAt), clip(t.lastSummary, 60)];
 
 export const runRow = (r: RunSummary) => [r.runId, r.task, r.role ?? "-", r.status, usd(r.costUsd), clip(r.account, 30) || "-", clip(r.summary ?? r.error, 60)];
 
@@ -41,7 +47,8 @@ export function showTask(d: TaskDetail): string {
       ? `${task.ref}  ${task.status}  (Linear unreadable: ${issue.error})`
       : `${task.ref}  ${task.status}  ${issue.title}\n${issue.state}, ${issue.delegatedToSergeant ? "delegated to Sergeant" : issue.delegate ? `delegated to ${issue.delegate}` : "not delegated"}  ${issue.url}`,
   ];
-  if (task.statusDetail) lines.push(`last ended: ${task.statusDetail}`);
+  if (task.paused) lines.push(`paused: ${pausedFor(task)}; it resumes on its own after that`);
+  else if (task.statusDetail) lines.push(`last ended: ${task.statusDetail}`);
   lines.push(`started ${minute(task.startedAt)}, ${plural(task.turns, "turn")}, last ${minute(task.lastTurnAt)}`);
   if (budget) {
     const spent = `${usd(budget.spentUsd)} of ${usd(budget.costLimitUsd)}${budget.unknownCostRuns ? ` (+${plural(budget.unknownCostRuns, "run")} of unknown cost)` : ""}`;
