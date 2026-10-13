@@ -62,7 +62,7 @@ async function start() {
   dir = await mkdtemp(join(tmpdir(), "sergeant-webhooks-test-"));
   const live = new Map([["UNF-1", conversation("UNF-1")]]);
   const delegated = ["UNF-1"];
-  const counts = { reads: new Map<string, number>(), intakes: 0, turns: [] as string[] };
+  const counts = { reads: new Map<string, number>(), ownerReads: 0, intakes: 0, turns: [] as string[] };
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
@@ -74,7 +74,7 @@ async function start() {
       },
       postComment: async () => {},
       createFollowupIssue: async () => Promise.reject(new Error("unused")),
-      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
+      readTaskOwner: async () => (counts.ownerReads++, { owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
     },
     github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("unused")) },
@@ -148,6 +148,15 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
   });
   expect(await post("linear", comment)).toBe(200);
   await vi.waitFor(() => expect(counts.turns).toEqual(["UNF-1", "UNF-1"]), { timeout: 2_000 });
+});
+
+test("a Linear webhook naming a running issue rechecks ownership without waiting for the fallback", async () => {
+  const { counts, post } = await start();
+  const before = counts.ownerReads;
+
+  expect(await post("linear", { type: "Comment", action: "create", data: { issueId: "i-UNF-1" } })).toBe(200);
+
+  await vi.waitFor(() => expect(counts.ownerReads).toBe(before + 1), { timeout: 2_000 });
 });
 
 test("a delegation to the V2 agent runs an intake now, which admits the issue", async () => {

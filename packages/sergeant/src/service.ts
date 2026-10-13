@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { GitHubRateLimitedError } from "@terros/sergeant-contracts";
+import { isRateLimited } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost } from "./auth.ts";
@@ -46,7 +46,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const slots = new Map<string, Slot>();
   // When and how each task loop last ended: an unchanged ending (an idle task readmitted every intake,
   // say) is not logged again, and a loop that ended since the latest intake waits for the next.
-  // `resumeAt`: a loop that failed on GitHub's rate limit is not resumed before it resets (TECH-5336).
+  // `resumeAt`: a loop that failed on GitHub's or Linear's rate limit is not resumed before it resets
+  // (TECH-5336, TECH-5923).
   const ended = new Map<string, { at: number; outcome: LoopResult["outcome"] | "failed"; detail: string; resumeAt?: number }>();
   const rateLimited = (issueId: string) => (ended.get(issueId)?.resumeAt ?? 0) > Date.now();
   let lastIntake: { at: string; error?: string } | undefined;
@@ -102,11 +103,11 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
           ({ outcome, detail } = result);
           if (ended.get(issueId)?.outcome !== outcome) log(`${issueId}: loop ended ${outcome}: ${result.detail}`);
         },
-        // A failed iteration ends the loop; the next intake admits it again. One GitHub's rate limit
-        // failed waits for its reset instead, and the GitHub adapter has already logged the pause once.
+        // A failed iteration ends the loop; the next intake admits it again. One a rate limit failed
+        // waits for its reset instead, and the GitHub or Linear adapter has already logged the pause once.
         (e: Error) => {
           detail = e.message;
-          if (e instanceof GitHubRateLimitedError) resumeAt = Date.parse(e.until);
+          if (isRateLimited(e)) resumeAt = Date.parse(e.until);
           else log(`${issueId}: loop failed, retrying on a later intake: ${detail}`);
         },
       )

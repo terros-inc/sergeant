@@ -31,7 +31,15 @@ export type PollContext = {
   state: TaskState;
   log: (line: string) => void;
   save: () => Promise<void>;
+  /** When this loop last proved the owner's delegation from Linear's history (`checkStop`); in memory only. */
+  ownerProvenAt?: number;
 };
+
+/**
+ * TECH-5923: the history reread is most of a poll's Linear cost, so a poll rereads it at most this
+ * often. An effect that spends the owner's quota or lands their work still rereads it first (`notOwned`).
+ */
+export const OWNER_RECHECK_MS = 10 * 60_000;
 
 /** The budget as this poll sees it, and the current window's budget question if Linear has it. */
 export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budgetKey: string; budgetAsked: AgentComment | undefined };
@@ -40,7 +48,8 @@ export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budget
  * A1/A2, and the owner's reassignment or redelegation: why the task stops for good, once the stop is
  * recorded (cancel.ts); `hold` when the owner's delegation cannot be proven this poll; undefined to go on.
  */
-export async function checkStop(conversation: Conversation, runs: RunRecord[], { opts, deps, state, log }: PollContext): Promise<string | { hold: string } | undefined> {
+export async function checkStop(conversation: Conversation, runs: RunRecord[], ctx: PollContext): Promise<string | { hold: string } | undefined> {
+  const { opts, deps, state, log } = ctx;
   // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer
   // (A1), or that a human moved to Backlog, Canceled, or Done (A2), is not Sergeant's to work on, and
   // its task stops for good (cancel.ts). Done after the worker's closing PR merged is the task's
@@ -64,8 +73,11 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
     return active.reason;
   }
   // Linear's durable history is reread too: a newer delegation, or someone else's, is a new episode.
-  // Unreadable, nothing new starts this poll (fails closed).
+  // Unreadable, nothing new starts this poll (fails closed). Proven within OWNER_RECHECK_MS, it is not
+  // reread; a restart rereads it at once.
   if (!active.allowed || !state.owner) return undefined;
+  const at = Date.now();
+  if (ctx.ownerProvenAt !== undefined && at - ctx.ownerProvenAt < OWNER_RECHECK_MS) return undefined;
   let changed: string | undefined;
   try {
     changed = await redelegated(state.owner, opts.issueId, deps);
@@ -77,6 +89,7 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], {
     await recordStop(opts.dir, changed, { handoff: { delegatedAt: state.owner.delegatedAt } });
     return changed;
   }
+  ctx.ownerProvenAt = at;
   return undefined;
 }
 

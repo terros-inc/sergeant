@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { CLI_VERSION_HEADER, MIN_CLI_VERSION, type RunRecord } from "@terros/sergeant-contracts";
+import { CLI_VERSION_HEADER, LinearRateLimitedError, MIN_CLI_VERSION, type RunRecord } from "@terros/sergeant-contracts";
 import type { LinearUser } from "@terros/sergeant-linear";
 import { agent, call, fakes } from "./api-fixtures.ts";
 import { linearCallers } from "./auth.ts";
@@ -149,7 +149,11 @@ test("only an admitted Linear user may call the API, and approvers are told apar
     humans: { linearClientId: "client-1", teams: ["UNF"], approvers: ["Grace", "Linus"] },
     organizationId: "org",
     agentUserIds: [agent.id],
-    lookup: async (token) => (token === "linear-down" ? Promise.reject(new Error("Linear API request failed (502)")) : users[token]),
+    lookup: async (token) => {
+      if (token === "linear-down") throw new Error("Linear API request failed (502)");
+      if (token === "rate-limited") throw new LinearRateLimitedError("2026-10-13T05:30:00.000Z");
+      return users[token];
+    },
   });
   const port = await start(f.deps, { humans: { callerOf, linearClientId: "client-1" } });
   await vi.waitFor(() => expect(f.turns()).toBe(1), { timeout: 5_000 });
@@ -162,6 +166,10 @@ test("only an admitted Linear user may call the API, and approvers are told apar
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, { Authorization: "Basic eDp5" })).status).toBe(401);
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as("revoked"))).status).toBe(401);
   expect((await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as("linear-down"))).status).toBe(503);
+  expect(await call(port, "GET", "/v1/whoami", undefined, as("rate-limited"))).toMatchObject({
+    status: 503,
+    json: { error: { code: "unavailable", message: "Linear is rate limiting; try again after 2026-10-13T05:30:00.000Z" } },
+  });
   for (const refused of ["outsider", "strayApprover", "elsewhere", "former", "agent"]) {
     expect(await call(port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "x" }, as(refused))).toMatchObject({ status: 403, json: { error: { code: "forbidden" } } });
   }

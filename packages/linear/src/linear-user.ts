@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { graphqlErrors, linearFailure } from "./rate-limit.ts";
 
 const callerQuery = `
   query SergeantCaller {
@@ -29,12 +30,13 @@ export async function linearUser(accessToken: string, options: { apiUrl?: string
     body: JSON.stringify({ query: callerQuery }),
   });
   if (res.status === 401) return undefined;
-  const body = z
-    .object({ data: z.unknown().optional(), errors: z.array(z.object({ message: z.string(), extensions: z.object({ code: z.string().optional() }).optional() })).optional() })
-    .safeParse(await res.json().catch(() => undefined));
+  const json: unknown = await res.json().catch(() => undefined);
+  const body = z.object({ data: z.unknown().optional(), errors: graphqlErrors.optional() }).safeParse(json);
   // Linear answers an unknown, expired, or revoked token with an authentication error.
   if (body.success && body.data.errors?.some((e) => e.extensions?.code === "AUTHENTICATION_ERROR")) return undefined;
-  if (!res.ok || !body.success || body.data.errors?.length) throw new Error(`Linear API request failed (${res.status})`);
+  const failure = linearFailure(res, json, Date.now());
+  if (failure) throw failure;
+  if (!body.success) throw new Error(`Linear API request failed (${res.status}: not a GraphQL response)`);
   const { viewer } = callerData.parse(body.data.data);
   return { id: viewer.id, name: viewer.name, email: viewer.email, active: viewer.active, organizationId: viewer.organization.id, teamKeys: viewer.teams.nodes.map((t) => t.key) };
 }

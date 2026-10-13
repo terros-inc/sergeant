@@ -25,6 +25,8 @@ export function serviceWebhooks(
       if (!named.has(issueId) && !wake.watched.some((k) => named.has(k))) continue;
       // Its PRs are reread at its next pass, not only at the fallback interval (poll.ts `pullRequestPolls`).
       if (source === "github") wake.github = true;
+      // Its delegation history is reread at the next pass, not after the fallback interval.
+      if (source === "linear") wake.linear = true;
       if (active.has(issueId)) wake.nudge(gapMs);
       else admit = true;
     }
