@@ -35,15 +35,32 @@ export type PollContext = {
   state: TaskState;
   log: (line: string) => void;
   save: () => Promise<void>;
-  /** When this loop last proved the owner's delegation from Linear's history (`checkStop`); in memory only. */
-  ownerProvenAt?: number;
 };
 
 /**
  * TECH-5923: the history reread is most of a poll's Linear cost, so a poll rereads it at most this
  * often. An effect that spends the owner's quota or lands their work still rereads it first (`notOwned`).
+ * TECH-5974: the proof is persisted in `state.json` (`ownerProvenAt`), so a restart does not reread a
+ * still-valid one; past this window it is a safety net for a missed delegation webhook.
  */
 export const OWNER_RECHECK_MS = 10 * 60_000;
+
+/**
+ * TECH-5974: an extra per-issue slice of up to this long is added to the recheck window, so proofs that
+ * expire together (after a restart, say) reread spread out over it, not all at once in one Linear burst.
+ */
+export const OWNER_RECHECK_JITTER_MS = 5 * 60_000;
+
+/** A deterministic offset in `[0, OWNER_RECHECK_JITTER_MS)` from the issue id, stable for a task's life. */
+export function ownerRecheckJitter(issueId: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < issueId.length; i++) hash = Math.imul(hash ^ issueId.charCodeAt(i), 0x01000193);
+  // A final avalanche, so ids that differ only in their last digits (TECH-5900, TECH-5901, …) still spread.
+  hash ^= hash >>> 15;
+  hash = Math.imul(hash, 0x2c1b3c6d);
+  hash ^= hash >>> 12;
+  return (hash >>> 0) % OWNER_RECHECK_JITTER_MS;
+}
 
 /** The budget as this poll sees it, and the current window's budget question if Linear has it. */
 export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budgetKey: string; budgetAsked: AgentComment | undefined };
@@ -53,7 +70,7 @@ export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budget
  * recorded (cancel.ts); `hold` when the owner's delegation cannot be proven this poll; undefined to go on.
  */
 export async function checkStop(conversation: Conversation, runs: RunRecord[], ctx: PollContext): Promise<string | { hold: string } | undefined> {
-  const { opts, deps, state, log } = ctx;
+  const { opts, deps, state, log, save } = ctx;
   // Before anything starts and on every poll: an issue not delegated to the V2 agent, or no longer
   // (A1), or that a human moved to Backlog, Canceled, or Done (A2), is not Sergeant's to work on, and
   // its task stops for good (cancel.ts). Done after the worker's closing PR merged is the task's
@@ -77,11 +94,15 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], c
     return active.reason;
   }
   // Linear's durable history is reread too: a newer delegation, or someone else's, is a new episode.
-  // Unreadable, nothing new starts this poll (fails closed). Proven within OWNER_RECHECK_MS, it is not
-  // reread; a restart rereads it at once.
+  // Unreadable, nothing new starts this poll (fails closed). TECH-5974: the proof is kept in state.json,
+  // so a still-valid one survives a restart and is not redone; past the recheck window (with its per-issue
+  // jitter) it is reread as a safety net for a missed delegation webhook, spread so a restart's proofs do
+  // not expire into one Linear burst. A delegation webhook clears the proof to force a fresh read (loop.ts),
+  // and an effect that spends the owner's quota rereads live regardless (notOwned).
   if (!active.allowed || !state.owner) return undefined;
   const at = Date.now();
-  if (ctx.ownerProvenAt !== undefined && at - ctx.ownerProvenAt < OWNER_RECHECK_MS) return undefined;
+  const provenAt = state.ownerProvenAt ? Date.parse(state.ownerProvenAt) : undefined;
+  if (provenAt !== undefined && at - provenAt < OWNER_RECHECK_MS + ownerRecheckJitter(opts.issueId)) return undefined;
   let changed: string | undefined;
   try {
     changed = await redelegated(state.owner, opts.issueId, deps);
@@ -93,7 +114,8 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], c
     await recordStop(opts.dir, changed, { handoff: { delegatedAt: state.owner.delegatedAt } });
     return changed;
   }
-  ctx.ownerProvenAt = at;
+  state.ownerProvenAt = new Date(at).toISOString();
+  await save();
   return undefined;
 }
 

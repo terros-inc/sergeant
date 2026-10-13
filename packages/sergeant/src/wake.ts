@@ -15,8 +15,14 @@ export class Wake {
   watched: string[] = [];
   /** A GitHub webhook named what it watches since the loop last read its PRs (TECH-5336). */
   github = false;
-  /** A Linear webhook named this issue since its owner was last proven (TECH-5923). */
+  /** A Linear webhook named this issue since the loop last ran (TECH-5923); the resting gate resumes it. */
   linear = false;
+  /**
+   * TECH-5974: a Linear webhook that may have changed this issue's delegation (not a plain comment) named
+   * it since its owner was last proven, so the loop rereads the delegation history instead of waiting out
+   * the recheck window. A plain comment sets only `linear`, which does not redo the history read.
+   */
+  recheckOwner = false;
   #interrupt = new AbortController();
   #lastNudge = 0;
   #trailing: NodeJS.Timeout | undefined;
