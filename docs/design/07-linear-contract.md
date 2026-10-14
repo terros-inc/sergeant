@@ -36,7 +36,7 @@ access.
 | First turn, when work starts | 2–5 lines: what Sergeant understood, the plan at outcome level, which repositories | Skipped for trivial tasks where the PR will say everything |
 | A question for a human | the question (§4) | the only kind that creates a human wait |
 | A genuine blocker Sergeant cannot resolve | what is blocked, what would unblock it | e.g. a required live check no one can run |
-| Budget exhausted | the budget ask (§6) | |
+| Budget exhausted | the budget ask (§6): what happened in the window, where the work stands, and the stop rubric's recommendation with its estimated remaining cost | nothing while the task only waits on a human (rubric rule 0) |
 | Outcome | 2–6 lines: what landed (PR links), known gaps, follow-ups filed, anything a human should check, and the task's total cost | posted when the work lands or for a non-code outcome; the cost line (TECH-5227, `cost.ts`) is an estimate split by provider, run counts by role, wall time and accounts, a run with no reported cost counted as unknown; Sergeant's own turns count over the whole task (`turns.jsonl`), not only the current budget window |
 | After each review round | about 5 lines: what changed (from the worker report), the PR and reviewed head, the verdict with blocking/non-blocking counts and up to two findings, what happens next, the estimated cost so far (worker and review runs by role, and Sergeant's turns, up to the previous turn) | TECH-5227, `progress.ts`; its own comment for every finished review still current, keyed `progress:<issue>:<reviewRunId>`, posted after the next turn even when that turn also asks or merges; `review.progressComments: false` turns it off |
 | Answers to human comments | when the comment asked something Sergeant can answer | |
@@ -152,16 +152,62 @@ worker starts.
 
 ## 6. Budget asks and fresh windows
 
-When the budget is exhausted, Sergeant asks (`ask_human` with `purpose: budget_extension`), or, if it
-cannot, a guardrail posts a fixed version:
+When the budget is exhausted, Sergeant asks, and the question makes the case for the human's call
+(TECH-6021, `stop-case.ts`, `stop-rubric.ts`). The poll that finds the window exhausted builds it from the
+ledger it already has (this window's run records, `turns.jsonl`, the PR facts and the task's report
+recoveries); it never starts a worker or reviewer, or asks reasoning, to research the window:
 
 ```
-**Budget reached** — about 2h of active work used (about $26 of model spend so far, as reported).
+**Question for you**
 
-Done: <what landed or is ready>. Remaining: <what is left>. PRs: <links with CI/review state>.
-Sergeant recommends **one more window (+2h / +$25)** because <reason>.
-Reply to extend, or say stop.
+Sergeant stopped this task: its budget is exhausted (<wall time or spend>). Running work was canceled.
+
+**What happened in this window:** <runs in start order, with outcomes, steers, restarts, fix cycles,
+human reviews>. <n> Sergeant turns, <n> fix cycles.
+
+**Where it stands:**
+- <PR link>: CI <counts by state>; review: <verdict at this head>; mergeable: <state>.
+- Open blocking findings: <up to three, with location>.
+- Left: <the concrete steps: fixes, rebase, (re-)review, CI, Sergeant's or a human's merge>.
+- Spent: $<spent> of $<cap> reported.
+
+**Sergeant recommends extend** (rubric rule 3: a first fix cycle after a reviewer's change request).
+Remaining: one fix, a re-review and merge, about 29 min and $5.
+
+Continue?
+1. Extend …  2. Accept as-is …
 ```
+
+The recommendation is the stop rubric of `docs/findings/tech-5922-wall-time-windows.md` §6, its
+thresholds as written there, applied in order, the first match deciding:
+
+- **Rule 0, park.** A task only waiting on a human posts nothing. This is the existing human wait, not
+  a separate check: an open question holds the task before the budget is read, and a merge handed to a
+  human or a re-review Sergeant asked for (TECH-5218), including the TECH-5913 escalation of a green PR
+  blocked on a required human review, parks quietly below.
+- **Rule 1, recommend stop.** Three or more fix cycles in the window (a worker run after a review that
+  requested changes); the same blocking finding back after two fix cycles (the same `location`); two or
+  more restarts or steers of one run with no report from any attempt; spend at 80% of the cap with no PR
+  ready for review; or a run reporting what it cannot get (unreadable inputs, a decision, a human's
+  call), recommended as "stop, or answer this".
+- **Rule 2, recommend extend.** Below 80% of the cap, the only thing left is a merge Sergeant may do
+  (approved at the head, required CI green, `mergePolicy: sergeant`), a conflict-free rebase of an
+  approved PR, or a first review of a finished worker's PR. Automatic extension is not built: these
+  still ask, "Sergeant recommends extend", so there is never an automatic extension in a row to limit.
+- **Rule 3, ask.** Everything else. It recommends extend for a first fix cycle after a reviewer's change
+  request, a run canceled in flight that was not the window's first and is its role's first canceled
+  attempt, or an approved PR Sergeant may merge waiting only on CI; otherwise it makes no recommendation.
+
+The estimate of what is left is rough on purpose: step lengths from the TECH-5922 measurement (reviewer
+5 min, worker 17, a mechanical fix 6, CI 5, a merge 2) and money from this task's own finished runs of
+each role and the window's turns; with no finished run of a role to go by, the cost is said to be unknown.
+
+Each question's call and rule is recorded in the task's `stops.jsonl`, and the human's reply to it next
+to it as extend (`1`, extend, continue), stop (`2`, stop, accept as-is, or a reply reasoning ended the
+task on through `accept_as_is`), or other. Only measurement reads it: reasoning still reads the reply
+itself. `GET /v1/stops` and `sgt stops` report, per rule and call, the questions asked, the replies by
+kind, and how many followed the recommendation, the data a later task needs to authorize automatic
+extension for rule 2.
 
 A human's answer to any of Sergeant's questions, this one included, gives the task a fresh budget
 window (TECH-5059): from the answer, with zero spend and the installation's current budget. So does a

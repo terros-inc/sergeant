@@ -6,9 +6,11 @@ import {
   type BudgetStatus,
   type Conversation,
   type GateVerdict,
+  type RepoSlug,
   type RunRecord,
   type SituationReport,
 } from "@terros/sergeant-contracts";
+import { join } from "node:path";
 import { budgetQuestion, budgetQuestionKey, openWindow, type BudgetWindow } from "./budget.ts";
 import { recordStop, stopReason } from "./cancel.ts";
 import { askHuman, describeOutcome, type Ports } from "./execute.ts";
@@ -17,6 +19,9 @@ import { reassigned, redelegated } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
 import { reviewWindowFeedback } from "./pr-wait.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
+import { stopCase } from "./stop-case.ts";
+import { recordBudgetStop, recordReply, windowTurns } from "./stop-ledger.ts";
+import type { WindowFacts } from "./stop-rubric.ts";
 import type { TaskState } from "./task-state.ts";
 
 // The checks the loop (loop.ts) makes on every poll before a turn: the delegation, stop-state, and
@@ -111,6 +116,8 @@ export async function checkHolds(
     openWindow(state, answer.createdAt, configured);
     await save();
     log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
+    // TECH-6021: an answer to a budget question is recorded next to the rubric's recommendation.
+    await recordReply(opts.dir, conversation).catch((e: Error) => log(`could not record the reply to the budget question: ${e.message}`));
   }
   await openUnblockWindow(conversation, configured, ctx);
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a
@@ -208,14 +215,21 @@ export async function holdForBudget(
   // window, and retried every poll until Linear shows it. Until a human replies after it, nothing
   // happens and no runaway guard ends the wait (UNF-727); the reply opens a fresh window (above) and
   // wakes a turn that reads it.
+  // TECH-6021: the question makes the case for the human's call, built here from the ledger (stop-case.ts).
   if (!exhausted.allowed && !budgetAsked && !humanWait) {
-    const asked = await askHuman(budgetQuestion(situation, exhausted.reason), situation, deps, check.budgetKey);
-    log(`budget exhausted (${exhausted.reason}): asking whether to continue: ${describeOutcome(asked)}`);
+    const stop = stopCase(await windowFacts(situation, { opts, deps, state }));
+    const asked = await askHuman(budgetQuestion(situation, exhausted.reason, stop), situation, deps, check.budgetKey);
+    const { call, rule } = stop.recommendation;
+    log(`budget exhausted (${exhausted.reason}): asking whether to continue, recommending ${call} (rubric rule ${rule}): ${describeOutcome(asked)}`);
+    if (asked.status !== "failed") {
+      await recordBudgetStop(opts.dir, conversation.issue.identifier, commentIdFor(check.budgetKey), stop.recommendation).catch((e: Error) => log(`could not record the stop's recommendation: ${e.message}`));
+    }
     return true;
   }
+  // The stop rubric's rule 0: a task only waiting on a human posts nothing (TECH-5218, TECH-5913).
   if (!exhausted.allowed && humanWait) {
     opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
-    log(`budget exhausted (${exhausted.reason}), but the task is waiting on ${humanWait}; parking quietly`);
+    log(`budget exhausted (${exhausted.reason}), but the task is waiting on ${humanWait}; parking quietly (rubric rule 0)`);
     return true;
   }
   if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {
@@ -224,4 +238,13 @@ export async function holdForBudget(
     return true;
   }
   return false;
+}
+
+/** The window as the stop rubric reads it: its runs in start order, steers, restarts and turns (stop-rubric.ts). */
+async function windowFacts(situation: SituationReport, { opts, deps, state }: Pick<PollContext, "opts" | "deps" | "state">): Promise<WindowFacts> {
+  const byId = new Map(situation.runs.map((r) => [r.runId, r]));
+  const runs = state.runIds.filter((id) => !state.budget.priorRuns.includes(id)).flatMap((id) => byId.get(id) ?? []);
+  const { turns, steers } = await windowTurns(join(opts.dir, "turns.jsonl"), situation.budget.windowStart);
+  const mergePolicy = (repo: RepoSlug) => deps.github.mergePolicy?.(repo);
+  return { situation, runs, steers, retries: state.reportRecoveries, turns, turnCostUsd: state.turnCostUsd, mergePolicy };
 }

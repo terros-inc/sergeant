@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import {
   CancelRunRequest,
   CancelTaskRequest,
@@ -27,6 +28,7 @@ import { repositoriesRoute } from "./api-repositories.ts";
 import { body, callerOf, notFound, ok, parse, Refusal, type Reply, send } from "./api-http.ts";
 import { allRuns, cancelRunOf, cancelTask, listRuns, listTasks, runReport, showRun, showTask, wakeTask } from "./api-tasks.ts";
 import { callerName, type Caller } from "./auth.ts";
+import { stopAgreement } from "./stop-ledger.ts";
 import type { BudgetWindow } from "./budget.ts";
 import type { CancelProgress } from "./cancel.ts";
 import type { Enrollment } from "./enrollment.ts";
@@ -128,6 +130,7 @@ export const V1_ROUTES: readonly { method: "GET" | "POST"; path: string; public?
   { method: "GET", path: "/v1/runs/:runId/report" },
   { method: "POST", path: "/v1/runs/:runId/cancel" },
   { method: "POST", path: "/v1/retro" },
+  { method: "GET", path: "/v1/stops" },
   { method: "GET", path: "/v1/admin/status" },
   { method: "POST", path: "/v1/admin/restart" },
   { method: "POST", path: "/v1/admin/update" },
@@ -195,6 +198,8 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
     ctl.log(`retro requested by ${callerName(caller)}`);
     return ok({ requested: true } satisfies RetroRequestResponse);
   }
+  // TECH-6021: how often humans follow the stop rubric, per rule (stop-ledger.ts).
+  if (noun === "stops" && id === undefined && get) return ok(await stopAgreement(join(ctl.stateDir, "tasks")));
   if (noun === "admin") return adminRoute(ctl.admin, ctl.enrollment, caller, req, { id, verb, pathname: url.pathname }, ctl.log);
   if (noun === "repositories") return repositoriesRoute(ctl.enrollment, caller, req, { id, verb, pathname: url.pathname });
   if (noun === "accounts") return accountsRoute(ctl.accounts, caller, req, { id, verb, pathname: url.pathname }, () => allRuns(ctl));
