@@ -62,9 +62,9 @@ its own `core.hooksPath` replaces the hook, and `git push --no-verify` skips it;
 and Sergeant's reviewer are the gates after it. PR titles and bodies are not pushes, so CI and the
 reviewer check those. The same script is this repository's CI check (`.github/workflows/public-data.yml`)
 and its pre-push hook (`.githooks/pre-push`). In CI the denylist secret reaches only the default
-branch's copy of the script: a `pull_request_target` job checks out the default branch, fetches the
-PR's commits as git objects only, and runs for same-repository PRs only; the `pull_request` job runs
-the PR's own copy with no secret. `src/public-data-workflow.test.ts` asserts that shape.
+branch's copy of the script: `public-data-trusted.yml`, a `pull_request_target` job, checks out the
+default branch, fetches the PR's commits as git objects only, and runs for same-repository PRs only;
+`public-data.yml` (`pull_request`) runs the PR's own copy with no secret. `src/public-data-workflow.test.ts` asserts that shape.
 
 A reviewer's token is read-only and used only on the host to read the PR and check out its exact
 head; it never enters the reviewer's container. A run gets no host home, AWS, `gh` login, SSH,

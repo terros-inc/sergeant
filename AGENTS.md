@@ -11,8 +11,8 @@ generically ("a customer's CRM sync sent a false alert"). A Linear issue's real 
 A pushed PR stays public record even after an edit, so check before you push: `git config
 core.hooksPath .githooks` turns on the pre-push check, which CI (`public-data.yml`) repeats. Both
 read the customer-name denylist from `PUBLIC_DATA_DENYLIST`, kept privately and never committed here;
-in CI only the default branch's copy of the check ever gets it (a `pull_request_target` job that reads
-the PR's commits as data and skips fork PRs), so never give that secret to a step that runs PR code.
+in CI only the default branch's copy of the check ever gets it (`public-data-trusted.yml`, a
+`pull_request_target` job that reads the PR's commits as data and skips fork PRs), so never give that secret to a step that runs PR code.
 The check (`packages/runner/container/check-public-data.mjs`) reads every commit's message, author and
 committer, added lines (binary files as text) and file paths (renames too), merge commits included
 (what a merge adds beyond git's own merge of its parents). It flags a Terros ID by this exact rule: a prefix `C`, `U`, `Program`, `Account`, `Role`,
@@ -27,7 +27,8 @@ key without a digit passes too, so still read your diff.
 - Sergeant 1 (Rust) is not on `main`; its final source, including its ADRs, is the tag `v1-final`.
   Never restore or depend on V1 code. `docs/design/13-s1-supersession.md` says which S1 decisions
   still apply.
-- CI is `.github/workflows/v2.yml`, and `public-data.yml` checks each PR for customer data.
+- CI is `.github/workflows/v2.yml`, and `public-data.yml` and `public-data-trusted.yml` check each PR
+  for customer data.
 - Expect other tasks to land in parallel. Rebase rather than merge, and never resolve a conflict
   by reverting a sibling's change.
 - Sergeant is a TypeScript workspace. Implementation follows [`docs/design/`](docs/design/README.md);

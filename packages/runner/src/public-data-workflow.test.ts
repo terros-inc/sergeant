@@ -1,35 +1,27 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 
-// The public-data workflow's trust boundary (TECH-5914): the customer-name denylist secret reaches only
+// The public-data workflows' trust boundary (TECH-5914): the customer-name denylist secret reaches only
 // code from the default branch, never code a PR can change, and never a fork PR. A pull_request run takes
-// its workflow file from the PR, so the secret may appear only in a pull_request_target job. This reads
-// the YAML as text, job by job, so it needs no YAML parser.
-const WORKFLOW = readFileSync(join(import.meta.dirname, "..", "..", "..", ".github", "workflows", "public-data.yml"), "utf8");
+// its workflow file from the PR, so the secret may appear only in a pull_request_target workflow. This
+// reads the YAML as text, so it needs no YAML parser.
+const DIR = join(import.meta.dirname, "..", "..", "..", ".github", "workflows");
+const read = (file: string) => readFileSync(join(DIR, file), "utf8");
 const SECRET = "secrets.PUBLIC_DATA_DENYLIST";
+const triggers = (workflow: string) => [...(/\non:\n((?: {2}.*\n)+)/.exec(workflow)?.[1] ?? "").matchAll(/^ {2}(\w+):/gm)].map((m) => m[1]);
 
-function jobs(): Map<string, string> {
-  const body = WORKFLOW.slice(WORKFLOW.indexOf("\njobs:\n"));
-  return new Map(body.split(/\n(?=  [\w-]+:\n)/).slice(1).map((block) => [/^ {2}([\w-]+):/.exec(block)?.[1] ?? "", block]));
-}
-
-function job(name: string): string {
-  const block = jobs().get(name);
-  if (block === undefined) throw new Error(`no job ${name}`);
-  return block;
-}
-
-test("only a same-repository pull_request_target job gets the denylist secret", () => {
-  expect([...jobs()].filter(([, block]) => block.includes(SECRET)).map(([name]) => name)).toEqual(["public-data"]);
-  const trusted = job("public-data");
-  expect(trusted).toMatch(/\n {4}if: \$\{\{ github\.event_name == 'pull_request_target' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository \}\}\n/);
-  // Nothing outside the jobs (env, defaults) passes the secret on.
-  expect(WORKFLOW.split(SECRET).length).toBe(trusted.split(SECRET).length);
+test("only the pull_request_target workflow, for same-repository PRs, gets the denylist secret", () => {
+  const withSecret = readdirSync(DIR).filter((file) => read(file).includes(SECRET));
+  expect(withSecret).toEqual(["public-data-trusted.yml"]);
+  const trusted = read("public-data-trusted.yml");
+  expect(triggers(trusted)).toEqual(["pull_request_target"]);
+  expect(trusted.slice(trusted.indexOf("\njobs:\n")).match(/\n {2}[\w-]+:\n/g)).toEqual(["\n  public-data:\n"]);
+  expect(trusted).toMatch(/\n {4}if: \$\{\{ github\.event\.pull_request\.head\.repo\.full_name == github\.repository \}\}\n/);
 });
 
 test("the secret-bearing job runs default-branch code and reads the PR head only as git objects", () => {
-  const trusted = job("public-data");
+  const trusted = read("public-data-trusted.yml");
   const checkouts = trusted.split("uses: actions/checkout@").slice(1);
   expect(checkouts).toHaveLength(1);
   expect(checkouts[0] ?? "").toMatch(/\n {10}ref: \$\{\{ github\.event\.repository\.default_branch \}\}\n/);
@@ -46,8 +38,8 @@ test("the secret-bearing job runs default-branch code and reads the PR head only
   ]);
 });
 
-test("the pull_request job runs the PR's own check with no secret", () => {
-  const untrusted = job("pr-code");
-  expect(untrusted).toMatch(/\n {4}if: \$\{\{ github\.event_name == 'pull_request' \}\}\n/);
+test("the pull_request workflow runs the PR's own check with no secret", () => {
+  const untrusted = read("public-data.yml");
+  expect(triggers(untrusted)).toEqual(["pull_request"]);
   expect(untrusted).not.toMatch(/secrets\./);
 });
