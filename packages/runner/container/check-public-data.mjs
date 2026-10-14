@@ -42,7 +42,7 @@ const PLACEHOLDER_ADDRESS = /^(git@github\.com|[^@]*no-?reply@.*|.*@users\.norep
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The denylisted names, each as a case-insensitive whole-word pattern. */
+/** The denylisted names, each as a whole-word pattern: case-insensitive, or in its listed case for a two-character name. */
 function denylist(env = process.env) {
   const text = [env.PUBLIC_DATA_DENYLIST ?? "", env.PUBLIC_DATA_DENYLIST_FILE ? readFileSync(env.PUBLIC_DATA_DENYLIST_FILE, "utf8") : ""].join("\n");
   const names = new Set(text.split(/[\n,]/).map((n) => n.trim()).filter(Boolean));
