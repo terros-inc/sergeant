@@ -244,7 +244,8 @@ export async function holdForBudget(
 async function windowFacts(situation: SituationReport, { opts, deps, state }: Pick<PollContext, "opts" | "deps" | "state">): Promise<WindowFacts> {
   const byId = new Map(situation.runs.map((r) => [r.runId, r]));
   const runs = state.runIds.filter((id) => !state.budget.priorRuns.includes(id)).flatMap((id) => byId.get(id) ?? []);
-  const { turns, steers } = await windowTurns(join(opts.dir, "turns.jsonl"), situation.budget.windowStart);
+  // An unreadable ledger only thins the case: the question is still asked.
+  const { turns, steers } = await windowTurns(join(opts.dir, "turns.jsonl"), situation.budget.windowStart).catch(() => ({ turns: 0, steers: {} }));
   const mergePolicy = (repo: RepoSlug) => deps.github.mergePolicy?.(repo);
   return { situation, runs, steers, retries: state.reportRecoveries, turns, turnCostUsd: state.turnCostUsd, mergePolicy };
 }
