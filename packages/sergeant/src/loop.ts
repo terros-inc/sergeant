@@ -22,6 +22,7 @@ import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
 import { latestAnswer, resolveAnswered } from "./question.ts";
 import { recoverReports } from "./report-recovery.ts";
+import { recordReply } from "./stop-ledger.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { admitOwner } from "./owner.ts";
@@ -319,6 +320,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // close's effects were made in the turn itself (execute.ts), so its ending only sets the task aside.
     const reply = accepted ? latestAnswer(conversation) : undefined;
     if (accepted) state.accepted = { at, ...(reply && { replyId: reply.id }), comment: acceptedComment(situation.pullRequests, costTotal({ ...spent(taskTurnCostUsd), at })) };
+    // TECH-6021: a reply reasoning took as accept-as-is is a stop, whatever its words (stop-ledger.ts).
+    if (accepted) await recordReply(opts.dir, conversation, true).catch((e: Error) => log(`could not record the accept-as-is reply: ${e.message}`));
     const close = outcomes.flatMap((o) => (o.status === "done" && o.action.kind === "close_issue" ? [o.action] : []))[0];
     if (close) state.accepted = { at, close: close.state, comment: closedComment(close) };
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);

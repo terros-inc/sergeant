@@ -1,6 +1,7 @@
-import { commentIdFor, type BudgetStatus, type ProposedAction, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, type BudgetStatus, type ProposedAction, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { reviewWindowFeedback } from "./pr-wait.ts";
 import { latestAnswer, latestQuestion } from "./question.ts";
+import { recommendationLine, type StopCase } from "./stop-case.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
 // the window's start; spend is the reported cost of the window's finished runs and turns. When either
@@ -116,23 +117,42 @@ export function budgetStatus(input: {
   };
 }
 
-/** The one concise comment on exhaustion: why it stopped, where the work stands, and whether to continue. */
-export function budgetQuestion(situation: SituationReport, why: string): Extract<ProposedAction, { kind: "ask_human" }> {
-  const { budget, runs, pullRequests, recentTurns } = situation;
+/**
+ * The one comment on exhaustion: why it stopped, the case for the human's call (TECH-6021, stop-case.ts:
+ * what happened in the window, where the work stands and what is left, and the stop rubric's
+ * recommendation with its rule and estimated remaining cost), and whether to continue.
+ */
+export function budgetQuestion(situation: SituationReport, why: string, stop: StopCase): Extract<ProposedAction, { kind: "ask_human" }> {
+  const { budget } = situation;
   const unknown = budget.unknownCostRuns > 0 ? ` (cost unknown for ${budget.unknownCostRuns} run${budget.unknownCostRuns === 1 ? "" : "s"})` : "";
-  const lines = [
-    `Sergeant stopped this task: its budget is exhausted (${why}). Running work was canceled.`,
+  const recommendation = recommendationLine({ ...stop.recommendation, reason: clip(stop.recommendation.reason, 1_000) });
+  const prefix = [
+    `Sergeant stopped this task: its budget is exhausted (${clip(why, 500)}). Running work was canceled.`,
     "",
-    `- Spent: $${budget.spentUsd.toFixed(2)} of $${budget.costLimitUsd.toFixed(2)} reported${unknown}.`,
-    `- Runs: ${runs.map((r) => `${r.role} ${r.status}`).join(", ") || "none"}.`,
-    `- PRs: ${pullRequests.map(describePr).join("; ") || "none"}.`,
-    ...(recentTurns.length > 0 ? [`- Last decision: ${recentTurns.at(-1)?.summary}`] : []),
+  ];
+  const suffix = [
+    recommendation,
     "",
     "Continue?",
   ];
+  const middle = [
+    `**What happened in this window:** ${stop.happened}`,
+    "",
+    "**Where it stands:**",
+    ...stop.standing.map((line) => `- ${line}`),
+    `- Spent: $${budget.spentUsd.toFixed(2)} of $${budget.costLimitUsd.toFixed(2)} reported${unknown}.`,
+    "",
+  ];
+  // Linear's limit must never remove the decision itself. Reserve the recommendation (including its
+  // rubric rule and estimate) and the question tail, and shorten only the narrative/standing first.
+  const fixed = [...prefix, ...suffix].join("\n");
+  const middleText = middle.join("\n");
+  const room = Math.max(0, 4_000 - fixed.length - 1);
+  const clipped = middleText.length > room ? `${middleText.slice(0, Math.max(0, room - 1))}…` : middleText;
+  const question = [...prefix, clipped, ...suffix].join("\n");
   return {
     kind: "ask_human",
-    question: lines.join("\n").slice(0, 4_000),
+    question,
     options: [
       "Extend: continue in a fresh window, from your reply, of the installation's budget",
       "Accept as-is: stop here and leave the work where it is",
@@ -140,9 +160,5 @@ export function budgetQuestion(situation: SituationReport, why: string): Extract
   };
 }
 
-const describePr = (p: PullRequestFacts) => {
-  const checks = p.checks.required.map((c) => `${c.name} ${c.state}`).join(", ") || "no required checks";
-  return `${p.url} ${p.state}${p.draft ? " draft" : ""}, ${checks}`;
-};
-
 const round = (usd: number) => Math.round(usd * 100) / 100;
+const clip = (text: string, length: number) => (text.length > length ? `${text.slice(0, length - 1)}…` : text);

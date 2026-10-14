@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { commentIdFor } from "@terros/sergeant-contracts";
@@ -53,7 +53,10 @@ test("exhausted wall time cancels the running worker, asks once, refuses effects
   expect(cancels).toBe(2);
   expect(posted).toHaveLength(1);
   expect(posted[0]).toMatch(/budget is exhausted \(wall time exhausted at /);
-  expect(posted[0]).toContain("worker canceled");
+  // TECH-6021: the case made from the ledger, and the rubric's call with its rule.
+  expect(posted[0]).toContain("**What happened in this window:** Worker was canceled at the deadline.");
+  expect(posted[0]).toContain("Left: a review, then Sergeant's merge.");
+  expect(posted[0]).toMatch(/\(rubric rule 3: /);
   expect(posted[0]).toContain("Extend: continue in a fresh window");
   // No turn until the human replied; then one in the fresh window, which starts. The old comment
   // before the question opened nothing.
@@ -64,6 +67,9 @@ test("exhausted wall time cancels the running worker, asks once, refuses effects
   expect(budget.priorRuns).toEqual(["run_w"]);
   expect(merged).toEqual([]);
   expect(started).toHaveLength(1);
+  // TECH-6021: the stop's recommendation and the human's reply are recorded side by side.
+  const recorded = (await readFile(join(dir, "stops.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l) as unknown);
+  expect(recorded).toEqual([expect.objectContaining({ kind: "stop", task: "UNF-1", rule: "3", call: "ask" }), expect.objectContaining({ kind: "reply", reply: "extend", replyId: "c1" })]);
 });
 
 test("observed spend at the limit refuses an otherwise allowed merge and asks instead", async () => {
@@ -84,6 +90,21 @@ test("observed spend at the limit refuses an otherwise allowed merge and asks in
   expect(merged).toEqual([]);
   expect(posted).toHaveLength(1);
   expect(posted[0]).toContain("spent $25.00 of $25.00");
+});
+
+test.each(["denied", "failed"] as const)("a %s budget question is not recorded as a stop", async (outcome) => {
+  const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  await scenario({
+    state: { startedAt, runIds: [] },
+    runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },
+    reasoner: async () => turnOf([]),
+    onPoll: async (poll, live) => {
+      if (poll >= 3) await writeFile(join(dir, "STOP"), "");
+      return outcome === "denied" && poll > 1 ? { ...live, issue: { ...live.issue, delegate: null } } : live;
+    },
+    ...(outcome === "failed" && { beforePost: () => { throw new Error("Linear unavailable"); } }),
+  });
+  await expect(readFile(join(dir, "stops.jsonl"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 test("a reasoning turn's own cost counts before its proposals run", async () => {

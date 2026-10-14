@@ -242,6 +242,9 @@ and the aggregates above.
 
 For review with this document; none is filed until the rubric is agreed.
 
+Steps 1 and 2 are implemented by TECH-6021: the budget question makes the case and the rubric's
+recommendation, and `sgt stops` reports agreement per rule (`docs/design/07-linear-contract.md` §6).
+
 1. **Make the case at the stop.** Build the window narrative from the ledger and include it, the
    remaining work and the rubric's recommendation in the budget question (`docs/design/07-linear-contract.md`
    §6 template). No change to when the window ends.

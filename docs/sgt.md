@@ -112,7 +112,7 @@ Approvers also have `sgt admin` (§7).
   The API's JSON is printed as it was sent, so it keeps fields newer than your `sgt`; an answer outside
   the contract your `sgt` knows is an error.
 - `sgt --help` lists every command: `login`, `logout`, `whoami`, `task list | show | wake | cancel`,
-  `run list | show | report | cancel`, `account …`, `repo list`, `retro`, `admin …`, and `update`.
+  `run list | show | report | cancel`, `account …`, `repo list`, `stops`, `retro`, `admin …`, and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
 - MCP: `sgt-mcp` puts the read-only commands in your AI assistant (§9).
 
@@ -122,7 +122,15 @@ A task works in a **budget window** of wall time and money: by default 120 minut
 task's start, or the installation's configured `budget` (a repository's own `budget` applies once the
 task has a run there). Wall time is hard; spend is the reported cost of the window's runs and
 reasoning turns. No count of turns or runs ends a task. Once either runs out, Sergeant cancels its runs
-and asks a **Question for you**: 1. Extend, 2. Accept as-is.
+and asks a **Question for you**: 1. Extend, 2. Accept as-is. The question makes the case (TECH-6021): what
+happened in the window, the PR's CI, review and mergeability with any open blocking findings and the
+steps left, and what Sergeant recommends (extend, stop, or no recommendation) under which rule of the
+stop rubric, with a rough estimate of the time and money left. A task only waiting on you (your merge,
+a re-review it asked for, a question) asks nothing.
+
+- **`sgt stops`** shows, for each rubric rule and recommendation, how many budget questions were asked,
+  how people replied (extend, stop, other), and how often the reply followed the recommendation.
+  `--json` adds every stop.
 
 - **Any human answer to a Sergeant question opens a fresh window**: it starts at the answer's time,
   with zero spend and the installation's budget as it is now (TECH-5059). The answer is the first human

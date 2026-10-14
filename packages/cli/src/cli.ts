@@ -7,6 +7,7 @@ import { adminCommands } from "./cli-admin.ts";
 import { type Command, type Context, call, callAnswer, caller, Failure, fail, type Flags, type Io, print, Usage } from "./cli-call.ts";
 import { repoCommands } from "./cli-repos.ts";
 import { runCommands } from "./cli-runs.ts";
+import { stopCommands } from "./cli-stops.ts";
 import { taskCommands } from "./cli-tasks.ts";
 import { linearLogin } from "./login.ts";
 import { CHECKOUT, update } from "./update.ts";
@@ -38,6 +39,8 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   run report <run>                   the run's raw Markdown report
   run cancel <run> [--reason …]
   repo list                          the enrolled repositories and how Sergeant merges in each
+  stops                              budget stops per stop-rubric rule: how humans replied, and how
+                                     often they followed Sergeant's recommendation
   retro                              ask Sergeant for a retro across tasks now (after a big change, say);
                                      it is posted as a document in the Sergeant project
   account list                       model accounts runs may use: name, provider, whose, what each paid for
@@ -75,13 +78,14 @@ Markdown) for run report, {"api","signedOut"} for logout, {"version"} for update
 -v/--version prints Sergeant's version (from git) and exits without an API call.`;
 
 // Each command group has its own module (cli-tasks.ts, cli-runs.ts, cli-accounts.ts, cli-admin.ts,
-// cli-repos.ts) over the shared API-call plumbing in cli-call.ts; signing in, out, updating, and retro are here.
+// cli-repos.ts, cli-stops.ts) over the shared API-call plumbing in cli-call.ts; signing in, out, updating, and retro are here.
 const commands: Record<string, Command> = {
   ...taskCommands,
   ...runCommands,
   ...accountCommands,
   ...adminCommands,
   ...repoCommands,
+  ...stopCommands,
   login: {
     args: 0,
     run: async (ctx) => {
