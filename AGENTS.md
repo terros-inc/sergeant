@@ -10,10 +10,12 @@ synthetic placeholders (`C.example`, `user@example.test`, "Acme Solar") and desc
 generically ("a customer's CRM sync sent a false alert"). A Linear issue's real case stays in Linear.
 A pushed PR stays public record even after an edit, so check before you push: `git config
 core.hooksPath .githooks` turns on the pre-push check, which CI (`public-data.yml`) repeats. Both
-read the customer-name denylist from `PUBLIC_DATA_DENYLIST`, kept privately and never committed here.
-The check (`packages/runner/container/check-public-data.mjs`) reads every commit's message, added
-lines and file paths, merge commits included (what a merge adds beyond git's own merge of its
-parents). It flags a Terros ID by this exact rule: a prefix `C`, `U`, `Program`, `Account`, `Role`,
+read the customer-name denylist from `PUBLIC_DATA_DENYLIST`, kept privately and never committed here;
+in CI only the default branch's copy of the check ever gets it (a `pull_request_target` job that reads
+the PR's commits as data and skips fork PRs), so never give that secret to a step that runs PR code.
+The check (`packages/runner/container/check-public-data.mjs`) reads every commit's message, author and
+committer, added lines (binary files as text) and file paths (renames too), merge commits included
+(what a merge adds beyond git's own merge of its parents). It flags a Terros ID by this exact rule: a prefix `C`, `U`, `Program`, `Account`, `Role`,
 `Group` or `Team`, not after a letter, digit, `_` or `.`; then `.` or `:`; then a key of 4 or more
 letters, digits, `_` or `-`, not followed by `(`, that names no placeholder (example, placeholder,
 sample, fake, test, dummy) and has a digit or mixes case with two or more capitals. So `C.example`,

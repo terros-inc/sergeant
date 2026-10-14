@@ -52,14 +52,19 @@ Every clone a worker pushes from carries a `pre-push` hook from the image's git 
 (`container/git-template`): the host clones with `git clone --template`, and a clone the agent makes
 in the container gets it from the image's `init.templateDir`. Unless GitHub reports the repository
 private, the hook runs `container/check-public-data.mjs` (copied into the image) over the branch name
-and every commit the remote lacks, merge commits included: their messages, added lines (for a merge,
-what it adds beyond git's own merge of its parents), and file paths. It refuses Terros IDs (the exact
+and every commit the remote lacks, merge commits included: their messages, author and committer
+names, added lines (binary files read as text; for a merge, what it adds beyond git's own merge of
+its parents), and file paths, renames included. It refuses Terros IDs (the exact
 rule is in the script and `AGENTS.md`), emails, phone numbers, and the denylisted customer names, and lets synthetic placeholders
-(`C.example`, `user@example.test`) through. It never prints a denylisted name. A repository that sets
+(`C.example`, `user@example.test`) through. It never prints a denylisted name, nor a file path that
+holds customer data. A two-character name (`3M`) matches only in its listed case. A repository that sets
 its own `core.hooksPath` replaces the hook, and `git push --no-verify` skips it; the repository's CI
 and Sergeant's reviewer are the gates after it. PR titles and bodies are not pushes, so CI and the
 reviewer check those. The same script is this repository's CI check (`.github/workflows/public-data.yml`)
-and its pre-push hook (`.githooks/pre-push`).
+and its pre-push hook (`.githooks/pre-push`). In CI the denylist secret reaches only the default
+branch's copy of the script: a `pull_request_target` job checks out the default branch, fetches the
+PR's commits as git objects only, and runs for same-repository PRs only; the `pull_request` job runs
+the PR's own copy with no secret. `src/public-data-workflow.test.ts` asserts that shape.
 
 A reviewer's token is read-only and used only on the host to read the PR and check out its exact
 head; it never enters the reviewer's container. A run gets no host home, AWS, `gh` login, SSH,

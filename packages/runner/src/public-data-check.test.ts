@@ -141,3 +141,69 @@ test("with no denylist it still checks IDs and says names went unchecked", () =>
   r.commit("a.md", "Zephyr Roofing\n");
   expect(check(r.dir, ["range", r.base, "HEAD"], "", "")).toMatchObject({ code: 0, out: expect.stringMatching(/no customer-name denylist/) });
 });
+
+test("binary files are read as text, a .gitattributes mark hides nothing, and a `++ ` line is an added line", () => {
+  const r = repo();
+  r.commit("logo.bin", `\0\x01PNG\nowner ${COMPANY_ID}\n\0`);
+  expect(check(r.dir, ["range", r.base, "HEAD"]).out).toMatch(/logo\.bin:2: Terros ID/);
+
+  const a = repo();
+  a.commit(".gitattributes", "*.md -diff\n");
+  a.commit("notes.md", "Zephyr Roofing\n");
+  expect(check(a.dir, ["range", a.base, "HEAD"]).out).toMatch(/notes\.md:1: denylisted customer name/);
+
+  // An added line that starts with `++ ` shows as `+++ ` in the diff, like a file header.
+  const p = repo();
+  p.commit("counter.c", `int a = 1;\n++ zephyr roofing;\n++ ${COMPANY_ID};\n`);
+  const out = check(p.dir, ["range", p.base, "HEAD"]).out;
+  expect(out).toMatch(/counter\.c:2: denylisted customer name/);
+  expect(out).toMatch(/counter\.c:3: Terros ID/);
+});
+
+test("a rename-only or empty file's path is checked, and a path with customer data is never printed", () => {
+  const r = repo();
+  r.git("mv", "README.md", "zephyr-roofing-notes.md");
+  r.git("commit", "--quiet", "-m", "Rename");
+  const renamed = check(r.dir, ["range", r.base, "HEAD"]);
+  expect(renamed.code).toBe(1);
+  expect(renamed.out).toMatch(/\(a file path with customer data\) \(file path\): denylisted customer name/);
+  expect(renamed.out).not.toMatch(/zephyr/i);
+
+  const e = repo();
+  e.commit("ZephyrRoofing.md", "");
+  expect(check(e.dir, ["range", e.base, "HEAD"]).out).toMatch(/\(file path\): denylisted customer name/);
+
+  // A line finding in such a file does not print its path either.
+  const l = repo();
+  l.commit("zephyr_roofing.ts", `const id = "${COMPANY_ID}";\n`);
+  const out = check(l.dir, ["range", l.base, "HEAD"]).out;
+  expect(out).toMatch(/\(a file path with customer data\):1: Terros ID/);
+  expect(out).not.toMatch(/zephyr/i);
+});
+
+test("a commit's author and committer are checked, but their own email address is not a finding", () => {
+  // The environment's GIT_AUTHOR_* and GIT_COMMITTER_* would override a -c user.name, so set those.
+  const commitAs = (dir: string, name: string, email: string) =>
+    execFileSync("git", ["commit", "--quiet", "--allow-empty", "-m", "Empty"], {
+      cwd: dir,
+      env: { ...process.env, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.test" },
+    });
+  const r = repo();
+  commitAs(r.dir, "Zephyr Roofing", "rep@example.test");
+  expect(check(r.dir, ["range", r.base, "HEAD"]).out).toMatch(/author\/committer:1: denylisted customer name/);
+  const e = repo();
+  commitAs(e.dir, "A Developer", EMAIL);
+  expect(check(e.dir, ["range", e.base, "HEAD"])).toEqual({ code: 0, out: "" });
+});
+
+test("a two-character denylist entry is checked in its listed case, and a one-character entry is an error", () => {
+  const r = repo();
+  r.commit("vendors.md", "Parts from 3M and from Zq.\nzq is lowercase here.\n");
+  const out = check(r.dir, ["range", r.base, "HEAD"], "", "Zq").out;
+  expect(out).toMatch(/vendors\.md:1: denylisted customer name/);
+  expect(out).not.toMatch(/vendors\.md:2:/);
+  expect(check(r.dir, ["range", r.base, "HEAD"], "", "3M").code).toBe(1);
+  const bad = check(r.dir, ["range", r.base, "HEAD"], "", "Zephyr Roofing,Q");
+  expect(bad.code).toBe(2);
+  expect(bad.out).not.toMatch(/Zephyr/);
+});
