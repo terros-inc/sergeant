@@ -8,7 +8,8 @@ import { outstandingChangeRequests, type MergePolicy, type PullRequestFacts, typ
 // facts and turn ledger; nothing here launches a run or reads anything new.
 
 export type StopCall = "extend" | "stop" | "ask";
-export type StopRecommendation = { call: StopCall; rule: "1" | "2" | "3"; reason: string; estimate?: string };
+export type StopRecommendation = { call: StopCall; rule: "1" | "2" | "3"; reason: string; estimate: string };
+export type RemainingStep = { label: string; kind: "worker" | "mechanical" | "reviewer" | "ci" | "merge" };
 
 /** One window of the task as the ledger has it: its runs in start order, and the steers each got. */
 export type WindowFacts = {
@@ -32,11 +33,12 @@ const MIN = { review: 5, worker: 17, mechanical: 6, ci: 5, merge: 2 } as const;
 /** The rubric's recommendation for this window, with the rule that decided it. */
 export function recommend(w: WindowFacts): StopRecommendation {
   const stop = ruleOne(w);
-  if (stop) return { call: "stop", rule: "1", reason: stop };
+  if (stop) return { call: "stop", rule: "1", reason: stop, estimate: remainingEstimate(w) };
   const capShare = w.situation.budget.spentUsd / w.situation.budget.costLimitUsd;
   const obvious = capShare < 0.8 ? ruleTwo(w) : undefined;
   if (obvious) return { call: "extend", rule: "2", ...obvious };
-  return { rule: "3", ...ruleThree(w) };
+  const fallback = ruleThree(w);
+  return { rule: "3", ...fallback, estimate: fallback.estimate ?? remainingEstimate(w) };
 }
 
 /** Rule 1: the clauses that recommend stopping, or undefined when none holds. */
@@ -100,6 +102,39 @@ function ruleThree(w: WindowFacts): { call: StopCall; reason: string; estimate?:
     return { call: "extend", reason: "an approved PR waits only on CI before Sergeant merges it", estimate: estimate(w, "one CI check and merge", MIN.ci + MIN.merge, { turns: 1 }) };
   }
   return { call: "ask", reason: "no rubric rule settles it; the case above is for you to judge" };
+}
+
+/** The concrete remaining steps shared by the standing text and fallback cost estimates. */
+export function stepsLeft(w: WindowFacts, pr: PullRequestFacts): RemainingStep[] {
+  const review = headVerdict(w.situation.runs, pr);
+  const findings = review?.verdict === "changes_requested" ? review.findings.filter((f) => f.severity === "blocking") : [];
+  const humans = outstandingChangeRequests(pr.humanFeedback);
+  const failed = pr.checks.required.filter((c) => c.state === "failed").map((c) => c.name);
+  const steps: RemainingStep[] = [];
+  if (findings.length) steps.push({ label: `fix ${findings.length} blocking finding${findings.length === 1 ? "" : "s"}`, kind: "worker" });
+  if (humans.length) steps.push({ label: `address ${humans.join(", ")}'s requested changes`, kind: "worker" });
+  if (failed.length) steps.push({ label: `fix failing checks (${failed.join(", ")})`, kind: "worker" });
+  if (pr.mergeableState === "dirty") steps.push({ label: "resolve merge conflicts", kind: "mechanical" });
+  else if (pr.mergeableState === "behind") steps.push({ label: "rebase onto the base branch", kind: "mechanical" });
+  if (pr.draft) steps.push({ label: "mark the PR ready for review", kind: "mechanical" });
+  if (!review || steps.length) steps.push({ label: review ? "a re-review" : "a review", kind: "reviewer" });
+  if (pr.checks.required.some((c) => c.state === "pending" || c.state === "missing")) steps.push({ label: "CI to finish", kind: "ci" });
+  steps.push({ label: w.mergePolicy(pr.repo) === "sergeant" ? "Sergeant's merge" : "a human's merge (mergePolicy human)", kind: "merge" });
+  return steps;
+}
+
+function remainingEstimate(w: WindowFacts): string {
+  const open = w.situation.pullRequests.filter((p) => p.state === "open");
+  const steps = open.length
+    ? open.flatMap((pr) => stepsLeft(w, pr))
+    : [
+        { label: "a worker to finish the change and open its PR", kind: "worker" as const },
+        { label: "a review", kind: "reviewer" as const },
+        { label: "a merge", kind: "merge" as const },
+      ];
+  const counts = (kind: RemainingStep["kind"]) => steps.filter((s) => s.kind === kind).length;
+  const minutes = counts("worker") * MIN.worker + counts("mechanical") * MIN.mechanical + counts("reviewer") * MIN.review + counts("ci") * MIN.ci + counts("merge") * MIN.merge;
+  return estimate(w, steps.map((s) => s.label).join(", then "), minutes, { worker: counts("worker"), reviewer: counts("reviewer"), turns: counts("merge") });
 }
 
 /** Worker runs in the window that followed a review requesting changes: one fix cycle each. */
@@ -173,9 +208,9 @@ function estimate(w: WindowFacts, what: string, minutes: number, steps: { worker
     return costs.length ? costs.reduce((a, b) => a + b, 0) / costs.length : undefined;
   };
   const turn = w.turns > 0 ? w.turnCostUsd / w.turns : 0;
-  const parts = [steps.worker ? average("worker") : 0, steps.reviewer ? average("reviewer") : 0];
+  const parts = [steps.worker ? (average("worker") ?? undefined) : 0, steps.reviewer ? (average("reviewer") ?? undefined) : 0];
   const known = parts.every((p) => p !== undefined);
-  const usd = parts.reduce<number>((a, p) => a + (p ?? 0), 0) + steps.turns * turn;
+  const usd = (parts[0] ?? 0) * (steps.worker ?? 0) + (parts[1] ?? 0) * (steps.reviewer ?? 0) + steps.turns * turn;
   const money = known ? `$${Math.max(1, Math.round(usd))}` : "a cost not yet known (no finished run of that role to go by)";
   return `${what}, about ${minutes} min and ${money}`;
 }

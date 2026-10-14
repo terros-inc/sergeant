@@ -198,9 +198,11 @@ thresholds as written there, applied in order, the first match deciding:
   request, a run canceled in flight that was not the window's first and is its role's first canceled
   attempt, or an approved PR Sergeant may merge waiting only on CI; otherwise it makes no recommendation.
 
-The estimate of what is left is rough on purpose: step lengths from the TECH-5922 measurement (reviewer
-5 min, worker 17, a mechanical fix 6, CI 5, a merge 2) and money from this task's own finished runs of
-each role and the window's turns; with no finished run of a role to go by, the cost is said to be unknown.
+Every outcome, including rule 1's stop and rule 3's no-recommendation fallback, estimates what is left.
+The estimate is rough on purpose: it uses the same concrete remaining-step list shown above, with step
+lengths from the TECH-5922 measurement (reviewer 5 min, worker 17, a mechanical fix 6, CI 5, a merge 2)
+and money from this task's own finished runs of each role and the window's turns; with no finished run
+of a role to go by, the cost is said to be unknown. A draft PR's steps include marking it ready for review.
 
 Each question's call and rule is recorded in the task's `stops.jsonl`, and the human's reply to it next
 to it as extend (`1`, extend, continue), stop (`2`, stop, accept as-is, or a reply reasoning ended the

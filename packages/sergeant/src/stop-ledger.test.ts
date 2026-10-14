@@ -22,12 +22,12 @@ test("replies are recorded once against their stop, accept-as-is counts as a sto
   await Promise.all([mkdir(a), mkdir(b)]);
 
   await recordBudgetStop(a, "UNF-1", "q1", { call: "extend", rule: "2", reason: "only a merge", estimate: "a merge, about 2 min and $1" });
-  await recordBudgetStop(a, "UNF-1", "q1", { call: "extend", rule: "2", reason: "only a merge" }); // retried poll: once
+  await recordBudgetStop(a, "UNF-1", "q1", { call: "extend", rule: "2", reason: "only a merge", estimate: "a merge, about 2 min and $1" }); // retried poll: once
   const extended = thread([asked("q1", "2026-10-14T01:00:00.000Z")], [reply("c1", "2026-10-14T01:05:00.000Z", "1")]);
   await recordReply(a, extended);
   await recordReply(a, extended); // seen again: once
 
-  await recordBudgetStop(b, "UNF-2", "q2", { call: "extend", rule: "3", reason: "a first fix cycle" });
+  await recordBudgetStop(b, "UNF-2", "q2", { call: "extend", rule: "3", reason: "a first fix cycle", estimate: "one fix, about 17 min and $2" });
   const ambiguous = thread([asked("q2", "2026-10-14T02:00:00.000Z")], [reply("c2", "2026-10-14T02:05:00.000Z", "Hmm, why did the reviewer flag this?")]);
   await recordReply(b, ambiguous);
   await recordReply(b, ambiguous, true); // reasoning took it as accept-as-is

@@ -113,11 +113,12 @@ export async function checkHolds(
   // newer than the window's start does, so it opens one window once, across restarts too.
   const answer = latestAnswer(conversation);
   if (answer && Date.parse(answer.createdAt) > Date.parse(state.budget.since ?? state.startedAt)) {
+    // Record against the old window before save can fail after advancing it; measurement must not
+    // lose a reply just because persisting the fresh window needs a retry.
+    await recordReply(opts.dir, conversation).catch((e: Error) => log(`could not record the reply to the budget question: ${e.message}`));
     openWindow(state, answer.createdAt, configured);
     await save();
     log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
-    // TECH-6021: an answer to a budget question is recorded next to the rubric's recommendation.
-    await recordReply(opts.dir, conversation).catch((e: Error) => log(`could not record the reply to the budget question: ${e.message}`));
   }
   await openUnblockWindow(conversation, configured, ctx);
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a

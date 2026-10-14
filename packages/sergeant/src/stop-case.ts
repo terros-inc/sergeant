@@ -1,5 +1,5 @@
 import { outstandingChangeRequests, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
-import { fixCycles, headVerdict, recommend, type StopRecommendation, type WindowFacts } from "./stop-rubric.ts";
+import { fixCycles, headVerdict, recommend, stepsLeft, type StopRecommendation, type WindowFacts } from "./stop-rubric.ts";
 
 // TECH-6021: the case Sergeant makes when a budget window runs out, so a human can decide from the
 // question alone: what happened in the window, how close the work is and what is left, and the stop
@@ -61,23 +61,9 @@ export function standing(w: WindowFacts): string[] {
     const verdict = !review ? "none at this head" : review.verdict === "approve" ? "approved at this head" : review.verdict === "needs_human" ? "reviewer asked for a human" : `changes requested (${findings.length} blocking)`;
     const lines = [`${pr.url}: ${pr.draft ? "draft, " : ""}CI ${ci(pr)}; review: ${verdict}${humans.length ? `; changes requested by ${humans.join(", ")}` : ""}; mergeable: ${pr.mergeableState}.`];
     if (findings.length) lines.push(`Open blocking findings: ${findings.slice(0, 3).map((f) => `${f.location ? `${f.location}: ` : ""}${clip(f.description)}`).join("; ")}${findings.length > 3 ? `; and ${findings.length - 3} more` : ""}.`);
-    lines.push(`Left: ${stepsLeft(w, pr, Boolean(review), findings.length, humans).join(", then ")}.`);
+    lines.push(`Left: ${stepsLeft(w, pr).map((step) => step.label).join(", then ")}.`);
     return lines;
   });
-}
-
-function stepsLeft(w: WindowFacts, pr: PullRequestFacts, reviewed: boolean, blocking: number, humans: string[]): string[] {
-  const failed = pr.checks.required.filter((c) => c.state === "failed").map((c) => c.name);
-  const steps: string[] = [];
-  if (blocking) steps.push(`fix ${blocking} blocking finding${blocking === 1 ? "" : "s"}`);
-  if (humans.length) steps.push(`address ${humans.join(", ")}'s requested changes`);
-  if (failed.length) steps.push(`fix failing checks (${failed.join(", ")})`);
-  if (pr.mergeableState === "dirty") steps.push("resolve merge conflicts");
-  else if (pr.mergeableState === "behind") steps.push("rebase onto the base branch");
-  if (!reviewed || steps.length) steps.push(reviewed ? "a re-review" : "a review");
-  if (pr.checks.required.some((c) => c.state === "pending" || c.state === "missing")) steps.push("CI to finish");
-  steps.push(w.mergePolicy(pr.repo) === "sergeant" ? "Sergeant's merge" : "a human's merge (mergePolicy human)");
-  return steps;
 }
 
 const ci = (pr: PullRequestFacts) => {

@@ -68,7 +68,9 @@ test("rule 1 wins over an obvious extend: repeated fix cycles, a recurring findi
 
   // At 80% of the cap, an approved mergeable PR is still an ask, not an extend; with no PR ready, a stop.
   expect(recommend(facts([worker("run_w"), reviewer("run_r", "approve")], { spentUsd: 20 }))).toMatchObject({ rule: "3" });
-  expect(recommend(facts([worker("run_w", "canceled")], { spentUsd: 20, pr: { draft: true } }))).toMatchObject({ call: "stop", rule: "1", reason: expect.stringContaining("80%") });
+  const capped = facts([worker("run_w", "canceled")], { spentUsd: 20, pr: { draft: true } });
+  expect(recommend(capped)).toMatchObject({ call: "stop", rule: "1", reason: expect.stringContaining("80%"), estimate: expect.stringContaining("mark the PR ready for review") });
+  expect(stopCase(capped).standing.at(-1)).toContain("Left: mark the PR ready for review, then a review");
 
   // A worker steered twice that never reported.
   expect(recommend(facts([worker("run_w", "canceled")], { steers: { run_w: 2 } }))).toMatchObject({ call: "stop", rule: "1", reason: expect.stringContaining("steered 2 times without producing a report") });
@@ -118,4 +120,14 @@ test("first review is classified only from worker and review records for the cur
   const staleReview = reviewer("run_r", "approve");
   if (staleReview.role === "reviewer" && staleReview.report) staleReview.report.reviewed[0]!.headSha = staleHead;
   expect(recommend(facts([worker("run_w", "succeeded", 3), staleReview]))).toMatchObject({ rule: "2", call: "extend" });
+});
+
+test("rule 3's undecided fallback still estimates every remaining step", () => {
+  const r = recommend(facts([worker("run_w", "canceled")]));
+  expect(r).toEqual({
+    call: "ask",
+    rule: "3",
+    reason: "no rubric rule settles it; the case above is for you to judge",
+    estimate: "a review, then Sergeant's merge, about 7 min and a cost not yet known (no finished run of that role to go by)",
+  });
 });
