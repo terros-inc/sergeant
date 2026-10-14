@@ -70,8 +70,10 @@ function ruleTwo(w: WindowFacts): { reason: string; estimate: string } | undefin
     return { reason: "only a conflict-free rebase of an approved PR is left", estimate: estimate(w, "a rebase, a re-review and merge", MIN.mechanical + MIN.review + MIN.ci + MIN.merge, { worker: 1, reviewer: 1, turns: 3 }) };
   }
   const worker = w.runs.filter((r) => r.role === "worker").at(-1);
-  const finished = worker?.status === "succeeded" && worker.report?.pullRequests.some((p) => p.repo === pr.repo && p.number === pr.number);
-  const reviewed = w.situation.runs.some((r) => r.role === "reviewer" && r.report?.reviewed.some((s) => s.repo === pr.repo && s.number === pr.number));
+  const finished = worker?.status === "succeeded" && worker.report?.pullRequests.some((p) => p.repo === pr.repo && p.number === pr.number && p.headSha === pr.headSha);
+  const reviewed = w.situation.runs.some(
+    (r) => r.role === "reviewer" && r.report?.reviewed.some((s) => s.repo === pr.repo && s.number === pr.number && s.headSha === pr.headSha),
+  );
   if (finished && !reviewed && !humanBlock) {
     return { reason: "the worker finished and only a first review of its PR is next", estimate: estimate(w, "a first review", MIN.review, { reviewer: 1, turns: 1 }) };
   }

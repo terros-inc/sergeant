@@ -221,7 +221,7 @@ export async function holdForBudget(
     const asked = await askHuman(budgetQuestion(situation, exhausted.reason, stop), situation, deps, check.budgetKey);
     const { call, rule } = stop.recommendation;
     log(`budget exhausted (${exhausted.reason}): asking whether to continue, recommending ${call} (rubric rule ${rule}): ${describeOutcome(asked)}`);
-    if (asked.status !== "failed") {
+    if (asked.status === "done") {
       await recordBudgetStop(opts.dir, conversation.issue.identifier, commentIdFor(check.budgetKey), stop.recommendation).catch((e: Error) => log(`could not record the stop's recommendation: ${e.message}`));
     }
     return true;

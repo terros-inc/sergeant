@@ -85,6 +85,21 @@ test("a first fix cycle cut off by the deadline recommends extend under rule 3, 
   expect(question).toContain("**Sergeant recommends extend** (rubric rule 3: a first fix cycle after a reviewer's change request). Remaining: one fix, a re-review and merge, about 29 min and $5.");
 });
 
+test("a long stop case keeps the recommendation, estimate and question tail", () => {
+  const w = facts([worker("run_w", "succeeded", 3)]);
+  const stop = stopCase(w);
+  stop.happened = "A".repeat(5_000);
+  stop.standing = ["B".repeat(5_000)];
+  stop.recommendation.reason = `the current head needs a first review ${"C".repeat(5_000)}`;
+  const action = budgetQuestion(w.situation, "wall time exhausted", stop);
+  const question = action.question;
+  expect(question.length).toBeLessThanOrEqual(4_000);
+  expect(question).toContain("**Sergeant recommends extend** (rubric rule 2: the current head needs a first review");
+  expect(question).toContain("Remaining: a first review, about 5 min and a cost not yet known");
+  expect(question).toMatch(/Continue\?$/);
+  expect(action.options).toEqual([expect.stringMatching(/^Extend:/), expect.stringMatching(/^Accept as-is:/)]);
+});
+
 test("a finished worker's PR awaiting its first review is rule 2; a worker that cannot get an input is rule 1's stop-or-answer", () => {
   expect(recommend(facts([worker("run_w", "succeeded", 3)]))).toMatchObject({ call: "extend", rule: "2", estimate: "a first review, about 5 min and a cost not yet known (no finished run of that role to go by)" });
 
@@ -92,4 +107,15 @@ test("a finished worker's PR awaiting its first review is rule 2; a worker that 
   if (blocked.role === "worker" && blocked.report) blocked.report = { ...blocked.report, outcome: "blocked", unreadableInputs: ["https://example.com/spec.pdf"] };
   const r = recommend(facts([blocked]));
   expect(r).toMatchObject({ call: "stop", rule: "1", reason: "the work cannot finish without inputs it could not read: https://example.com/spec.pdf" });
+});
+
+test("first review is classified only from worker and review records for the current head", () => {
+  const staleHead = "b".repeat(40);
+  const staleWorker = worker("run_w", "succeeded", 3);
+  if (staleWorker.role === "worker" && staleWorker.report) staleWorker.report.pullRequests[0]!.headSha = staleHead;
+  expect(recommend(facts([staleWorker]))).toMatchObject({ rule: "3", call: "ask" });
+
+  const staleReview = reviewer("run_r", "approve");
+  if (staleReview.role === "reviewer" && staleReview.report) staleReview.report.reviewed[0]!.headSha = staleHead;
+  expect(recommend(facts([worker("run_w", "succeeded", 3), staleReview]))).toMatchObject({ rule: "2", call: "extend" });
 });

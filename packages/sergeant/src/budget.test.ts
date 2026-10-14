@@ -92,6 +92,21 @@ test("observed spend at the limit refuses an otherwise allowed merge and asks in
   expect(posted[0]).toContain("spent $25.00 of $25.00");
 });
 
+test.each(["denied", "failed"] as const)("a %s budget question is not recorded as a stop", async (outcome) => {
+  const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  await scenario({
+    state: { startedAt, runIds: [] },
+    runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },
+    reasoner: async () => turnOf([]),
+    onPoll: async (poll, live) => {
+      if (poll >= 3) await writeFile(join(dir, "STOP"), "");
+      return outcome === "denied" && poll > 1 ? { ...live, issue: { ...live.issue, delegate: null } } : live;
+    },
+    ...(outcome === "failed" && { beforePost: () => { throw new Error("Linear unavailable"); } }),
+  });
+  await expect(readFile(join(dir, "stops.jsonl"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+});
+
 test("a reasoning turn's own cost counts before its proposals run", async () => {
   const started: string[] = [];
   const { posted } = await scenario({
