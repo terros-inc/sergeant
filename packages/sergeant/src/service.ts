@@ -13,6 +13,7 @@ import { newWork, resumableTasks } from "./service-intake.ts";
 import { lockStateDir } from "./service-lock.ts";
 import { createServiceServer } from "./service-http.ts";
 import type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
+import { OwnerReadPacer } from "./owner-pace.ts";
 import { serviceWebhooks } from "./service-webhooks.ts";
 import { Wake } from "./wake.ts";
 import { webhookHealth } from "./webhook-health.ts";
@@ -64,6 +65,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const blocked = new Map<string, string>();
   const byRank = (a: string, b: string) => (rank.get(a) ?? rank.size) - (rank.get(b) ?? rank.size);
   const wakes = new Map<string, Wake>();
+  // TECH-5974: one pacer for all loops, so rechecks due on the same poll tick reread Linear spread out.
+  const ownerReads = new OwnerReadPacer(opts.ownerReadSpacingSeconds !== undefined ? opts.ownerReadSpacingSeconds * 1000 : undefined);
   const wakeOf = (issueId: string) => {
     const wake = wakes.get(issueId) ?? new Wake();
     wakes.set(issueId, wake);
@@ -111,6 +114,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
         log: (line) => log(`${issueId}: ${line}`),
         signal: abort.signal,
         wake: wakeOf(issueId),
+        ownerReads,
         slot,
       },
       { ...deps, exclusive: (step) => locked(issueId, step) },

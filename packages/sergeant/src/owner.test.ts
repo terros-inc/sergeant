@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -136,17 +136,21 @@ test("an owner with no usable account starts nothing and is asked to fix it, onc
   expect(runIds).toEqual([]);
 });
 
-test("an undelegation and redelegation missed between polls, even by the owner, stops the task: a new episode is checked afresh", async () => {
+test("a redelegation, even by the owner, stops the task once the proof is rechecked: a new episode is checked afresh", async () => {
   let check: TaskOwnerCheck = { owner: ann, delegatedAt: "2026-10-04T06:01:00.000Z" };
   const t = await task(() => check, async () => {});
   await t.loop();
   expect(t.starts.map((s) => s.owner)).toEqual([ann]);
 
-  // No webhook seen: the assignee is unchanged, but Linear's history shows a newer delegation.
+  // The assignee is unchanged, but Linear's history shows a newer delegation. TECH-5974: the persisted proof
+  // is not redone until its recheck window falls due or a delegation webhook clears it; age it past the
+  // window to model the safety-net recheck (in serve a delegation webhook clears it at once).
+  const file = join(t.dir, "state.json");
+  await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, "utf8")), ownerProvenAt: "2026-10-04T05:00:00.000Z" }));
   check = { owner: ann, delegatedAt: "2026-10-04T06:09:00.000Z" };
   expect(await t.loop()).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("delegated to Sergeant again") });
   expect(t.starts).toHaveLength(1);
-  expect(existsSync(join(t.dir, "state.json"))).toBe(false);
+  expect(existsSync(file)).toBe(false);
 });
 
 test("an active task's owner proof is reread: someone else delegating stops it, and unreadable history throws so nothing starts", async () => {

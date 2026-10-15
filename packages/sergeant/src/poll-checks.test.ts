@@ -6,7 +6,7 @@ import type { BudgetStatus, Conversation } from "@terros/sergeant-contracts";
 import { DEFAULT_BUDGET } from "./budget.ts";
 import type { Ports } from "./execute.ts";
 import { runLoop } from "./loop.ts";
-import { checkHolds, checkStop, OWNER_RECHECK_MS, type PollContext } from "./poll-checks.ts";
+import { checkHolds, checkStop, OWNER_RECHECK_JITTER_MS, OWNER_RECHECK_MS, type PollContext } from "./poll-checks.ts";
 import { Slot } from "./slots.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -120,11 +120,15 @@ test("a poll rereads the owner's delegation history at most once per OWNER_RECHE
     const ctx = { opts: { issueId: "T-1", enrolledRepositories: [] }, deps, state: { owner: { id: "user-ann", name: "Ann", admittedAt: now } }, log: () => {}, save: async () => {} } as unknown as PollContext;
 
     expect(await checkStop(live, [], ctx)).toBeUndefined();
+    expect(reads).toBe(1);
+    // The proof is kept on the task's state, so a restart that reloads it does not redo a still-valid one.
+    expect(ctx.state.ownerProvenAt).toBeTypeOf("string");
     vi.advanceTimersByTime(OWNER_RECHECK_MS - 1);
     expect(await checkStop(live, [], ctx)).toBeUndefined();
     expect(reads).toBe(1);
 
-    vi.advanceTimersByTime(1);
+    // Past the recheck window and its per-issue jitter it is reread once more (the missed-webhook safety net).
+    vi.advanceTimersByTime(OWNER_RECHECK_JITTER_MS + 1);
     expect(await checkStop(live, [], ctx)).toBeUndefined();
     expect(reads).toBe(2);
   } finally {

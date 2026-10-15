@@ -153,13 +153,35 @@ test("a signed event wakes the loop watching its issue or PR; an unsigned or unw
   await vi.waitFor(() => expect(counts.turns).toEqual(["UNF-1", "UNF-1"]), { timeout: 2_000 });
 });
 
-test("a Linear webhook naming a running issue rechecks ownership without waiting for the fallback", async () => {
+test("a Linear delegation event rechecks ownership now; a plain comment does not (TECH-5974)", async () => {
   const { counts, post } = await start();
   const before = counts.ownerReads;
 
+  // A plain comment wakes the loop to reread the conversation, but does not redo the delegation history.
   expect(await post("linear", { type: "Comment", action: "create", data: { issueId: "i-UNF-1" } })).toBe(200);
+  await sleep(200);
+  expect(counts.ownerReads).toBe(before);
 
+  // A delegation change to the V2 agent may have changed who owns the task, so the history is reread now.
+  expect(await post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-1", identifier: "UNF-1", delegateId: agent.id }, updatedFrom: { delegateId: "someone-else" } })).toBe(200);
   await vi.waitFor(() => expect(counts.ownerReads).toBe(before + 1), { timeout: 2_000 });
+});
+
+test("a burst of delegation events for one task causes at most one ownership reread (TECH-5974)", async () => {
+  const { counts, post } = await start();
+  const before = counts.ownerReads;
+
+  // Ten delegation events, a tight burst and then a trickle spanning several webhook gaps: without the
+  // per-task debounce each gap would redo the history read.
+  const delegation = () => post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-1", identifier: "UNF-1", delegateId: agent.id }, updatedFrom: { delegateId: "someone-else" } });
+  await Promise.all(Array.from({ length: 5 }, delegation));
+  for (let i = 0; i < 5; i++) {
+    await sleep(webhookGapMs / 2);
+    expect(await delegation()).toBe(200);
+  }
+  await vi.waitFor(() => expect(counts.ownerReads).toBeGreaterThan(before), { timeout: 2_000 });
+  await sleep(webhookGapMs * 6);
+  expect(counts.ownerReads - before).toBe(1);
 });
 
 test("a delegation to the V2 agent runs an intake now, which admits the issue", async () => {
@@ -180,6 +202,6 @@ test("a delegation to the V2 agent runs an intake now, which admits the issue", 
 test("an issue update that touches nothing Sergeant reads is dropped", () => {
   const issue = { id: "i-UNF-1", identifier: "UNF-1" };
   expect(linearNudge({ type: "Issue", action: "update", data: issue, updatedFrom: { priority: 2, sortOrder: 1 } }, agent.id)).toBeUndefined();
-  expect(linearNudge({ type: "Issue", action: "update", data: issue, updatedFrom: { stateId: "s" } }, agent.id)).toEqual({ keys: ["i-UNF-1", "UNF-1"], intake: false });
+  expect(linearNudge({ type: "Issue", action: "update", data: issue, updatedFrom: { stateId: "s" } }, agent.id)).toEqual({ keys: ["i-UNF-1", "UNF-1"], intake: false, recheckOwner: false });
   expect(linearNudge({ type: "Reaction", action: "create", data: { issueId: "i-UNF-1" } }, agent.id)).toBeUndefined();
 });

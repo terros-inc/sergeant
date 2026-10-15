@@ -37,6 +37,12 @@ const TaskState = z.looseObject({
    * notes an app delegation accepted on a suspicious display-name match (TECH-5280).
    */
   owner: z.looseObject({ id: z.string().min(1), name: z.string(), admittedAt: z.iso.datetime(), delegatedAt: z.string().optional(), warning: z.string().optional() }).optional(),
+  /**
+   * TECH-5974: when this task last proved its owner's delegation from Linear's history (poll-checks.ts).
+   * Persisted so a restart does not reread a still-valid proof; a delegation webhook clears it, and the
+   * recheck window is a safety net for a missed one. Absent until the first proof.
+   */
+  ownerProvenAt: z.iso.datetime().optional(),
   turns: z.number().int(),
   lastTurnAt: z.iso.datetime().optional(),
   /** What the last turn saw; an unchanged situation gets no new turn. */

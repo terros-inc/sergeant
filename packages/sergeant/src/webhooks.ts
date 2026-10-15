@@ -22,6 +22,13 @@ export type Nudge = {
   keys: string[];
   /** It may change which issues are delegated to the V2 agent. */
   intake: boolean;
+  /**
+   * TECH-5974: it may have changed who owns the task (its delegation to or from the V2 agent, or a new
+   * agent session), so the loop watching it rereads Linear's delegation history now. A plain comment,
+   * attachment, or relation leaves this false: the loop still wakes and rereads the conversation (which
+   * carries the live assignee), but it does not pay for a history read it has no reason to redo.
+   */
+  recheckOwner: boolean;
 };
 
 /** How a task loop names what it watches, and an event what it is about; case-insensitive repos. */
@@ -126,7 +133,7 @@ const LinearEvent = z.object({
 });
 
 /** Issue fields whose change can matter to a task; an update to only others (priority, sort order) is dropped. */
-const ISSUE_FIELDS = ["delegateId", "stateId", "title", "description", "labelIds", "archivedAt"];
+const ISSUE_FIELDS = ["delegateId", "assigneeId", "stateId", "title", "description", "labelIds", "archivedAt"];
 
 /**
  * The issue a Linear event is about, by id and identifier, for an issue change Sergeant could act on,
@@ -144,14 +151,14 @@ export function linearNudge(payload: unknown, agentUserId: string): Nudge | unde
       const changed = updatedFrom ? ISSUE_FIELDS.filter((f) => f in updatedFrom) : ISSUE_FIELDS;
       if (changed.length === 0) return undefined;
       const delegation = changed.includes("delegateId") && (data.delegateId === agentUserId || updatedFrom?.delegateId === agentUserId);
-      return { keys: ids(data.id, data.identifier), intake: delegation };
+      return { keys: ids(data.id, data.identifier), intake: delegation, recheckOwner: delegation };
     }
     case "Comment":
     case "Attachment":
     case "IssueRelation":
-      return data ? { keys: ids(data.issueId, data.issue?.id, data.issue?.identifier, data.relatedIssueId), intake: false } : undefined;
+      return data ? { keys: ids(data.issueId, data.issue?.id, data.issue?.identifier, data.relatedIssueId), intake: false, recheckOwner: false } : undefined;
     case "AgentSessionEvent":
-      return { keys: ids(agentSession?.issueId, agentSession?.issue?.id, agentSession?.issue?.identifier), intake: true };
+      return { keys: ids(agentSession?.issueId, agentSession?.issue?.id, agentSession?.issue?.identifier), intake: true, recheckOwner: true };
     default:
       return undefined;
   }
@@ -197,5 +204,6 @@ export function githubNudge(event: string, payload: unknown, enrolled: Set<strin
       ]),
     ],
     intake: false,
+    recheckOwner: false,
   };
 }

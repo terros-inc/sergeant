@@ -180,10 +180,14 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     watch(conversation.issue.linkedPullRequests);
     // Before the stop check (TECH-5082): a failure seen on the poll that stops the task is alerted too.
     await postAuthAlerts(conversation.issue.id, runs, conversation.agentComments, deps.linear, log);
-    if (opts.wake?.linear) {
-      delete ctx.ownerProvenAt;
-      opts.wake.linear = false;
+    // TECH-5974: a webhook that may have changed this issue's delegation clears the persisted proof, so the
+    // stop check below rereads Linear's history at once rather than waiting out the recheck window. A plain
+    // comment only clears the "named" flag the resting gate reads; it does not redo the history read.
+    if (opts.wake?.recheckOwner) {
+      state.ownerProvenAt = undefined;
+      opts.wake.recheckOwner = false;
     }
+    if (opts.wake) opts.wake.linear = false;
     const stop = await checkStop(conversation, runs, ctx);
     if (typeof stop === "object") {
       await wait(pollMs);

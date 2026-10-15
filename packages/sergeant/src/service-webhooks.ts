@@ -19,15 +19,19 @@ export function serviceWebhooks(
   // delegated issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
   // most once per `webhookGapSeconds`. An issue or PR no task knows is ignored; the polls cover it.
   const gapMs = (opts.webhookGapSeconds ?? 5) * 1000;
-  const nudge = ({ keys, intake }: Nudge, source: "linear" | "github") => {
+  const nudge = ({ keys, intake, recheckOwner }: Nudge, source: "linear" | "github") => {
     const named = new Set(keys);
     let admit = intake;
     for (const [issueId, wake] of wakes) {
       if (!named.has(issueId) && !wake.watched.some((k) => named.has(k))) continue;
       // Its PRs are reread at its next pass, not only at the fallback interval (poll.ts `pullRequestPolls`).
       if (source === "github") wake.github = true;
-      // Its delegation history is reread at the next pass, not after the fallback interval.
+      // Any Linear event naming it ends its rest (webhook-health.ts `resting`), so a human's comment is read
+      // promptly. TECH-5974: only one that may have changed the delegation (not a plain comment) also rereads
+      // the delegation history now; the recheck window otherwise catches a missed one, and a burst coalesces
+      // into one reread: the recheck is debounced per task (`Wake.recheckOwnerAfter`).
       if (source === "linear") wake.linear = true;
+      if (source === "linear" && recheckOwner && active.has(issueId)) wake.recheckOwnerAfter(gapMs);
       if (active.has(issueId)) wake.nudge(gapMs);
       else admit = true;
     }
