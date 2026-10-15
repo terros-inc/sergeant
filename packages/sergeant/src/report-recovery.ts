@@ -1,6 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import { conversationRevision, type ProposedAction, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { conversationRevision, type GitHubPort, type ProposedAction, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -13,6 +13,11 @@ import type { TaskState } from "./task-state.ts";
 // the conversation has changed since the last turn (a human's reply to the budget question, a comment, an
 // issue edit, a PR review): the retry starts only after reasoning has read it. Every such run
 // gets one line in `report-recoveries.jsonl`, with what followed, so how often it happens is counted.
+//
+// TECH-6106: a worker usually quits this way after it pushed its work, ending its headless session to
+// wait on CI it expected to be told about. A retry told to finish the objective spent most of its run
+// confirming that work. So when the issue's branch has a head committed since the run started, the retry
+// is report-only: it reviews what was pushed against the Task and CI, writes the report, and changes nothing.
 
 /** How much of a run's report error a retry's brief and the telemetry carry. */
 const ERROR_CHARS = 1_000;
@@ -75,7 +80,8 @@ export async function recoverReports(
       waitingForSlot = true;
       break;
     }
-    const outcome = await execute(retryOf(run, start, why), situation, ports);
+    const pushed = start.kind === "start_worker" ? await pushedSince(start, situation.conversation.issue.identifier, ports.github, ctx.log) : [];
+    const outcome = await execute(retryOf(run, start, why, pushed), situation, ports);
     const retryRunId = outcome.status === "done" ? (outcome.result.runId as string) : undefined;
     state.reportRecoveries[run.runId] = retryRunId ? { retryRunId } : {};
     if (retryRunId) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== retryRunId);
@@ -83,10 +89,11 @@ export async function recoverReports(
     if (outcome.status === "failed" && outcome.unposted) unposted ??= outcome.unposted;
     const described = describeOutcome(outcome);
     // The next turn's recentTurns say why the run was retried, or why the retry did not start.
-    const summary = `Sergeant retried ${run.role} run ${run.runId} at once, before this turn, because it ended with no usable report (${problem}).`;
+    const reportOnly = pushed.length > 0 ? " It had pushed work, so the retry only reviews it and reports." : "";
+    const summary = `Sergeant retried ${run.role} run ${run.runId} at once, before this turn, because it ended with no usable report (${problem}).${reportOnly}`;
     state.recentTurns = [...state.recentTurns, { at, summary, outcomes: [described] }].slice(-8);
-    lines.push(JSON.stringify({ ...fact, recovery: retryRunId ? "retried" : "retry_not_started", ...(retryRunId ? { retryRunId } : { reason: described }) }));
-    ctx.log(`${why}; retrying it: ${described}`);
+    lines.push(JSON.stringify({ ...fact, recovery: retryRunId ? "retried" : "retry_not_started", ...(retryRunId ? { retryRunId } : { reason: described }), ...(pushed.length > 0 && { reportOnly: true, pushed }) }));
+    ctx.log(`${why}; retrying it${reportOnly && " report-only"}: ${described}`);
   }
   if (lines.length > 0) {
     await appendFile(join(ctx.dir, "report-recoveries.jsonl"), lines.map((l) => `${l}\n`).join(""));
@@ -95,13 +102,47 @@ export async function recoverReports(
   return { retried, ...(waitingForSlot && { waitingForSlot }), ...(unposted && { unposted }) };
 }
 
-/** The same start again, saying why: the reviewer on the same heads, the worker told to finish and report. */
-function retryOf(run: RunRecord, start: TaskState["starts"][string], why: string): ProposedAction {
+type WorkerStart = Extract<TaskState["starts"][string], { kind: "start_worker" }>;
+
+/**
+ * The issue's branches in the run's repositories whose head was committed since the turn that started it:
+ * what the run pushed. None for a start recorded without its time, and none, logged, when GitHub cannot
+ * say: the retry then finishes the objective, as before.
+ */
+async function pushedSince(start: WorkerStart, identifier: string, github: GitHubPort, log: (line: string) => void): Promise<string[]> {
+  const read = github.issueBranches?.bind(github);
+  if (!start.at || !read) return [];
+  const since = Date.parse(start.at);
+  try {
+    const branches = await Promise.all(start.repositories.map(async (repo) => (await read(repo, identifier)).map((b) => ({ repo, ...b }))));
+    return branches.flat().filter((b) => Date.parse(b.committedAt) >= since).map((b) => `${b.repo}: ${b.branch} at ${b.sha}`);
+  } catch (e) {
+    log(`could not read ${identifier}'s branches, so a retry finishes the objective: ${e instanceof Error ? e.message : String(e)}`);
+    return [];
+  }
+}
+
+/** Nothing tells a headless agent a background job finished: the run ends with its turn. */
+const HEADLESS = "You run headless: when your turn ends the run ends, and nothing wakes you later, so never end it to wait for CI or a background job.";
+
+/**
+ * The same start again, saying why: the reviewer on the same heads; the worker told to finish and report,
+ * or only to review and report on what it pushed.
+ */
+function retryOf(run: RunRecord, start: TaskState["starts"][string], why: string, pushed: string[]): ProposedAction {
   if (start.kind === "start_reviewer") {
     const focus = `Sergeant reran this review at once because the previous ${why}. Review the same heads, and end with exactly one valid sergeant-report block as the Report section says.${start.focus ? `\n\n${start.focus}` : ""}`;
     return { kind: "start_reviewer", subject: start.subject, focus: focus.slice(0, 4_000) };
   }
-  const objective = `Sergeant restarted this work at once because the previous ${why}. Its workspace is gone, but anything it pushed is on origin: continue from its branch and any PR it opened (see "Where earlier work stands"), finish what remains of the objective below, and end by writing /workspace/sergeant-report.md exactly as the Report section says.
+  const instruction =
+    pushed.length > 0
+      ? `Sergeant restarted this run at once because the previous ${why}. It had already pushed its work:
+
+${pushed.map((p) => `- ${p}`).join("\n")}
+
+This run only reports on that work; do not re-implement anything, change no code, and push nothing. Check out that branch and read any PR it opened (see "Where earlier work stands"). Review the pushed work against the Task section (its Done-when, where it has one) and read the PR's CI once with \`gh pr checks\`; do not wait for checks still running, since Sergeant watches CI after your report. If the branch has no PR yet, open one as rules 4 and 5 say. Then write /workspace/sergeant-report.md exactly as the Report section says, naming the pushed head. Where the work falls short of the Task, or a check failed, say what remains in the report, with outcome \`partial\`, rather than doing it. ${HEADLESS}`
+      : `Sergeant restarted this work at once because the previous ${why}. Its workspace is gone, but anything it pushed is on origin: continue from its branch and any PR it opened (see "Where earlier work stands"), finish what remains of the objective below, and end by writing /workspace/sergeant-report.md exactly as the Report section says. ${HEADLESS}`;
+  const objective = `${instruction}
 
 The objective ${run.runId} was given:
 

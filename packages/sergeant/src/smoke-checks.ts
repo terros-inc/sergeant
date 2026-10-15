@@ -14,7 +14,7 @@ type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
   "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
 > & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "validateTarget" | "lastRetro" | "feedbackTasks" | "filedIssues"> };
-type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead">;
+type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
 
 const DAY_MS = 86_400_000;
@@ -164,9 +164,22 @@ export function githubChecks(
       return github.defaultBranchHead(repo);
     },
   };
-  if (pr === undefined) return [defaultHead, ...[facts, squash, handoff, branch].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
+  const issueBranches: SmokeCheck = {
+    name: `github ${repo} issue branches (report-only retry)`,
+    covers: ["TECH-6106"],
+    ...(input.issue === undefined
+      ? { skip: "needs --issue <an issue Sergeant worked in the repository>" }
+      : {
+          run: () => {
+            if (!github.issueBranches) throw new Error("the GitHub adapter has no issueBranches");
+            return github.issueBranches(repo, input.issue ?? "");
+          },
+        }),
+  };
+  if (pr === undefined) return [defaultHead, issueBranches, ...[facts, squash, handoff, branch].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
   return [
     defaultHead,
+    issueBranches,
     {
       ...facts,
       run: async () => {

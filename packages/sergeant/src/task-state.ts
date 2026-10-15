@@ -127,9 +127,11 @@ const TaskState = z.looseObject({
   reviewsRecorded: z.record(z.string(), z.string()).default({}),
   /**
    * TECH-5259: the start each run of a turn was given, so one that ends with no usable report can be
-   * retried as it was (report-recovery.ts). Losing it only leaves that run to reasoning.
+   * retried as it was (report-recovery.ts). Losing it only leaves that run to reasoning. `at` is when
+   * the turn that started it read its situation (TECH-6106): a branch head committed since then is the
+   * run's own push.
    */
-  starts: z.record(z.string(), z.union([StartWorker.loose(), StartReviewer.loose()])).default({}),
+  starts: z.record(z.string(), z.union([StartWorker.extend({ at: z.iso.datetime({ offset: true }).optional().catch(undefined) }).loose(), StartReviewer.loose()])).default({}),
   /** TECH-5259: per run that ended with no usable report, the retry Sergeant started for it, if any. */
   reportRecoveries: z.record(z.string(), z.looseObject({ retryRunId: RunId.optional() })).default({}),
 });
@@ -171,7 +173,8 @@ export function applyTurn(
   for (const o of done) {
     const { started } = o;
     if (started) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== started.runId);
-    if (started && (o.action.kind === "start_worker" || o.action.kind === "start_reviewer")) state.starts[started.runId] = o.action;
+    if (started && o.action.kind === "start_worker") state.starts[started.runId] = { ...o.action, at: situation.generatedAt };
+    if (started && o.action.kind === "start_reviewer") state.starts[started.runId] = o.action;
     const { followup } = o;
     if (followup && !state.followups.some((f) => f.key === followup.key)) state.followups.push(followup);
   }

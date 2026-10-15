@@ -289,6 +289,16 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       return { branch, sha: head.commit.sha };
     },
 
+    async issueBranches(repo, issueIdentifier) {
+      configFor(repo);
+      const prefix = `${BRANCH_PREFIX}${issueIdentifier.toLowerCase()}`;
+      const refs = z.array(gitRef.extend({ ref: z.string() })).parse(await request(`/repos/${repo}/git/matching-refs/heads/${prefix}`));
+      // The prefix `sergeant/tech-1` also matches `sergeant/tech-10-…`, another issue's branch.
+      const own = refs.map((r) => ({ branch: r.ref.replace(/^refs\/heads\//, ""), sha: Sha.parse(r.object.sha) })).filter((b) => b.branch === prefix || b.branch.startsWith(`${prefix}-`));
+      const commit = z.object({ committer: z.object({ date: z.string() }) });
+      return Promise.all(own.map(async (b) => ({ ...b, committedAt: commit.parse(await request(`/repos/${repo}/git/commits/${b.sha}`)).committer.date })));
+    },
+
     async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);
       // TECH-5244, defense in depth: whatever decided to merge, the repository's live policy is read
