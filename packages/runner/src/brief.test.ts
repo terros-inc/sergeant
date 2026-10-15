@@ -157,7 +157,7 @@ test("the worker brief has the worker find and continue existing work, and lists
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/9)");
+  expect(brief).toContain("## Rules (s2-reviewer-rules/10)");
   const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
@@ -169,7 +169,7 @@ test("reviewer rule 12 counts a trade-off as settled only on the base branch or 
 test("worker and reviewer briefs carry the rebase rule and ask for dependencies in the report", () => {
   const base = spec([]);
   const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
-  expect(worker).toContain("## Rules (s2-worker-rules/12)");
+  expect(worker).toContain("## Rules (s2-worker-rules/13)");
   const rebase = worker.slice(worker.indexOf("14. Rebase early and often."), worker.indexOf("\n15. "));
   expect(rebase).toMatch(/before its first push, before you report a head for\s+review, and whenever the default branch has moved under its open PR/);
   expect(rebase).toMatch(/Resolve conflicts then, as\s+part of the task/);
@@ -237,4 +237,23 @@ test("worker and reviewer briefs keep customer data out of a public repository",
   expect(reviewer).toContain("https://github.com/o/r/pull/7 — **public repository** — base");
   expect(reviewer.slice(reviewer.indexOf("15. "), reviewer.indexOf("## Report"))).toMatch(/Report each occurrence as a blocking finding and request changes/);
   expect(reviewerBrief(spec([pr]), [{ ...subject, public: false }], [])).not.toContain("public repository**");
+});
+
+// TECH-6126: Claude workers and reviewers in long-CI repositories pushed their work, started a
+// background wait on a required check, and ended their turn to report once CI finished. Headless, the
+// turn's end is the run's end, so the report never came. Both briefs say to report once the head is pushed.
+test("worker and reviewer briefs say to report once the head is pushed, without waiting on CI", () => {
+  const worker = workerBrief({ ...spec([]), role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
+  const workerRule = worker.slice(worker.indexOf("19. "), worker.indexOf("## Report"));
+  expect(workerRule).toMatch(/Once your final head is pushed, write the report right away\. Do not wait on CI: Sergeant already\s+watches CI on your PRs and reacts to failures\./);
+
+  const reviewer = reviewerBrief(spec([pr]), [subject], []);
+  expect(reviewer).toContain("## Rules (s2-reviewer-rules/10)");
+  const reviewerRule = reviewer.slice(reviewer.indexOf("16. "), reviewer.indexOf("## Report"));
+  expect(reviewerRule).toMatch(/Once your review is done, write the report right away\. Do not wait on CI: the head is already\s+pushed, and Sergeant watches its CI and reacts to failures\./);
+
+  for (const rule of [workerRule, reviewerRule].map((r) => r.replace(/\s+/g, " "))) {
+    expect(rule).toContain("when your turn ends the run ends and nothing wakes you later");
+    expect(rule).toContain("never end it to wait for a check or a background job");
+  }
 });

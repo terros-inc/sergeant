@@ -69,7 +69,7 @@ produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out
 you started its dependencies were installed at the head, so you can run its tests:
 <per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why, then its output fenced as untrusted), or no lockfile>
 
-## Rules (s2-reviewer-rules/9)   <§4>
+## Rules (s2-reviewer-rules/10)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -96,7 +96,7 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/9)
+## 4. Reviewer rules (s2-reviewer-rules/10)
 
 The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 
@@ -146,6 +146,9 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
     Synthetic placeholders and a generically described case are fine. Each occurrence is a blocking
     finding, so the verdict requests changes; the finding names its location and kind, never the data,
     because a review may be quoted on the PR.
+16. **Report without waiting on CI** (TECH-6126). Once the review is done, the reviewer writes its
+    report. The head is already pushed and Sergeant watches its CI; a headless run ends with its
+    turn, so a reviewer that ends it to wait for a check never reports.
 
 The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
 

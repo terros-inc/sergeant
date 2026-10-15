@@ -124,7 +124,9 @@ Versioned text rendered into every worker brief. A change is a new version, reco
    CI workflow permissions.**
 6. **Implementation and testing.** Follow the durable guidance in `AGENTS.md`; use judgment to
    validate proportionately rather than imposing a test or coverage requirement on every change.
-   CI is the full gate. While you are running, watch CI on your PRs and fix what fails.
+   CI is the full gate. Once the final head is pushed, write the report right away: do not wait on
+   CI. Sergeant watches CI on the PRs and reacts to failures, and a headless run ends with its turn,
+   so a worker that ends it to wait for a check never reports (TECH-6126).
 7. **Moving bases.** Rebase early and often (TECH-5278): onto the current default branch before the
    first push, before each review round, and whenever the default branch moves under an open PR.
    Resolve conflicts then, as part of the task, never by reverting another task's change. Report a

@@ -16,7 +16,9 @@ The walking skeleton's runner (UNF-705): `containerRunner` implements `RunnerPor
   regular file, never a symlink, and parses it with the contract schemas (`WorkerReport` or
   `ReviewReport`). A worker reports the PRs it opened and their exact heads.
 - **Limits and cancellation.** `timeout` inside the container caps wall time, and for Claude Code
-  `--max-budget-usd` caps cost (Codex has no such cap). `cancel` stops the container and records `canceled` only once Docker shows it stopped or
+  `--max-budget-usd` caps cost (Codex has no such cap). Claude Code runs with
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`: headless, nothing wakes a run whose turn ended to wait on
+  a background task, so it would end without its report (TECH-6126). `cancel` stops the container and records `canceled` only once Docker shows it stopped or
 gone; otherwise it throws so the caller retries. Likewise `status` throws while Docker cannot
 answer; a run counts as lost only when Docker says its container no longer exists. There are no leases, adoption, restart recovery, or
   `send`.
