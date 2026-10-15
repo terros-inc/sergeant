@@ -118,6 +118,10 @@ test("a run with no usable report is retried at once and says why; a failed retr
   expect(turns[2]?.runs.map((r) => r.runId)).toEqual([w1.runId, w2.runId, r1?.runId, r2?.runId]);
   expect(r3?.focus).toBe("Check pagination.");
 
+  // TECH-6106: a worker's start keeps when its turn read the situation, so a later push can be told apart.
+  const saved = JSON.parse(await readFile(join(dir, "state.json"), "utf8"));
+  expect(saved.starts[w1.runId].at).toBe(turns[0]?.generatedAt);
+
   const lines = (await readFile(join(dir, "report-recoveries.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
   expect(lines).toEqual([
     expect.objectContaining({ issue: "UNF-1", runId: w1.runId, role: "worker", problem: "missing", recovery: "retried", retryRunId: w2.runId }),
@@ -141,6 +145,38 @@ test("a review whose head moved, or a run that failed on its account, is counted
     ["run_w1", "none", "it failed on quota; its account is set aside and reasoning decides"],
     ["run_r1", "none", "a head it was to review has moved or is gone"],
   ]);
+});
+
+test("a worker that pushed before it quit gets a report-only retry; one that pushed nothing finishes the objective", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-report-recovery-test-"));
+  const at = "2026-10-15T02:00:00.000Z";
+  const seen = { revision: conversationRevision(situation.conversation), issue: "unused" };
+  const target = situation.pullRequests[0]!.repo;
+  const objectiveOf = async (committedAt: string) => {
+    const { p } = ports();
+    const specs: RunSpec[] = [];
+    p.runner.start = async (spec) => void specs.push(spec);
+    // TECH-6106: the issue's branch head, committed after the run's start (it pushed) or before it.
+    p.github.issueBranches = async (repo, identifier) => [{ branch: `sergeant/${identifier.toLowerCase()}-paginate`, sha: "a".repeat(40), committedAt }];
+    const state = { seen, starts: { run_w1: { kind: "start_worker", objective: "Paginate the list.", repositories: [target], at } }, reportRecoveries: {}, recentTurns: [], unconfirmedStarts: [] };
+    await recoverReports({ ...situation, runs: [missing("run_w1")] }, state as never, p, { issueId: "UNF-1", dir, log: () => {}, save: async () => {} });
+    const spec = specs[0] as Extract<RunSpec, { role: "worker" }>;
+    return { objective: spec.objective, summary: state.recentTurns.at(-1) };
+  };
+
+  const pushed = await objectiveOf("2026-10-15T02:20:00Z");
+  expect(pushed.objective).toContain(`It had already pushed its work:\n\n- ${target}: sergeant/unf-1-paginate at ${"a".repeat(40)}`);
+  expect(pushed.objective).toContain("do not re-implement anything");
+  expect(pushed.objective).not.toContain("finish what remains");
+  expect(pushed.objective).toContain("Paginate the list.");
+  expect(pushed.summary).toMatchObject({ summary: expect.stringContaining("the retry only reviews it and reports") });
+
+  const untouched = await objectiveOf("2026-10-15T01:50:00Z");
+  expect(untouched.objective).toContain("finish what remains of the objective below");
+  expect(untouched.objective).not.toContain("do not re-implement anything");
+
+  const lines = (await readFile(join(dir, "report-recoveries.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+  expect(lines.map((l) => [l.recovery, l.reportOnly])).toEqual([["retried", true], ["retried", undefined]]);
 });
 
 test("a released task waits for slot admission before starting one report recovery", async () => {

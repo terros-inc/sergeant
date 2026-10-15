@@ -91,6 +91,8 @@ const pr = {
 const githubAnswer = (path: string): unknown => {
   if (path === `/repos/${repo}`) return { default_branch: "main" };
   if (path === `/repos/${repo}/branches/main`) return { commit: { sha: "c".repeat(40) } };
+  if (path === `/repos/${repo}/git/matching-refs/heads/sergeant/tech-9`) return [{ ref: "refs/heads/sergeant/tech-9-thing", object: { sha: head, type: "commit" } }];
+  if (path === `/repos/${repo}/git/commits/${head}`) return { committer: { date: "2026-10-15T02:00:00Z" } };
   if (path.endsWith("/pulls/7")) return pr;
   if (path.includes("/pulls/7/files?")) return [{ filename: "src/thing.ts" }];
   if (path.includes("/pulls?state=open")) return [{ number: 7 }];
@@ -156,12 +158,13 @@ test("every check passes over the real adapters, and nothing is written", async 
   // Every named Linear read query the adapter has ran (SergeantCaller reads with a human's own token, at `sgt login`).
   expect([...f.queried].sort()).toEqual(allReads.filter((q) => q !== "SergeantCaller").sort());
   expect(results.find((r) => r.name.includes("default branch head"))?.detail).toEqual({ branch: "main", sha: "c".repeat(40) });
+  expect(results.find((r) => r.name.includes("issue branches"))?.detail).toEqual([{ branch: "sergeant/tech-9-thing", sha: head, committedAt: "2026-10-15T02:00:00Z" }]);
   // Every GitHub port method is a read a check calls, a write whose reads a probe covers, or local:
   // a new port method fails here until it gets a check or is classified.
   const readByProbe = { mergePullRequest: "squash message", handToHuman: "handoff read", closePullRequest: "handoff read", deletePullRequestBranch: "branch-delete read" };
   const local = ["mergePolicy", "rateLimit"];
   expect(Object.keys(f.githubPort).filter((m) => !f.called.has(m) && !(m in readByProbe) && !local.includes(m))).toEqual([]);
-  expect([...f.called].sort()).toEqual(["defaultBranchHead", "readPullRequest"]);
+  expect([...f.called].sort()).toEqual(["defaultBranchHead", "issueBranches", "readPullRequest"]);
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(0);
   expect(text.split("\n").at(-1)).toBe(`SMOKE PASS: ${results.length} passed, 0 failed, 0 skipped`);
@@ -191,6 +194,7 @@ test("a failed read, or a host on another version, fails its own line and the re
     "SKIP linear comment thread and comment by id",
     "SKIP linear follow-up and retro issue reads (origin, issue, team states, relation and document by id)",
     `PASS github ${repo} default branch head (follow-up "Written against")`,
+    `SKIP github ${repo} issue branches (report-only retry)`,
     `SKIP github ${repo} PR facts (mergeable state, human reviews, required checks)`,
     `SKIP github ${repo} squash message from PR text and commits`,
     `SKIP github ${repo} handoff read (draft, requested reviewers, posted comments)`,
@@ -200,7 +204,7 @@ test("a failed read, or a host on another version, fails its own line and the re
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(1);
   expect(text).toContain("FAIL linear completed issues in the feedback lookback [TECH-5049]");
-  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 4 passed, 2 failed, 14 skipped");
+  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 4 passed, 2 failed, 15 skipped");
 });
 
 test("the API check reads the run list and a run's view with its provider choice and account, as sent", async () => {

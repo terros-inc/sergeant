@@ -194,6 +194,12 @@ export interface GitHubPort {
    * commit it was written against, so its staleness is visible. Optional, so a fake without it records none.
    */
   defaultBranchHead?(repo: RepoSlug): Promise<{ branch: string; sha: Sha }>;
+  /**
+   * TECH-6106: the issue's own branches in `repo`, `sergeant/<identifier>` and `sergeant/<identifier>-<slug>`
+   * with the identifier lowercased as the worker brief names them, each with its head commit and when that
+   * commit was committed. Optional, so a fake without it finds none.
+   */
+  issueBranches?(repo: RepoSlug, issueIdentifier: string): Promise<{ branch: string; sha: Sha; committedAt: string }[]>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**
