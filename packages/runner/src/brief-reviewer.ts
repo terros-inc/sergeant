@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/10";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/11";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -98,7 +98,9 @@ ${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
 3. Rule on every requirement the issue states, quoting it, with evidence: met, not met, contradicted
    (a decision narrowed or dropped it; only a human may do that), or needs live validation. Report
    every unmet or contradicted requirement also as a blocking finding with \`category: "acceptance"\`.
-   Omit \`category\` from ordinary implementation defects.
+   Omit \`category\` from ordinary implementation defects. Items in the issue's **After deploy (not for
+   workers):** section, and done-when items only production access or watching real traffic after
+   deploy can prove, are not requirements of this change: their owner checks them after deploy.
 4. Trace self-declared trade-offs that change persisted or control-plane state through every reader,
    or report them as blocking.
 5. Name every correctness claim that rests on behavior outside the repository; verify it if you can,

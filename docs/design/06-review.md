@@ -69,7 +69,7 @@ produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out
 you started its dependencies were installed at the head, so you can run its tests:
 <per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why, then its output fenced as untrusted), or no lockfile>
 
-## Rules (s2-reviewer-rules/10)   <§4>
+## Rules (s2-reviewer-rules/11)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -96,7 +96,7 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/10)
+## 4. Reviewer rules (s2-reviewer-rules/11)
 
 The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 
@@ -108,7 +108,9 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
    `contradicted` (a decision narrowed or dropped it: only a human may do that), or
    `needs_live_validation`. Use the issue's acceptance section if it has one; otherwise list the outcomes
    it asks for (S1 ADR-0041). **Report every `not_met` or `contradicted` requirement also as a blocking
-   finding with category `acceptance`.** Omit `category` from ordinary implementation defects.
+   finding with category `acceptance`.** Omit `category` from ordinary implementation defects. Items in
+   the issue's `**After deploy (not for workers):**` section, and done-when items only production access
+   or post-deploy observation can prove, are not requirements of the change (TECH-6146).
 4. **Trace self-declared trade-offs** that change persisted or control-plane state through every reader,
    or report them as blocking.
 5. **External boundaries.** Name every correctness claim resting on behavior outside the repository.

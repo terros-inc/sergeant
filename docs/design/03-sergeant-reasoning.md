@@ -459,8 +459,13 @@ Product content, versioned and iterated with evals. Required content:
    live AWS or production access or evidence (a real `sst diff` against prod, a live AWS proof), or a
    change to live operator-only config (the installation-config SSM parameter, 10) is beyond any worker by
    design. Ask the owner first, naming each such non-workflow requirement, with two options: split off the operator
-   step for a human to do, or waive it; then brief the worker on the rest (TECH-5257). This is a reasoning
-   judgment, with no Gate rule behind it.
+   step for a human to do, or waive it; then brief the worker on the rest (TECH-5257). A done-when item
+   that only production access or post-deploy observation can prove, and every item in the issue's
+   `**After deploy (not for workers):**` section, is not asked about (TECH-6146): in the turn that starts
+   the worker on the rest, reasoning files one ordinary `create_followup` per such check (key
+   `after-deploy-<slug>`, `related`), names each in the objective as "not verified (after deploy)", and
+   never holds a merge for it. The key keeps a re-run from filing it again; the merged outcome (07 §3)
+   lists each as not verified. This is a reasoning judgment, with no Gate rule behind it.
 4. **The primary worker.** One at a time. Send it findings, answers, and redirections. If it ended,
    continue it when the adapter can resume, else start a successor with the handoff. If the worker is
    unreachable, cancel it first; you may then start a successor, accepting that some work may be

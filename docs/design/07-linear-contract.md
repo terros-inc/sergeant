@@ -37,7 +37,7 @@ access.
 | A question for a human | the question (§4) | the only kind that creates a human wait |
 | A genuine blocker Sergeant cannot resolve | what is blocked, what would unblock it | e.g. a required live check no one can run |
 | Budget exhausted | the budget ask (§6): what happened in the window, where the work stands, and the stop rubric's recommendation with its estimated remaining cost | nothing while the task only waits on a human (rubric rule 0) |
-| Outcome | 2–6 lines: what landed (PR links), known gaps, follow-ups filed, anything a human should check, and the task's total cost | posted when the work lands or for a non-code outcome; the cost line (TECH-5227, `cost.ts`) is an estimate split by provider, run counts by role, wall time and accounts, a run with no reported cost counted as unknown; Sergeant's own turns count over the whole task (`turns.jsonl`), not only the current budget window |
+| Outcome | 2–6 lines: what landed (PR links), known gaps, each after-deploy check as "not verified (after deploy)" with its follow-up (TECH-6146, a follow-up keyed `after-deploy-…`), other follow-ups filed, anything a human should check, and the task's total cost | posted when the work lands or for a non-code outcome; the cost line (TECH-5227, `cost.ts`) is an estimate split by provider, run counts by role, wall time and accounts, a run with no reported cost counted as unknown; Sergeant's own turns count over the whole task (`turns.jsonl`), not only the current budget window |
 | After each review round | about 5 lines: what changed (from the worker report), the PR and reviewed head, the verdict with blocking/non-blocking counts and up to two findings, what happens next, the estimated cost so far (worker and review runs by role, and Sergeant's turns, up to the previous turn) | TECH-5227, `progress.ts`; its own comment for every finished review still current, keyed `progress:<issue>:<reviewRunId>`, posted after the next turn even when that turn also asks or merges; `review.progressComments: false` turns it off |
 | Answers to human comments | when the comment asked something Sergeant can answer | |
 | Post-merge audit findings | one comment listing blocking findings and a report link (06 §8) | guardrail, rare |
@@ -382,6 +382,9 @@ last retro: its first line names where its window ended and its "Issues filed" s
   the origin to Sergeant when Linear's history shows it, else unassigned.
 - Limits: no per-task count (TECH-5186); `maxDepth` (F2–F3); deduplicated by Sergeant's semantic key
   (02 §6).
+- After-deploy checks (TECH-6146): a done-when item only production access or post-deploy observation
+  can prove gets one such follow-up per check, keyed `after-deploy-<slug>`, instead of a question to a
+  human (03 §12). Nothing else differs: same Backlog state, relation, owner, and dedup.
 
 **Feedback after the work landed (TECH-4985).** Once the completing PR merged or the issue is Done,
 the task loop takes no more turns, so a human comment on the issue, or a comment or review on its

@@ -109,7 +109,9 @@ Versioned text rendered into every worker brief. A change is a new version, reco
 1. **Role.** You work for Sergeant on one Linear issue. You talk to Sergeant only, through your
    report and progress notes. Do not post to Linear or contact humans.
 2. **Scope.** Achieve the objective. The Task section, including every human comment (and
-   `sergeant-thread.md` when it is referenced), is what was asked. Work only in your repository set. If you need another enrolled
+   `sergeant-thread.md` when it is referenced), is what was asked, except its `**After deploy (not for
+   workers):**` section and any done-when item the objective calls after deploy: Sergeant filed a
+   follow-up for each, checked after deploy (TECH-6146). Work only in your repository set. If you need another enrolled
    repository, say so in `repositoryRequests` and continue with what you can.
 3. **Branches.** One branch per repository, named `sergeant/<identifier>-<short-slug>`. Never push
    to a default branch. Force-push only your own branches. **Push work in progress before you stop,
