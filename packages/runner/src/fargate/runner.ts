@@ -174,7 +174,12 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
           attachments,
           dir: attachmentsDir,
           brief: (files) => workerBrief(spec, existing, files),
-          credentials: { GH_TOKEN: githubToken, [AGENTS[adapter].credentialEnv]: account.credential },
+          credentials: {
+            GH_TOKEN: githubToken,
+            [AGENTS[adapter].credentialEnv]: account.credential,
+            // The worker's pre-push hook reads it (TECH-5914): private, so it rides in the run's secret.
+            ...(opts.publicDataDenylist && { PUBLIC_DATA_DENYLIST: opts.publicDataDenylist }),
+          },
         });
         // The files are in the secret now; nothing reads them here again.
         await rm(attachmentsDir, { recursive: true, force: true });
@@ -210,6 +215,7 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
                 adapter: l.adapter,
                 secretArn: l.secretArn,
                 attachments: secret.attachments,
+                denylist: Boolean(opts.publicDataDenylist),
                 executionRoleArn: s.executionRoleArn,
                 logGroup: s.logGroup,
                 region: s.region,

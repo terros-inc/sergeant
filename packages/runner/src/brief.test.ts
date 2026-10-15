@@ -12,6 +12,7 @@ const subject: ReviewSubject = {
   number: 7,
   url: "https://github.com/o/r/pull/7",
   baseRef: "main",
+  public: true,
   headSha: head,
   title: "Add it",
   body: "Fixes UNF-1",
@@ -156,7 +157,7 @@ test("the worker brief has the worker find and continue existing work, and lists
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/8)");
+  expect(brief).toContain("## Rules (s2-reviewer-rules/9)");
   const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
@@ -168,7 +169,7 @@ test("reviewer rule 12 counts a trade-off as settled only on the base branch or 
 test("worker and reviewer briefs carry the rebase rule and ask for dependencies in the report", () => {
   const base = spec([]);
   const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
-  expect(worker).toContain("## Rules (s2-worker-rules/11)");
+  expect(worker).toContain("## Rules (s2-worker-rules/12)");
   const rebase = worker.slice(worker.indexOf("14. Rebase early and often."), worker.indexOf("\n15. "));
   expect(rebase).toMatch(/before its first push, before you report a head for\s+review, and whenever the default branch has moved under its open PR/);
   expect(rebase).toMatch(/Resolve conflicts then, as\s+part of the task/);
@@ -221,4 +222,19 @@ test("the reviewer brief states the exact reviewer report shape and rejects the 
   for (const wrong of ['"s2-sergeant-report/1"', "`outcome`", "`pullRequests[].decision`", "`knownGaps`", "`addressedFindings`"]) {
     expect(brief).toContain(wrong);
   }
+});
+
+// TECH-5914: agents copied a real customer case from the issue into a public repository's tests and PR
+// bodies. The worker is told to keep it out, and the reviewer blocks it, on a PR GitHub did not call private.
+test("worker and reviewer briefs keep customer data out of a public repository", () => {
+  const worker = workerBrief({ ...spec([]), role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
+  const rule = worker.slice(worker.indexOf("18. "), worker.indexOf("## Report"));
+  expect(rule).toMatch(/never put customer or\s+company names, people's names, Terros IDs/);
+  expect(rule).toMatch(/commit messages, branch names, PR titles or\s+bodies, or review comments/);
+  expect(rule).toMatch(/`C\.example`, `user@example\.test`,\s+"Acme Solar"/);
+
+  const reviewer = reviewerBrief(spec([pr]), [subject], []);
+  expect(reviewer).toContain("https://github.com/o/r/pull/7 — **public repository** — base");
+  expect(reviewer.slice(reviewer.indexOf("15. "), reviewer.indexOf("## Report"))).toMatch(/Report each occurrence as a blocking finding and request changes/);
+  expect(reviewerBrief(spec([pr]), [{ ...subject, public: false }], [])).not.toContain("public repository**");
 });

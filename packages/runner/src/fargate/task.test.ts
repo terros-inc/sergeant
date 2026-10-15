@@ -80,7 +80,7 @@ describe("awaitingLogs", () => {
 describe("taskDefinition", () => {
   const input = {
     family: "f", image: "i", adapter: "codex-local" as const, secretArn: "arn:aws:secretsmanager:r:1:secret:s-AbC", executionRoleArn: "arn:role",
-    logGroup: "g", region: "r", cpu: "2048", memory: "8192", gitIdentity: { name: "N", email: "e@x" }, reportNonce: "n", command: ["sh"],
+    logGroup: "g", region: "r", cpu: "2048", memory: "8192", gitIdentity: { name: "N", email: "e@x" }, reportNonce: "n", command: ["sh"], denylist: false,
   };
 
   it("carries credentials only as secret references, never values, and has no task role", () => {
@@ -94,5 +94,10 @@ describe("taskDefinition", () => {
   it("references the attachments key only when the secret has one, since a missing key fails the task's start", () => {
     const [worker] = taskDefinition({ ...input, attachments: true }).containerDefinitions;
     expect(worker?.secrets.map((s) => s.name)).toContain("SERGEANT_ATTACHMENTS");
+  });
+
+  it("references the public-data denylist only when the installation has one, for the same reason", () => {
+    const [worker] = taskDefinition({ ...input, attachments: false, denylist: true }).containerDefinitions;
+    expect(worker?.secrets.map((s) => s.name)).toEqual(["SERGEANT_BRIEF", "PUBLIC_DATA_DENYLIST", "GH_TOKEN", "CODEX_CREDENTIAL"]);
   });
 });

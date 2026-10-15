@@ -169,5 +169,12 @@ export const InstallationConfig = z.strictObject({
    * TECH-5204). Absent, nobody can register an account.
    */
   registeredAccountsSecret: SecretRef.optional(),
+  /**
+   * Secrets Manager id of the customer-name denylist (TECH-5914): one name per line or comma. A worker's
+   * push to a public repository fails on any of them, or on a Terros ID, email, or phone number
+   * (packages/runner/container/check-public-data.mjs). It is a secret so the names never enter a
+   * repository or this config. Absent, the push check still refuses IDs, emails, and phone numbers.
+   */
+  publicDataDenylistSecret: SecretRef.optional(),
 });
 export type InstallationConfig = z.infer<typeof InstallationConfig>;

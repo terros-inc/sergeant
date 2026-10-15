@@ -117,6 +117,8 @@ export type Installation = {
   workerApp: GitHubApp;
   githubTokens: RunGitHubTokens;
   modelToken: string;
+  /** The customer names a worker's push to a public repository refuses, when the config names the secret (TECH-5914). */
+  publicDataDenylist?: string;
   /** Webhook signing secrets, for the sources the config gives one. */
   webhookSecrets: { linear?: string; github?: string };
   /** The enrolled repositories' settings `github` reads at each call: changed in place with `repositories` (enrollment.ts). */
@@ -138,13 +140,14 @@ export async function connect(
   if (unknown.length > 0) throw new Error(`not enrolled in the installation config: ${unknown.join(", ")}`);
   const secret = secretResolver(config);
   const optional = (ref: string | undefined) => (ref === undefined ? undefined : secret(ref));
-  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook] = await Promise.all([
+  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook, publicDataDenylist] = await Promise.all([
     secret(config.linear.tokenSecret),
     secret(config.github.controlPlaneApp.privateKeySecret),
     secret(config.github.workerApp.privateKeySecret),
     secret(config.modelTokenSecret),
     optional(config.linear.webhookSecret),
     optional(config.github.webhookSecret),
+    optional(config.publicDataDenylistSecret),
   ]);
   const app = (ref: z.infer<typeof GitHubAppRef>, privateKey: string) =>
     githubApp({ appId: ref.appId, installationId: ref.installationId, privateKey });
@@ -186,6 +189,7 @@ export async function connect(
     workerApp,
     githubTokens: runTokens(workerApp),
     modelToken,
+    ...(publicDataDenylist && { publicDataDenylist }),
     webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },
     repositoryConfigs,
   };

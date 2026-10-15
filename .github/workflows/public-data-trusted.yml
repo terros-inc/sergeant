@@ -1,0 +1,50 @@
+name: public-data-trusted
+
+# The public-data check with the PUBLIC_DATA_DENYLIST secret (TECH-5914); public-data.yml says what it
+# refuses and how to keep the secret. Trust boundary: no code a PR can change ever runs with the secret.
+# A pull_request_target run takes this file from the default branch, not from the PR. The job checks out
+# the default branch, reads the PR's commits only as git objects (it fetches them into that checkout and
+# never checks them out, installs, or runs them), and runs the default branch's copy of the check. It
+# runs only for PRs from this repository: a fork PR never gets the secret.
+# packages/runner/src/public-data-workflow.test.ts asserts this.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  public-data:
+    name: public-data
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the default branch (trusted code)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Fetch the PR's commits as data
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: git fetch --no-tags --quiet origin "$BASE" "$HEAD"
+      - name: Commits
+        env:
+          PUBLIC_DATA_DENYLIST: ${{ secrets.PUBLIC_DATA_DENYLIST }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node packages/runner/container/check-public-data.mjs range "$BASE" "$HEAD"
+      - name: Branch name, PR title and body
+        if: ${{ !cancelled() }}
+        env:
+          PUBLIC_DATA_DENYLIST: ${{ secrets.PUBLIC_DATA_DENYLIST }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n%s\n\n%s\n' "$BRANCH" "$TITLE" "$BODY" | node packages/runner/container/check-public-data.mjs text "branch, PR title and body"

@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/11";
+export const WORKER_RULES_VERSION = "s2-worker-rules/12";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -118,6 +118,15 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
     (\`docs/design/\`, READMEs, Terraform and other IaC, every other doc) for the old claim, and update
     every place that still makes it before you call the work done. A list of places in the Task is a
     starting point, not the scope.
+18. In a public repository (\`gh repo view <owner/name> --json visibility\`), never put customer or
+    company names, people's names, Terros IDs (\`C.\`, \`U.\`, \`Program.\`, \`Account.\` and so on),
+    emails, phone numbers, addresses, internal Slack or Linear links to customer cases, or customer
+    business details into code, tests, fixtures, docs, commit messages, branch names, PR titles or
+    bodies, or review comments. Use synthetic placeholders (\`C.example\`, \`user@example.test\`,
+    "Acme Solar") and describe a real case generically ("a customer's CRM sync sent a false alert").
+    The Task is internal: its real case stays in Linear, and out of your report too. A pushed PR stays
+    public record even after an edit, so check before you push; your clones' pre-push hook refuses IDs,
+    emails, phone numbers, and known customer names, not everything above.
 
 ## Report
 

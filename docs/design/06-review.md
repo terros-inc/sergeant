@@ -69,7 +69,7 @@ produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out
 you started its dependencies were installed at the head, so you can run its tests:
 <per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why, then its output fenced as untrusted), or no lockfile>
 
-## Rules (s2-reviewer-rules/8)   <§4>
+## Rules (s2-reviewer-rules/9)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -96,7 +96,7 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/8)
+## 4. Reviewer rules (s2-reviewer-rules/9)
 
 The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
 
@@ -138,6 +138,14 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
     newer changes conflict with the change or alter what it does. A stacked PR is allowed (TECH-5278).
 14. **Dependencies.** A dependency the reviewer notices between this issue and another goes in
     `dependencies`, like a worker's (05 §3); Sergeant records it as "blocked by" (TECH-5278).
+15. **Customer data in a public repository** (TECH-5914). The brief marks each PR whose repository
+    GitHub does not report private. In one, the reviewer checks the diff, every commit message, and the
+    PR title and body for customer or company names, people's names, Terros IDs (`C.`, `U.`,
+    `Program.`, `Account.` and so on), emails, phone numbers, addresses, internal Slack or Linear links
+    to customer cases, and customer business details, starting with the Task's own real case.
+    Synthetic placeholders and a generically described case are fine. Each occurrence is a blocking
+    finding, so the verdict requests changes; the finding names its location and kind, never the data,
+    because a review may be quoted on the PR.
 
 The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
 

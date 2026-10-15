@@ -32,6 +32,20 @@ test("only the model token, the run's scoped worker-App token, and the human git
   expect(clone?.opts.env?.SERGEANT_RUN_GITHUB_TOKEN).toBe(GH);
 });
 
+// TECH-5914: a worker's push to a public repository is checked for customer data before it leaves. Its
+// clones carry the image's pre-push hook, and the private customer-name list enters only by name.
+test("a worker's clones get the public-data pre-push hook, and its denylist enters by name", async () => {
+  const { host } = await started({ publicDataDenylist: "Zephyr Roofing" });
+
+  const clone = host.calls.find((c) => c.cmd === "git" && c.args.includes("clone"));
+  const template = clone?.args.find((a) => a.startsWith("--template="))?.slice("--template=".length);
+  expect(await readFile(join(template ?? "", "hooks", "pre-push"), "utf8")).toMatch(/check-public-data\.mjs pre-push/);
+  const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
+  expect(run?.args).toContain("PUBLIC_DATA_DENYLIST");
+  expect(run?.args.join(" ")).not.toMatch(/Zephyr/);
+  expect(run?.opts.env?.PUBLIC_DATA_DENYLIST).toBe("Zephyr Roofing");
+});
+
 // TECH-5593: a run commits as the person who requested it, the owner whose registered account it runs
 // on, so GitHub attaches the commit to them and not to the installation's one identity. An account no
 // signed-in person registered (the fixture's above) keeps the installation's `gitIdentity`.

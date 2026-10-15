@@ -22,11 +22,17 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/c
 RUN install -d -o node -g node /workspace
 USER node
 WORKDIR /workspace
+# The public-data check every worker push runs (TECH-5914): git copies the template's pre-push hook
+# into each clone made here, and the local runner clones on the host with the same template.
+COPY check-public-data.mjs /usr/local/lib/sergeant/check-public-data.mjs
+COPY git-template /usr/local/share/sergeant/git-template
 # No git identity here: the runner sets the installation's human identity through GIT_AUTHOR_* and
 # GIT_COMMITTER_*, and Claude Code adds no agent co-author trailer or attribution line. Repository
-# hooks run normally; the image does not override core.hooksPath. git pushes to GitHub with the run's
-# GH_TOKEN (`gh` reads it directly); a reviewer has none.
+# hooks run normally; the image does not override core.hooksPath (a repository that sets it replaces
+# the template's pre-push hook with its own). git pushes to GitHub with the run's GH_TOKEN (`gh` reads
+# it directly); a reviewer has none.
 RUN git config --global init.defaultBranch main \
+  && git config --global init.templateDir /usr/local/share/sergeant/git-template \
   && git config --global credential.https://github.com.helper \
     '!f() { test "$1" = get && test -n "$GH_TOKEN" && echo username=x-access-token && echo "password=$GH_TOKEN"; }; f' \
   && mkdir -p /home/node/.claude \

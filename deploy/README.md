@@ -77,7 +77,8 @@ anything, and the state backend and the provider refuse any other account.
 
    The state bucket already exists; this configuration never creates it. `secret_names` lists every
    secret the config refers to, and nothing else: four literal names, or up to six with the webhook
-   signing secrets (Webhooks below), and seven if an adopted registered-accounts secret stays listed, which Terraform enforces. Codex needs no secret here (A Codex reviewer below).
+   signing secrets (Webhooks below), seven with the public-data denylist (`publicDataDenylistSecret`
+   below), and eight if an adopted registered-accounts secret stays listed, which Terraform enforces. Codex needs no secret here (A Codex reviewer below).
    The registered-accounts secret is not one of them: Terraform creates it (Model accounts below).
    To change an input later, put the parameter again and rerun `./init.sh`.
 2. **Secrets** exist in Secrets Manager under those names: both GitHub Apps' private keys, the Linear
@@ -347,7 +348,7 @@ issue saying what to do, and nothing starts.
      an update). Registration works from that restart on.
    - **An existing secret** (made by hand before TECH-5204, under another name) is adopted, not
      recreated: with `registered_accounts_secret` naming it, the next plan shows it imported (its description and tags updated in place) and a
-     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` (the reason `secret_names` accepts up to seven names) or leave it: the role reads and writes it through its own grant either way.
+     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` (the reason `secret_names` accepts up to eight names) or leave it: the role reads and writes it through its own grant either way.
    - **Another name, later, is unsupported.** Changing `registered_accounts_secret` would replace the
      secret, which holds every registered credential, so its `prevent_destroy` makes the plan fail
      and nothing changes. Keep the name the first apply used. On the host, leave the installation
@@ -741,6 +742,13 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 - **`retro`** (optional) is the Sergeant project's Linear id and the team its issues are filed in
   (Retros below).
 - **`registeredAccountsSecret`** (optional) names the registered-accounts secret (Model accounts above).
+- **`publicDataDenylistSecret`** (optional, TECH-5914) names a secret whose value is the customer
+  names, one per line, that a worker's push to a public repository must not carry. Add the name to
+  `secret_names` too. Each worker gets the list as `PUBLIC_DATA_DENYLIST`, read only by the pre-push
+  hook the runner image installs in its clones (`packages/runner/container/check-public-data.mjs`); the
+  hook also refuses Terros IDs, emails, and phone numbers, with or without the list. Keep the same list
+  as the `PUBLIC_DATA_DENYLIST` Actions secret of each public repository whose CI runs that check,
+  written there on one line with commas, so Actions masks it whole in the public log.
 
 ### GitHub Apps and rulesets
 
