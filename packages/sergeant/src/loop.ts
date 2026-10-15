@@ -20,7 +20,7 @@ import { describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPoll
 import { awaitedHumanPrAction } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
-import { latestAnswer, resolveAnswered } from "./question.ts";
+import { answerTimes, latestAnswer, resolveAnswered } from "./question.ts";
 import { recoverReports } from "./report-recovery.ts";
 import { recordReply } from "./stop-ledger.ts";
 import { postRereviewRequests } from "./rereview.ts";
@@ -128,8 +128,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     recordReviewFacts(runs, state, { issueId: opts.issueId, auditFollowups: files.auditFollowups, reviews: files.reviews, log, save });
 
 
-  const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
-    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), unblockedAt: state.unblockedAt, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
+  const budgetOf = (runs: RunRecord[], unknownRuns: number, answers?: string[]) =>
+    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), unblockedAt: state.unblockedAt, answers, recentTurns: state.recentTurns, starts: state.starts, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
 
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };
@@ -198,7 +198,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     await resolveDue(conversation);
-    const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length) }, configured, ctx);
+    const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length, answerTimes(conversation)) }, configured, ctx);
     if (holds.hold) {
       if (holds.hold === "question") unposted = undefined;
       // An open question waits on a human's reply, which Linear's webhook announces.

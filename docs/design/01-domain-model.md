@@ -257,7 +257,7 @@ BudgetStatus {                  // computed by BudgetMeter, never stored
   window: { wallMinutes, costUsd }
   taskStart                     // admittedAt
   windowStart                   // admittedAt, or the latest human answer to a Sergeant question
-  wallDeadline                  // windowStart + window.wallMinutes
+  wallDeadline                  // windowStart + window.wallMinutes; an answer's window: from the first turn or run after it
   spentUsd                      // reported cost of this window's runs and turns
   costLimitUsd                  // window.costUsd
   unknownCostRuns               // runs whose cost is not known yet
@@ -269,7 +269,8 @@ BudgetStatus {                  // computed by BudgetMeter, never stored
   question, the budget question included, opens a fresh one at the answer's timestamp, with zero spend
   and the installation's current `defaults.budget.window`; so does a human review of the task's PR (07
   §6, TECH-5218). Opening a window sets `windowStart`, copies the window, and moves the task's runs so far
-  into `priorRunIds`. One answer opens one window, also across a restart. There is no grant record, grant
+  into `priorRunIds`. An answer's window starts its wall time at the task's first turn or run after the
+  answer, so time queued for a task slot does not count (TECH-6127). One answer opens one window, also across a restart. There is no grant record, grant
   action, or approver check: an extension is just an answer (03 §5, §9).
 - **Hard**: wall time. No new run, message, or merge after `wallDeadline` (B1), plus concurrency and
   cancellation. Sergeant controls these itself.
