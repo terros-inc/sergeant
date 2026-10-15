@@ -58,6 +58,10 @@ const claude: Agent = {
   credentialEnv: "CLAUDE_CODE_OAUTH_TOKEN",
   script: `
 wall="$1"; model="$2"; budget="$3"
+# Headless, the run ends with the agent's turn and nothing wakes it for a background task, so a worker
+# that backgrounded a wait on CI ended without its report (TECH-6126). Claude Code 2.1.287 then drops
+# run_in_background from its Bash and Agent tools.
+export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
 exec timeout "$wall" claude -p "${PROMPT}" \\
   --output-format json --model "$model" --max-budget-usd "$budget" --permission-mode bypassPermissions
 `,

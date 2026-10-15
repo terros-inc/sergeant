@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/12";
+export const WORKER_RULES_VERSION = "s2-worker-rules/13";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -127,6 +127,10 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
     The Task is internal: its real case stays in Linear, and out of your report too. A pushed PR stays
     public record even after an edit, so check before you push; your clones' pre-push hook refuses IDs,
     emails, phone numbers, and known customer names, not everything above.
+19. Once your final head is pushed, write the report right away. Do not wait on CI: Sergeant already
+    watches CI on your PRs and reacts to failures. You run headless, so when your turn ends the run
+    ends and nothing wakes you later: never end it to wait for a check or a background job, or say you
+    will report when CI finishes.
 
 ## Report
 

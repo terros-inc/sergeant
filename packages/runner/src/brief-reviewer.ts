@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/9";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/10";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -138,6 +138,10 @@ ${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
     sent a false alert") are fine. Report each occurrence as a blocking finding and request changes. Name
     its location and kind only, never the data itself: your report may be quoted on the PR, and a public
     PR stays public record.
+16. Once your review is done, write the report right away. Do not wait on CI: the head is already
+    pushed, and Sergeant watches its CI and reacts to failures. You run headless, so when your turn
+    ends the run ends and nothing wakes you later: never end it to wait for a check or a background
+    job, or say you will report when CI finishes.
 
 ## Report
 
