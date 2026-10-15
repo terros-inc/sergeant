@@ -198,7 +198,8 @@ Proposing an action whose key exists returns the earlier verdict and result inst
 
 - **Spend** (best-effort): `sum(runs.usage.costUsd) + sum(turns.usage.costUsd)` over the current
   window's task-charged runs and turns, from reported or estimated usage.
-- **Wall time** (hard): from `windowStart` to `wallDeadline` (`windowStart` + the window's minutes).
+- **Wall time** (hard): from `windowStart` to `wallDeadline` (`windowStart` + the window's minutes; for
+  an answer's window, from the task's first turn or run after the answer, TECH-6127).
 - Both count only the current window: runs in `tasks.budget.priorRunIds` and turns before
   `windowStart` belong to earlier windows (01 `TaskBudget`).
 - **Who did what**: `actions.actor`, `verdict`, `status`, `steps`.

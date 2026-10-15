@@ -364,7 +364,8 @@ history pointers to older comments, review dispositions, and actions.
 - A task's budget is one window of wall time and money. No count of turns ends the task.
 - Turns count toward the task's `costUsd`.
 - The first human answer after any Sergeant question opens a fresh window from the answer, with zero
-  spend and the installation's current budget. Continuing after a budget question needs no separate
+  spend and the installation's current budget; its wall time runs from the task's first turn or run
+  after the answer, so time queued for a task slot does not count (TECH-6127). Continuing after a budget question needs no separate
   action or approval rule.
 - Human feedback on the task's PR, or an issue comment after Sergeant escalated the review, opens a
   fresh window too. Waiting on a human's merge or re-review never causes a budget question, whether

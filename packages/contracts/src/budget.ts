@@ -21,7 +21,10 @@ export const BudgetStatus = z.object({
   windowStart: Instant,
   /** TECH-5803: the start of every window an unblock opened; absent when none has. */
   unblockedAt: z.array(Instant).optional(),
-  /** One window after `windowStart`. */
+  /**
+   * One window after `windowStart`; for a window a human's answer opened, after the task's first turn or
+   * run since the answer, and from now while it has none and nothing runs (TECH-6127).
+   */
   wallDeadline: Instant,
   /** The reported spend of this window's runs and turns. */
   spentUsd: z.number().nonnegative(),

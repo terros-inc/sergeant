@@ -26,6 +26,7 @@ import { budgetStatus, windowFor } from "./budget.ts";
 import { CancelConflict, cancelRun, runIdsOf, taskDir } from "./cancel.ts";
 import { readIntent, readStopRecord } from "./cancel-intent.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
+import { answerTimes } from "./question.ts";
 
 // `/v1/tasks` and `/v1/runs` (11 §2, UNF-713): what api.ts routes there. Reads come from each task's
 // `state.json` and the runner, live; a wake and the cancels go through `ApiControl` and cancel.ts.
@@ -86,23 +87,28 @@ export async function listTasks(ctl: ApiControl): Promise<TaskList> {
 
 export async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetail> {
   const task = await findTask(ctl, ref);
+  let answers: string[] | undefined;
   const [records, issue, stop] = await Promise.all([
     readRuns(ctl, runIdsOf(task.state)),
     ctl.deps.linear.readConversation(ref).then(
-      ({ issue: i }) => ({
-        title: i.title,
-        state: i.state,
-        url: i.url,
-        delegatedToSergeant: i.delegate?.id === ctl.deps.agentUserId,
-        delegate: i.delegate?.name ?? null,
-      }),
+      (conversation) => {
+        const i = conversation.issue;
+        answers = answerTimes(conversation);
+        return {
+          title: i.title,
+          state: i.state,
+          url: i.url,
+          delegatedToSergeant: i.delegate?.id === ctl.deps.agentUserId,
+          delegate: i.delegate?.name ?? null,
+        };
+      },
       (e: Error) => ({ error: e.message }),
     ),
     lastStop(ctl, ref),
   ]);
   const known = records.flatMap((r) => (r.record ? [r.record] : []));
   const state = task.state;
-  const budget = state && budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => ctl.repositoryBudget?.(r)), startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs: known, unknownRuns: records.length - known.length });
+  const budget = state && budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => ctl.repositoryBudget?.(r)), answers, recentTurns: state.recentTurns, starts: state.starts, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs: known, unknownRuns: records.length - known.length });
   const verdict = budget && checkBudget(budget, new Date());
   return {
     task: summarize(ctl, task),

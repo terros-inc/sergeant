@@ -134,7 +134,9 @@ a re-review it asked for, a question) asks nothing.
 
 - **Any human answer to a Sergeant question opens a fresh window**: it starts at the answer's time,
   with zero spend and the installation's budget as it is now (TECH-5059). The answer is the first human
-  comment on the issue after Sergeant's latest question.
+  comment on the issue after Sergeant's latest question. Its wall time runs from the task's first turn
+  or run after the answer, so a task that must first queue for a task slot does not spend its window
+  in the queue; until then the deadline `sgt task show` prints moves with the clock (TECH-6127).
 - **The budget question is no different.** Answering `Extend.` or `1` is just such an answer, and
   the next turn carries on. Answering `Accept as-is` or `2` ends the task instead, leaving its PRs to you.
 - **A human review** (approval, change request, or comment) of the task's PR also opens a fresh window

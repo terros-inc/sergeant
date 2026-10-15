@@ -898,7 +898,8 @@ happens. It is the installation config's `budget`, each field unset defaulting t
 `canary`'s `--budget-minutes` and `--budget-usd` override the config's for its task. A restart keeps
 the stored window and logs that it ignores a different one, so changing the config's `budget` affects
 only tasks that start afterward, and their next fresh window. A human's answer to any of the agent's
-questions gives the task a fresh window: from the answer's time, with zero spend (runs of earlier
+questions gives the task a fresh window: from the answer's time, its wall time from the task's first
+turn or run after it (so time queued for a task slot does not count), with zero spend (runs of earlier
 windows no longer count) and the config's current `budget`. So do a human's review of the task's PR
 (TECH-5218) and the task's unblocking, its last open Linear "blocked by" issue completed or canceled or
 that relation removed (TECH-5803): the loop logs `unblocked (was waiting on ...): a fresh budget window ...`.

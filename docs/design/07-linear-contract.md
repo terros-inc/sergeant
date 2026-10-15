@@ -218,8 +218,10 @@ kind, and how many followed the recommendation, the data a later task needs to a
 extension for rule 2.
 
 A human's answer to any of Sergeant's questions, this one included, gives the task a fresh budget
-window (TECH-5059): from the answer, with zero spend and the installation's current budget. So does a
-human review or inline review comment on the task's PR; after Sergeant escalates a review, an ordinary
+window (TECH-5059): from the answer, with zero spend and the installation's current budget. Its wall
+time runs from the task's first turn or run after the answer, so a task that gave up its task slot and
+queues for one in the usual order does not spend the window in the queue (TECH-6127). A human review
+or inline review comment on the task's PR gives a fresh window too, from that moment; after Sergeant escalates a review, an ordinary
 PR comment or a human comment on the issue does too (TECH-5218, TECH-5913). The task's unblocking—its
 last open "blocked by" issue completing or canceling, or that
 relation removed, from the poll that sees it (TECH-5803). Waiting on a human PR action is a human wait like a question: while the only thing left is

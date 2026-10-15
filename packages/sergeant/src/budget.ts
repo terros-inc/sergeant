@@ -4,7 +4,7 @@ import { latestAnswer, latestQuestion } from "./question.ts";
 import { recommendationLine, type StopCase } from "./stop-case.ts";
 
 // UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
-// the window's start; spend is the reported cost of the window's finished runs and turns. When either
+// the window's start, or for an answer's window from when the task first works in it (TECH-6127); spend is the reported cost of the window's finished runs and turns. When either
 // is exhausted, the loop cancels running work through the runner and asks the human, through the
 // ordinary question path (UNF-727), whether to continue. A human's answer to any of Sergeant's
 // questions, that one included, opens a fresh window (TECH-5059): "extend" needs nothing more. A reply
@@ -95,6 +95,11 @@ export function budgetStatus(input: {
   priorRuns?: string[] | undefined;
   /** TECH-5803: the start of every window an unblock opened. */
   unblockedAt?: string[] | undefined;
+  /** TECH-6127: the times of humans' answers to Sergeant's questions (question.ts `answerTimes`). */
+  answers?: string[] | undefined;
+  /** The task's latest turns and run starts (`state.json`), each with its time if recorded. */
+  recentTurns?: { at: string }[] | undefined;
+  starts?: Record<string, { kind: string; at?: string | undefined }> | undefined;
   startedAt: string;
   turnCostUsd: number;
   runs: RunRecord[];
@@ -110,11 +115,31 @@ export function budgetStatus(input: {
     taskStart: input.startedAt,
     windowStart,
     ...(input.unblockedAt?.length ? { unblockedAt: input.unblockedAt } : {}),
-    wallDeadline: new Date(Date.parse(windowStart) + window.wallMinutes * 60_000).toISOString(),
+    wallDeadline: new Date(wallFrom(input, windowStart, runs) + window.wallMinutes * 60_000).toISOString(),
     spentUsd: round(runCost + input.turnCostUsd),
     costLimitUsd: window.costUsd,
     unknownCostRuns: runs.filter((r) => r.costUsd === undefined).length + input.unknownRuns,
   };
+}
+
+/**
+ * TECH-6127: when the window's wall time starts. A window an answer opened starts at the task's first
+ * turn or run after the answer, so a task that must queue for a task slot first does not spend its window
+ * in the queue; until then, with nothing running, it floats from now. Any other window starts when it
+ * opens. Read from what `state.json` already keeps: the latest turns (at most 8, so with no worker run's
+ * start to fall back on, a window that has outlived them starts at the answer) and the worker runs' starts.
+ */
+function wallFrom(input: Parameters<typeof budgetStatus>[0], windowStart: string, runs: RunRecord[]): number {
+  const since = Date.parse(windowStart);
+  if (input.since === undefined || !input.answers?.includes(input.since)) return since;
+  const turns = input.recentTurns ?? [];
+  const startedRuns = runs.flatMap((r) => input.starts?.[r.runId]?.at ?? []);
+  const after = [...turns.map((t) => t.at), ...startedRuns].map(Date.parse).filter((t) => t >= since);
+  if (turns.length >= 8 && turns.every((t) => Date.parse(t.at) >= since) && startedRuns.length === 0) return since;
+  if (after.length > 0) return Math.min(...after);
+  // A run of this window, or one still going, is work whose start is not on record: the answer it is.
+  const worked = runs.length > 0 || input.unknownRuns > 0 || input.runs.some((r) => r.status === "running");
+  return worked ? since : Math.max(since, Date.now());
 }
 
 /**
@@ -154,7 +179,7 @@ export function budgetQuestion(situation: SituationReport, why: string, stop: St
     kind: "ask_human",
     question,
     options: [
-      "Extend: continue in a fresh window, from your reply, of the installation's budget",
+      "Extend: continue in a fresh window of the installation's budget, from when the task resumes work after your reply",
       "Accept as-is: stop here and leave the work where it is",
     ],
   };
