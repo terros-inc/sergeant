@@ -949,7 +949,11 @@ one from a task is exceptional. Workers suggest them in their report's `followup
 what could be better, whether it will recur) goes in the report's `feedback` and its short Feedback
 section, and is never filed. Reviewers' `non_blocking` findings and nits never become follow-ups, nor
 do theoretical edge cases, future robustness, generalized cleanup, speculative rollback hazards, or
-abstraction improvements.
+abstraction improvements. The exception is after-deploy checks (TECH-6146): a done-when item only
+production access or post-deploy observation can prove, or an item in the issue's `**After deploy (not
+for workers):**` section, gets one follow-up per check (key `after-deploy-<slug>`) in the turn that
+starts the worker on the rest, instead of a question to a human; the merged outcome comment lists each
+as "not verified (after deploy)", and workers and reviewers treat them as out of scope.
 
 Reasoning decides whether a suggestion deserves an issue and proposes `create_followup` with its
 category, why, and a short key naming the idea; the filed issue opens with the category and why, and

@@ -8,6 +8,8 @@ import { approvedHead } from "./review-quality.ts";
  * ones re-read after it. No run ids or other internals; Done is left to the GitHub integration.
  * Known gaps are judged against the issue's current title and description (TECH-5034), so a human
  * merge of work checked against older text, or over a review's unmet requirements, says so.
+ * A follow-up reasoning filed for an after-deploy check (key `after-deploy-…`, TECH-6146) is listed
+ * as not verified, since no worker or reviewer could check it.
  */
 export function outcomeComment(
   pr: PullRequestFacts,
@@ -35,6 +37,8 @@ export function outcomeComment(
   const validation = checks.every((c) => c.state === "passed")
     ? `required checks passed on that head: ${checks.map((c) => c.name).join(", ") || "none declared"}`
     : `required checks on that head: ${checks.map((c) => `${c.name} ${c.state}`).join(", ")}`;
+  const afterDeploy = followups.filter((f) => f.key.startsWith("after-deploy-"));
+  const filed = followups.filter((f) => !afterDeploy.includes(f));
   const gaps = [...(report?.knownGaps ?? []), ...acceptanceGaps(pr, runs, issueRevision(issue))].map((g) => g.trim().replace(/\.$/, ""));
 
   return [
@@ -42,7 +46,8 @@ export function outcomeComment(
     `- Review: ${review}.`,
     `- Validation: ${validation}.`,
     `- Known gaps: ${gaps.length > 0 ? gaps.join("; ") : "none reported"}.`,
-    ...(followups.length > 0 ? [`- Follow-ups filed: ${followups.map((f) => `[${f.identifier}](${f.url}) ${f.title}`).join("; ")}.`] : []),
+    ...(afterDeploy.length > 0 ? [`- Not verified (after deploy): ${afterDeploy.map((f) => `${f.title}, follow-up [${f.identifier}](${f.url})`).join("; ")}.`] : []),
+    ...(filed.length > 0 ? [`- Follow-ups filed: ${filed.map((f) => `[${f.identifier}](${f.url}) ${f.title}`).join("; ")}.`] : []),
     ...(cost ? [`- ${cost}`] : []),
   ].join("\n");
 }

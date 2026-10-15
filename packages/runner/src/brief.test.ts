@@ -157,7 +157,7 @@ test("the worker brief has the worker find and continue existing work, and lists
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/10)");
+  expect(brief).toContain("## Rules (s2-reviewer-rules/11)");
   const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
@@ -169,7 +169,7 @@ test("reviewer rule 12 counts a trade-off as settled only on the base branch or 
 test("worker and reviewer briefs carry the rebase rule and ask for dependencies in the report", () => {
   const base = spec([]);
   const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
-  expect(worker).toContain("## Rules (s2-worker-rules/13)");
+  expect(worker).toContain("## Rules (s2-worker-rules/14)");
   const rebase = worker.slice(worker.indexOf("14. Rebase early and often."), worker.indexOf("\n15. "));
   expect(rebase).toMatch(/before its first push, before you report a head for\s+review, and whenever the default branch has moved under its open PR/);
   expect(rebase).toMatch(/Resolve conflicts then, as\s+part of the task/);
@@ -248,7 +248,7 @@ test("worker and reviewer briefs say to report once the head is pushed, without 
   expect(workerRule).toMatch(/Once your final head is pushed, write the report right away\. Do not wait on CI: Sergeant already\s+watches CI on your PRs and reacts to failures\./);
 
   const reviewer = reviewerBrief(spec([pr]), [subject], []);
-  expect(reviewer).toContain("## Rules (s2-reviewer-rules/10)");
+  expect(reviewer).toContain("## Rules (s2-reviewer-rules/11)");
   const reviewerRule = reviewer.slice(reviewer.indexOf("16. "), reviewer.indexOf("## Report"));
   expect(reviewerRule).toMatch(/Once your review is done, write the report right away\. Do not wait on CI: the head is already\s+pushed, and Sergeant watches its CI and reacts to failures\./);
 
@@ -256,4 +256,16 @@ test("worker and reviewer briefs say to report once the head is pushed, without 
     expect(rule).toContain("when your turn ends the run ends and nothing wakes you later");
     expect(rule).toContain("never end it to wait for a check or a background job");
   }
+});
+
+// TECH-6146: done-when items only production can prove are the follow-ups Sergeant filed, checked by
+// their owner after deploy. A worker that tried them, or a reviewer that blocked on them, would stall the task.
+test("worker and reviewer briefs keep the issue's After-deploy section out of scope", () => {
+  const worker = workerBrief({ ...spec([]), role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
+  const scope = worker.slice(worker.indexOf("2. Achieve the objective."), worker.indexOf("\n3. "));
+  expect(scope).toMatch(/After deploy \(not for workers\):\*\* section, if any, is not\s+your scope, nor is a done-when item the objective calls after deploy/);
+  expect(scope).toMatch(/Don't attempt them or list them as gaps\./);
+  const reviewer = reviewerBrief(spec([pr]), [subject], []);
+  const rule = reviewer.slice(reviewer.indexOf("3. Rule on every requirement"), reviewer.indexOf("\n4. "));
+  expect(rule).toMatch(/After deploy \(not for\s+workers\):\*\* section, and done-when items only production access or watching real traffic after\s+deploy can prove, are not requirements of this change/);
 });
