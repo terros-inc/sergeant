@@ -1,5 +1,6 @@
 export { ADAPTERS, type Adapter } from "./agents.ts";
 export { workerBrief } from "./brief.ts";
+export { issueBranches } from "./brief-worker.ts";
 export { setAside, type ModelAccount } from "./accounts.ts";
 export { byRole } from "./by-role.ts";
 export { FargateSettings } from "./fargate/aws.ts";

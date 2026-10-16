@@ -52,7 +52,7 @@ stored beside it so it can be replayed.
 ## Environment
 - Repositories you may use (read and write): <slug — purpose — merge policy>
 - Other enrolled repositories (names only; ask if you need one): <slug — purpose>
-- Existing work: Sergeant branches on origin; PRs Linear links to the issue (rule 16)
+- Existing work: branches on origin naming the issue's identifier exactly; PRs Linear links to the issue (rule 16)
 - Access: GitHub write via the credential helper; AWS dev/stage via the `sergeant-dev` profile; tools: <names>
 - Not available, by design: production, IAM/org/billing, Linear, Sergeant's control plane
 
@@ -113,8 +113,8 @@ Versioned text rendered into every worker brief. A change is a new version, reco
    workers):**` section and any done-when item the objective calls after deploy: Sergeant filed a
    follow-up for each, checked after deploy (TECH-6146). Work only in your repository set. If you need another enrolled
    repository, say so in `repositoryRequests` and continue with what you can.
-3. **Branches.** One branch per repository, named `sergeant/<identifier>-<short-slug>`. Never push
-   to a default branch. Force-push only your own branches. **Push work in progress before you stop,
+3. **Branches.** One branch per repository: the issue's existing branch (rule 16), else a fresh one
+   named `sergeant/<identifier>-<short-slug>`. Never push to a default branch. Force-push only your own branches. **Push work in progress before you stop,
    whenever you are told to wrap up, and at least every 30 minutes**; a successor continues from
    what you pushed.
 4. **Pull requests.** Open or update PRs yourself. A PR body must stand on its own once the Linear
@@ -182,11 +182,21 @@ Versioned text rendered into every worker brief. A change is a new version, reco
 16. **Existing work first.** Before changing anything, understand what already exists; it matters
     most after a handoff or a reopen (TECH-5191). Read the issue description and every comment in
     the Task section, handoff notes and decisions included. Find the existing PRs (the brief lists
-    the Sergeant branches on origin and the PRs Linear links to the issue; `gh pr list --search
-    <IDENTIFIER>` finds the rest) and branches, and read their descriptions, discussion, review
-    feedback, and diffs. Work out what is finished, what remains, and whether earlier feedback was
-    addressed. Continue a suitable existing PR or branch; open a replacement only for a concrete
-    reason, and say it. Name required history you cannot read instead of assuming a fresh start.
+    the branches on origin whose name holds the issue's identifier exactly and the PRs Linear links to
+    the issue; `gh pr list --search <IDENTIFIER>` finds the rest) and branches, and read their
+    descriptions, discussion, review feedback, and diffs. Work out what is finished, what remains, and
+    whether earlier feedback was addressed. Continue a suitable existing PR or branch; open a
+    replacement only for a concrete reason, and say it. Name required history you cannot read instead
+    of assuming a fresh start.
+    **Which branch is the issue's (TECH-6164).** Only a branch whose name holds the identifier
+    exactly, case-insensitive, after any prefix and not run into another letter or digit
+    (`grok/tech-123`, `someone/tech-123-…`, but never `tech-1234` or `tech-12`), or the branch of a PR
+    Linear links to the issue. Partial or fuzzy matches never count; with none, the worker starts a
+    fresh branch. One a human or another agent started is taken over without asking (decided Oct 15
+    2026): the worker pushes to that same branch and PR, and its report's summary opens by naming
+    it, the sentence Sergeant's progress comment quotes. Sergeant itself names on the issue what the
+    worker takes over when it starts the worker, before the run starts (`adopted.ts`, 07 §3): the open
+    linked PRs the worker App did not open, and the exact-identifier branches outside `sergeant/`.
     This reuses the brief's existing discovery (Linear's linked PRs, origin's branches, `gh`); there
     is no separate handoff record.
     **Stale hints.** File paths, line numbers and scope in the issue are hints written against an

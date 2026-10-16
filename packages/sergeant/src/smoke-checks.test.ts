@@ -91,6 +91,7 @@ const pr = {
 const githubAnswer = (path: string): unknown => {
   if (path === `/repos/${repo}`) return { default_branch: "main" };
   if (path === `/repos/${repo}/branches/main`) return { commit: { sha: "c".repeat(40) } };
+  if (path === `/repos/${repo}/branches?per_page=100&page=1`) return [{ name: "main" }, { name: "sergeant/tech-9-thing" }];
   if (path === `/repos/${repo}/git/matching-refs/heads/sergeant/tech-9`) return [{ ref: "refs/heads/sergeant/tech-9-thing", object: { sha: head, type: "commit" } }];
   if (path === `/repos/${repo}/git/commits/${head}`) return { committer: { date: "2026-10-15T02:00:00Z" } };
   if (path.endsWith("/pulls/7")) return pr;
@@ -164,7 +165,8 @@ test("every check passes over the real adapters, and nothing is written", async 
   const readByProbe = { mergePullRequest: "squash message", handToHuman: "handoff read", closePullRequest: "handoff read", deletePullRequestBranch: "branch-delete read" };
   const local = ["mergePolicy", "rateLimit", "forgetFeedback"];
   expect(Object.keys(f.githubPort).filter((m) => !f.called.has(m) && !(m in readByProbe) && !local.includes(m))).toEqual([]);
-  expect([...f.called].sort()).toEqual(["defaultBranchHead", "issueBranches", "readPullRequest"]);
+  expect([...f.called].sort()).toEqual(["branches", "defaultBranchHead", "issueBranches", "readPullRequest"]);
+  expect(results.find((r) => r.name.includes("branch list"))?.detail).toEqual({ branches: 2 });
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(0);
   expect(text.split("\n").at(-1)).toBe(`SMOKE PASS: ${results.length} passed, 0 failed, 0 skipped`);
@@ -194,6 +196,7 @@ test("a failed read, or a host on another version, fails its own line and the re
     "SKIP linear comment thread and comment by id",
     "SKIP linear follow-up and retro issue reads (origin, issue, team states, relation and document by id)",
     `PASS github ${repo} default branch head (follow-up "Written against")`,
+    `PASS github ${repo} branch list (takeover notice)`,
     `SKIP github ${repo} issue branches (report-only retry)`,
     `SKIP github ${repo} PR facts (mergeable state, human reviews, required checks)`,
     `SKIP github ${repo} squash message from PR text and commits`,
@@ -204,7 +207,7 @@ test("a failed read, or a host on another version, fails its own line and the re
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(1);
   expect(text).toContain("FAIL linear completed issues in the feedback lookback [TECH-5049]");
-  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 4 passed, 2 failed, 15 skipped");
+  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 5 passed, 2 failed, 15 skipped");
 });
 
 test("the API check reads the run list and a run's view with its provider choice and account, as sent", async () => {
