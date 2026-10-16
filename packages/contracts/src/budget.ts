@@ -24,6 +24,8 @@ export const BudgetStatus = z.object({
   windowStart: Instant,
   /** TECH-6165: which window of the task this is, counting from 0, which keys its budget question; absent means 0. */
   windowSeq: z.number().int().nonnegative().optional(),
+  /** TECH-6225: a budget question of this task asked before TECH-6165, keyed by its window's start; its comment id. */
+  legacyQuestion: z.string().optional(),
   /**
    * When the window's active time runs out if the task works without pause from now: now plus the
    * `wallMinutes` it has not yet used (TECH-6165). Past, once they are used up.

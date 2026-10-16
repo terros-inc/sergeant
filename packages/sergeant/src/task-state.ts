@@ -83,6 +83,12 @@ const TaskState = z.looseObject({
       /** TECH-6165: which window of the task this is (budget.ts `openWindow`); absent means 0. */
       windowSeq: z.number().int().nonnegative().optional(),
     }),
+  /**
+   * TECH-6225: the id of a budget question asked before TECH-6165, under its window's start
+   * (budget.ts `legacyBudgetQuestionKey`), kept the first poll that finds it: a later window's start is
+   * not that one's, so it would be found no more.
+   */
+  legacyBudgetQuestion: z.string().optional(),
   /** TECH-5803: the issue's open blockers as the last poll read them; absent until a poll has. */
   blockedBy: z.array(z.string()).optional(),
   merged: z

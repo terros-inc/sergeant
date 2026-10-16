@@ -142,6 +142,15 @@ export async function checkHolds(
 ): Promise<{ hold: "budget" | "unknown" | "question" } | (BudgetCheck & { hold?: undefined })> {
   const { opts, deps, state, log, save } = ctx;
   const { conversation, live, unknown } = poll;
+  const { id } = conversation.issue;
+  const find = (key: string) => conversation.agentComments.find((c) => c.id === commentIdFor(key));
+  // TECH-6225: a task saved before TECH-6165 may have asked its budget question under its window's start,
+  // which a new window replaces: kept before any window below opens, so every later one still knows it.
+  const legacy = find(legacyBudgetQuestionKey(id, state.budget.since ?? state.startedAt));
+  if (legacy && state.legacyBudgetQuestion !== legacy.id) {
+    state.legacyBudgetQuestion = legacy.id;
+    await save();
+  }
   // TECH-5059: a human's answer to Sergeant's latest question, the budget question included, opens a
   // fresh window from the answer, with zero spend and the installation's budget now. Only an answer
   // newer than the window's start does, so it opens one window once, across restarts too.
@@ -159,13 +168,13 @@ export async function checkHolds(
   // crash between posting it and saving anything loses nothing. The key names the task's start, so an
   // earlier task's budget question, answered or not, is never this one's (TECH-5145). TECH-6225: a task
   // saved before TECH-6165 may have asked it under the window's old key; a deploy that missed it asked again.
-  const { id } = conversation.issue;
   const budgetKey = budgetQuestionKey(id, state.startedAt, state.budget.windowSeq);
-  const find = (key: string) => conversation.agentComments.find((c) => c.id === commentIdFor(key));
   const budgetAsked = find(budgetKey) ?? find(legacyBudgetQuestionKey(id, state.budget.since ?? state.startedAt));
-  // TECH-6225: an earlier window's question is still open when no human has commented since: a PR review
-  // opened this window (TECH-6165). It holds nothing, but no second question is asked while it is open.
-  const budgetOpen = Array.from({ length: state.budget.windowSeq ?? 0 }, (_, seq) => find(budgetQuestionKey(id, state.startedAt, seq)))
+  // TECH-6225: an earlier window's question, the one kept from before TECH-6165 too, is still open when no
+  // human has commented since: a PR review opened this window (TECH-6165). It holds nothing, but no second
+  // question is asked while it is open.
+  const earlier = Array.from({ length: state.budget.windowSeq ?? 0 }, (_, seq) => find(budgetQuestionKey(id, state.startedAt, seq)));
+  const budgetOpen = [...earlier, conversation.agentComments.find((c) => c.id === state.legacyBudgetQuestion)]
     .filter((c) => c !== undefined)
     .find((c) => !conversation.humanComments.some((h) => Date.parse(h.createdAt) > Date.parse(c.createdAt)));
   const budget = poll.budgetOf();

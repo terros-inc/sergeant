@@ -92,8 +92,8 @@ export const legacyBudgetQuestionKey = (issueId: string, windowStart: string) =>
 /**
  * TECH-5118: whether a human has replied to Sergeant's budget question, the question it asked last (or a
  * clarifying question in that question's thread). Every budget question of this task has the key of one
- * of its windows so far, 0 to `windowSeq` (TECH-6165), however each opened, or one asked before
- * TECH-6165 (`legacyBudgetQuestionKey`).
+ * of its windows so far, 0 to `windowSeq` (TECH-6165), however each opened, or is the one asked before
+ * TECH-6165 (`legacyQuestion`).
  *
  * TECH-5137: only a reply given in the current window counts. A reply to one of this task's questions
  * opens a window from itself (poll-checks.ts), so it is never older than `windowStart`; a reply from
@@ -104,18 +104,16 @@ export const legacyBudgetQuestionKey = (issueId: string, windowStart: string) =>
  */
 export function answeredBudgetQuestion(
   situation: Pick<SituationReport, "conversation">,
-  budget: Pick<BudgetStatus, "taskStart" | "windowStart" | "windowSeq">,
+  budget: Pick<BudgetStatus, "taskStart" | "windowStart" | "windowSeq" | "legacyQuestion">,
 ): boolean {
   const { conversation } = situation;
   const asked = latestQuestion(conversation);
   const reply = latestAnswer(conversation);
   if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(budget.windowStart)) return false;
   const thread = asked.parentId ?? asked.id;
-  const { id } = conversation.issue;
-  const keys = Array.from({ length: (budget.windowSeq ?? 0) + 1 }, (_, seq) => budgetQuestionKey(id, budget.taskStart, seq));
-  // TECH-6225: one asked before TECH-6165, keyed by its window's start: the task's, or an answer's.
-  const legacy = [budget.taskStart, ...conversation.humanComments.map((c) => c.createdAt)].map((at) => legacyBudgetQuestionKey(id, at));
-  return [...keys, ...legacy].map(commentIdFor).includes(thread);
+  const keys = Array.from({ length: (budget.windowSeq ?? 0) + 1 }, (_, seq) => budgetQuestionKey(conversation.issue.id, budget.taskStart, seq));
+  // TECH-6225: or the one asked before TECH-6165, whichever window it was (poll-checks.ts `checkHolds`).
+  return [...keys.map(commentIdFor), ...(budget.legacyQuestion ? [budget.legacyQuestion] : [])].includes(thread);
 }
 
 /** The task's budget now, from what `state.json` keeps (start, window, active time, turn spend) and the run records. */
@@ -126,6 +124,7 @@ export function budgetStatus(input: {
   windowSeq?: number | undefined;
   activeMs?: number | undefined;
   activeSince?: string | undefined;
+  legacyQuestion?: string | undefined;
   startedAt: string;
   turnCostUsd: number;
   runs: RunRecord[];
@@ -142,6 +141,7 @@ export function budgetStatus(input: {
     taskStart: input.startedAt,
     windowStart: input.since ?? input.startedAt,
     ...(input.windowSeq !== undefined && { windowSeq: input.windowSeq }),
+    ...(input.legacyQuestion && { legacyQuestion: input.legacyQuestion }),
     wallDeadline: new Date(now + window.wallMinutes * 60_000 - activeMs).toISOString(),
     spentUsd: round(runCost + input.turnCostUsd),
     costLimitUsd: window.costUsd,

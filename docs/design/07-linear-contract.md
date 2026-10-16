@@ -240,7 +240,10 @@ question, as before. Each window has a number,
 window's budget question is keyed by the task's start and that number, however the window opened, and a
 task saved before it had one is in window 0. A window saved before active time was kept starts with none
 used (TECH-6225): its wall time included every wait, so only work from then on counts. Its budget question,
-keyed by its window's start before TECH-6165, is still found, so a deploy posts nothing new. Sergeant
+keyed by its window's start before TECH-6165, is still found, so a deploy posts nothing new, and its id is
+kept in `state.json` (`legacyBudgetQuestion`) the first poll that finds it: a later window, opened by a PR
+review or an unblock, no longer names that start, yet the question is still the task's, open until a human
+replies, and a reply to it can accept the work as it is. Sergeant
 never asks a budget question while an earlier one of the task has no human reply on the issue, as after a
 PR review opened the window: once this window is exhausted, the task waits on that question instead.
 A comment a person's assistant posts through that person's own account (the Linear MCP, `gh`) is that

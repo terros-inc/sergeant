@@ -92,3 +92,39 @@ test("a task that used up its active time asks once, and a restart, or a later w
   });
   expect(later.posted).toEqual([]);
 });
+
+// A task saved before TECH-6165 whose budget question was asked in a window a human's PR review opened:
+// its key names that review's time, which nothing else keeps. A restart finds it under the saved window's
+// start and keeps it, and a later PR review opens a window whose start is not that one.
+async function restartedOnLegacyQuestion() {
+  const startedAt = ago(400);
+  const reviewedAt = ago(300);
+  const question = asked(legacyBudgetQuestionKey("i1", reviewedAt), ago(60));
+  const state = { startedAt, runIds: ["run_w"], turnCostUsd: 0, budget: { window, since: reviewedAt, priorRuns: [] } };
+  const restart = await scenario({ state, conversation: { agentComments: [question] }, runner, reasoner: async () => turnOf([]), onPoll: stopAt(3) });
+  expect(restart.posted).toEqual([]);
+  await rm(join(dir, "STOP"));
+  // A later PR review opened window 1, which the work has used up.
+  const later = { ...(await saved()), budget: { window, since: ago(30), priorRuns: ["run_w"], activeMs: 121 * 60_000, windowSeq: 1 } };
+  return { question, later };
+}
+
+test("a pre-TECH-6165 budget question still open asks nothing more once a PR review opens a later window that runs out", async () => {
+  const { question, later } = await restartedOnLegacyQuestion();
+  const { posted } = await scenario({ state: later, conversation: { agentComments: [question] }, runner, reasoner: async () => turnOf([]), onPoll: stopAt(4) });
+  expect(posted).toEqual([]);
+});
+
+test("a reply accepting the work as it is to a pre-TECH-6165 budget question from a PR review's window ends the task, in a later window", async () => {
+  const { question, later } = await restartedOnLegacyQuestion();
+  let reply: ReturnType<typeof human> | undefined;
+  const { result, posted } = await scenario({
+    state: later,
+    conversation: { agentComments: [question] },
+    runner,
+    reasoner: async () => turnOf([{ kind: "accept_as_is" }]),
+    onPoll: (poll, live) => (poll < 3 ? live : { ...live, humanComments: [(reply ??= human("c1", ago(0), "Accept it as it is."))] }),
+  });
+  expect(posted.filter((b) => /budget is exhausted/.test(b))).toEqual([]);
+  expect(result).toEqual({ outcome: "accepted", detail: "a human accepted the work as it is" });
+});

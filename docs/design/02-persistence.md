@@ -185,7 +185,7 @@ duplicate is accepted (captain, 2026-10-02).
 | Merge | `merge:<taskId>:<repo>#<n>:<headSha>` | Merging the wrong head. GitHub's merge with the expected SHA; "already merged at that SHA" counts as success |
 | Follow-up issue | `followup:<taskId>:<semanticKey>` | Duplicate issues for humans to clean up. Client-supplied issue id (verify V1) or a lookup by the key before creating; reasoning picks `semanticKey`, so re-proposals deduplicate |
 | Close, cancel, release, complete | `close:<taskId>` | A stopped task restarting. One closing action per task; its steps are ordered and re-driven (03 §10) |
-| Budget question | `budget-question:<linearIssueId>:<taskStart>:<windowSeq>` | Asking twice in one window, or matching an earlier task's question. One per task and window, by the window's number (TECH-6165, 07 §6) |
+| Budget question | `budget-question:<linearIssueId>:<taskStart>:<windowSeq>` | Asking twice in one window, or matching an earlier task's question. One per task and window, by the window's number (TECH-6165, 07 §6). One asked before TECH-6165 was keyed `budget-question:<linearIssueId>:<windowStart>`; its id is kept in `state.json` once found (TECH-6225) |
 | Review disposition | `disposition:<taskId>:<repo>#<n>:<headSha>` | Write-once evidence |
 | Admit | `admit:<linearIssueId>:<observedAt>` | Two episodes of one issue. Partial unique index on open tasks per issue |
 | Linear comment, question, note | `comment:<taskId>:<turnId>:<n>`, `ask:<taskId>:<turnId>:<n>` | Best-effort: a client-supplied comment id where Linear supports it (V1). A rare duplicate comment after a crash is accepted |
