@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import type { GitHubPort, RepoSlug, RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
-import { cachedToken, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
+import type { CiRerunPort, GitHubPort, RepoSlug, RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
+import { cachedToken, ciRerunner, createGitHubPort, githubApp, runTokens, type GitHubApp } from "@terros/sergeant-github";
 import { createLinearPort } from "@terros/sergeant-linear";
 import { FargateSettings, type Adapter } from "@terros/sergeant-runner";
 import type { z } from "zod";
@@ -116,6 +116,8 @@ export type Installation = {
   controlPlaneApp: GitHubApp;
   workerApp: GitHubApp;
   githubTokens: RunGitHubTokens;
+  /** TECH-5839: reruns failed CI a worker asks for, when the config names a rerun App. */
+  ciRerun?: CiRerunPort;
   modelToken: string;
   /** The customer names a worker's push to a public repository refuses, when the config names the secret (TECH-5914). */
   publicDataDenylist?: string;
@@ -140,7 +142,7 @@ export async function connect(
   if (unknown.length > 0) throw new Error(`not enrolled in the installation config: ${unknown.join(", ")}`);
   const secret = secretResolver(config);
   const optional = (ref: string | undefined) => (ref === undefined ? undefined : secret(ref));
-  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook, publicDataDenylist] = await Promise.all([
+  const [linearToken, controlPlaneKey, workerKey, modelToken, linearWebhook, githubWebhook, publicDataDenylist, ciRerunKey] = await Promise.all([
     secret(config.linear.tokenSecret),
     secret(config.github.controlPlaneApp.privateKeySecret),
     secret(config.github.workerApp.privateKeySecret),
@@ -148,6 +150,7 @@ export async function connect(
     optional(config.linear.webhookSecret),
     optional(config.github.webhookSecret),
     optional(config.publicDataDenylistSecret),
+    optional(config.github.ciRerunApp?.privateKeySecret),
   ]);
   const app = (ref: z.infer<typeof GitHubAppRef>, privateKey: string) =>
     githubApp({ appId: ref.appId, installationId: ref.installationId, privateKey });
@@ -188,6 +191,8 @@ export async function connect(
     controlPlaneApp,
     workerApp,
     githubTokens: runTokens(workerApp),
+    // TECH-5839: the rerun App's key stays here, in the control plane; runs never see it or its tokens.
+    ...(config.github.ciRerunApp && ciRerunKey && { ciRerun: ciRerunner({ app: app(config.github.ciRerunApp, ciRerunKey), repositories: repositoryConfigs }) }),
     modelToken,
     ...(publicDataDenylist && { publicDataDenylist }),
     webhookSecrets: { ...(linearWebhook && { linear: linearWebhook }), ...(githubWebhook && { github: githubWebhook }) },

@@ -67,6 +67,7 @@ test("a hostile linked-issue description never reaches the reasoning prompt or a
     followups: [],
     uploads: [],
     refusedMerges: [],
+    ciReruns: [],
     budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2999-01-01T00:00:00.000Z", spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 0, taskStart: "2026-10-02T10:00:00.000Z", windowStart: "2026-10-02T10:00:00.000Z" },
     recentTurns: [],
   });

@@ -178,6 +178,7 @@ const service = await startService(
     linearProfileForGitHubLogin: reviewerProfileLookup(config),
     githubLoginForLinearProfile: githubLoginLookup(config),
     github: installation.github,
+    ...(installation.ciRerun && { ciRerun: installation.ciRerun }),
     runner,
     reasoner: claudeCliReasoner({
       model: values["reasoning-model"],

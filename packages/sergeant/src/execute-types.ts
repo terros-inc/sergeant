@@ -1,4 +1,5 @@
 import type {
+  CiRerunPort,
   FiledFollowup,
   GitHubPort,
   HumanHandoffStep,
@@ -53,6 +54,8 @@ export type Ports = {
   handoff?: (reason: string) => Promise<void>;
   /** The task's cost so far, this turn's included, for the comment a close posts (TECH-5227). */
   costLine?: () => string;
+  /** TECH-5839: reruns the failed CI a worker asks for; absent, every request is refused (ci-reruns.ts). */
+  ciRerun?: CiRerunPort;
 };
 
 export type ActionOutcome =

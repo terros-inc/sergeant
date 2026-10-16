@@ -66,8 +66,8 @@ async function serve(opts: { writable?: boolean; write?: () => Write } = {}) {
     },
   };
   const repositories: RepoSlug[] = ["terros-inc/one"];
-  const configs: Record<string, { mergeMethod: "merge" | "squash" | "rebase"; mergePolicy: "sergeant" | "human"; observedChecksFallback: boolean }> = {
-    "terros-inc/one": { mergeMethod: "squash", mergePolicy: "human", observedChecksFallback: false },
+  const configs: Record<string, { mergeMethod: "merge" | "squash" | "rebase"; mergePolicy: "sergeant" | "human"; observedChecksFallback: boolean; ciRerunWorkflows: string[] }> = {
+    "terros-inc/one": { mergeMethod: "squash", mergePolicy: "human", observedChecksFallback: false, ciRerunWorkflows: [] },
   };
   const logs: string[] = [];
   const clock = { ms: 0 };
@@ -143,7 +143,7 @@ test("an approver's add and remove change only the parameter's repositories, the
   expect(parameter.descriptions).toEqual(["Grace Example enrolled terros-inc/two (rebase, merged by human)"]);
   // The same array and record every holder (loops, webhooks, the GitHub port) reads.
   expect(repositories).toEqual(["terros-inc/one", "terros-inc/two"]);
-  expect(configs["terros-inc/two"]).toEqual({ mergeMethod: "rebase", mergePolicy: "human", observedChecksFallback: false });
+  expect(configs["terros-inc/two"]).toEqual({ mergeMethod: "rebase", mergePolicy: "human", observedChecksFallback: false, ciRerunWorkflows: [] });
   expect(logs).toContain("Grace Example enrolled terros-inc/two (rebase, merged by human): the installation-config parameter and the running service have it");
 
   // Everyone signed in may list; nobody but an approver may change.

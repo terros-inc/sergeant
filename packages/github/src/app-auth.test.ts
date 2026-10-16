@@ -5,7 +5,9 @@ import { githubApp, runTokens } from "./app-auth.ts";
 // The worker App token is the only GitHub credential a run gets. If minting dropped the repository
 // or permission scope, a worker would hold every repository and permission the App was installed
 // with (administration, if someone over-granted it), and a reviewer could push. Workflow write is
-// deliberately present only on worker tokens so they can propose workflow changes.
+// deliberately present only on worker tokens so they can propose workflow changes. TECH-5839: commit
+// statuses are readable once the installation grants them, and Actions write never reaches a run even
+// when the installation holds it: reruns go through Sergeant's own rerun App.
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
@@ -26,14 +28,14 @@ function fakeGitHub(installed: Record<string, string>) {
 const base = { contents: "write", pull_requests: "write", checks: "read", actions: "read", metadata: "read" };
 
 test("run tokens are minted by the worker App for exactly the run's repositories and role", async () => {
-  const { requests, app } = fakeGitHub({ ...base, workflows: "write" });
+  const { requests, app } = fakeGitHub({ ...base, actions: "write", workflows: "write", statuses: "read" });
   const tokens = runTokens(app);
 
   expect(await tokens({ repositories: ["o/canary"], access: "write" })).toBe("ghs_1");
   await tokens({ repositories: ["o/canary"], access: "read" });
 
   expect(requests.map((r) => [r.url, r.body])).toEqual([
-    ["https://api.github.com/app/installations/7/access_tokens", { repositories: ["canary"], permissions: { ...base, workflows: "write" } }],
+    ["https://api.github.com/app/installations/7/access_tokens", { repositories: ["canary"], permissions: { ...base, workflows: "write", statuses: "read" } }],
     [
       "https://api.github.com/app/installations/7/access_tokens",
       { repositories: ["canary"], permissions: { contents: "read", pull_requests: "read", metadata: "read" } },
@@ -47,10 +49,11 @@ test("run tokens are minted by the worker App for exactly the run's repositories
 
 // TECH-5797: the captain grants workflows:write after this ships, and an owner then accepts it. Until
 // then, asking for it would make GitHub refuse every worker token, so a worker gets the token it got before.
+// The same holds for TECH-5839's statuses:read.
 test.each([
   ["has not accepted", base],
   ["holds only read on", { ...base, workflows: "read" }],
-])("a worker token asks for no workflows permission while the installation %s workflows", async (_, installed) => {
+])("a worker token asks for no workflows or statuses permission while the installation %s workflows", async (_, installed) => {
   const { requests, app } = fakeGitHub(installed);
   await runTokens(app)({ repositories: ["o/canary"], access: "write" });
   expect(requests.map((r) => r.body)).toEqual([{ repositories: ["canary"], permissions: base }]);

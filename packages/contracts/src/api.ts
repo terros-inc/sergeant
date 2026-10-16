@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BudgetStatus } from "./budget.ts";
+import { CiRerun } from "./ci-rerun.ts";
 import { RepoSlug } from "./conversation.ts";
 import { MergePolicy } from "./github.ts";
 import { QuotaReading, QuotaWindowName, RunAccount, RunId, RunRecord } from "./runs.ts";
@@ -84,6 +85,8 @@ export const TaskDetail = z.object({
   runs: z.array(RunSummary),
   recentTurns: z.array(z.object({ at: z.string(), summary: z.string(), outcomes: z.array(z.string()) })),
   followups: z.array(FiledFollowup),
+  /** TECH-5839: the CI reruns its workers asked for, and what came of each; absent from an older Sergeant. */
+  ciReruns: z.array(CiRerun).optional(),
   /**
    * The task's last stop (TECH-5006): under way (`done` false) or finished, and the worker PRs it closed,
    * those closed after a `sgt task cancel` answered included. Kept once it finishes, until a later stop.

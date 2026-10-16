@@ -47,7 +47,7 @@ const situation = (over: SituationOver = {}): SituationReport => {
   const pullRequests = [prAt(second)];
   return {
     taskId: "canary_UNF-1", generatedAt: at, conversationRevision: conversationRevision(conversation, pullRequests), conversation,
-    uploads: [], enrolledRepositories: [repo], pullRequests, runs: records, followups: [], refusedMerges: [],
+    uploads: [], enrolledRepositories: [repo], pullRequests, runs: records, followups: [], refusedMerges: [], ciReruns: [],
     budget: { ...budget, ...over.budget }, recentTurns: [],
   };
 };

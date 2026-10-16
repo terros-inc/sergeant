@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Conversation, FeedbackCase, HumanPullRequestFeedback, PullRequestFacts } from "@terros/sergeant-contracts";
 import { agent, pr, repo } from "./budget-scenario.ts";
 import { sweepFeedback, type FeedbackDeps } from "./feedback.ts";
@@ -23,7 +23,12 @@ const merged = (n: number, hour: number, humanFeedback: HumanPullRequestFeedback
 const open = (n: number, humanFeedback: HumanPullRequestFeedback[]): PullRequestFacts => ({ ...pr, number: n, url: `https://github.com/${repo}/pull/${n}`, humanFeedback });
 
 let dir = "";
-afterEach(() => rm(dir, { recursive: true, force: true }));
+// The lookback counts back from now: the clock is pinned to the evening of the day these hours are on.
+beforeEach(() => void vi.useFakeTimers({ toFake: ["Date"], now: new Date(at(23)) }));
+afterEach(async () => {
+  vi.useRealTimers();
+  await rm(dir, { recursive: true, force: true });
+});
 
 type World = {
   /** Each earlier episode: when it recorded its merge and when it was seen through, in hours. */

@@ -25,6 +25,16 @@ test("the control-plane and worker GitHub Apps must differ, however the App ID i
   expect(InstallationConfig.parse(config(42, "43")).github.workerApp.appId).toBe(43);
 });
 
+// TECH-5839: workers mint tokens from the worker App, so the rerun App's Actions write must be another App's.
+test("the CI rerun App must differ from the worker App", () => {
+  const withRerun = (appId: number | string) => {
+    const c = config(1, 2);
+    return { ...c, github: { ...c.github, ciRerunApp: { appId, installationId: 3, privateKeySecret: "sergeant/ci-rerun" } } };
+  };
+  expect(InstallationConfig.safeParse(withRerun("2")).success).toBe(false);
+  expect(InstallationConfig.parse(withRerun(3)).github.ciRerunApp?.appId).toBe(3);
+});
+
 test("reviewer profiles are validated and GitHub logins are matched case-insensitively", () => {
   const profile = "https://linear.app/acme/profiles/ada";
   const parsed = InstallationConfig.parse({
