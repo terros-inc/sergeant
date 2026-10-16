@@ -52,7 +52,7 @@ stored beside it so it can be replayed.
 ## Environment
 - Repositories you may use (read and write): <slug — purpose — merge policy>
 - Other enrolled repositories (names only; ask if you need one): <slug — purpose>
-- Existing work: Sergeant branches on origin; PRs Linear links to the issue (§3)
+- Existing work: branches on origin naming the issue's identifier exactly; PRs Linear links to the issue (§3)
 - Access: GitHub write via the credential helper; AWS dev/stage via the `sergeant-dev` profile; tools: <names>
 - Not available, by design: production, IAM/org/billing, Linear, Sergeant's control plane
 

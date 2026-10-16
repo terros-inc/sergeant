@@ -154,6 +154,28 @@ test("the worker brief has the worker find and continue existing work, and lists
   );
 });
 
+// TECH-6164: the brief listed every `sergeant/*` branch, so a worker was pointed at another issue's
+// branch (`sergeant/prod-789-…` for an unrelated issue) and could push onto it. Only a branch naming the
+// issue exactly is listed, whoever started it; one that merely resembles the ID never is.
+test("the worker brief lists only branches naming the issue exactly, any prefix, else a fresh branch", () => {
+  const worker = { ...spec([]), role: "worker" as const, objective: "o", context: { pullRequests: [], runs: [] } };
+  const listed = (b: string) => b.slice(b.indexOf("Branches on origin"), b.indexOf("- Pull requests Linear links"));
+  const brief = workerBrief(worker, [
+    "o/r: grok/UNF-1",
+    "o/r: someone/unf-1-recorder",
+    "o/r: sergeant/prod-789-auth-contract",
+    "o/r: sergeant/unf-12-other",
+    "o/r: sergeant/unf-1x",
+    "o/r: grok/test-1",
+    "o/unf-1: main",
+  ]);
+  expect(listed(brief)).toContain("  - o/r: grok/UNF-1\n  - o/r: someone/unf-1-recorder\n");
+  expect(listed(brief)).not.toMatch(/prod-789|unf-12|unf-1x|test-1|main/);
+  expect(brief).toMatch(/do not ask, continue on that same\s+branch and PR/);
+
+  expect(listed(workerBrief(worker, ["o/r: sergeant/prod-789-auth-contract"]))).toContain("  - (none: start a fresh branch)");
+});
+
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);

@@ -5,9 +5,20 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
 export const WORKER_RULES_VERSION = "s2-worker-rules/22";
 
+/**
+ * TECH-6164: of origin's branches (`<repo>: <branch>`), the ones that are this issue's: their name holds
+ * its identifier exactly, case-insensitive, after any prefix, and not run into another letter or digit,
+ * so `tech-12` is never `tech-123`'s. A branch that only resembles it is another issue's work.
+ */
+export function issueBranches(identifier: string, branches: string[]): string[] {
+  const exact = new RegExp(`(?<![a-z0-9])${identifier}(?![a-z0-9])`, "i");
+  return branches.filter((b) => exact.test(b.slice(b.indexOf(": ") + 2)));
+}
+
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
-  existingBranches: string[],
+  /** Every branch on origin, as `<repo>: <branch>`; only the issue's own are listed (`issueBranches`). */
+  remoteBranches: string[],
   /** `renderAttachments`: the issue's files the run was given (TECH-4994). */
   files = "",
   /** The enrolled repositories the run's `GH_READ_TOKEN` reads (TECH-6194). */
@@ -15,6 +26,7 @@ export function workerBrief(
 ): string {
   const id = spec.conversation.issue.identifier;
   const linked = spec.conversation.issue.linkedPullRequests;
+  const existingBranches = issueBranches(id, remoteBranches);
   return `# Sergeant worker brief — ${id} · ${spec.runId}
 
 ## Task (verbatim from Linear — this is what was asked)
@@ -29,10 +41,13 @@ ${files}${renderLinkedIssueBackground(spec.conversation)}${renderContext(spec.co
 
 - Repositories you may change, cloned at their default branch under \`/workspace/<owner>/<name>\`:
 ${spec.repositories.map((r) => `  - ${r}`).join("\n")}
-- Sergeant branches already on origin (continue on the one for this issue rather than starting over):
-${existingBranches.length ? existingBranches.map((b) => `  - ${b}`).join("\n") : "  - (none)"}
+- Branches on origin whose name holds \`${id}\` exactly, any prefix (other issues' branches are left out):
+${existingBranches.length ? existingBranches.map((b) => `  - ${b}`).join("\n") : "  - (none: start a fresh branch)"}
 - Pull requests Linear links to this issue:
 ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.number}`).join("\n") : "  - (none)"}
+- Those branches and PRs are this issue's, whoever started them. If a human or another agent started
+  one, the delegation to Sergeant authorizes you to take it over: do not ask, continue on that same
+  branch and PR, and push to it. Never build on or push to any other branch, however similar its name.
 - **GitHub:** \`GH_TOKEN\` is a token for the repositories above only, valid for about an hour from
   the start of this run. \`git push\` over https and \`gh\` use it. It can push branches, open and
   update PRs, and read CI (\`gh pr checks\`, \`gh run view --log-failed\`). It cannot rerun CI, push
@@ -58,16 +73,19 @@ ${renderReadAccess(enrolled)}
    handoff or a reopen. Read the issue description and every comment in the Task section, handoff
    notes and decisions included. Find the existing PRs (those this brief lists, and any naming
    \`${id}\`: \`gh pr list --state all --search "${id}"\` in each repository) and branches
-   (\`git branch -r\`). Read the relevant PRs' descriptions, discussion and review comments, and
-   diffs (\`gh pr view --comments\`, \`gh pr diff\`, \`gh api\` for inline review comments). Work
-   out what is finished, what remains, and whether earlier feedback was addressed. Continue a suitable
-   existing PR or branch; open a replacement only for a concrete reason, and give it in the new PR's
-   body and your report. History you need but cannot read (a PR, branch, or repository outside your
-   tokens): name it in \`knownGaps\` (\`unreadableInputs\` if the Task links it, rule 13) rather
+   (\`git branch -r\`; only one whose name holds \`${id}\` exactly is this issue's). Read the
+   relevant PRs' descriptions, discussion and review comments, and diffs (\`gh pr view --comments\`,
+   \`gh pr diff\`, \`gh api\` for inline review comments). Work out what is finished, what remains,
+   and whether earlier feedback was addressed. Continue a suitable existing PR or branch; open a
+   replacement only for a concrete reason, and give it in the new PR's body and your report. History
+   you need but cannot read (a PR, branch, or repository outside your tokens): name it in
+   \`knownGaps\` (\`unreadableInputs\` if the Task links it, rule 13) rather
    than assuming you start from scratch.
-4. Commit on one branch per repository named \`sergeant/${id.toLowerCase()}-<short-slug>\` (or the
-   existing one listed above), push it, and open its PR (or update the open one) with \`gh\`. Never
-   commit to the default branch. Push work in progress before you stop. Commit with the git identity
+4. Commit on one branch per repository: the issue's existing branch or linked PR's branch listed
+   above, or else a fresh one named \`sergeant/${id.toLowerCase()}-<short-slug>\`. Push it, and open its
+   PR (or update the open one) with \`gh\`. When you continue an existing branch or PR, start your
+   report's summary with a sentence naming it ("Continued <owner/name>: <branch>, PR #<n>."); Sergeant's
+   first Linear comment on the work quotes that sentence. Never commit to the default branch. Push work in progress before you stop. Commit with the git identity
    already set in your environment: never pass \`--author\` or set \`user.name\`/\`user.email\`, and
    add no \`Co-Authored-By\` trailer or other contributor credit for an AI agent or tool.
 5. Write each PR body to stand on its own once the Linear issue is gone: the issue identifier and
