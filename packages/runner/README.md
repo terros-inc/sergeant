@@ -165,10 +165,10 @@ setting leaves running runs where they are. Account choice, the brief, the agent
 the report are the same as the local runner's; only where the run happens differs.
 
 - **Start.** On the host: choose the account, mint the worker token, list the repositories'
-  `sergeant/*` branches with `git ls-remote`, fetch the issue's files, render the brief. Then one
-  Secrets Manager secret per run, `sergeant/runs/<runId>`, holds the brief, the files, `GH_TOKEN`, `GH_READ_TOKEN`, and
-  the model credential as JSON keys; a task definition revision references those keys (never values);
-  `RunTask` starts it with a client token and `startedBy: <runId>`. Each step is recorded in the run's
+  branches naming the issue (`issueBranches`) with `git ls-remote`, fetch the issue's files, render
+  the brief. Then one Secrets Manager secret per run, `sergeant/runs/<runId>`, holds the brief, the
+  files, `GH_TOKEN`, `GH_READ_TOKEN`, and the model credential as JSON keys; a task definition revision
+  references those keys (never values); `RunTask` starts it with a client token and `startedBy: <runId>`. Each step is recorded in the run's
   `launch.json` before it can exist (`launch.ts`): a failure before the task deletes the secret and
   the revision, and a lost `RunTask` answer is settled by the run's next `status` or `cancel`, which
   finds the task by `startedBy` or repeats the same idempotent `RunTask`.

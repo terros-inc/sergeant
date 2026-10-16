@@ -170,7 +170,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         for (const repo of spec.repositories) {
           const dir = join(p.workspace, repo);
           await tokenGit(githubToken, ["clone", "--quiet", `--template=${GIT_TEMPLATE}`, `https://github.com/${repo}.git`, dir], p.workspace);
-          const remote = await execOk("git", ["branch", "-r", "--list", "origin/sergeant/*", "--format=%(refname:short)"], { cwd: dir });
+          const remote = await execOk("git", ["branch", "-r", "--format=%(refname:short)"], { cwd: dir });
           existing.push(...remote.split("\n").filter(Boolean).map((b) => `${repo}: ${b.replace(/^origin\//, "")}`));
         }
         brief = workerBrief(spec, existing, files, enrolled);
