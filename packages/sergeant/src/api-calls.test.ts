@@ -130,6 +130,40 @@ test("usage, budget samples, windows, rate-limit events, and paused tasks surviv
   expect(later.usage(168)).toMatchObject({ sources: [], endpoints: [], samples: [], windows: [], events: [] });
 });
 
+// TECH-6208-F1: a refusal after a pause's `until` is a new episode, even when no answer came between
+// them; merging it into the old event would combine two episodes' timing, refusals and paused tasks.
+test("a refusal after the pause expired starts a new event, in memory and after a restart", async () => {
+  const file = join(dir, "api-usage.json");
+  const clock = { now: T0 };
+  let calls = apiCalls(() => {}, () => clock.now, file);
+  const refused = () => Response.json({ message: "You have exceeded a secondary rate limit." }, { status: 403, headers: { "retry-after": "60" } });
+  const refuse = () => calls.counting("github", async () => refused())("https://api.github.com/repos/acme/app/pulls/7");
+  const at = (ms: number) => new Date(ms).toISOString();
+  const event = (start: number, until: number, endedAt: string | null, refusals: number, tasks: string[]) => ({ provider: "github", kind: "secondary", status: 403, startedAt: at(start), until: at(until), endedAt, refusals, tasks });
+
+  await refuse();
+  calls.taskPaused("github", "TECH-1");
+  clock.now += 30_000;
+  await refuse(); // during the pause: the same episode, paused until 60 s after it
+  clock.now += 60_000;
+  await refuse(); // the first call after the pause is refused again
+  calls.taskPaused("github", "TECH-2");
+  expect(calls.usage(24).events).toEqual([event(T0, T0 + 90_000, at(T0 + 90_000), 2, ["TECH-1"]), event(T0 + 90_000, T0 + 150_000, null, 1, ["TECH-2"])]);
+
+  // The open event read back from the file must not absorb a refusal after its pause expired either.
+  await calls.save();
+  clock.now += 120_000;
+  calls = apiCalls(() => {}, () => clock.now, file);
+  await calls.load();
+  await refuse();
+  calls.taskPaused("github", "TECH-3");
+  expect(calls.usage(24).events).toEqual([
+    event(T0, T0 + 90_000, at(T0 + 90_000), 2, ["TECH-1"]),
+    event(T0 + 90_000, T0 + 150_000, at(T0 + 150_000), 1, ["TECH-2"]),
+    event(T0 + 210_000, T0 + 270_000, null, 1, ["TECH-3"]),
+  ]);
+});
+
 // TECH-6208: the warning must come before the budget runs out, and once per window: a warning on every
 // call below the line would bury the log as the repeated rate-limit errors did.
 test("a budget falling below 15% before its reset is warned about once per window, across a restart too", async () => {

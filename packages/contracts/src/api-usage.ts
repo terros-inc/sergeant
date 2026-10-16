@@ -58,9 +58,10 @@ export type ApiBudgetWindow = z.infer<typeof ApiBudgetWindow>;
 
 /**
  * A rate-limit refusal and the pause it started: GitHub's `primary` (hourly) or `secondary` limit, or
- * Linear's `RATELIMITED`. Refusals of the same kind while it lasts are counted in it. `endedAt`: the
- * provider's first answer after it that was not a refusal; null while none came yet. `tasks`: the task
- * loops it paused.
+ * Linear's `RATELIMITED`. Refusals of the same kind before its `until` are counted in it; one after
+ * starts a new event. `endedAt`: the provider's first answer after `until` that was not a refusal, or
+ * `until` itself when the next call after it was refused again; null while neither came yet. `tasks`:
+ * the task loops it paused.
  */
 export const RateLimitEvent = z.object({
   provider: ApiProvider,

@@ -67,17 +67,20 @@ export function recordBudgets(state: BudgetState, provider: Provider, status: nu
 }
 
 /**
- * A rate-limit refusal: counted in the provider's open event of the same kind, else it ends any open
- * one and starts its own.
+ * A rate-limit refusal: counted in the provider's open event of the same kind while its pause lasts
+ * (one refused then was already in flight), else it ends any open one and starts its own. An open event
+ * whose pause is over ends at its `until`: a refusal after it, even with no answer between them, is a
+ * new episode, and the old one lasted as long as the pause it imposed.
  */
 export function recordRefusal(state: BudgetState, provider: Provider, refusal: { kind: RateLimitEvent["kind"]; status: number; until: number }, now: number): void {
   const open = state.events.findLast((e) => e.provider === provider && e.endedAt === null);
-  if (open && open.kind === refusal.kind) {
+  const expired = open !== undefined && now >= Date.parse(open.until);
+  if (open && !expired && open.kind === refusal.kind) {
     open.refusals++;
     if (refusal.until > Date.parse(open.until)) open.until = iso(refusal.until);
     return;
   }
-  if (open) open.endedAt = iso(now);
+  if (open) open.endedAt = expired ? open.until : iso(now);
   state.events.push({ provider, kind: refusal.kind, status: refusal.status, startedAt: iso(now), until: iso(refusal.until), endedAt: null, refusals: 1, tasks: [] });
 }
 
