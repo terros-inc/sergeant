@@ -237,8 +237,11 @@ window is exhausted (it can then only ask or accept, B1), and the task then wait
 question, as before. Each window has a number,
 `budget.windowSeq` in `state.json`, 0 for the task's first and one more for each window opened; the
 window's budget question is keyed by the task's start and that number, however the window opened, and a
-task saved before it had one is in window 0. A window saved before active time was kept counts the wall
-time it has had as used.
+task saved before it had one is in window 0. A window saved before active time was kept starts with none
+used (TECH-6225): its wall time included every wait, so only work from then on counts. Its budget question,
+keyed by its window's start before TECH-6165, is still found, so a deploy posts nothing new. Sergeant
+never asks a budget question while an earlier one of the task has no human reply on the issue, as after a
+PR review opened the window: once this window is exhausted, the task waits on that question instead.
 A comment a person's assistant posts through that person's own account (the Linear MCP, `gh`) is that
 person's. A bot's or app's never opens one: a review bot that comments on every push would otherwise keep
 a task going forever. Linear app users and integrations are never human, the GitHub adapter reads no App

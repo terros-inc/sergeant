@@ -12,7 +12,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { join } from "node:path";
-import { budgetQuestion, budgetQuestionKey, openWindow, type BudgetWindow } from "./budget.ts";
+import { budgetQuestion, budgetQuestionKey, legacyBudgetQuestionKey, openWindow, type BudgetWindow } from "./budget.ts";
 import { recordStop, stopReason } from "./cancel.ts";
 import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
@@ -64,8 +64,11 @@ export function ownerRecheckJitter(issueId: string): number {
   return (hash >>> 0) % OWNER_RECHECK_JITTER_MS;
 }
 
-/** The budget as this poll sees it, and the current window's budget question if Linear has it. */
-export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budgetKey: string; budgetAsked: AgentComment | undefined };
+/**
+ * The budget as this poll sees it, the current window's budget question if Linear has it, and (TECH-6225)
+ * an earlier window's no human has replied to yet.
+ */
+export type BudgetCheck = { budget: BudgetStatus; exhausted: GateVerdict; budgetKey: string; budgetAsked: AgentComment | undefined; budgetOpen?: AgentComment | undefined };
 
 /**
  * A1/A2, and the owner's reassignment or redelegation: why the task stops for good, once the stop is
@@ -154,10 +157,17 @@ export async function checkHolds(
   await openUnblockWindow(conversation, configured, ctx);
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a
   // crash between posting it and saving anything loses nothing. The key names the task's start, so an
-  // earlier task's budget question, answered or not, is never this one's (TECH-5145).
-  const budgetKey = budgetQuestionKey(conversation.issue.id, state.startedAt, state.budget.windowSeq);
-  const questionId = commentIdFor(budgetKey);
-  const budgetAsked = conversation.agentComments.find((c) => c.id === questionId);
+  // earlier task's budget question, answered or not, is never this one's (TECH-5145). TECH-6225: a task
+  // saved before TECH-6165 may have asked it under the window's old key; a deploy that missed it asked again.
+  const { id } = conversation.issue;
+  const budgetKey = budgetQuestionKey(id, state.startedAt, state.budget.windowSeq);
+  const find = (key: string) => conversation.agentComments.find((c) => c.id === commentIdFor(key));
+  const budgetAsked = find(budgetKey) ?? find(legacyBudgetQuestionKey(id, state.budget.since ?? state.startedAt));
+  // TECH-6225: an earlier window's question is still open when no human has commented since: a PR review
+  // opened this window (TECH-6165). It holds nothing, but no second question is asked while it is open.
+  const budgetOpen = Array.from({ length: state.budget.windowSeq ?? 0 }, (_, seq) => find(budgetQuestionKey(id, state.startedAt, seq)))
+    .filter((c) => c !== undefined)
+    .find((c) => !conversation.humanComments.some((h) => Date.parse(h.createdAt) > Date.parse(c.createdAt)));
   const budget = poll.budgetOf();
   // UNF-728: an exhausted budget cancels running work through the runner, every poll until confirmed,
   // whatever else is going on; the executor refuses every new effect (B1).
@@ -190,7 +200,7 @@ export async function checkHolds(
     log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);
     return { hold: "question" };
   }
-  return { budget, exhausted, budgetKey, budgetAsked };
+  return { budget, exhausted, budgetKey, budgetAsked, budgetOpen };
 }
 
 /**
@@ -259,7 +269,7 @@ export async function holdForBudget(
   humanWait?: string,
   reconcile?: string,
 ): Promise<boolean> {
-  const { exhausted, budgetAsked } = check;
+  const { exhausted, budgetAsked, budgetOpen } = check;
   // TECH-6165: a handed-off PR's end or an issue edit is reconciled in a turn first (`reconcileDue`).
   if (!exhausted.allowed && reconcile) {
     log(`${reconcile}: a turn reconciles it in the window it has`);
@@ -270,7 +280,8 @@ export async function holdForBudget(
   // happens and no runaway guard ends the wait (UNF-727); the reply opens a fresh window (above) and
   // wakes a turn that reads it.
   // TECH-6021: the question makes the case for the human's call, built here from the ledger (stop-case.ts).
-  if (!exhausted.allowed && !budgetAsked && !humanWait) {
+  // TECH-6225: never while an earlier one is still open; the task waits on that one instead (below).
+  if (!exhausted.allowed && !budgetAsked && !budgetOpen && !humanWait) {
     const stop = stopCase(await windowFacts(situation, { opts, deps, state }));
     const asked = await askHuman(budgetQuestion(situation, exhausted.reason, stop), situation, deps, check.budgetKey);
     const { call, rule } = stop.recommendation;
@@ -288,9 +299,10 @@ export async function holdForBudget(
     log(`waiting on ${humanWait}`);
     return true;
   }
-  if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {
-    opts.slot?.waiting(Date.parse(budgetAsked.createdAt));
-    log(`waiting: the budget question posted at ${budgetAsked.createdAt} has no human reply yet`);
+  const asked = budgetAsked ?? (exhausted.allowed ? undefined : budgetOpen);
+  if (asked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(asked.createdAt))) {
+    opts.slot?.waiting(Date.parse(asked.createdAt));
+    log(`waiting: the budget question posted at ${asked.createdAt} has no human reply yet`);
     return true;
   }
   return false;

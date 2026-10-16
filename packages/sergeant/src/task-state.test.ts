@@ -83,24 +83,3 @@ test.each([
 
   expect(state.refusedMerges).toEqual(kept ? [refused, policy] : [policy]);
 });
-
-// TECH-6165: the budget counts active time, kept in `budget.activeMs`. A task saved before that has
-// none; read as 0, its current window would start over at the deploy, however long it had worked. It
-// counts the wall time its window has had instead, the old measure and never less than its active time.
-test("a window saved before active time was kept counts its wall time as used; a saved or new one keeps its own", async () => {
-  dir = await mkdtemp(join(tmpdir(), "task-state-"));
-  const file = join(dir, "state.json");
-  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
-  const hour = 3_600_000;
-  const legacy = async (budget: object, activeMs: number) => {
-    await writeFile(file, JSON.stringify({ issueId: "i1", startedAt: ago(5 * hour), turns: 1, runIds: [], recentTurns: [], budget: { window: DEFAULT_BUDGET, priorRuns: [], ...budget } }));
-    const state = await loadState(file, "i1", DEFAULT_BUDGET);
-    expect(state.budget.activeMs).toBeGreaterThanOrEqual(activeMs);
-    expect(state.budget.activeMs).toBeLessThan(activeMs + 60_000);
-  };
-
-  await legacy({}, 5 * hour);
-  await legacy({ since: ago(hour) }, hour);
-  await legacy({ since: ago(hour), activeMs: 60_000 }, 60_000);
-  expect((await loadState(join(dir, "none.json"), "i1", DEFAULT_BUDGET)).budget.activeMs).toBe(0);
-});

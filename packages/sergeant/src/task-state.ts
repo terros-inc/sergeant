@@ -220,11 +220,11 @@ export async function loadState(file: string, issueId: string, window: BudgetWin
 export async function readTaskState(file: string, window: BudgetWindow = DEFAULT_BUDGET): Promise<TaskState | undefined> {
   const raw = await readFile(file, "utf8").catch(() => undefined);
   if (raw === undefined) return undefined;
-  const stored = JSON.parse(raw) as { startedAt?: string; budget?: { since?: string } };
-  // A task saved before it had a window adopts the one it is resumed with, once. TECH-6165: one saved
-  // before active time was kept counts the wall time its window has had as active, so it gains none.
-  const activeMs = Math.max(0, Date.now() - Date.parse(stored.budget?.since ?? stored.startedAt ?? "")) || 0;
-  return TaskState.parse({ ...stored, budget: { window, activeMs, ...stored.budget } });
+  const stored = JSON.parse(raw) as { budget?: object };
+  // A task saved before it had a window adopts the one it is resumed with, once. TECH-6225: one saved
+  // before active time was kept (TECH-6165) starts with none: its wall time included every wait, and
+  // counting it as active marked tasks that had run nothing exhausted. Only work from now on counts.
+  return TaskState.parse({ ...stored, budget: { window, activeMs: 0, ...stored.budget } });
 }
 
 /**
