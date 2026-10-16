@@ -85,6 +85,19 @@ test("a first fix cycle cut off by the deadline recommends extend under rule 3, 
   expect(question).toContain("**What happened in this window:** Worker finished (trevorallred/canary#7); reviewer requested changes (2 blocking); fix worker was canceled at the deadline. 4 Sergeant turns, 1 fix cycle.");
   expect(question).toContain("Left: fix 2 blocking findings, then a re-review, then Sergeant's merge.");
   expect(question).toContain("**Sergeant recommends extend** (rubric rule 3: a first fix cycle after a reviewer's change request). Remaining: one fix, a re-review and merge, about 29 min and $5.");
+  // TECH-6225: the PR is one Markdown link; a bare URL before its colon rendered as the link twice in Linear.
+  expect(question).toContain(`- [${pr.repo}#7](${pr.url}): CI `);
+  expect(question.split(pr.url).length - 1).toBe(1);
+});
+
+test("a role with earlier runs that reported a cost is estimated, even when another role has none to go by", () => {
+  // TECH-6225: the worker's earlier runs (one from an earlier window, so only in the situation) price
+  // the fix; only the reviewer, whose run reported no cost, is left unknown, and named.
+  const runs = [worker("run_w1", "succeeded", 4), reviewer("run_r1", "changes_requested", ["a.ts:1"]), worker("run_w2", "canceled")];
+  const w = facts(runs);
+  w.situation = { ...w.situation, runs: [worker("run_w0", "succeeded", 6), ...runs] };
+  const question = budgetQuestion(w.situation, "active time exhausted", stopCase(w)).question;
+  expect(question).toContain("Remaining: one fix, a re-review and merge, about 29 min and $5 plus the reviewer's cost, not yet known (no reviewer run of this task has reported a cost yet).");
 });
 
 test("a long stop case keeps the recommendation, estimate and question tail", () => {
@@ -103,7 +116,7 @@ test("a long stop case keeps the recommendation, estimate and question tail", ()
 });
 
 test("a finished worker's PR awaiting its first review is rule 2; a worker that cannot get an input is rule 1's stop-or-answer", () => {
-  expect(recommend(facts([worker("run_w", "succeeded", 3)]))).toMatchObject({ call: "extend", rule: "2", estimate: "a first review, about 5 min and a cost not yet known (no finished run of that role to go by)" });
+  expect(recommend(facts([worker("run_w", "succeeded", 3)]))).toMatchObject({ call: "extend", rule: "2", estimate: "a first review, about 5 min and a cost not yet known (no reviewer run of this task has reported a cost yet)" });
 
   const blocked = worker("run_w");
   if (blocked.role === "worker" && blocked.report) blocked.report = { ...blocked.report, outcome: "blocked", unreadableInputs: ["https://example.com/spec.pdf"] };
@@ -128,6 +141,6 @@ test("rule 3's undecided fallback still estimates every remaining step", () => {
     call: "ask",
     rule: "3",
     reason: "no rubric rule settles it; the case above is for you to judge",
-    estimate: "a review, then Sergeant's merge, about 7 min and a cost not yet known (no finished run of that role to go by)",
+    estimate: "a review, then Sergeant's merge, about 7 min and a cost not yet known (no reviewer run of this task has reported a cost yet)",
   });
 });

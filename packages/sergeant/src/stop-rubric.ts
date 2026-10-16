@@ -200,7 +200,8 @@ export function headVerdict(runs: RunRecord[], pr: PullRequestFacts) {
 
 /**
  * "about 20 min and $4": the steps' length, and their cost from this task's own finished runs of each
- * role and the window's turns. A role with no finished run to go by leaves the cost unknown.
+ * role and the window's turns. Each role is priced from its own runs (TECH-6225): only a role with no
+ * run that reported a cost is left unknown, and named, so a known role's runs always give an estimate.
  */
 function estimate(w: WindowFacts, what: string, minutes: number, steps: { worker?: number; reviewer?: number; turns: number }): string {
   const average = (role: RunRecord["role"]) => {
@@ -208,10 +209,11 @@ function estimate(w: WindowFacts, what: string, minutes: number, steps: { worker
     return costs.length ? costs.reduce((a, b) => a + b, 0) / costs.length : undefined;
   };
   const turn = w.turns > 0 ? w.turnCostUsd / w.turns : 0;
-  const parts = [steps.worker ? (average("worker") ?? undefined) : 0, steps.reviewer ? (average("reviewer") ?? undefined) : 0];
-  const known = parts.every((p) => p !== undefined);
-  const usd = (parts[0] ?? 0) * (steps.worker ?? 0) + (parts[1] ?? 0) * (steps.reviewer ?? 0) + steps.turns * turn;
-  const money = known ? `$${Math.max(1, Math.round(usd))}` : "a cost not yet known (no finished run of that role to go by)";
+  const roles = (["worker", "reviewer"] as const).filter((role) => steps[role]).map((role) => ({ role, each: average(role), count: steps[role] ?? 0 }));
+  const unknown = roles.filter((r) => r.each === undefined).map((r) => r.role);
+  const usd = Math.max(1, Math.round(roles.reduce((sum, r) => sum + (r.each ?? 0) * r.count, steps.turns * turn)));
+  const why = `no ${unknown.join(" or ")} run of this task has reported a cost yet`;
+  const money = unknown.length === 0 ? `$${usd}` : unknown.length < roles.length ? `$${usd} plus the ${unknown.join(" and ")}'s cost, not yet known (${why})` : `a cost not yet known (${why})`;
   return `${what}, about ${minutes} min and ${money}`;
 }
 

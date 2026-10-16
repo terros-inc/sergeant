@@ -171,7 +171,7 @@ Sergeant stopped this task: its budget is exhausted (<wall time or spend>). Runn
 human reviews>. <n> Sergeant turns, <n> fix cycles.
 
 **Where it stands:**
-- <PR link>: CI <counts by state>; review: <verdict at this head>; mergeable: <state>.
+- [<owner/name>#<n>](<PR URL>): CI <counts by state>; review: <verdict at this head>; mergeable: <state>.
 - Open blocking findings: <up to three, with location>.
 - Left: <the concrete steps: fixes, rebase, (re-)review, CI, Sergeant's or a human's merge>.
 - Spent: $<spent> of $<cap> reported.
@@ -207,8 +207,9 @@ thresholds as written there, applied in order, the first match deciding:
 Every outcome, including rule 1's stop and rule 3's no-recommendation fallback, estimates what is left.
 The estimate is rough on purpose: it uses the same concrete remaining-step list shown above, with step
 lengths from the TECH-5922 measurement (reviewer 5 min, worker 17, a mechanical fix 6, CI 5, a merge 2)
-and money from this task's own finished runs of each role and the window's turns; with no finished run
-of a role to go by, the cost is said to be unknown. A draft PR's steps include marking it ready for review.
+and money from this task's own finished runs of each role and the window's turns. Each role is priced
+from its own runs (TECH-6225): only a role none of whose runs has reported a cost is said to be unknown,
+and it is named, while the roles that have one are still estimated. A draft PR's steps include marking it ready for review.
 
 Each question's call and rule is recorded in the task's `stops.jsonl`, and the human's reply to it next
 to it as extend (`1`, extend, continue), stop (`2`, stop, accept as-is, or a reply reasoning ended the
