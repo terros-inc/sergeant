@@ -17,6 +17,7 @@ test("a codex-local run gets only the Codex credential in place of the Claude to
   expect(envNames(run?.args)).toEqual([
     "CODEX_CREDENTIAL",
     "GH_TOKEN",
+    "GH_READ_TOKEN",
     "GIT_AUTHOR_NAME=Ada Example",
     "GIT_AUTHOR_EMAIL=ada@example.com",
     "GIT_COMMITTER_NAME=Ada Example",

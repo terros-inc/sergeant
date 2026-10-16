@@ -74,6 +74,7 @@ export const secretKeys = (adapter: Adapter, attachments: boolean, denylist: boo
   ...(attachments ? ["SERGEANT_ATTACHMENTS"] : []),
   ...(denylist ? ["PUBLIC_DATA_DENYLIST"] : []),
   "GH_TOKEN",
+  "GH_READ_TOKEN",
   AGENTS[adapter].credentialEnv,
 ];
 

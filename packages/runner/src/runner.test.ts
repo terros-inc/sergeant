@@ -2,34 +2,68 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { issueRevision, NoModelAccount } from "@terros/sergeant-contracts";
+import { issueRevision, NoModelAccount, type RunSpec } from "@terros/sergeant-contracts";
 import { containerRunner } from "./runner.ts";
-import { annClaude, fakeHost, GH, REPORT, spec, started, TOKEN } from "./runner-fixtures.ts";
+import { annClaude, ENROLLED, fakeHost, GH, READ, REPORT, spec, started, TOKEN } from "./runner-fixtures.ts";
 
 
 // The container is the hard boundary between runs and the operator's personal and control-plane
 // credentials. A generic environment pass-through let any caller add a personal GH_TOKEN, AWS, or
-// Linear keys. A worker's only GitHub credential is its worker-App token, scoped to its run's
+// Linear keys. A worker's only GitHub write credential is its worker-App token, scoped to its run's
 // repositories. Commits are a human's identity, never an agent's: the captain forbids an agent author.
-test("only the model token, the run's scoped worker-App token, and the human git identity enter", async () => {
+// TECH-6194: the run's other GitHub credential is a read-only token for the enrolled repositories, so it
+// can read another one, or another PR in its own; the write token stays on the run's repositories.
+test("only the model token, the run's scoped worker-App tokens, and the human git identity enter", async () => {
   const { host, minted } = await started({ modelEnv: { GH_TOKEN: "ghp_x" }, env: { AWS_PROFILE: "lifeDev" } });
 
-  expect(minted).toEqual([{ repositories: ["o/canary"], access: "write" }]);
+  expect(minted).toEqual([
+    { repositories: ["o/canary"], access: "write" },
+    { repositories: ENROLLED, access: "read" },
+  ]);
   const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
   const passed = run?.args.flatMap((a, i, all) => (a === "--env" || a === "-e" ? [all[i + 1]] : [])) ?? [];
   expect(passed).toEqual([
     "CLAUDE_CODE_OAUTH_TOKEN",
     "GH_TOKEN",
+    "GH_READ_TOKEN",
     "GIT_AUTHOR_NAME=Ada Example",
     "GIT_AUTHOR_EMAIL=ada@example.com",
     "GIT_COMMITTER_NAME=Ada Example",
     "GIT_COMMITTER_EMAIL=ada@example.com",
   ]);
-  expect(run?.opts.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN, GH_TOKEN: GH });
+  expect(run?.opts.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN, GH_TOKEN: GH, GH_READ_TOKEN: READ });
   // No token on any command line, including the host clone, which reads it from its environment.
-  expect(host.calls.flatMap((c) => c.args).join(" ")).not.toMatch(new RegExp(`${TOKEN}|${GH}`));
+  expect(host.calls.flatMap((c) => c.args).join(" ")).not.toMatch(new RegExp(`${TOKEN}|${GH}|${READ}`));
   const clone = host.calls.find((c) => c.cmd === "git" && c.args.includes("clone"));
   expect(clone?.opts.env?.SERGEANT_RUN_GITHUB_TOKEN).toBe(GH);
+});
+
+// TECH-6194: a reviewer could read only its PR's checkout, so an issue naming a file in another
+// enrolled repository, or another PR, stopped for a human. It now gets the same read-only token for
+// the repositories enrolled at its launch, and still no write token: a reviewer must never push.
+test("a reviewer gets the enrolled repositories' read-only token and no write token", async () => {
+  const enrolled = [...ENROLLED];
+  const reviewer = { ...spec, role: "reviewer", subject: [{ repo: "o/canary", number: 9, headSha: "a".repeat(40) }], pullRequests: [] } as unknown as RunSpec;
+  const fetch = (async () => Response.json({ html_url: "https://github.com/o/canary/pull/9", title: "T", body: "", base: { ref: "main" } })) as typeof globalThis.fetch;
+  const { host, minted, rootDir } = await started({ fetch, enrolledRepositories: () => enrolled }, reviewer);
+
+  expect(minted).toEqual([
+    { repositories: ["o/canary"], access: "read" },
+    { repositories: ENROLLED, access: "read" },
+  ]);
+  expect(minted).not.toContainEqual(expect.objectContaining({ access: "write" }));
+  const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run" && c.args.includes("--detach"));
+  const passed = run?.args.flatMap((a, i, all) => (a === "--env" ? [all[i + 1]] : [])) ?? [];
+  expect(passed).toContain("GH_READ_TOKEN");
+  expect(passed).not.toContain("GH_TOKEN");
+  expect(run?.opts.env?.GH_READ_TOKEN).toBe(READ);
+  const brief = await readFile(join(rootDir, "run_t1", "workspace", "sergeant-brief.md"), "utf8");
+  expect(brief).toContain("  - o/canary\n  - o/wiki\n");
+
+  // A repository removed from enrollment is out of the next run's token.
+  enrolled.splice(enrolled.indexOf("o/wiki"), 1);
+  const next = await started({ fetch, enrolledRepositories: () => enrolled }, reviewer);
+  expect(next.minted.at(-1)).toEqual({ repositories: ["o/canary"], access: "read" });
 });
 
 // TECH-5914: a worker's push to a public repository is checked for customer data before it leaves. Its
@@ -116,6 +150,7 @@ test("gives the run the issue's files read-only, fetched on the host, skipping o
     accounts: async () => [annClaude],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => GH,
+    enrolledRepositories: () => ["o/canary"],
     exec: host.exec,
     attachmentLimits: { perFileBytes: 1024, perTaskBytes: 4096 },
     fetchUpload: async (url) => {

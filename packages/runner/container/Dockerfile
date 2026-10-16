@@ -1,7 +1,7 @@
 # The laptop runner zone (09 §4, 10 §5): workers and reviewers run here, never as the captain's own
 # user. Nothing from the host is mounted except the run's workspace; the only credentials a run gets
-# are its agent's model credential (Claude Code's or Codex's) and, for a worker, its scoped worker-App
-# GitHub token, passed by name.
+# are its agent's model credential (Claude Code's or Codex's), a read-only worker-App token for the
+# enrolled repositories (GH_READ_TOKEN) and, for a worker, its scoped worker-App GitHub token, passed by name.
 FROM node:24-bookworm-slim
 
 RUN apt-get update \

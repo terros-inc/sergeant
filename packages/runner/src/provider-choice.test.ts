@@ -52,6 +52,7 @@ test("a launch records its quota choice, and the worker's reviewer runs on the o
     quota,
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
+    enrolledRepositories: () => ["o/canary"],
     exec,
     fetch: (async () => Response.json({ html_url: "https://github.com/o/r/pull/9", title: "T", body: "", base: { ref: "main" } })) as typeof fetch,
   });
@@ -107,6 +108,7 @@ test("a sergeant:codex issue's worker runs on Codex, and its reviewer on Claude"
     }),
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
+    enrolledRepositories: () => ["o/canary"],
     exec,
     fetch: (async () => Response.json({ html_url: "https://github.com/o/r/pull/9", title: "T", body: "", base: { ref: "main" } })) as typeof fetch,
   });
@@ -151,6 +153,7 @@ test("a quota failure moves the next run to another of the owner's accounts, and
     quota: async ({ id, adapter }) => ({ adapter, account: id, readAt: "2026-10-03T12:00:00.000Z", weekly: { remainingPercent: left[id] ?? 0 }, fiveHour: { remainingPercent: 90 } }),
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
+    enrolledRepositories: () => ["o/canary"],
     exec,
   });
 
@@ -205,6 +208,7 @@ test("a terminal record keeps the provider choice and account recorded at launch
     accounts: async () => [],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
+    enrolledRepositories: () => ["o/canary"],
   });
 
   expect(await runner.status("run_done")).toMatchObject({ providerChoice, account, accountReason: "owner's account installation-codex" });

@@ -51,6 +51,7 @@ async function benchedUntil(logs: string, atLaunch: Windows, atFailure: Windows,
     quota: reader === "production" ? accountQuota({ fetch: usageEndpoint }) : async ({ id, adapter }) => ({ adapter, account: id, readAt: new Date().toISOString(), ...windows }),
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
+    enrolledRepositories: () => ["o/canary"],
     exec,
   });
 

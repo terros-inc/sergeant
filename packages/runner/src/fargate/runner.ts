@@ -155,6 +155,9 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
       starting.add(spec.runId);
       try {
         const githubToken = await opts.githubTokens({ repositories: spec.repositories, access: "write" });
+        // TECH-6194: read-only, for every enrolled repository, so the run can follow a reference to one.
+        const enrolled = opts.enrolledRepositories();
+        const readToken = await opts.githubTokens({ repositories: enrolled, access: "read" });
         // The brief lists each repository's `sergeant/*` branches, here with `ls-remote`: the task clones.
         const existing: string[] = [];
         for (const repo of spec.repositories) {
@@ -173,9 +176,10 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
         const secret = await runSecret({
           attachments,
           dir: attachmentsDir,
-          brief: (files) => workerBrief(spec, existing, files),
+          brief: (files) => workerBrief(spec, existing, files, enrolled),
           credentials: {
             GH_TOKEN: githubToken,
+            GH_READ_TOKEN: readToken,
             [AGENTS[adapter].credentialEnv]: account.credential,
             // The worker's pre-push hook reads it (TECH-5914): private, so it rides in the run's secret.
             ...(opts.publicDataDenylist && { PUBLIC_DATA_DENYLIST: opts.publicDataDenylist }),

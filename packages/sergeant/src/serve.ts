@@ -90,6 +90,8 @@ const runnerOptions = {
   ...accounts.runner,
   gitIdentity: config.gitIdentity,
   githubTokens: installation.githubTokens,
+  // Read at each launch: enrollment.ts changes `repositories` in place (TECH-6194).
+  enrolledRepositories: () => [...repositories],
   fetchUpload: installation.linear.fetchUpload,
   ...(installation.publicDataDenylist && { publicDataDenylist: installation.publicDataDenylist }),
   asides: setAside(),

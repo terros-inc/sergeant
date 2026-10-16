@@ -73,7 +73,7 @@ issue (06 §8).
 
 **C2. Strong review intent, relaxed review enforcement.** Review is called one of the most important
 requirements, yet the review-need policy accepts occasional wrong skips, and the shared runner zone means
-a reviewer having no credentials of its own is a convention rather than a boundary. Both are deliberate
+a reviewer having no write credentials of its own is a convention rather than a boundary. Both are deliberate
 (captain, 2026-10-02); the package relies on telemetry (06 §9) to show whether that balance is right.
 
 **C3. Completion by automation vs. Sergeant deciding the outcome is achieved.** Sergeant controls

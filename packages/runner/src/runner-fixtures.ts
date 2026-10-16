@@ -28,6 +28,9 @@ export function fakeHost() {
 
 export const TOKEN = "sk-ant-oat01-test-token";
 export const GH = "ghs_worker-app-run-token";
+/** TECH-6194: the read-only token for the enrolled repositories, which every run gets. */
+export const READ = "ghs_worker-app-enrolled-read-token";
+export const ENROLLED = ["o/canary", "o/wiki"];
 export const CODEX = '{"auth_mode":"chatgpt","tokens":{"access_token":"codex-test-token"}}';
 const ann = { id: "ann", name: "Ann" };
 // Ann's registered accounts, and someone else's that her task must never run on (TECH-5179).
@@ -68,7 +71,8 @@ export async function started(extra: Record<string, unknown> = {}, run: RunSpec 
     models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
     accounts: async (ownerId: string) => registered[ownerId] ?? [],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
-    githubTokens: async (req: unknown) => (minted.push(req), GH),
+    githubTokens: async (req: { access: string }) => (minted.push(req), req.access === "read" ? READ : GH),
+    enrolledRepositories: () => ENROLLED,
     exec: host.exec,
     ...extra,
   } as ContainerRunnerOptions;

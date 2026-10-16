@@ -81,6 +81,7 @@ const result = await runLoop(
       ...accounts.runner,
       gitIdentity: config.gitIdentity,
       githubTokens: installation.githubTokens,
+      enrolledRepositories: () => [repo],
       fetchUpload: installation.linear.fetchUpload,
     }),
     reasoner: claudeCliReasoner({

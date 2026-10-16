@@ -21,8 +21,8 @@ const version = adapter === "codex-local" ? "codex --version" : "claude --versio
 
 const out = await execOk(
   "docker",
-  ["run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--env", credentialEnv, "--env", "GH_TOKEN", values.image, "sh", "-c",
+  ["run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--env", credentialEnv, "--env", "GH_TOKEN", "--env", "GH_READ_TOKEN", values.image, "sh", "-c",
     `echo "user: $(id -un)"; echo "env: $(env | cut -d= -f1 | sort | tr "\\n" " ")"; for p in /Users ~/.aws ~/.config/gh ~/.ssh ~/.codex ~/.claude/.credentials.json /var/run/docker.sock; do [ -e "$p" ] && echo "PRESENT $p" || echo "absent  $p"; done; echo "agent: $(${version})"`],
-  { env: { ...process.env, [credentialEnv]: "placeholder", GH_TOKEN: "placeholder" } },
+  { env: { ...process.env, [credentialEnv]: "placeholder", GH_TOKEN: "placeholder", GH_READ_TOKEN: "placeholder" } },
 );
 console.log(out);

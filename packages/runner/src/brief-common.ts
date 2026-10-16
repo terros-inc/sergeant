@@ -95,3 +95,19 @@ export function renderReview(report: ReviewReport): string {
   );
   return `Verdict **${report.verdict}** on ${heads}. ${report.summary}\n\nFindings:\n${findings.join("\n") || "- (none)"}`;
 }
+
+/**
+ * TECH-6194: how a run reads the enrolled repositories beyond its own checkout, with the read-only
+ * token it gets as `GH_READ_TOKEN`, so it can follow an issue's reference to another repository or PR.
+ */
+export function renderReadAccess(enrolled: readonly string[]): string {
+  return `- **Reading other repositories and PRs:** \`GH_READ_TOKEN\` is a read-only token (contents, pull
+  requests, metadata) for every repository enrolled with Sergeant, valid for about an hour from the
+  start of this run:
+${enrolled.length ? enrolled.map((r) => `  - ${r}`).join("\n") : "  - (none)"}
+  Use it to read a file in another of them or another PR, in any of them including your own, for example
+  \`GH_TOKEN="$GH_READ_TOKEN" gh api -H "Accept: application/vnd.github.raw" "repos/<owner>/<name>/contents/<path>?ref=<ref>"\`,
+  \`GH_TOKEN="$GH_READ_TOKEN" gh pr view <number> -R <owner>/<name> --comments\` (or \`gh pr diff\`), or
+  \`GH_TOKEN="$GH_READ_TOKEN" git clone https://github.com/<owner>/<name>.git /tmp/<name>\`. It cannot
+  write anything, and GitHub refuses it for any repository not listed here.`;
+}

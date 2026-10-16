@@ -1,4 +1,4 @@
-import type { RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
+import type { RepoSlug, RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
 import type { AttachmentLimits, FetchUpload } from "./attachments.ts";
 import type { Adapter } from "./agents.ts";
 import type { CodexPrice } from "./codex-prices.ts";
@@ -36,11 +36,15 @@ export type ContainerRunnerOptions = {
    */
   accounts: (ownerId: string) => Promise<ModelAccount[]>;
   /**
-   * Mints each run's GitHub token from the worker App, scoped to the run's repositories. A worker's
-   * write token is its only GitHub credential and enters its container as `GH_TOKEN`; a reviewer's
-   * read-only token is used on the host to check out the PR and never enters its container.
+   * Mints each run's GitHub tokens from the worker App. A worker's write token, scoped to the run's
+   * repositories, enters its container as `GH_TOKEN`; a reviewer's read-only token for its PRs' repositories
+   * is used on the host to check out the PR and never enters its container. TECH-6194: every run also
+   * gets a read-only token for `enrolledRepositories` as `GH_READ_TOKEN`, so it can read another
+   * enrolled repository or PR; it carries `RUN_PERMISSIONS.read` only, never write.
    */
   githubTokens: RunGitHubTokens;
+  /** The repositories enrolled now, read at each launch: the only ones a run's `GH_READ_TOKEN` reaches. */
+  enrolledRepositories: () => RepoSlug[];
   /**
    * Who a run's commits are authored and committed as when its account names no person (TECH-5593):
    * the installation's human identity, never an agent's. A run on a person's registered account

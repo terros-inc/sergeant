@@ -65,9 +65,11 @@ Built by the deterministic core from durable artifacts, never from the implement
 
 ## Environment
 A fresh session and workspace. You did not write this change and have no access to how it was
-produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out locally, and before
-you started its dependencies were installed at the head, so you can run its tests:
+produced. You have no AWS or Linear credentials, and no GitHub write access. Each PR is checked out
+locally, and before you started its dependencies were installed at the head, so you can run its tests:
 <per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why, then its output fenced as untrusted), or no lockfile>
+- Reading other repositories and PRs: `GH_READ_TOKEN` is a read-only token (contents, pull requests,
+  metadata) for every enrolled repository: <the enrolled repositories>, with example `gh` and `git` commands.
 
 ## Rules (s2-reviewer-rules/12)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>

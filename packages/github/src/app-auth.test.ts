@@ -2,9 +2,10 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 import { expect, test } from "vitest";
 import { githubApp, runTokens } from "./app-auth.ts";
 
-// The worker App token is the only GitHub credential a run gets. If minting dropped the repository
+// Worker App tokens are the only GitHub credentials a run gets. If minting dropped the repository
 // or permission scope, a worker would hold every repository and permission the App was installed
-// with (administration, if someone over-granted it), and a reviewer could push. Workflow write is
+// with (administration, if someone over-granted it), and a reviewer could push. TECH-6194: every run's
+// `GH_READ_TOKEN` for the enrolled repositories is a `read` token, so it can never write either. Workflow write is
 // deliberately present only on worker tokens so they can propose workflow changes. TECH-5839: commit
 // statuses are readable once the installation grants them, and Actions write never reaches a run even
 // when the installation holds it: reruns go through Sergeant's own rerun App.
