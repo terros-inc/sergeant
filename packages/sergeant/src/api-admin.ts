@@ -5,10 +5,12 @@ import {
   AdminRequest,
   AdminResult,
   AdminUpdateRequest,
+  API_USAGE_HOURS,
   RetroTarget,
   type AdminRequestResponse,
   type AdminStatus,
   type ApiCallCount,
+  type ApiUsage,
   type WebhookHealth,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
@@ -46,14 +48,20 @@ export type HostAdmin = {
 };
 
 export async function adminRoute(
-  admin: HostAdmin | undefined,
-  enrollment: Enrollment | undefined,
+  { admin, enrollment, apiUsage }: { admin?: HostAdmin | undefined; enrollment?: Enrollment | undefined; apiUsage?: ((hours: number) => ApiUsage) | undefined },
   caller: Caller,
   req: IncomingMessage,
-  at: { id: string | undefined; verb: string | undefined; pathname: string },
+  at: { id: string | undefined; verb: string | undefined; pathname: string; search: URLSearchParams },
   log: (line: string) => void,
 ): Promise<Reply> {
   if (!caller.approver) throw new Refusal(403, "forbidden", "only an approver changes the retro target, restarts or updates the Sergeant host, or reads its status");
+  // TECH-6208: serve's API usage, off the Sergeant host too.
+  if (at.id === "api" && at.verb === undefined && req.method === "GET") {
+    if (!apiUsage) throw new Refusal(404, "not_found", "this Sergeant records no API usage");
+    const hours = at.search.get("hours") ?? "24";
+    if (!/^\d+$/.test(hours) || Number(hours) < 1 || Number(hours) > API_USAGE_HOURS) throw new Refusal(400, "bad_request", `hours must be a whole number from 1 to ${API_USAGE_HOURS}`);
+    return ok(apiUsage(Number(hours)));
+  }
   if (at.id === "retro" && req.method === "POST" && (at.verb === "set" || at.verb === "off")) {
     if (!enrollment) throw new Refusal(404, "not_found", "this Sergeant cannot change its installation config");
     const by = callerName(caller);

@@ -5,6 +5,8 @@ import {
   type ApiFailure,
   type ApiResult,
   apiClient,
+  API_USAGE_HOURS,
+  ApiUsage,
   CLI_VERSION_HEADER,
   RunDetail,
   RunId,
@@ -129,11 +131,13 @@ export function sergeantMcp(api: string, env: Record<string, string | undefined>
   server.registerTool(
     "health",
     {
-      description: "Whether Sergeant's service is healthy (running, not stopping, its latest intake succeeded), and which API this server reads.",
-      outputSchema: Health.extend({ api: z.string() }),
+      description:
+        "Whether Sergeant's service is healthy (running, not stopping, its latest intake succeeded), and which API this server reads. For an approver's login, also what spent the GitHub and Linear API budgets in the last `hours` (default 24): calls per hour by source and endpoint with GitHub's 304s, budget samples and GitHub budget windows with calls serve did not make, rate-limit pauses with the tasks they paused, and low-budget warnings. Like `sgt admin api`.",
+      inputSchema: z.object({ hours: z.number().int().min(1).max(API_USAGE_HOURS).optional().describe("hours of API usage, default 24") }),
+      outputSchema: Health.extend({ api: z.string(), apiUsage: ApiUsage.nullable(), apiUsageUnavailable: z.string().optional() }),
       annotations: readOnly,
     },
-    async () => {
+    async ({ hours }) => {
       // `/health` answers 503 with `{ ok: false }` when unhealthy: that is an answer, not a failure.
       let res: Response;
       try {
@@ -143,7 +147,9 @@ export function sergeantMcp(api: string, env: Record<string, string | undefined>
       }
       const parsed = Health.safeParse(safeJson(await res.text()));
       if (!parsed.success) return error({ code: "unavailable", message: `GET /health answered ${res.status} outside its contract` });
-      const health = { ok: parsed.data.ok, api };
+      // TECH-6208: the API usage is an approver's (`/v1/admin`); any other login still gets the health.
+      const usage = await asCaller((client) => client.call("GET", `/v1/admin/api?hours=${hours ?? 24}`, ApiUsage));
+      const health = { ok: parsed.data.ok, api, apiUsage: usage.ok ? usage.value : null, ...(!usage.ok && { apiUsageUnavailable: usage.error.message }) };
       return { content: [{ type: "text", text: JSON.stringify(health) }], structuredContent: health };
     },
   );

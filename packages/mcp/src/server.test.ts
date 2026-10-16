@@ -92,6 +92,16 @@ const run = {
   },
 };
 
+const usage = {
+  since: "2026-10-02T05:00:00.000Z",
+  sources: [{ hour: "2026-10-02T10:00:00.000Z", provider: "github", source: "task loop", calls: 12, notModified: 5 }],
+  endpoints: [{ hour: "2026-10-02T10:00:00.000Z", provider: "github", endpoint: "GET /repos/{o}/{r}/pulls/{n}", calls: 12, notModified: 5 }],
+  samples: [{ at: "2026-10-02T10:05:00.000Z", provider: "github", resource: "core", limit: 5000, remaining: 4000, resetAt: "2026-10-02T10:40:00.000Z" }],
+  windows: [],
+  events: [{ provider: "github", kind: "secondary", status: 403, startedAt: "2026-10-02T10:10:00.000Z", until: "2026-10-02T10:11:00.000Z", endedAt: "2026-10-02T10:11:05.000Z", refusals: 2, tasks: ["UNF-12"] }],
+  alerts: [],
+};
+
 test("an MCP client reads a task and its runs as the API answers them, through read-only tools that only GET", async () => {
   routes = {
     "GET /v1/tasks": { json: { tasks: [detail.task] } },
@@ -100,6 +110,7 @@ test("an MCP client reads a task and its runs as the API answers them, through r
     "GET /v1/runs/run_w1": { json: run },
     "GET /v1/runs/run_w1/report": { text: "# Report\n\nFixed the login\n" },
     "GET /health": { status: 503, json: { ok: false } },
+    "GET /v1/admin/api?hours=6": { json: usage },
   };
 
   const { tools } = await client.listTools();
@@ -116,7 +127,11 @@ test("an MCP client reads a task and its runs as the API answers them, through r
   expect((await client.callTool({ name: "run_show", arguments: { run: "run_w1" } })).structuredContent).toEqual(run);
   expect((await client.callTool({ name: "run_report", arguments: { run: "run_w1" } })).content).toEqual([{ type: "text", text: "# Report\n\nFixed the login\n" }]);
   // An unhealthy service is an answer, not a tool failure.
-  expect((await client.callTool({ name: "health", arguments: {} })).structuredContent).toEqual({ ok: false, api });
+  // TECH-6208: with the API usage `sgt admin api` shows, when the login may read it, and without it when not.
+  expect((await client.callTool({ name: "health", arguments: { hours: 6 } })).structuredContent).toEqual({ ok: false, api, apiUsage: usage });
+  const health = (await client.callTool({ name: "health", arguments: {} })).structuredContent as Record<string, unknown>;
+  expect(health).toMatchObject({ ok: false, api, apiUsage: null });
+  expect(health.apiUsageUnavailable).toEqual(expect.any(String));
 
   expect(seen.every((s) => s.startsWith("GET "))).toBe(true);
   expect(versions.filter((v) => typeof v !== "string" || !/^\d+\.\d+\.\d+/.test(v))).toEqual([]);

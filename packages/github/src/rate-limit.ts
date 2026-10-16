@@ -30,16 +30,9 @@ export function rateLimiter(log: (line: string) => void, now: () => number = Dat
       if (remaining !== null && (header("x-ratelimit-resource") ?? "core") === "core") {
         budget = { limit: int(header("x-ratelimit-limit")), remaining, resetAt: reset === null ? null : iso(reset * 1000), observedAt: iso(now()) };
       }
-      if (res.status !== 403 && res.status !== 429) return;
-      const retryAfter = int(header("retry-after"));
-      let until: number;
-      let kind: string;
-      if (remaining === 0 && reset !== null) [until, kind] = [reset * 1000, "primary"];
-      else if (retryAfter !== null) [until, kind] = [now() + retryAfter * 1000, "secondary"];
-      else if (res.status === 429 || /rate limit/i.test(await message(res))) [until, kind] = [now() + SECONDARY_DEFAULT_MS, "secondary"];
-      else return;
-      // A reset already past by this host's clock still pauses briefly, so a skewed clock cannot spin.
-      until = Math.max(until, now() + 1000);
+      const refused = await rateLimitRefusal(res, now());
+      if (!refused) return;
+      const { kind, until } = refused;
       const started = now() >= pausedUntil;
       if (until > pausedUntil) pausedUntil = until;
       const error = new GitHubRateLimitedError(iso(pausedUntil), `GitHub API ${kind} rate limit: no GitHub calls until ${iso(pausedUntil)}`);
@@ -53,6 +46,26 @@ export function rateLimiter(log: (line: string) => void, now: () => number = Dat
       return { limit: null, remaining: null, resetAt: null, observedAt: null, ...budget, pausedUntil: paused };
     },
   };
+}
+
+/**
+ * Whether `res` is a refusal for a rate limit (TECH-5336), and until when it pauses calls: the primary
+ * (hourly) limit's reset, a secondary one's `retry-after`, else a minute. A reset already past by this
+ * host's clock still pauses briefly, so a skewed clock cannot spin. TECH-6208 records each one too.
+ */
+export async function rateLimitRefusal(res: Response, now: number): Promise<{ kind: "primary" | "secondary"; until: number } | undefined> {
+  if (res.status !== 403 && res.status !== 429) return undefined;
+  const header = (name: string) => res.headers.get(name);
+  const remaining = int(header("x-ratelimit-remaining"));
+  const reset = int(header("x-ratelimit-reset"));
+  const retryAfter = int(header("retry-after"));
+  let until: number;
+  let kind: "primary" | "secondary";
+  if (remaining === 0 && reset !== null) [until, kind] = [reset * 1000, "primary"];
+  else if (retryAfter !== null) [until, kind] = [now + retryAfter * 1000, "secondary"];
+  else if (res.status === 429 || /rate limit/i.test(await message(res))) [until, kind] = [now + SECONDARY_DEFAULT_MS, "secondary"];
+  else return undefined;
+  return { kind, until: Math.max(until, now + 1000) };
 }
 
 /** GitHub's `message`, read from a copy so the caller can still read the body. */

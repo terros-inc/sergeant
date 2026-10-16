@@ -12,6 +12,7 @@ import {
   TaskRef,
   WakeRequest,
   type ApiError,
+  type ApiUsage,
   type LoginConfig,
   type RetroRequestResponse,
   type RepoSlug,
@@ -83,6 +84,8 @@ export type ApiControl = {
   admin?: HostAdmin;
   /** Lists and changes the enrolled repositories (TECH-5193, api-repositories.ts). */
   enrollment?: Enrollment;
+  /** TECH-6208: serve's API usage from the clock hour `hours - 1` before this one (api-calls.ts), for `GET /v1/admin/api`. */
+  apiUsage?: (hours: number) => ApiUsage;
   /** Asks the retro loop for a retro now (TECH-5187, retro.ts); absent when this Sergeant has no retro configured. */
   requestRetro?: () => boolean;
 };
@@ -132,6 +135,7 @@ export const V1_ROUTES: readonly { method: "GET" | "POST"; path: string; public?
   { method: "POST", path: "/v1/retro" },
   { method: "GET", path: "/v1/stops" },
   { method: "GET", path: "/v1/admin/status" },
+  { method: "GET", path: "/v1/admin/api" },
   { method: "POST", path: "/v1/admin/restart" },
   { method: "POST", path: "/v1/admin/update" },
   { method: "POST", path: "/v1/admin/retro/set" },
@@ -200,7 +204,7 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   }
   // TECH-6021: how often humans follow the stop rubric, per rule (stop-ledger.ts).
   if (noun === "stops" && id === undefined && get) return ok(await stopAgreement(join(ctl.stateDir, "tasks")));
-  if (noun === "admin") return adminRoute(ctl.admin, ctl.enrollment, caller, req, { id, verb, pathname: url.pathname }, ctl.log);
+  if (noun === "admin") return adminRoute(ctl, caller, req, { id, verb, pathname: url.pathname, search: url.searchParams }, ctl.log);
   if (noun === "repositories") return repositoriesRoute(ctl.enrollment, caller, req, { id, verb, pathname: url.pathname });
   if (noun === "accounts") return accountsRoute(ctl.accounts, caller, req, { id, verb, pathname: url.pathname }, () => allRuns(ctl));
   throw notFound(url.pathname);

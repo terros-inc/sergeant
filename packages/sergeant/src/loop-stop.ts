@@ -1,3 +1,4 @@
+import { isRateLimited } from "@terros/sergeant-contracts";
 import { driveCancel } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
@@ -19,7 +20,12 @@ export async function driveStop(reason: string, opts: LoopOptions, deps: Ports, 
   }
   const exclusive = deps.exclusive ?? ((step) => step());
   const drive = () => driveCancel(opts.dir, opts.issueId, deps, opts.enrolledRepositories, log);
-  const progress = await exclusive(drive).catch((e: Error) => (log(`stopping (${reason}): ${e.message}`), undefined));
+  // TECH-6208: a rate limit ends the loop paused until its reset, like any other step it fails, and the
+  // adapter has logged its pause once: retried every poll, it logged the same refusal every few seconds.
+  const progress = await exclusive(drive).catch((e: Error) => {
+    if (isRateLimited(e)) throw e;
+    return void log(`stopping (${reason}): ${e.message}`);
+  });
   if (progress?.stopping.length !== 0) {
     log(`stopping (${reason}): retrying cancellation`);
     return undefined;

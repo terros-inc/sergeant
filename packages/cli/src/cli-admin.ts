@@ -1,8 +1,10 @@
-import { AdminRequestResponse, AdminStatus, RetroTargetChange } from "@terros/sergeant-contracts";
+import { AdminRequestResponse, AdminStatus, API_USAGE_HOURS, ApiUsage, RetroTargetChange } from "@terros/sergeant-contracts";
 import { showOutcome, showStatus, staleConfig, waitForOutcome } from "./admin.ts";
-import { answered, type Command, type Context, callAnswer, client, Failure, print, settle } from "./cli-call.ts";
+import { showApiUsage } from "./api-usage.ts";
+import { answered, type Command, type Context, callAnswer, client, Failure, print, settle, Usage } from "./cli-call.ts";
 
-// `sgt admin status`, `restart`, and `update`: an approver's view of the host and its two actions.
+// `sgt admin status`, `restart`, and `update`: an approver's view of the host and its two actions;
+// `sgt admin api`: what spent the API budgets (TECH-6208).
 
 export const adminCommands: Record<string, Command> = {
   "admin status": {
@@ -10,6 +12,16 @@ export const adminCommands: Record<string, Command> = {
     run: async (ctx) => {
       const { value: status, answer } = await callAnswer(ctx, "GET", "/v1/admin/status", AdminStatus);
       print(ctx, answer, () => showStatus(status));
+    },
+  },
+  "admin api": {
+    args: 0,
+    flags: ["hours"],
+    run: async (ctx) => {
+      const hours = ctx.flags.hours ?? "24";
+      if (!/^\d+$/.test(hours) || Number(hours) < 1 || Number(hours) > API_USAGE_HOURS) throw new Usage(`--hours must be a whole number from 1 to ${API_USAGE_HOURS}`);
+      const { value, answer } = await callAnswer(ctx, "GET", `/v1/admin/api?hours=${hours}`, ApiUsage);
+      print(ctx, answer, () => showApiUsage(value, Number(hours)));
     },
   },
   "admin restart": {
