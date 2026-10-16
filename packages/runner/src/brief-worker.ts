@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/15";
+export const WORKER_RULES_VERSION = "s2-worker-rules/16";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -137,6 +137,8 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
     watches CI on your PRs and reacts to failures. You run headless, so when your turn ends the run
     ends and nothing wakes you later: never end it to wait for a check or a background job, or say you
     will report when CI finishes.
+20. Before coding, state in one sentence the smallest change that meets the issue. In the report,
+    justify each new concept beyond it.
 
 ## Report
 

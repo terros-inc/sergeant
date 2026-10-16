@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/12";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/13";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -150,6 +150,13 @@ ${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
     pushed, and Sergeant watches its CI and reacts to failures. You run headless, so when your turn
     ends the run ends and nothing wakes you later: never end it to wait for a check or a background
     job, or say you will report when CI finishes.
+17. Before reading the diff closely, sketch the smallest change that meets the issue's Done-when. List
+    every new concept the PR adds beyond that sketch: persisted state or fields, actions, rules or
+    checks, issue or comment conventions, config, and doc restatements of an existing rule. For each
+    one, say which Done-when item requires it. Flag each concept that none requires: \`blocking\` when
+    you can name a simpler path that still meets the issue, otherwise \`non_blocking\`. When the issue
+    text itself asks for the extra pieces, say so and recommend a spec fix rather than blaming the
+    worker. Judge concepts, not lines: no line counts or size ratios.
 
 ## Report
 
