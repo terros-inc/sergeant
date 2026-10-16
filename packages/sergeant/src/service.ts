@@ -132,6 +132,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
             outcome = "paused";
             paused = { provider: e instanceof GitHubRateLimitedError ? "GitHub" : "Linear", until: e.until };
             detail = `rate-limited by ${paused.provider} until ${e.until}`;
+            opts.apiUsage?.taskPaused(paused.provider === "GitHub" ? "github" : "linear", issueId);
           } else log(`${issueId}: loop failed, retrying on a later intake: ${detail}`);
         },
       )
@@ -205,7 +206,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
 
   const intake = async () => {
     for (const ref of await pendingCancels(opts.stateDir)) {
-      await serialized(ref, () => drive(ref)).catch((e: Error) => log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
+      // A rate limit's pause is logged once, by the adapter, not again for every stop it holds up (TECH-6208).
+      await serialized(ref, () => drive(ref)).catch((e: Error) => isRateLimited(e) || log(`${ref}: cancel not yet done, retrying next intake: ${e.message}`));
     }
     const startedAt = Date.now();
     let listed: DelegatedIssue[] | undefined;
@@ -252,6 +254,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   const retro = deps.retro;
   const retroLoop = retro ? withSource("retro", () => retroEvery(60 * 60_000, retroWake, { stateDir: opts.stateDir, log, signal: abort.signal }, retro)) : Promise.resolve();
 
+  const apiUsage = opts.apiUsage;
   const api = apiHandler({
     stateDir: opts.stateDir,
     enrolledRepositories: opts.enrolledRepositories,
@@ -286,6 +289,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     ...(opts.accounts && { accounts: opts.accounts }),
     ...(opts.admin && { admin: { ...opts.admin, webhooks: () => health.status() } }),
     ...(opts.enrollment && { enrollment: opts.enrollment }),
+    ...(apiUsage && { apiUsage: (hours: number) => apiUsage.usage(hours) }),
     ...(deps.retro && { requestRetro: () => (deps.retro?.target() ? (retroWake.request(), true) : false) }),
   });
   const webhooks = serviceWebhooks(opts, deps, log, { wakes, active, delegated: () => delegated, intakeWake, health });

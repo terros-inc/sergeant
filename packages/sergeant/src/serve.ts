@@ -76,8 +76,12 @@ const stateDir = resolve(values["state-dir"] ?? fail("--state-dir is required"))
 const runsDir = join(stateDir, "runs");
 const repositories = Object.keys(config.repositories).map((r) => RepoSlug.parse(r));
 
-// TECH-5942: every GitHub and Linear API call serve makes, counted per hour by what made it.
-const calls = apiCalls(log);
+// TECH-5942: every GitHub and Linear API call serve makes, counted per hour by what made it. TECH-6208:
+// and by endpoint, with their budgets and rate-limit events, saved every minute and at a stop.
+const calls = apiCalls(log, Date.now, join(stateDir, "api-usage.json"));
+await calls.load();
+const saveCalls = () => calls.save().catch((e: Error) => log(`could not save api-usage.json, retrying in a minute: ${e.message}`));
+setInterval(() => void saveCalls(), 60_000).unref();
 const installation = await connect(config, repositories, { github: calls.counting("github"), linear: calls.counting("linear") });
 // People's registered model accounts: a task's runs use only its owner's (TECH-5179).
 const accounts = modelAccounts(config, log);
@@ -159,6 +163,7 @@ const service = await startService(
     trustLoopback: values["trust-loopback"],
     accounts: accounts.registry,
     ...(admin && { admin }),
+    apiUsage: calls,
     enrollment: enrolled,
     ...(config.humans && {
       humans: {
@@ -222,7 +227,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => 
   }
   stopping = true;
   console.log(`${signal}: stopping after each task's current step (deadline ${shutdownDeadlineMs / 1_000}s)`);
-  void stopBeforeDeadline(() => service.stop(), shutdownDeadlineMs).then(
+  void stopBeforeDeadline(() => service.stop().finally(saveCalls), shutdownDeadlineMs).then(
     (stopped) => {
       if (!stopped) console.error(`${signal}: graceful shutdown exceeded ${shutdownDeadlineMs / 1_000}s; forcing exit`);
       process.exit(stopped ? 0 : 1);

@@ -446,4 +446,6 @@ Not required by this design; recorded as `14` V3.
   advertised `x-ratelimit-*-reset`, capped at one hour, else a minute, logged once (TECH-5923). A task
   loop that fails on it resumes after that time, not at the next intake, and shows as `paused` with
   the reset time until then, not `failed` (TECH-5941); the feedback sweep ends its pass. A login checked during that pause gets a 503 naming when to retry. Any other refusal names
-  Linear's error code and message.
+  Linear's error code and message. The `requests` and `complexity` budgets each response reports, and
+  each such pause with the tasks it paused, are kept for `sgt admin api`, and a budget below 15%
+  before its reset is logged as a warning once (TECH-6208).

@@ -60,6 +60,9 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   admin status                       the host's release, when serve started, the last restart or update,
                                      whether the installation config changed since serve started, and
                                      GitHub API calls left this hour, its reset, and any rate-limit pause
+  admin api [--hours N]              an approver's: what spent the GitHub and Linear API budgets in the
+                                     last N hours (default 24, up to 168): calls by source and endpoint,
+                                     budget history, rate-limit pauses and the tasks they paused, warnings
   admin retro set <projectId> <teamId>
                                      an approver's: validate and use this Linear project and team now
   admin retro off                    an approver's: stop scheduling retros now
@@ -156,6 +159,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         task: { type: "string" },
         "merge-method": { type: "string" },
         "merge-policy": { type: "string" },
+        hours: { type: "string" },
         version: { type: "boolean", short: "v" },
         help: { type: "boolean", short: "h" },
       },
@@ -181,7 +185,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"] };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], hours: values.hours };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

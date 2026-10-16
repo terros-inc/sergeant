@@ -237,7 +237,13 @@ call until `x-ratelimit-reset` (primary) or `retry-after` (secondary, else a min
 task loop that fails on it resumes after that time, not at the next intake, and until then its task
 shows as `paused` with the provider and reset time, not `failed` (TECH-5941). `sgt admin status` shows
 the calls left, the reset, and any pause, and GitHub and Linear calls per hour by what made them
-(TECH-5942).
+(TECH-5942). `sgt admin api` (and the MCP `health` tool) shows 7 days of them, kept across restarts in
+`<state dir>/api-usage.json`, by source and by endpoint with the 304s, the `core` and `graphql`
+budgets over time, each budget window's drop in `remaining` beside the calls serve counted (the
+difference is what something else spent on the installation's budget), and each rate-limit pause,
+primary or secondary, with its start, end, and the tasks it paused. A budget below 15% before its
+reset is logged as a warning once per window (TECH-6208). A stopped task's stop that a rate limit
+holds up pauses like any other task loop, not retried and logged at every poll.
 
 ## 10. Humans on GitHub
 

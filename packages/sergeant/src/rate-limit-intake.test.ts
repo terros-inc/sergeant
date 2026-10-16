@@ -100,3 +100,36 @@ test("a rate-limited task is listed as paused until its reset, then active again
     await service.stop();
   }
 }, 30_000);
+
+// TECH-6208: a stopped task whose stop a rate limit held up logged the same refusal at every poll and
+// intake, every few seconds for the whole pause, and buried the real signal. It is paused like any
+// other task now, named in the rate-limit event, and the adapter's one log line is the only one.
+test("a stop held up by a rate limit pauses its task without logging the refusal at every poll", async () => {
+  await underWay("UNF-1");
+  await writeFile(join(dir, "tasks", "UNF-1", "cancel.json"), JSON.stringify({ reason: "the issue was moved to Backlog", requestId: "req-1", at: new Date().toISOString() }));
+  const until = new Date(Date.now() + 60_000).toISOString();
+  let reads = 0;
+  const deps = {
+    agentUserId: "agent-v2",
+    workerLogin: "sergeant-worker[bot]",
+    delegatedIssues: async () => [],
+    linear: {
+      readConversation: async () => {
+        reads++;
+        throw new LinearRateLimitedError(until);
+      },
+    },
+    runner: { status: async () => Promise.reject(new Error("no runs")) },
+  } as unknown as ServiceDeps;
+  const logs: string[] = [];
+  const paused: string[] = [];
+  const apiUsage = { taskPaused: (provider: string, ref: string) => void paused.push(`${provider} ${ref}`), usage: () => { throw new Error("not read"); } };
+  const service = await startService({ enrolledRepositories: [], stateDir: dir, intakeSeconds: 0.01, pollSeconds: 0, slowPollMinutes: 0.0001, log: (l) => logs.push(l), apiUsage }, deps);
+  try {
+    await vi.waitFor(() => expect(reads).toBeGreaterThan(20), { timeout: 5_000 });
+    expect(paused).toEqual(["linear UNF-1"]);
+    expect(logs.filter((l) => l.includes("rate limit"))).toEqual([]);
+  } finally {
+    await service.stop();
+  }
+});

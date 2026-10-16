@@ -3,6 +3,7 @@ import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import type { AccountRegistry } from "./accounts.ts";
 import type { HostAdmin } from "./api-admin.ts";
+import type { ApiCalls } from "./api-calls.ts";
 import type { Caller } from "./auth.ts";
 import type { BudgetWindow } from "./budget.ts";
 import type { Enrollment } from "./enrollment.ts";
@@ -66,6 +67,8 @@ export type ServiceOptions = {
   accounts?: AccountRegistry;
   /** On the Sergeant host: approvers restart and update it through `/v1/admin` (TECH-5195). */
   admin?: HostAdmin;
+  /** TECH-6208: serve's API usage record (api-calls.ts): names each task a rate limit paused, and answers `sgt admin api`. */
+  apiUsage?: Pick<ApiCalls, "taskPaused" | "usage">;
   /** Lists and changes `enrolledRepositories` in place, for `/v1/repositories` (TECH-5193). */
   enrollment?: Enrollment;
   /** Trusts a loopback caller with no login as an operator: for development on one machine, refused unless `host` is 127.0.0.1 or ::1. */

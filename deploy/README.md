@@ -453,6 +453,8 @@ sgt admin update v2.1.0    # or to a branch, tag, or commit: only a commit on ma
 sgt admin status           # the release, when serve started, the last restart or update, whether
                            # the installation-config parameter changed since serve started, each
                            # webhook source's health, and GitHub and Linear API calls by source
+sgt admin api --hours 24   # what spent the GitHub and Linear API budgets: calls by source and endpoint,
+                           # budget history, rate-limit pauses and the tasks they paused, warnings
 ```
 
 `restart` and `update` each print the outcome when the host has one, including why it failed, waiting
@@ -1104,6 +1106,14 @@ shell over the canary's per-task loop, not a workflow engine:
   its `since` (the first sweep) keeps feedback from before the rollout out. Per issue, at most 3
   follow-ups are filed and 10 pieces of feedback judged; past that, or after 3 failed attempts at one
   piece, Sergeant says so in a comment on the issue rather than dropping it silently.
+- **API usage** (TECH-6208). `<state dir>/api-usage.json` keeps 7 days of serve's GitHub and Linear
+  API calls per hour by source and endpoint, the budgets their responses report (sampled every 5
+  minutes), GitHub's budget windows, rate-limit pauses with the tasks they paused, and low-budget
+  warnings; serve saves it every minute and when it stops, and `sgt admin api` shows it. A budget
+  below 15% of its limit before its reset logs `WARNING: <provider> <budget> API budget low: …` once
+  per window. Workers and reviewers use the worker App's installation, a budget of its own; calls
+  anything else makes on the control-plane App's budget show as a window's `other`. Deleting the
+  file loses only this history; an unreadable one is set aside and counting starts afresh.
 - **Signals and restarts.** SIGINT or SIGTERM stops intake, closes the HTTP listener and connections,
   and asks each loop to end at its next poll. If that has not completed in five seconds the process
   exits; a second signal exits at once. A restart rereads Linear, GitHub, the runner, and each

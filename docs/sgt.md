@@ -235,6 +235,12 @@ sgt admin status           # its release, when it last restarted, the last resta
                            # the retro target (or none), GitHub API calls left this hour, whether
                            # each webhook source is delivering (or an alert when it is not), and
                            # GitHub and Linear API calls this hour and last by what made them
+sgt admin api --hours 24   # what spent the GitHub and Linear API budgets (up to 168 hours, kept
+                           # across restarts): calls per hour by source and endpoint with GitHub's
+                           # 304s, GitHub's budget windows with the calls serve did not make, each
+                           # hour's lowest budget, rate-limit pauses and the tasks they paused, and
+                           # low-budget warnings; --json adds every 5-minute budget sample. The MCP
+                           # `health` tool returns the same for an approver's login
 sgt admin retro set <projectId> <teamId> # validate both in Linear, then use the target at once
 sgt admin retro off                     # remove the target and stop scheduling retros at once
 ```

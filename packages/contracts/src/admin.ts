@@ -8,6 +8,7 @@ import { RetroTarget } from "./retro.ts";
 // `sergeant-update` an automatic update does and writes the outcome back for `GET /v1/admin/status`.
 //
 //   GET  /v1/admin/status
+//   GET  /v1/admin/api?hours=N   serve's API usage (TECH-6208, api-usage.ts), off the host too
 //   POST /v1/admin/restart   {}
 //   POST /v1/admin/update    { "ref"?: "<branch, tag, or commit on main>" }
 
