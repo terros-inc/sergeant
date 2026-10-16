@@ -5,6 +5,7 @@ import { conversationRevision, SituationReport, type Conversation, type Proposed
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { driveMerged, exists, mergedOf, reopenReason } from "./after-merge.ts";
 import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
+import { postAdoptions } from "./adopted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, clockActive, DEFAULT_BUDGET, openWindow, windowFor } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
@@ -289,6 +290,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     await postHandoffs(conversation.issue.id, state.refusedMerges, deps.linear, log, save);
     await postRereviewRequests(situation, deps, deps.linear, log);
+    // TECH-6164: a PR a human or another agent started that a worker took over is named on the issue (adopted.ts).
+    await postAdoptions(situation, deps.workerLogin, deps.linear, log);
     // Any human direction on the issue or the PR resumes the task in a fresh window (TECH-5218, TECH-5913,
     // TECH-6165). The next pass rereads every fact under that window.
     if (await openDirectionWindow(situation, configured, ctx)) continue;
