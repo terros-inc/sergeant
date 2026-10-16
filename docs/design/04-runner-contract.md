@@ -201,7 +201,8 @@ Credentials are vended per run through `/runner/v1/runs/:id/credentials/...` (11
 run token placed in the run's workspace:
 
 - **GitHub**: one-hour installation tokens of the **worker App**, scoped to the task's current repository
-  set; `contents: write`, `pull_requests: write`, `checks: read`, `actions: read` for workers. Reviewers
+  set; `contents: write`, `pull_requests: write`, `checks: read`, `actions: read` for workers, and
+  `statuses: read` once the installation holds it; never `actions: write` (08 §6). Reviewers
   get none: the host checks out a reviewer's PRs with a read-only token that never enters the run.
   Scoping keeps each run pointed at its repositories; it is not a boundary against another co-resident
   run.

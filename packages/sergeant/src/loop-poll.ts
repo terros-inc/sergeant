@@ -58,6 +58,7 @@ export function situationOf(
     runs,
     followups: state.followups,
     refusedMerges: state.refusedMerges,
+    ciReruns: state.ciReruns,
     budget,
     recentTurns: state.recentTurns,
   });

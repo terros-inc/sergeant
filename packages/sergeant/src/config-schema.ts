@@ -55,12 +55,22 @@ export const InstallationConfig = z.strictObject({
       workerApp: GitHubAppRef,
       /** The control-plane App webhook's secret; without it serve has no GitHub webhook endpoint. */
       webhookSecret: SecretRef.optional(),
+      /**
+       * TECH-5839: a separate App with Actions write, held only by the control plane, that reruns the
+       * failed jobs of a workflow a worker asks for (ci-reruns.ts). Absent, every rerun request is refused.
+       */
+      ciRerunApp: GitHubAppRef.optional(),
     })
     // Repository rules tell GitHub App actors apart, not Sergeant's labels: one App in both roles
     // would let workers merge as the control plane.
     .refine((g) => g.controlPlaneApp.appId !== g.workerApp.appId, {
       message: "controlPlaneApp and workerApp must be different GitHub Apps",
       path: ["workerApp", "appId"],
+    })
+    // Workers mint tokens from the worker App's key, so the rerun App's Actions write must be another App's.
+    .refine((g) => g.ciRerunApp?.appId !== g.workerApp.appId, {
+      message: "ciRerunApp and workerApp must be different GitHub Apps",
+      path: ["ciRerunApp", "appId"],
     }),
   repositories: z.record(
     RepoSlug,
@@ -79,6 +89,11 @@ export const InstallationConfig = z.strictObject({
        * more (or less) than the installation's `budget`. Each field unset keeps the installation's.
        */
       budget: z.strictObject({ wallMinutes: z.number().positive().optional(), costUsd: z.number().positive().optional() }).optional(),
+      /**
+       * TECH-5839: the workflow files (`.github/workflows/ci.yml`) whose failed runs on a task's PR a
+       * worker may have Sergeant rerun. Never a deployment or other privileged workflow. Empty, none.
+       */
+      ciRerunWorkflows: z.array(z.string().regex(/^\.github\/workflows\/[\w.-]+\.ya?ml$/, "expected a workflow file path")).default([]),
     }),
   ),
   /** The Sergeant model token for reasoning; never a worker's or reviewer's (TECH-5179). */

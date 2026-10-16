@@ -67,6 +67,11 @@ export function showTask(d: TaskDetail): string {
     lines.push(`${d.stop.done ? "stopped" : "stopping"}, recorded ${minute(d.stop.at)}: ${clip(d.stop.reason, 100)}`, ...closed);
   }
   if (d.followups.length) lines.push("follow-ups:", ...d.followups.map((f) => `  ${f.identifier}  ${clip(f.title, 60)}  ${f.url}`));
+  if (d.ciReruns?.length) {
+    const rerun = (r: NonNullable<TaskDetail["ciReruns"]>[number]) =>
+      `  ${minute(r.at)}  ${r.repo}#${r.number} workflow run ${r.workflowRunId}${r.workflow ? ` (${r.workflow})` : ""}  ${r.outcome}  by ${r.requestedBy}: ${clip(r.reason, 100)}`;
+    lines.push("CI reruns:", ...d.ciReruns.map(rerun));
+  }
   return lines.join("\n");
 }
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CiRerunRequest } from "./ci-rerun.ts";
 import { RepoSlug } from "./conversation.ts";
 
 export const RunId = z.string().regex(/^run_[\w-]+$/);
@@ -84,6 +85,12 @@ export const WorkerReport = z.object({
    * retro reads it from the run's record. A malformed list reads as absent rather than failing the report.
    */
   feedback: z.array(z.string()).optional().catch(undefined),
+  /**
+   * TECH-5839: failed workflow runs on the task's PR the worker asks Sergeant to rerun the failed jobs
+   * of, instead of pushing an empty commit. Sergeant checks each and performs it once (ci-reruns.ts).
+   * A malformed list reads as absent rather than failing the report.
+   */
+  rerunFailedCI: z.array(CiRerunRequest).optional().catch(undefined),
   /**
    * How the worker answered earlier review findings (01 `FindingResolution`), each named by its
    * review run and finding id. Only telemetry reads it (`ReviewFacts.resultingMutation`), so a

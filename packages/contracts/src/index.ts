@@ -2,6 +2,7 @@ export * from "./actions.ts";
 export * from "./admin.ts";
 export * from "./api.ts";
 export * from "./budget.ts";
+export * from "./ci-rerun.ts";
 export * from "./client.ts";
 export * from "./conversation.ts";
 export * from "./feedback.ts";

@@ -117,6 +117,7 @@ export async function showTask(ctl: ApiControl, ref: TaskRef): Promise<TaskDetai
     runs: records.map((r) => runSummary(ref, r)),
     recentTurns: state?.recentTurns.slice(-5) ?? [],
     followups: state?.followups ?? [],
+    ciReruns: state?.ciReruns ?? [],
     stop,
   };
 }

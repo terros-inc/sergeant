@@ -170,6 +170,7 @@ test("a turn that asks does nothing else, whatever order reasoning proposed", as
       followups: [],
       uploads: [],
       refusedMerges: [],
+      ciReruns: [],
     };
     const { outcomes } = await takeTurn(situation, {
       agentUserId: agent.id,

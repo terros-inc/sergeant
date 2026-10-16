@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BudgetStatus } from "./budget.ts";
+import { CiRerun } from "./ci-rerun.ts";
 import { Conversation, ConversationRevision, conversationRevision, RepoSlug, Sha } from "./conversation.ts";
 import { PullRequestFacts } from "./github.ts";
 import { RunRecord } from "./runs.ts";
@@ -66,6 +67,8 @@ export const SituationReport = z.object({
   followups: z.array(FiledFollowup).default([]),
   /** Merges handed off after their bounded attempts: each PR waits for a human or a fact change. */
   refusedMerges: z.array(RefusedMerge).default([]),
+  /** TECH-5839: every CI rerun a worker asked for, and whether Sergeant performed or refused it. */
+  ciReruns: z.array(CiRerun).default([]),
   budget: BudgetStatus,
   recentTurns: z.array(
     z.object({

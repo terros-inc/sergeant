@@ -34,11 +34,17 @@ export const RUN_PERMISSIONS: Record<"write" | "read", Permissions> = {
  * TECH-5797: a worker token also gets `workflows: write`, so a worker can push workflow changes, but
  * only once the worker App's installation holds it: GitHub refuses a token asking for more than the
  * installation was granted, and the captain grants it by hand, after which an owner accepts it.
+ * TECH-5839: likewise `statuses: read`, so `gh pr checks` can read commit statuses. Never `actions:
+ * write`: a rerun of failed CI goes through Sergeant's own rerun App (ci-rerun.ts).
  */
 export async function runPermissions(workerApp: Pick<GitHubApp, "installationPermissions">, access: "write" | "read"): Promise<Permissions> {
   if (access === "read") return RUN_PERMISSIONS.read;
   const held = await workerApp.installationPermissions();
-  return held.workflows === "write" ? { ...RUN_PERMISSIONS.write, workflows: "write" } : RUN_PERMISSIONS.write;
+  return {
+    ...RUN_PERMISSIONS.write,
+    ...(held.workflows === "write" && { workflows: "write" }),
+    ...((held.statuses === "read" || held.statuses === "write") && { statuses: "read" }),
+  };
 }
 
 const base64url = (data: string | Buffer) => Buffer.from(data).toString("base64url");

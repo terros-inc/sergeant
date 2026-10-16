@@ -2,6 +2,7 @@ import { readdir, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BudgetStatus,
+  CiRerun,
   conversationRevision,
   ConversationRevision,
   FiledFollowup,
@@ -134,6 +135,8 @@ const TaskState = z.looseObject({
   starts: z.record(z.string(), z.union([StartWorker.extend({ at: z.iso.datetime({ offset: true }).optional().catch(undefined) }).loose(), StartReviewer.loose()])).default({}),
   /** TECH-5259: per run that ended with no usable report, the retry Sergeant started for it, if any. */
   reportRecoveries: z.record(z.string(), z.looseObject({ retryRunId: RunId.optional() })).default({}),
+  /** TECH-5839: each CI rerun a worker's report asked for, once handled, with its outcome (ci-reruns.ts). */
+  ciReruns: z.array(CiRerun.loose()).default([]),
 });
 export type TaskState = z.infer<typeof TaskState>;
 type State = TaskState;

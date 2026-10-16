@@ -4,12 +4,13 @@ GitHub is the source of truth for code, branches, PRs, CI results, required chec
 merge boundary (rulesets). The worker does all ordinary git and PR mechanics. Sergeant reads facts,
 links PRs to the Linear issue, and merges under the Gate's rules.
 
-## 1. Two GitHub identities per installation
+## 1. GitHub identities per installation
 
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
 | **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
-| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write (only while the installation holds it), checks: read, actions: read, metadata: read. Reviewers: none (the host checks out their PRs with a read-only token that never enters the run) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs |
+| **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write and statuses: read (each only while the installation holds it), checks: read, actions: read, metadata: read. Reviewers: none (the host checks out their PRs with a read-only token that never enters the run) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs and statuses (`gh pr checks`) |
+| **rerun App** (optional, TECH-5839) | Sergeant's deterministic core only; each call mints a token for one repository with only `actions` | actions: write, metadata: read | rerunning the failed jobs of a workflow run a worker asked for (§6), nothing else |
 
 Why two: the default-branch ruleset must let Sergeant merge and must stop a worker from pushing to
 or merging into the default branch. The worker's contents write would let it merge its own green PR,
@@ -19,8 +20,11 @@ different actor from the one that approves and merges. The worker App alone has 
 the captain grants it to the worker App by hand and an organization owner accepts it on the
 installation. A worker token asks for it only when the installation's permissions (read before each
 mint) include it, since GitHub refuses a token asking for more than the installation holds; until
-then workers get the same token as before and cannot push workflow changes. Neither App has administration, secrets, environments, deployments, or `actions: write` (which could
-dispatch workflows) permissions.
+then workers get the same token as before and cannot push workflow changes. `statuses: read` follows
+the same rule (TECH-5839). Neither the control-plane nor the worker App has administration, secrets,
+environments, deployments, or `actions: write` (which could dispatch workflows) permissions. Only the
+rerun App holds `actions: write`; it must be a different App from the worker App, its key never leaves
+the control plane, and Sergeant uses it for one operation (§6). Without it, no CI is rerun.
 
 ## 2. Repository enrollment
 
@@ -100,7 +104,18 @@ FactReader reads, for each linked PR's head SHA:
 `missing` and `not_run_conflict` are never reported as failures (S1 retro F1: "no CI" read as "CI
 failed" sent a $3 rethink at an unrelated file). For failed checks, `get_ci` returns names, URLs,
 and a bounded log tail, enough for Sergeant to brief a worker. The worker reads full logs itself
-(`actions: read`). Sergeant never re-runs CI; a worker retriggers by pushing.
+(`actions: read`, and `statuses: read` for `gh pr checks`).
+
+A worker never pushes an empty commit to retrigger CI (TECH-5839). For a failure unrelated to its change it
+names the failed workflow run in its report's `rerunFailedCI` (05 §4), and once the run ends Sergeant's
+core handles each request once (`packages/sergeant/src/ci-reruns.ts`): the PR must be one of the task's
+own, open, and opened by the worker App; the workflow run must be in that repository, on the PR's current
+head SHA, from a workflow file the repository's `ciRerunWorkflows` lists (never a deployment or other
+privileged workflow), and completed with conclusion `failure`; and it must have been rerun fewer than
+twice, by GitHub's `run_attempt` or this task's records, whichever is more. Sergeant then calls GitHub's
+`rerun-failed-jobs` with the rerun App. Every request is recorded in the task's `state.json`
+(`ciReruns`: the requesting run, PR, head, workflow run, workflow, attempt, outcome, reason) and shown
+by `sgt task show` and in the Situation Report. Sergeant never decides on its own to rerun CI.
 
 ## 7. Merging
 

@@ -78,7 +78,8 @@ anything, and the state backend and the provider refuse any other account.
    The state bucket already exists; this configuration never creates it. `secret_names` lists every
    secret the config refers to, and nothing else: four literal names, or up to six with the webhook
    signing secrets (Webhooks below), seven with the public-data denylist (`publicDataDenylistSecret`
-   below), and eight if an adopted registered-accounts secret stays listed, which Terraform enforces. Codex needs no secret here (A Codex reviewer below).
+   below), eight with the CI rerun App's key (`github.ciRerunApp` below), and nine if an adopted
+   registered-accounts secret stays listed, which Terraform enforces. Codex needs no secret here (A Codex reviewer below).
    The registered-accounts secret is not one of them: Terraform creates it (Model accounts below).
    To change an input later, put the parameter again and rerun `./init.sh`.
 2. **Secrets** exist in Secrets Manager under those names: both GitHub Apps' private keys, the Linear
@@ -348,7 +349,7 @@ issue saying what to do, and nothing starts.
      an update). Registration works from that restart on.
    - **An existing secret** (made by hand before TECH-5204, under another name) is adopted, not
      recreated: with `registered_accounts_secret` naming it, the next plan shows it imported (its description and tags updated in place) and a
-     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` (the reason `secret_names` accepts up to eight names) or leave it: the role reads and writes it through its own grant either way.
+     `sergeant-initial` version added beside the current one, which stays current. It may stay in `secret_names` (the reason `secret_names` accepts up to nine names) or leave it: the role reads and writes it through its own grant either way.
    - **Another name, later, is unsupported.** Changing `registered_accounts_secret` would replace the
      secret, which holds every registered credential, so its `prevent_destroy` makes the plan fail
      and nothing changes. Keep the name the first apply used. On the host, leave the installation
@@ -669,9 +670,10 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   },
   "github": {
     "controlPlaneApp": { "appId": 1, "installationId": 2, "privateKeySecret": "<secret id>" },
-    "workerApp": { "appId": 3, "installationId": 4, "privateKeySecret": "<secret id>" }
+    "workerApp": { "appId": 3, "installationId": 4, "privateKeySecret": "<secret id>" },
+    "ciRerunApp": { "appId": 5, "installationId": 6, "privateKeySecret": "<secret id>" }
   },
-  "repositories": { "owner/name": { "mergeMethod": "squash", "mergePolicy": "sergeant" } },
+  "repositories": { "owner/name": { "mergeMethod": "squash", "mergePolicy": "sergeant", "ciRerunWorkflows": [".github/workflows/ci.yml"] } },
   "modelTokenSecret": "<Sergeant model token secret id>",
   "gitIdentity": { "name": "<human name>", "email": "<human email>" }
 }
@@ -687,6 +689,14 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   merge call and refuses in a `human` repository whatever asked it to merge. A repository's
   `"observedChecksFallback": true` treats every check observed on the exact head as required (GitHub
   Apps and rulesets below).
+- **`github.ciRerunApp`** (optional, TECH-5839) is a separate GitHub App, never the worker App, with
+  actions write and metadata read on the enrolled repositories. Only `serve` holds its key (add the key's
+  secret name to `secret_names` too); it reruns the failed jobs of a workflow run a worker asked for in
+  its report, after Sergeant checks the request (`docs/design/08-github-contract.md` §6). Without it,
+  every rerun request is refused and recorded as such.
+- **`repositories.<owner/name>.ciRerunWorkflows`** (optional, default none) lists the workflow files,
+  such as `.github/workflows/ci.yml`, whose failed runs on a task's PR may be rerun. List only ordinary
+  CI, never a deployment or other privileged workflow.
 - **`repositories.<owner/name>.budget`** (optional) replaces the installation's `budget` for tasks
   working in that repository, field by field: `"budget": { "wallMinutes": 180, "costUsd": 40 }`
   (positive numbers, each optional; a field unset keeps the installation's; Budget below).
@@ -754,11 +764,13 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 
 The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs contents
 and pull requests write, checks and commit statuses read, and metadata read. The worker App needs
-contents and pull requests write, and checks and actions read; it may also hold workflows write
+contents and pull requests write, and checks and actions read, and commit statuses read so `gh pr
+checks` can read statuses (TECH-5839; run tokens ask for it only once the installation holds it); it may also hold workflows write
 (TECH-5797), which lets workers push workflow changes on non-default branches once an organization
 owner accepts it on the installation (run tokens ask for it only then). Any PR that changes protected
 CI configuration needs an independent review and is always handed to a human to review and merge.
-Neither App may hold administration, secrets, environments, deployments, or actions write, the
+Neither App may hold administration, secrets, environments, deployments, or actions write (only the
+optional `ciRerunApp` holds actions write, above), the
 control-plane App may not hold workflows, and the worker App must not be a ruleset bypass actor. Contents write would let the worker App merge its own green PR, so each
 repository's ruleset must require at least one approving review: GitHub never lets a PR's author
 approve it, and the control-plane App submits that approval on the exact gated head only after every

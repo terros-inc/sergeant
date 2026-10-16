@@ -255,6 +255,7 @@ before identifiers were cached, by looking them up through Linear on a cache mis
 | Needs another repository | `repositoryRequests[]` |
 | A dependency on another issue, or of another issue on this one | `dependencies[]`, each with the issue, `blocked_by` or `blocks`, and `why`; reasoning records it (`record_blocked_by`) |
 | A real bug, required unfinished work, a blocker, or an ops/security problem | `followups[]`, each with `category` and `why`; Sergeant decides |
+| CI on the PR's current head failed for a reason unrelated to the change (a flaky test) | `rerunFailedCI[]`, each with `repo`, PR `number`, and the failed `workflowRunId`, never an empty commit. Sergeant checks and performs each once after the run ends (08 §6) |
 | What made the task harder, what could be better, whether it recurs | `feedback[]` and a short Feedback section; never filed; may become the issue's Sergeant feedback comment (07 §11) |
 | Failed outright | `outcome: failed` with what happened; still a report if at all possible |
 

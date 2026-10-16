@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/16";
+export const WORKER_RULES_VERSION = "s2-worker-rules/17";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -33,10 +33,10 @@ ${existingBranches.length ? existingBranches.map((b) => `  - ${b}`).join("\n") :
 ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.number}`).join("\n") : "  - (none)"}
 - **GitHub:** \`GH_TOKEN\` is a token for the repositories above only, valid for about an hour from
   the start of this run. \`git push\` over https and \`gh\` use it. It can push branches, open and
-  update PRs, and read CI. It cannot push to or merge into the default branch or change workflow
-  permissions. It may change workflow files on its non-default branch once the worker App holds
-  \`workflows: write\` (until then GitHub refuses that push); those PRs always require a human
-  review and human merge.
+  update PRs, and read CI (\`gh pr checks\`, \`gh run view --log-failed\`). It cannot rerun CI, push
+  to or merge into the default branch, or change workflow permissions. It may change workflow files
+  on its non-default branch once the worker App holds \`workflows: write\` (until then GitHub
+  refuses that push); those PRs always require a human review and human merge.
 - Not available, by design: AWS, production, IAM/org/billing, Linear, Sergeant's control plane.
 
 ## Rules (${WORKER_RULES_VERSION})
@@ -133,11 +133,16 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
     The Task is internal: its real case stays in Linear, and out of your report too. A pushed PR stays
     public record even after an edit, so check before you push; your clones' pre-push hook refuses IDs,
     emails, phone numbers, and known customer names, not everything above.
-19. Once your final head is pushed, write the report right away. Do not wait on CI: Sergeant already
+19. CI that failed for a reason unrelated to the change (a flaky test, a runner hiccup): never push an
+    empty or no-op commit to get a new run. Name the failed workflow run on your PR's current head in
+    \`rerunFailedCI\` (its id from \`gh pr checks\` or \`gh run list\`); Sergeant reruns its failed jobs
+    after your run ends, at most twice per workflow run and only for approved workflows. A real
+    failure you fix.
+20. Once your final head is pushed, write the report right away. Do not wait on CI: Sergeant already
     watches CI on your PRs and reacts to failures. You run headless, so when your turn ends the run
     ends and nothing wakes you later: never end it to wait for a check or a background job, or say you
     will report when CI finishes.
-20. Before coding, state in one sentence the smallest change that meets the issue. In the report,
+21. Before coding, state in one sentence the smallest change that meets the issue. In the report,
     justify each new concept beyond it.
 
 ## Report
@@ -162,7 +167,8 @@ what changed, validation, known gaps, decisions, a short Feedback section), endi
                    "why": "<why it meets that category and why it matters>" }],
   "feedback": ["<one short line each>"],
   "addressedFindings": [{ "reviewRunId": "<run id of the review>", "findingId": "<finding id>",
-                          "resolution": "fixed" | "disputed", "reason": "<what changed, or why it is wrong>" }] }
+                          "resolution": "fixed" | "disputed", "reason": "<what changed, or why it is wrong>" }],
+  "rerunFailedCI": [{ "repo": "<owner/name>", "number": <PR number>, "workflowRunId": <failed workflow run id> }] }
 \`\`\`
 `;
 }
@@ -198,7 +204,8 @@ change. A human's review or comment on a PR below that asks for a change is a bl
 outranks Sergeant's own reviewer: address it on that PR, unless a later human review already settled
 it, and say in your report how. Address every blocking finding below, by fixing it or by saying in your report, with
 evidence, why it is wrong, and list each finding you answered in \`addressedFindings\`. Read a
-failing check's logs with \`gh\` (\`gh pr checks\`, \`gh run view --log-failed\`). Then decide afresh whether your new head needs review (rule 9): it does if anything
+failing check's logs with \`gh\` (\`gh pr checks\`, \`gh run view --log-failed\`); a failure unrelated to
+the change gets a rerun through \`rerunFailedCI\` (rule 19), not an empty commit. Then decide afresh whether your new head needs review (rule 9): it does if anything
 changed since the last approving review of the PR needs one, including an earlier run's unreviewed fix.
 
 ### Pull requests

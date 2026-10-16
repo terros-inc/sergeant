@@ -8,6 +8,7 @@ import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, DEFAULT_BUDGET, windowFor } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
+import { performCiReruns } from "./ci-reruns.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { postHandoffs } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
@@ -226,6 +227,12 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue, costTotal(spent(await turnsSoFar())));
       await save();
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
+      continue;
+    }
+    // TECH-5839: CI reruns an ended worker asked for are checked and made before a turn (ci-reruns.ts);
+    // one GitHub accepted changes the PR's checks, so the next pass rereads them first.
+    if (await performCiReruns(runs, pullRequests, state, deps, log, save)) {
+      prPolls.forget();
       continue;
     }
     let situation = situationOf(conversation, pullRequests, runs, budget, state, opts);
