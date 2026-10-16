@@ -277,8 +277,8 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
 });
 
 // TECH-6166 (review f3): a description edit must not overwrite a human's edit made since Sergeant read
-// it. The write happens only while the description still reads what the edit was made on.
-test("updateDescription writes only while the description is still the one the edit was made on", async () => {
+// it. The write happens only while the description still reads what the turn read.
+test("updateDescription writes only while the description is still the one the turn read", async () => {
   let description = "Keep the single-record update.";
   const writes: unknown[] = [];
   const linear = createLinearPort({

@@ -7,7 +7,7 @@ import { descriptionNote } from "./update-description.ts";
 
 // TECH-6166: a worker stopped on a human's inline PR comment because the issue description, by then
 // stale, said the opposite. The latest human steering wins for what it addresses: Sergeant replaces the
-// passage it changed, notes it in the thread, and the work follows the comment.
+// description, notes it in the thread, and the work follows the comment.
 
 const at = "2026-10-02T06:01:00.000Z";
 const kept = "Add the bulk update.";
@@ -21,7 +21,7 @@ const turnOf = (c: Conversation): SituationReport => ({ ...situation, conversati
 const dropped = `${kept}\n\nDrop the single-record update (a reviewer's inline comment on the PR).`;
 const edit = (over: Partial<Extract<ProposedAction, { kind: "update_description" }>> = {}): Extract<ProposedAction, { kind: "update_description" }> => ({
   kind: "update_description",
-  edits: [{ old: "Keep the single-record update.", new: "Drop the single-record update (a reviewer's inline comment on the PR)." }],
+  description: dropped,
   why: `captain's inline comment on ${pr.url} drops the single-record update the description kept.`,
   ...over,
 });
@@ -49,7 +49,7 @@ function linear(live: Conversation, meanwhile?: string, livePr = reviewed) {
   return { p, edits, comments, text: () => text };
 }
 
-test("a human inline comment that conflicts with the description: only that passage follows it, with a note, and the worker gets the new text", async () => {
+test("a human inline comment that conflicts with the description: the description follows it, with a note, and the worker gets the new text", async () => {
   const { p, edits, comments } = linear(described);
   const specs: RunSpec[] = [];
   p.runner.start = async (spec) => void specs.push(spec);
@@ -92,27 +92,12 @@ test("a scope change in a Linear comment is noted in that comment's thread", asy
   const reply = { ...top, id: "c2", body: "Yes: drop the single-record update.", parentId: "c1" };
   const live = { ...described, humanComments: [top, reply] };
   const { p, edits, comments } = linear(live);
-  expect(await execute(edit({ commentId: "c2" }), turnOf(live), p)).toMatchObject({ status: "done", result: { updated: true, thread: "c1" } });
+  expect(await execute(edit({ commentId: "c2" }), turnOf(live), p)).toMatchObject({ status: "done", result: { thread: "c1" } });
   expect(edits).toHaveLength(1);
   expect(comments).toMatchObject([{ parentId: "c1" }]);
 });
 
-// Review f1: the edit landed but its note failed, and a retry of a replace whose `old` is gone could
-// never post it. The same edits again find the edit made and post only the note.
-test("an edit whose note failed is retried by proposing it again: the note is posted, the description is not written twice", async () => {
-  const { p, edits, comments, text } = linear(described);
-  p.linear.postComment = async () => { throw new Error("Linear is down"); };
-  expect(await execute(edit(), turnOf(described), p)).toMatchObject({ status: "failed", error: expect.stringMatching(/description was updated, but its note was not posted/) });
-  expect(text()).toBe(dropped);
-
-  p.linear.postComment = async (req) => void comments.push(req);
-  const after = { ...described, issue: { ...described.issue, description: dropped } };
-  expect(await execute(edit(), turnOf(after), p)).toMatchObject({ status: "done", result: { updated: false } });
-  expect(edits).toEqual([dropped]);
-  expect(comments).toHaveLength(1);
-});
-
-test("the description is never edited over a change the turn did not see, for a comment that is not a human's, or where a passage is not there exactly once", async () => {
+test("the description is never edited over a change the turn did not see, for a comment that is not a human's, or to the text it already has", async () => {
   const humanEdit = { ...described, issue: { ...described.issue, description: "A human rewrote it meanwhile." } };
   const raced = linear(humanEdit);
   expect(await execute(edit(), turnOf(described), raced.p)).toMatchObject({ status: "denied", rule: "U1" });
@@ -130,13 +115,9 @@ test("the description is never edited over a change the turn did not see, for a 
   const unknown = linear(described);
   expect(await execute(edit({ commentId: "sergeant-own" }), turnOf(described), unknown.p)).toMatchObject({ status: "denied", rule: "U2" });
 
-  // "update." ends both paragraphs: replacing it could change the line the comment did not address.
-  const twice = linear(described);
-  expect(await execute(edit({ edits: [{ old: "update.", new: "update, bulk only." }] }), turnOf(described), twice.p)).toMatchObject({ status: "denied", rule: "U3", reason: expect.stringMatching(/appears 2 times/) });
+  const same = linear(described);
+  expect(await execute(edit({ description: described.issue.description }), turnOf(described), same.p)).toMatchObject({ status: "denied", rule: "U3" });
 
-  const missing = linear(described);
-  expect(await execute(edit({ edits: [{ old: "Keep the CSV export.", new: "Drop the CSV export." }, { old: "Keep the single-record update.", new: "" }] }), turnOf(described), missing.p)).toMatchObject({ status: "denied", rule: "U3" });
-
-  const all = [raced, instant, steered, unknown, twice, missing];
+  const all = [raced, instant, steered, unknown, same];
   expect(all.flatMap((l) => [...l.edits, ...l.comments])).toEqual([]);
 });

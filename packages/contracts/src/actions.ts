@@ -123,13 +123,13 @@ export type RecordBlockedBy = z.infer<typeof RecordBlockedBy>;
 /**
  * TECH-6166: a human comment on the issue or a PR changed what the issue asks, so Sergeant edits the
  * description to match and notes the edit, so workers and reviewers check against one current source.
- * A targeted replace: each `old` passage is replaced by its `new` one, and nothing else changes. The
- * note is a reply in the thread of `commentId` (a human Linear comment) when given, else on the issue.
+ * The whole description is replaced, only while it is still the one the turn read. The note is a reply
+ * in the thread of `commentId` (a human Linear comment) when given, else on the issue.
  */
 export const UpdateDescription = z.object({
   kind: z.literal("update_description"),
-  /** The passages to replace: each `old` is quoted exactly from the current description, and appears in it once. */
-  edits: z.array(z.object({ old: z.string().min(1).max(8_000), new: z.string().max(8_000) })).min(1).max(20),
+  /** The whole new description: the current one with only what the comment changed rewritten. */
+  description: z.string().min(1).max(100_000),
   /** What changed and which human comment asked for it (author, and where: the issue or PR, with its link). */
   why: z.string().min(1).max(2_000),
   /** The human Linear comment that changed the scope, when it was one; a PR comment has none. */

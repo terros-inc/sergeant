@@ -15,7 +15,6 @@ export {
   checkLive,
   checkSend,
   checkStart,
-  planDescriptionEdit,
   STOP_STATE_TYPES,
   type GateVerdict,
   type Ownership,
