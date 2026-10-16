@@ -15,12 +15,15 @@ import {
 import { cleanup, dir, issue, pr, saved, scenario, turnOf } from "./budget-scenario.ts";
 import { handoffKey } from "./handoff.ts";
 import { questionKey } from "./question.ts";
+import { Slot } from "./slots.ts";
 
 // TECH-6165: the budget counts only active time, the time a run or a planner turn is running. A task
 // handed to a human to merge ran out its window with nothing running and logged "budget exhausted …
 // parking quietly" every poll; then a human's review after that went unanswered until they wrote
 // "Extend". Now a wait uses none of the window, any human direction starts a fresh window and a turn, and
-// a change no human made resumes the task in the window it has.
+// a change no human made resumes the task in the window it has; a merge or close of the handed-off PR, or
+// an edit to the issue, which nobody is credited with, takes a turn even in an exhausted window, and opens
+// no fresh one. Sergeant's own open question stays open whatever its PR's reviews say.
 
 afterEach(cleanup);
 
@@ -138,70 +141,111 @@ test("a change no human made after the window's length wakes a turn in the windo
   expect(budget.windowSeq).toBeUndefined();
 });
 
-test("a human's PR review while Sergeant's own question is open starts a fresh window and a turn", async () => {
-  let reviewedAt = "";
-  const { posted, turns } = await waiting({
-    activeMs: 3 * hour,
+test("a human's PR review while Sergeant's own question is open leaves that question pending", async () => {
+  let questionAt = "";
+  const { posted, turns, logs } = await waiting({
+    activeMs: 30 * 60_000,
     polls: 6,
     // Sergeant asked the owner something, unrelated to the PR, and nobody has answered on the issue.
-    conversation: (live) => ({
-      agentComments: [...live.agentComments, { id: commentIdFor(questionKey(issue.id, conversationRevision(live))), createdAt: new Date().toISOString(), body: `${QUESTION_HEADING}\n\nShip the flag on, or off?` }],
-    }),
+    conversation: (live) => {
+      questionAt = new Date().toISOString();
+      return { agentComments: [...live.agentComments, { id: commentIdFor(questionKey(issue.id, conversationRevision(live))), createdAt: questionAt, body: `${QUESTION_HEADING}\n\nShip the flag on, or off?` }] };
+    },
     onPoll: (poll, { pullRequest }) => {
       if (poll !== 3) return;
       vi.setSystemTime(Date.now() + 60_000);
-      reviewedAt = new Date().toISOString();
-      return { pullRequest: { ...pullRequest, humanFeedback: [feedback("captain", "review", reviewedAt)] } };
+      return { pullRequest: { ...pullRequest, humanFeedback: [feedback("captain", "review", new Date().toISOString())] } };
     },
   });
 
+  // The review answers nothing Sergeant asked: no turn, no fresh window, and the question still waits.
   expect(posted).toEqual([]);
-  expect(turns).toEqual([reviewedAt]);
-  expect((await saved()).budget.since).toBe(reviewedAt);
+  expect(turns).toEqual([]);
+  expect(logs.at(-1)).toBe(`waiting: the question posted at ${questionAt} has no human reply yet`);
+  const { budget } = await saved();
+  expect(budget.since).toBeUndefined();
+  expect(budget.windowSeq).toBeUndefined();
 });
 
 test.each([
   ["closed", { state: "closed" as const }],
   ["merged", { state: "merged" as const, mergedSha: "c".repeat(40) }],
-])("a handed-off PR %s after the window ran out starts a fresh window and a turn", async (_name, change) => {
-  let changedAt = "";
-  const { posted, quiet, turns } = await waiting({
+])("a handed-off PR %s after the window ran out takes a turn in that window, and opens no fresh one", async (_name, change) => {
+  const { posted, logs, turns, startedAt } = await waiting({
     activeMs: 3 * hour,
     polls: 6,
     onPoll: (poll, { pullRequest }) => {
       if (poll !== 3) return;
-      changedAt = new Date().toISOString();
       // Not reported closing by a worker: the task goes on, it does not end on this merge.
       return { pullRequest: { ...pullRequest, ...change } };
     },
   });
 
-  expect(posted).toEqual([]);
-  expect(quiet).toEqual([]);
-  expect(turns).toHaveLength(1);
+  // GitHub does not say who merged or closed it, so it is reconciled, not taken as direction.
+  expect(turns).toEqual([startedAt]);
   const { budget } = await saved();
-  expect(Date.parse(budget.since ?? "")).toBeGreaterThanOrEqual(Date.parse(changedAt));
-  expect(turns[0]).toBe(budget.since);
+  expect(budget.since).toBeUndefined();
+  expect(budget.windowSeq).toBeUndefined();
+  // Nothing of the budget while the task waited; once reconciled and no longer waiting, the exhausted
+  // window asks its question.
+  const turnLog = logs.findIndex((l) => l.startsWith("turn "));
+  expect(logs.slice(0, turnLog).filter((l) => /budget exhausted|parking quietly/.test(l))).toEqual([]);
+  expect(posted).toEqual([expect.stringContaining("Sergeant stopped this task: its budget is exhausted")]);
 });
 
-test("a human's edit to the issue after the window ran out starts a fresh window and a turn, once", async () => {
-  let editedAt = "";
+test("an edit to the issue after the window ran out takes a turn in that window, and opens no fresh one", async () => {
   const lastTurnAt = new Date(Date.now() - 60_000).toISOString();
-  const { posted, quiet, turns } = await waiting({
+  const { posted, quiet, turns, startedAt } = await waiting({
     activeMs: 3 * hour,
     polls: 8,
     // The last turn read the issue as it was.
     state: { lastTurnAt, seen: { revision: "0".repeat(64), issue: issueRevision(issue) } },
     onPoll: (poll, { live }) => {
       if (poll !== 3) return;
-      editedAt = new Date().toISOString();
       return { live: { ...live, issue: { ...live.issue, description: "D, and keep the old flag working." } } };
     },
   });
 
+  // Linear does not say who edited it, so it wakes one turn and grants no budget; the PR's merge is still
+  // awaited, so the task parks again and says nothing of its budget.
+  expect(turns).toEqual([startedAt]);
   expect(posted).toEqual([]);
   expect(quiet).toEqual([]);
-  expect(turns).toHaveLength(1);
-  expect(Date.parse(turns[0] ?? "")).toBeGreaterThanOrEqual(Date.parse(editedAt));
-  expect((await saved()).budget.since).toBe(turns[0]);
+  const { budget } = await saved();
+  expect(budget.since).toBeUndefined();
+  expect(budget.windowSeq).toBeUndefined();
+});
+
+test.each(["CI", "a task slot"])("hours waiting on %s use none of the window", async (on) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const startedAt = new Date(Date.now() - 3 * hour).toISOString();
+  const pending = { ...pr, checks: { sha: pr.headSha, required: [{ name: "validate", state: "pending" as const }] } };
+  let pullRequest = on === "CI" ? pending : pr;
+  // The task is queued for a slot from the start until the five hours have passed.
+  const slot = new Slot(() => {});
+  slot.released = on !== "CI";
+  const turns: string[] = [];
+  const { posted } = await scenario({
+    // Ten minutes of the two-hour window are left.
+    state: { startedAt, runIds: [], budget: { activeMs: 110 * 60_000 } },
+    runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
+    reasoner: async (situation) => (turns.push(situation.budget.windowStart), turnOf([])),
+    pullRequest: () => pullRequest,
+    onPoll: async (poll, live) => {
+      if (poll === 3) vi.setSystemTime(Date.now() + 5 * hour);
+      if (poll === 5) {
+        pullRequest = pr;
+        slot.released = false;
+      }
+      if (poll >= 8) await writeFile(join(dir, "STOP"), "");
+      return live;
+    },
+    loop: { idleMinutes: 24 * 60, slot },
+  });
+
+  expect(posted).toEqual([]);
+  expect(turns).toEqual(on === "CI" ? [startedAt, startedAt] : [startedAt]);
+  const { budget } = await saved();
+  expect(budget.since).toBeUndefined();
+  expect(budget.activeMs).toBeLessThan(111 * 60_000);
 });

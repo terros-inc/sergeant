@@ -135,10 +135,13 @@ a re-review it asked for, a question) asks nothing and says nothing of its budge
 
 - **Any human direction opens a fresh window** and wakes a turn, with zero spend and the installation's
   budget as it is now, however exhausted the old window was (TECH-5059, TECH-5218, TECH-6165): any
-  human comment on the issue (an answer to a Sergeant question included), a review, inline comment or
-  comment on the task's PR, an edit to the issue's title or description, or your merge or close of a PR
-  Sergeant handed to you. A comment your AI assistant posts as you (through the Linear MCP or `gh`)
-  counts as yours. A bot's or app's comment never opens one, and neither does Sergeant's own.
+  human comment on the issue (an answer to a Sergeant question included), or a review, inline comment
+  or comment on the task's PR. A comment your AI assistant posts as you (through the Linear MCP or `gh`)
+  counts as yours. A bot's or app's comment wakes the task but never opens one, and neither does
+  Sergeant's own. A PR review does not answer a question Sergeant asked on the issue: reply there.
+- **An edit to the issue, or your merge or close of a PR Sergeant handed to you, wakes a turn but opens
+  no window**, since Linear and GitHub do not say who made it. The turn runs even if the window is used
+  up; after it, a task with nothing left to wait on asks the budget question.
 - **The budget question is no different.** Answering `Extend.` or `1` is just such an answer, and
   the next turn carries on. Answering `Accept as-is` or `2` ends the task instead, leaving its PRs to you.
 - **Unblocking a task opens a fresh window** (TECH-5803). Once the task's last open Linear "blocked by"

@@ -167,11 +167,10 @@ export function linearNudge(payload: unknown, agentUserId: string): Nudge | unde
 
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const prNumbers = z.array(z.object({ number: z.number().int() })).default([]);
-const posted = z.object({ user: z.object({ type: z.string() }).nullish() });
 const GitHubEvent = z.object({
   repository: z.object({ full_name: z.string() }),
-  review: posted.optional(),
-  comment: posted.optional(),
+  review: z.object({}).optional(),
+  comment: z.object({}).optional(),
   number: z.number().int().optional(),
   pull_request: z.object({ number: z.number().int(), head: z.object({ sha }).optional() }).optional(),
   /** An `issue_comment` names its issue; only one that is a PR (it has `pull_request`) counts. */
@@ -201,9 +200,10 @@ export function githubNudge(event: string, payload: unknown, enrolled: Set<strin
   const pr = e.pull_request?.number ?? (e.issue?.pull_request && e.issue.number);
   const numbers = [e.number, pr, ...(check?.pull_requests.map((p) => p.number) ?? [])];
   const heads = [e.pull_request?.head?.sha, check?.head_sha, e.sha, e.before, e.after];
-  // A review or comment, not a bot's or App's, which the GitHub adapter never counts as feedback.
+  // A review or comment, a bot's or App's too: the woken loop rereads the PR's feedback. Only a human's
+  // opens a fresh budget window (pr-wait.ts `humanDirection`).
   const item = event === "pull_request_review" ? e.review : event === "pull_request_review_comment" || event === "issue_comment" ? e.comment : undefined;
-  const feedback = item && pr !== undefined && item.user?.type !== "Bot" ? { repo, number: pr } : undefined;
+  const feedback = item && pr !== undefined ? { repo, number: pr } : undefined;
   return {
     keys: [
       ...new Set([

@@ -369,7 +369,8 @@ history pointers to older comments, review dispositions, and actions.
 - The first human answer after any Sergeant question opens a fresh window from the answer, with zero
   spend and the installation's current budget. Continuing after a budget question needs no separate
   action or approval rule.
-- Any other human direction on the issue or the task's PRs opens a fresh window too. Waiting on a
+- Any other human comment or review on the issue or the task's PRs opens a fresh window too; an issue
+  edit or a handed-off PR's merge or close only wakes a turn (07 §6). Waiting on a
   human's merge or re-review never causes a budget question (TECH-5218, TECH-5913, TECH-6165, 07 §6).
 - The budget question itself is not a reasoning turn: the poll builds its case and the stop rubric's
   recommendation from the ledger (TECH-6021, 07 §6), and the next turn reads the human's reply as usual.

@@ -8,7 +8,7 @@ import { recommendationLine, type StopCase } from "./stop-case.ts";
 // turns. When either is exhausted, the loop cancels running work through the runner and asks the human,
 // through the ordinary question path (UNF-727), whether to continue. Any human direction opens a fresh
 // window (TECH-5059, TECH-6165, poll-checks.ts): an answer to that question, so "extend" needs nothing
-// more, or any other human comment, review or edit; a bot's never does. A reply to it that accepts the
+// more, or any other human comment or review; a bot's never does, nor an unattributed edit or merge. A reply to it that accepts the
 // work as it is ends the task instead (TECH-5118, accept_as_is).
 
 export type BudgetWindow = BudgetStatus["window"];
@@ -50,9 +50,8 @@ export type TaskBudget = {
  * The one way a task gets a fresh budget window: from `at`, with zero spend and `window`, the
  * installation's budget now, and none of its active time used; work still running counts from now. Any
  * human direction opens one (TECH-6165, poll-checks.ts): an answer to one of Sergeant's questions
- * (TECH-5059), any other human comment or review on the issue or its PRs (TECH-5218, TECH-5913), an edit
- * to the issue's title or description, a merge or close of a PR Sergeant handed to a human; so does its
- * last blocker going (TECH-5803).
+ * (TECH-5059), any other human comment or review on the issue or its PRs (TECH-5218, TECH-5913); so does
+ * its last blocker going (TECH-5803).
  */
 export function openWindow(state: { turnCostUsd: number; runIds: string[]; budget: TaskBudget }, at: string, window: BudgetWindow): void {
   state.turnCostUsd = 0;

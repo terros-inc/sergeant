@@ -20,7 +20,8 @@ export function humanDirection(situation: Pick<SituationReport, "conversation" |
 
 /**
  * TECH-6165: the latest time Sergeant handed a now merged or closed PR to a human, to merge or to
- * re-review: Sergeant merges no PR it handed over, so a human ended that wait, which is direction too.
+ * re-review. Its end is reconciled in a turn (poll-checks.ts `reconcileDue`), but it is not direction:
+ * GitHub's PR facts do not say who merged or closed it, so it opens no window.
  */
 export function endedHandoff(situation: Pick<SituationReport, "conversation" | "pullRequests">): { pr: string; state: string; askedAt: string } | undefined {
   const { issue, agentComments } = situation.conversation;

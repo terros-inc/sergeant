@@ -85,8 +85,8 @@ active time, counted only while a worker or reviewer run or a turn of yours is r
 human, CI or a task slot uses none of it, so its wallDeadline is when it runs out if work runs from now.
 Once either is exhausted, Sergeant cancels running work, refuses every start, message, follow-up, and
 merge, and asks the human whether to continue. Any human direction gives the task a fresh window from
-it: an answer to any of Sergeant's questions, that one included, or any other human comment, review, or
-edit on the issue or its PRs (a bot's never does). So a reply to continue or extend needs no action of
+it: an answer to any of Sergeant's questions, that one included, or any other human comment or review on
+the issue or its PRs (a bot's never does, nor an issue edit or a PR's merge or close). So a reply to continue or extend needs no action of
 its own: carry on with the work, and a steer is carried out in it. A reply to the budget
 question that accepts the work as it is (or says to stop here): propose accept_as_is.
 Near the deadline, prefer finishing what is in flight over starting new work.

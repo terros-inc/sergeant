@@ -133,8 +133,6 @@ export async function checkHolds(
     live: string[];
     unknown: { unknown: string; error: string }[];
     budgetOf: () => BudgetStatus;
-    /** TECH-6165: whether a human reviewed or commented on the task's PRs after `at`. */
-    prDirectionAfter?: (at: string) => Promise<boolean>;
   },
   configured: BudgetWindow,
   ctx: PollContext,
@@ -153,7 +151,6 @@ export async function checkHolds(
     await save();
     log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
   }
-  await openEditWindow(conversation, configured, ctx);
   await openUnblockWindow(conversation, configured, ctx);
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a
   // crash between posting it and saving anything loses nothing. The key names the task's start, so an
@@ -184,31 +181,16 @@ export async function checkHolds(
     (e: Error) => log(`could not note the edit to ${conversation.issue.identifier}: ${e.message}`),
   );
   // While the question Sergeant asked is unanswered it takes no turn and makes no effect, and no
-  // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts, and
-  // TECH-6165, a human's review or comment on the task's PR since. The loop also drops any question it
-  // still has to post.
+  // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts.
+  // TECH-6165: PR feedback is not an answer to it, so the question stays open. The loop also drops any
+  // question it still has to post.
   const question = openQuestion(conversation);
-  if (question && !(await poll.prDirectionAfter?.(question.createdAt))) {
+  if (question) {
     if (live.length === 0) opts.slot?.waiting(Date.parse(question.createdAt));
     log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);
     return { hold: "question" };
   }
   return { budget, exhausted, budgetKey, budgetAsked };
-}
-
-/**
- * TECH-6165: a human's edit to the issue's title or description is direction, and opens a fresh window
- * like an answer: the text differs from what the last turn read (`state.seen`, as for the edit's notice,
- * question.ts `noteEdit`), and no window has opened since that turn. Linear gives no time for an edit, so
- * the window opens from the poll that sees it. A Linear app's edit counts too: Linear does not say who edited.
- */
-async function openEditWindow(conversation: Conversation, configured: BudgetWindow, { state, log, save }: PollContext): Promise<void> {
-  if (!state.seen || !state.lastTurnAt || state.seen.issue === issueRevision(conversation.issue)) return;
-  if (Date.parse(state.budget.since ?? state.startedAt) > Date.parse(state.lastTurnAt)) return;
-  const at = new Date().toISOString();
-  openWindow(state, at, configured);
-  await save();
-  log(`the issue's title or description changed: a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
 }
 
 /**
@@ -235,28 +217,34 @@ async function openUnblockWindow(conversation: Conversation, configured: BudgetW
  * TECH-5218, TECH-5913, TECH-6165: any human direction on the issue or the task's PRs (pr-wait.ts
  * `humanDirection`) opens a fresh window exactly as an answer does, however exhausted the window it
  * replaces. Only input newer than the window's start does, so it opens one window once, across restarts
- * too. So does a merge or close of a PR Sergeant handed to a human since the window opened (`endedHandoff`),
- * from the poll that sees it, as GitHub's facts give no time for it. Returns whether it opened one.
+ * too. Returns whether it opened one.
  */
 export async function openDirectionWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
-  const since = Date.parse(state.budget.since ?? state.startedAt);
   const direction = humanDirection(situation)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
-  if (direction && Date.parse(direction.createdAt) > since) {
-    openWindow(state, direction.createdAt, configured);
-    await save();
-    const source = "url" in direction ? `${direction.author} responded on the PR (${direction.url})` : `${direction.author.name} commented on the issue`;
-    log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${direction.createdAt}`);
-    return true;
-  }
-  const ended = endedHandoff(situation);
-  if (!ended || Date.parse(ended.askedAt) <= since) return false;
-  const at = new Date().toISOString();
-  openWindow(state, at, configured);
+  if (!direction || Date.parse(direction.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
+  openWindow(state, direction.createdAt, configured);
   await save();
-  log(`${ended.pr}, handed to a human, was ${ended.state}: a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
+  const source = "url" in direction ? `${direction.author} responded on the PR (${direction.url})` : `${direction.author.name} commented on the issue`;
+  log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${direction.createdAt}`);
   return true;
+}
+
+/**
+ * TECH-6165: what changed since the last turn that the task reconciles in a turn even once its window is
+ * exhausted, without opening a fresh one: a merge or close of a PR Sergeant handed to a human in this
+ * window (`endedHandoff`), or an edit to the issue's title or description no turn has read (`state.seen`,
+ * as for the edit's notice, question.ts `noteEdit`). Neither GitHub's PR facts nor Linear say who did it,
+ * so neither is human direction. The turn can only ask or accept (B1, execute.ts); once nothing changes,
+ * the task waits or asks the budget question as before.
+ */
+export function reconcileDue(situation: SituationReport, fingerprint: string, state: Pick<TaskState, "lastFingerprint" | "seen" | "budget" | "startedAt">): string | undefined {
+  if (fingerprint === state.lastFingerprint) return undefined;
+  const ended = endedHandoff(situation);
+  if (ended && Date.parse(ended.askedAt) >= Date.parse(state.budget.since ?? state.startedAt)) return `${ended.pr}, handed to a human, was ${ended.state}`;
+  if (state.seen && state.seen.issue !== issueRevision(situation.conversation.issue)) return "the issue's title or description changed";
+  return undefined;
 }
 
 /**
@@ -269,8 +257,14 @@ export async function holdForBudget(
   check: BudgetCheck,
   { opts, deps, state, log }: PollContext,
   humanWait?: string,
+  reconcile?: string,
 ): Promise<boolean> {
   const { exhausted, budgetAsked } = check;
+  // TECH-6165: a handed-off PR's end or an issue edit is reconciled in a turn first (`reconcileDue`).
+  if (!exhausted.allowed && reconcile) {
+    log(`${reconcile}: a turn reconciles it in the window it has`);
+    return false;
+  }
   // One question per exhausted window, posted like any question but under a key of the task and the
   // window, and retried every poll until Linear shows it. Until a human replies after it, nothing
   // happens and no runaway guard ends the wait (UNF-727); the reply opens a fresh window (above) and

@@ -1,10 +1,11 @@
 import { createHmac } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Conversation, PullRequestFacts } from "@terros/sergeant-contracts";
+import { taskDir } from "./cancel.ts";
 import { startService, type Service, type ServiceDeps } from "./service.ts";
 import { linearNudge } from "./webhooks.ts";
 
@@ -212,12 +213,11 @@ test("an issue update that touches nothing Sergeant reads is dropped", () => {
   expect(linearNudge({ type: "Reaction", action: "create", data: { issueId: "i-UNF-1" } }, agent.id)).toBeUndefined();
 });
 
-test("a human's PR review or comment webhook drops that PR's remembered feedback before the woken reread; a bot's does not (TECH-6165)", async () => {
+test("a PR review or comment webhook drops that PR's remembered feedback before the woken reread (TECH-6165)", async () => {
   const { counts, post, reads } = await start();
   const before = reads("UNF-1");
   const user = { type: "User" };
-  // A bot's comment, or a comment on a plain issue, leaves the memo alone.
-  expect(await post("github", { repository: { full_name: "o/r" }, issue: { number: 7, pull_request: {} }, comment: { id: 45, user: { type: "Bot" } } }, { event: "issue_comment" })).toBe(200);
+  // A comment on a plain issue leaves the memo alone.
   expect(await post("github", { repository: { full_name: "o/r" }, issue: { number: 8 }, comment: { id: 44, user } }, { event: "issue_comment" })).toBe(200);
   expect(counts.forgotten).toEqual([]);
 
@@ -226,4 +226,18 @@ test("a human's PR review or comment webhook drops that PR's remembered feedback
   expect(await post("github", { repository: { full_name: "o/r" }, action: "created", issue: { number: 7, pull_request: {} }, comment: { id: 43, user } }, { event: "issue_comment" })).toBe(200);
   expect(counts.forgotten).toEqual(["O/R#7", "o/r#7", "o/r#7"]);
   await vi.waitFor(() => expect(reads("UNF-1")).toBeGreaterThan(before), { timeout: 2_000 });
+});
+
+test("a bot's or App's PR comment webhook drops the memo and wakes the loop, but opens no budget window (TECH-6165)", async () => {
+  const { counts, post, reads } = await start();
+  const before = reads("UNF-1");
+  expect(await post("github", { repository: { full_name: "o/r" }, action: "created", issue: { number: 7, pull_request: {} }, comment: { id: 45, user: { type: "Bot" } } }, { event: "issue_comment" })).toBe(200);
+  expect(counts.forgotten).toEqual(["o/r#7"]);
+  await vi.waitFor(() => expect(reads("UNF-1")).toBe(before + 1), { timeout: 2_000 });
+  await sleep(100);
+  // Woken, the task still works in the window it started with: a bot is never human direction.
+  const state = JSON.parse(await readFile(join(taskDir(dir, "UNF-1"), "state.json"), "utf8")) as { budget: { since?: string; windowSeq?: number } };
+  expect(state.budget.since).toBeUndefined();
+  expect(state.budget.windowSeq).toBeUndefined();
+  expect(counts.turns).toEqual(["UNF-1"]);
 });

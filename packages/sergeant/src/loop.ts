@@ -16,7 +16,7 @@ import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
-import { checkHolds, checkStop, holdForBudget, openDirectionWindow, type PollContext } from "./poll-checks.ts";
+import { checkHolds, checkStop, holdForBudget, openDirectionWindow, reconcileDue, type PollContext } from "./poll-checks.ts";
 import { describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, unsettledMerges, waitMs } from "./poll.ts";
 import { awaitedHumanPrAction } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
@@ -201,9 +201,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     await resolveDue(conversation);
-    const prDirectionAfter = async (at: string) =>
-      (await prPolls.read(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps)).some((p) => p.humanFeedback.some((f) => Date.parse(f.createdAt) > Date.parse(at)));
-    const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length), prDirectionAfter }, configured, ctx);
+    const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length) }, configured, ctx);
     if (holds.hold) {
       if (holds.hold === "question") unposted = undefined;
       // An open question waits on a human's reply, which Linear's webhook announces.
@@ -254,14 +252,15 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const retryDue = dueMergeRetries(state, retryGraceMs);
     // TECH-5218: a task whose only work is waiting on a human's merge or re-review is a human wait, like a
     // question: it takes no turn and posts nothing until something changes, and (TECH-6165) uses none of
-    // its window, which counts only active time. A human's review, comment, merge or close opens a fresh
-    // window (above); anything else that changes resumes it in the window it has.
+    // its window, which counts only active time. A human's review or comment opens a fresh window (above);
+    // anything else that changes resumes it in the window it has, and a merge or close of the PR, or an
+    // issue edit, takes a turn even once that window is exhausted (`reconcileDue`).
     // The wait is only a stable one with no active or unreadable run. A changed PR (red, behind,
     // conflicted, or pushed) and work still in flight remain ordinary active work.
     const stable = state.lastFingerprint === undefined || fingerprint === state.lastFingerprint;
     const currentWindowCanceledWork = runs.some((r) => r.status === "canceled" && !state.budget.priorRuns.includes(r.runId));
     const humanWait = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable ? awaitedHumanPrAction(situation) : undefined;
-    if (await holdForBudget(situation, conversation, holds, ctx, humanWait)) {
+    if (await holdForBudget(situation, conversation, holds, ctx, humanWait, reconcileDue(situation, fingerprint, state))) {
       await wait(waitMs(opts, pollMs, live.length > 0));
       continue;
     }
