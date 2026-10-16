@@ -82,7 +82,7 @@ ${renderReadAccess(enrolled)}
    above, or else a fresh one named \`sergeant/${id.toLowerCase()}-<short-slug>\`. Push it, and open its
    PR (or update the open one) with \`gh\`. When you continue an existing branch or PR, start your
    report's summary with a sentence naming it ("Continued <owner/name>: <branch>, PR #<n>."); Sergeant's
-   first Linear comment on the work quotes that sentence. Never commit to the default branch. Push work in progress before you stop. Commit with the git identity
+   progress comment quotes it, and Sergeant names on the issue any PR you took over. Never commit to the default branch. Push work in progress before you stop. Commit with the git identity
    already set in your environment: never pass \`--author\` or set \`user.name\`/\`user.email\`, and
    add no \`Co-Authored-By\` trailer or other contributor credit for an AI agent or tool.
 5. Write each PR body to stand on its own once the Linear issue is gone: the issue identifier and
