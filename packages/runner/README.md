@@ -39,11 +39,16 @@ generic environment input:
 - For a worker only, `GH_TOKEN`: an installation token of the **worker GitHub App**, minted per run
   by the injected `githubTokens` and scoped to exactly the run's repositories with `contents`,
   `pull_requests`, and `workflows` write (`workflows` only once the worker App's installation holds it) and `checks`, `actions`, and `metadata` read. It is the worker's only GitHub
-  credential: the worker pushes its `sergeant/` branch and opens or updates its PR itself (`gh` and
+  write credential: the worker pushes its `sergeant/` branch and opens or updates its PR itself (`gh` and
   git over https use it). The repository's ruleset, where the worker App is not a bypass actor, is
   what stops it from pushing to or merging into the default branch. It may push workflow changes on
   a non-default branch; Sergeant's deterministic gate requires an independent review of such a PR's
   exact head, always hands it to a human, and never merges it or enables auto-merge.
+- For every run, worker and reviewer, `GH_READ_TOKEN` (TECH-6194): another worker-App installation
+  token, minted per run for the repositories enrolled at its launch with only `contents`,
+  `pull_requests`, and `metadata` read, so a run can follow an issue's reference to another enrolled
+  repository or another PR (`GH_TOKEN="$GH_READ_TOKEN" gh ...`). It cannot write, and GitHub refuses
+  it for a repository that is not enrolled.
 - For a worker only, when the installation names one (`publicDataDenylistSecret`, TECH-5914),
   `PUBLIC_DATA_DENYLIST`: the customer names its push to a public repository must not carry. It is no
   credential, but it is private, so it travels like one (on Fargate, in the run's secret).
@@ -68,9 +73,9 @@ branch's copy of the script: `public-data-trusted.yml`, a `pull_request_target` 
 default branch, fetches the PR's commits as git objects only, and runs for same-repository PRs only;
 `public-data.yml` (`pull_request`) runs the PR's own copy with no secret. `src/public-data-workflow.test.ts` asserts that shape.
 
-A reviewer's token is read-only and used only on the host to read the PR and check out its exact
-head; it never enters the reviewer's container. A run gets no host home, AWS, `gh` login, SSH,
-Linear, Docker socket, or Sergeant state. `node src/live-check.ts` prints what a run can see.
+A reviewer's token for its PRs is read-only and used only on the host to read the PR and check out its
+exact head; it never enters the reviewer's container, whose only GitHub credential is `GH_READ_TOKEN`.
+A run gets no host home, AWS, `gh` login, SSH, Linear, Docker socket, or Sergeant state. `node src/live-check.ts` prints what a run can see.
 
 Commits are authored and committed, through `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, as the person who
 requested the run (TECH-5593): the name and Linear login email the task owner registered the run's
@@ -161,7 +166,7 @@ the report are the same as the local runner's; only where the run happens differ
 
 - **Start.** On the host: choose the account, mint the worker token, list the repositories'
   `sergeant/*` branches with `git ls-remote`, fetch the issue's files, render the brief. Then one
-  Secrets Manager secret per run, `sergeant/runs/<runId>`, holds the brief, the files, `GH_TOKEN`, and
+  Secrets Manager secret per run, `sergeant/runs/<runId>`, holds the brief, the files, `GH_TOKEN`, `GH_READ_TOKEN`, and
   the model credential as JSON keys; a task definition revision references those keys (never values);
   `RunTask` starts it with a client token and `startedBy: <runId>`. Each step is recorded in the run's
   `launch.json` before it can exist (`launch.ts`): a failure before the task deletes the secret and

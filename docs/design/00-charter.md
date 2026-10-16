@@ -231,9 +231,11 @@ The arrows that matter:
 
 All runs share one **runner zone** (development trust): write access to the enrolled repositories they
 are given (with no bypass of default-branch rulesets), dev/stage AWS authority, model credentials, and
-engineering tools. Reviewers are given no GitHub, AWS, or Linear credentials (what they review is
-checked out for them locally), but runs are not isolated from each other, so anything granted to any
-run is within the accepted blast radius. Sergeant's deterministic core runs in a separate
+engineering tools. Every run, reviewer or worker, also gets a read-only GitHub token for all the
+enrolled repositories, so it can follow an issue's reference to another one or to another PR. Reviewers
+are given no AWS or Linear credentials and no GitHub write access (what they review is checked out for
+them locally), but runs are not isolated from each other, so anything granted to any run is within the
+accepted blast radius. Sergeant's deterministic core runs in a separate
 **control-plane zone** that holds the Linear agent credential, the control-plane GitHub App,
 installation configuration, and merge authority. Neither zone holds production,
 IAM/org/billing administration, or anyone's personal credentials (apart from the model subscription a

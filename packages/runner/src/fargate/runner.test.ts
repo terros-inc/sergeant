@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RunSpec } from "@terros/sergeant-contracts";
 import type { Exec } from "../exec.ts";
-import { annClaude, GH, REPORT, spec, TOKEN } from "../runner-fixtures.ts";
+import { annClaude, GH, READ, REPORT, spec, TOKEN } from "../runner-fixtures.ts";
 import { fakeAws, frame, serviceError } from "./fake-aws.ts";
 import { fargateRunner } from "./runner.ts";
 import { WORKSPACE_READY } from "./task.ts";
@@ -27,6 +27,7 @@ async function setUp(over: { spec?: RunSpec; now?: () => Date; accounts?: (typeo
   const calls: Parameters<Exec>[] = [];
   const exec: Exec = async (...args) => (calls.push(args), { code: 0, stdout: "abc\trefs/heads/sergeant/unf-1-old\n", stderr: "" });
   const rootDir = await mkdtemp(join(tmpdir(), "sergeant-fargate-test-"));
+  const minted: { repositories: string[]; access: string }[] = [];
   const runner = fargateRunner({
     rootDir,
     settings,
@@ -35,10 +36,11 @@ async function setUp(over: { spec?: RunSpec; now?: () => Date; accounts?: (typeo
     models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
     accounts: async () => over.accounts ?? [annClaude],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
-    githubTokens: async () => GH,
+    githubTokens: async (req: { repositories: string[]; access: string }) => (minted.push(req), req.access === "read" ? READ : GH),
+    enrolledRepositories: () => ["o/canary", "o/wiki"],
     ...(over.now && { now: over.now }),
   });
-  return { aws, calls, rootDir, runner, run: () => runner.start(over.spec ?? spec) };
+  return { aws, calls, minted, rootDir, runner, run: () => runner.start(over.spec ?? spec) };
 }
 
 const launchOf = async (rootDir: string) => JSON.parse(await readFile(join(rootDir, "run_t1", "launch.json"), "utf8")) as { nonce: string; taskArn?: string };
@@ -46,12 +48,17 @@ const result = JSON.stringify({ is_error: false, subtype: "success", session_id:
 
 describe("fargateRunner", () => {
   it("starts one task whose credentials are only in the run's secret, never in an ECS call", async () => {
-    const { aws, calls, rootDir, run } = await setUp();
+    const { aws, calls, minted, rootDir, run } = await setUp();
     await run();
 
     const secret = JSON.parse(aws.secrets.get("sergeant/runs/run_t1") ?? "{}");
-    expect(Object.keys(secret)).toEqual(["SERGEANT_BRIEF", "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]);
-    expect(secret).toMatchObject({ GH_TOKEN: GH, CLAUDE_CODE_OAUTH_TOKEN: TOKEN });
+    expect(Object.keys(secret)).toEqual(["SERGEANT_BRIEF", "GH_TOKEN", "GH_READ_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]);
+    expect(secret).toMatchObject({ GH_TOKEN: GH, GH_READ_TOKEN: READ, CLAUDE_CODE_OAUTH_TOKEN: TOKEN });
+    // TECH-6194: write stays on the task's repositories; the enrolled ones get a read-only token.
+    expect(minted).toEqual([
+      { repositories: ["o/canary"], access: "write" },
+      { repositories: ["o/canary", "o/wiki"], access: "read" },
+    ]);
     // The brief lists the branches the host read with ls-remote, the token only in git's environment.
     expect(secret.SERGEANT_BRIEF).toContain("o/canary: sergeant/unf-1-old");
     expect(calls[0]?.[2]?.env?.SERGEANT_RUN_GITHUB_TOKEN).toBe(GH);

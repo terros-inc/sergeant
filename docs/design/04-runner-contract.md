@@ -203,9 +203,11 @@ run token placed in the run's workspace:
 - **GitHub**: one-hour installation tokens of the **worker App**, scoped to the task's current repository
   set; `contents: write`, `pull_requests: write`, `checks: read`, `actions: read` for workers, and
   `statuses: read` once the installation holds it; never `actions: write` (08 §6). Reviewers
-  get none: the host checks out a reviewer's PRs with a read-only token that never enters the run.
-  Scoping keeps each run pointed at its repositories; it is not a boundary against another co-resident
-  run.
+  get no write token: the host checks out a reviewer's PRs with a read-only token that never enters the run.
+  Every run, worker and reviewer, also gets `GH_READ_TOKEN` (TECH-6194): `contents: read`,
+  `pull_requests: read` and `metadata: read` only, scoped to the repositories enrolled at its launch, so
+  it can read another enrolled repository or another PR. Scoping keeps each run pointed at its
+  repositories; it is not a boundary against another co-resident run.
 - **AWS dev/stage**: short STS sessions for `aws.runnerDevRoleArn`, exposed as a `credential_process`.
   Reviewers get none.
 - **Model credentials**: supplied by the adapter.

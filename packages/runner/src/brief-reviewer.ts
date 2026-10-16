@@ -1,10 +1,10 @@
 import type { PullRequestFacts, ReviewReport, RunSpec, Sha } from "@terros/sergeant-contracts";
-import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-common.ts";
+import { renderBoundedHumanFeedback, renderReadAccess, renderReview, renderTask } from "./brief-common.ts";
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/13";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/14";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -46,6 +46,8 @@ export function reviewerBrief(
   workerClaims: string[],
   previousReviews: ReviewReport[] = [],
   files = "",
+  /** The enrolled repositories the run's `GH_READ_TOKEN` reads (TECH-6194). */
+  enrolled: readonly string[] = [],
 ): string {
   const what = subjects
     .map((s) => `- ${s.url}${s.public ? " — **public repository**" : ""} — base \`${s.baseRef}\` — head \`${s.headSha}\` (review exactly this SHA)
@@ -83,11 +85,12 @@ ${humanFeedback}${previousReviews.length ? `\n## Previous reviews of these PRs (
 ## Environment
 
 A fresh session and workspace. You did not write this change and have no access to how it was
-produced. You have no GitHub, AWS, or Linear credentials. Each PR is checked out locally, and before
-you started its dependencies were installed at the head (each result is below), so you can run its
-tests (for example \`pnpm exec vitest run <file>\`, or the repository's own test command), type checks,
-and linters:
+produced. You have no AWS or Linear credentials, and no GitHub write access. Each PR is checked out
+locally, and before you started its dependencies were installed at the head (each result is below), so
+you can run its tests (for example \`pnpm exec vitest run <file>\`, or the repository's own test
+command), type checks, and linters:
 ${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
+${renderReadAccess(enrolled)}
 
 ## Rules (${REVIEWER_RULES_VERSION})
 
@@ -122,7 +125,8 @@ ${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
 10. Verdict: \`approve\`, \`changes_requested\`, or \`needs_human\`.
 11. An input the issue depends on that you cannot read (an auth-gated link, a missing file or
     attachment, a file the brief lists as not downloaded): name it in \`unreadableInputs\` exactly
-    as the issue gives it, and rule the requirements that rest on it as not verified.
+    as the issue gives it, and rule the requirements that rest on it as not verified. A file or PR in
+    an enrolled repository is readable with \`GH_READ_TOKEN\` (Environment): read it instead.
 12. Do not re-litigate a design trade-off the repository's design docs record as settled or accepted
     merely because you would choose differently. Do flag a change that breaks its documented
     assumptions, expands its blast radius, or brings evidence meeting its documented revisit condition.

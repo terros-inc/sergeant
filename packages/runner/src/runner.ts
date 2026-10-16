@@ -37,9 +37,10 @@ const GIT_TEMPLATE = fileURLToPath(new URL("../container/git-template", import.m
 /**
  * The local runner (04 §10 `claude-code-local` and `codex-local`, laptop shape): every worker and
  * reviewer is a new `claude -p` or `codex exec` session in a new container whose only mount is the
- * run's own workspace. Its credentials are one of the task owner's model accounts and, for a worker,
- * the worker-App token it pushes branches and opens PRs with. Repositories are cloned on the host before launch,
- * and a reviewer's checkouts get their dependencies installed in a container with no credentials (reviewer-deps.ts).
+ * run's own workspace. Its credentials are one of the task owner's model accounts, a read-only worker-App
+ * token for the enrolled repositories and, for a worker, the worker-App token it pushes branches and opens
+ * PRs with. Repositories are cloned on the host before launch, and a reviewer's checkouts get their
+ * dependencies installed in a container with no credentials (reviewer-deps.ts).
  *
  * Basic cancellation only: no leases, adoption, or restart recovery. `send` is not supported.
  */
@@ -150,6 +151,9 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         repositories: spec.repositories,
         access: spec.role === "worker" ? "write" : "read",
       });
+      // TECH-6194: read-only, for every enrolled repository, so the run can follow a reference to one.
+      const enrolled = opts.enrolledRepositories();
+      const readToken = await opts.githubTokens({ repositories: enrolled, access: "read" });
 
       // The task's files, for worker and reviewer alike; mounted read-only, never fatal.
       const attachmentsDir = join(p.dir, "attachments");
@@ -169,7 +173,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           const remote = await execOk("git", ["branch", "-r", "--list", "origin/sergeant/*", "--format=%(refname:short)"], { cwd: dir });
           existing.push(...remote.split("\n").filter(Boolean).map((b) => `${repo}: ${b.replace(/^origin\//, "")}`));
         }
-        brief = workerBrief(spec, existing, files);
+        brief = workerBrief(spec, existing, files, enrolled);
       } else {
         const subjects: ReviewSubject[] = [];
         for (const s of spec.subject) {
@@ -183,7 +187,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           const dependencies = await installDependencies(exec, { image, workspace: p.workspace, rel, container: `sergeant-${spec.runId}-install-${subjects.length}` });
           subjects.push({ ...s, url: pr.html_url, title: pr.title, body: pr.body ?? "", baseRef: pr.base.ref, public: pr.base.repo?.private !== true, path: `/workspace/${rel}`, dependencies });
         }
-        brief = reviewerBrief(spec, subjects, prior?.claims ?? [], prior?.reviews ?? [], files);
+        brief = reviewerBrief(spec, subjects, prior?.claims ?? [], prior?.reviews ?? [], files, enrolled);
       }
       await writeWorkspaceFile(join(p.workspace, "sergeant-brief.md"), brief);
 
@@ -214,8 +218,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
       await writeFile(p.meta, JSON.stringify(meta, null, 2));
       // `--env NAME` copies the value from the docker CLI's own environment, so no token is ever on
       // a command line. These are the only credentials that cross into the container: its account's
-      // model credential, and a worker's own scoped GitHub token. The git identity variables are not
-      // secret; a worker's denylist is private but no credential.
+      // model credential, a worker's own scoped GitHub token, and the read-only token for the enrolled
+      // repositories. The git identity variables are not secret; a worker's denylist is private but no credential.
       const worker = spec.role === "worker";
       // A worker's pre-push hook reads the customer-name denylist; it is private, never in a repository.
       const denylist = worker && opts.publicDataDenylist;
@@ -228,13 +232,14 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           ...(attachments.files.length ? ["--volume", `${attachmentsDir}:${ATTACHMENTS_PATH}:ro`] : []),
           "--env", agent.credentialEnv,
           ...(worker ? ["--env", "GH_TOKEN"] : []),
+          "--env", "GH_READ_TOKEN",
           ...(denylist ? ["--env", "PUBLIC_DATA_DENYLIST"] : []),
           ...gitIdentityEnv(commitIdentity(account, opts.gitIdentity)),
           image, "sh", "-c", agent.script, "sh",
           String(limits.maxWallSeconds), meta.model, String(limits.maxCostUsd),
           ...(reviewSchema ? [CODEX_REVIEW_SCHEMA_PATH] : []),
         ],
-        { env: { ...process.env, [agent.credentialEnv]: account.credential, ...(worker && { GH_TOKEN: githubToken }), ...(denylist && { PUBLIC_DATA_DENYLIST: denylist }) } },
+        { env: { ...process.env, [agent.credentialEnv]: account.credential, ...(worker && { GH_TOKEN: githubToken }), GH_READ_TOKEN: readToken, ...(denylist && { PUBLIC_DATA_DENYLIST: denylist }) } },
       );
     },
 

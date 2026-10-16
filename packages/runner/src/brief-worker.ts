@@ -1,15 +1,17 @@
 import type { RunSpec } from "@terros/sergeant-contracts";
-import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-common.ts";
+import { renderBoundedHumanFeedback, renderReadAccess, renderReview, renderTask } from "./brief-common.ts";
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/17";
+export const WORKER_RULES_VERSION = "s2-worker-rules/18";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
   existingBranches: string[],
   /** `renderAttachments`: the issue's files the run was given (TECH-4994). */
   files = "",
+  /** The enrolled repositories the run's `GH_READ_TOKEN` reads (TECH-6194). */
+  enrolled: readonly string[] = [],
 ): string {
   const id = spec.conversation.issue.identifier;
   const linked = spec.conversation.issue.linkedPullRequests;
@@ -37,6 +39,7 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
   to or merge into the default branch, or change workflow permissions. It may change workflow files
   on its non-default branch once the worker App holds \`workflows: write\` (until then GitHub
   refuses that push); those PRs always require a human review and human merge.
+${renderReadAccess(enrolled)}
 - Not available, by design: AWS, production, IAM/org/billing, Linear, Sergeant's control plane.
 
 ## Rules (${WORKER_RULES_VERSION})
@@ -57,7 +60,7 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
    out what is finished, what remains, and whether earlier feedback was addressed. Continue a suitable
    existing PR or branch; open a replacement only for a concrete reason, and give it in the new PR's
    body and your report. History you need but cannot read (a PR, branch, or repository outside your
-   token): name it in \`knownGaps\` (\`unreadableInputs\` if the Task links it, rule 13) rather
+   tokens): name it in \`knownGaps\` (\`unreadableInputs\` if the Task links it, rule 13) rather
    than assuming you start from scratch.
 4. Commit on one branch per repository named \`sergeant/${id.toLowerCase()}-<short-slug>\` (or the
    existing one listed above), push it, and open its PR (or update the open one) with \`gh\`. Never
@@ -102,7 +105,8 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
 13. An input the issue depends on that you cannot read (an auth-gated link, a missing file or
     attachment, a file the brief lists as not downloaded): never guess its content. Name it in
     \`unreadableInputs\` exactly as the issue gives it (its URL or path); Sergeant asks a human
-    about it before anything merges.
+    about it before anything merges. A file or PR in an enrolled repository is readable with
+    \`GH_READ_TOKEN\` (Environment): read it instead.
 14. Rebase early and often. Rebase each branch onto the current default branch (\`git fetch origin\`,
     then \`git rebase origin/<default branch>\`) before its first push, before you report a head for
     review, and whenever the default branch has moved under its open PR. Resolve conflicts then, as

@@ -214,9 +214,10 @@ export interface GitHubPort {
 }
 
 /**
- * Mints a run's only GitHub credential: a worker-App installation token scoped to exactly
- * `repositories`, able to push branches and open PRs (`write`, workers) or only read (`read`,
- * reviewers). Never a control-plane or personal credential.
+ * Mints a run's GitHub credentials: a worker-App installation token scoped to exactly
+ * `repositories`, able to push branches and open PRs (`write`, workers) or only read (`read`: a
+ * reviewer's checkout, and every run's token for the enrolled repositories, TECH-6194). Never a
+ * control-plane or personal credential.
  */
 export type RunGitHubTokens = (req: { repositories: RepoSlug[]; access: "write" | "read" }) => Promise<string>;
 

@@ -37,6 +37,7 @@ async function review(lockfile: string | undefined, installExit = 0, install?: I
     accounts: async () => [annClaude],
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_reader",
+    enrolledRepositories: () => ["o/canary"],
     exec,
     fetch: (async () => Response.json({ html_url: "https://github.com/o/r/pull/9", title: "T", body: "", base: { ref: "main" } })) as typeof fetch,
   });
@@ -60,9 +61,9 @@ test("a reviewer's pnpm checkout is installed in a credential-free container bef
   const env = install?.args.flatMap((a, i, all) => (a === "--env" ? [all[i + 1]] : [])) ?? [];
   expect(env).toEqual(["CI=true", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0"]);
   expect(install?.opts.env).toBeUndefined();
-  expect(install?.args.join(" ")).not.toMatch(new RegExp(`${TOKEN}|ghs_reader|GH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN`));
-  // The reviewer itself still gets only its model credential.
-  expect(agent?.args.flatMap((a, i, all) => (a === "--env" ? [all[i + 1]] : [])).filter((e) => !e?.startsWith("GIT_"))).toEqual(["CLAUDE_CODE_OAUTH_TOKEN"]);
+  expect(install?.args.join(" ")).not.toMatch(new RegExp(`${TOKEN}|ghs_reader|GH_TOKEN|GH_READ_TOKEN|CLAUDE_CODE_OAUTH_TOKEN`));
+  // The reviewer itself gets only its model credential and the enrolled repositories' read-only token (TECH-6194).
+  expect(agent?.args.flatMap((a, i, all) => (a === "--env" ? [all[i + 1]] : [])).filter((e) => !e?.startsWith("GIT_"))).toEqual(["CLAUDE_CODE_OAUTH_TOKEN", "GH_READ_TOKEN"]);
   expect(brief).toContain("- `/workspace/o/r-pr9`: installed with `pnpm install --frozen-lockfile`.");
 });
 

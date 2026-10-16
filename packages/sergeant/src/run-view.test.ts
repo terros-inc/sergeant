@@ -43,6 +43,7 @@ test("GET /v1/runs/:id through serve's containerRunner and the typed client keep
     quota: async ({ id, adapter }) => ({ adapter, account: id, readAt: "2026-10-03T12:00:00.000Z", weekly: { remainingPercent: adapter === "claude-code-local" ? 80 : 40 }, fiveHour: { remainingPercent: 90 } }),
     gitIdentity: { name: "Ada Example", email: "ada@example.com" },
     githubTokens: async () => "ghs_test",
+    enrolledRepositories: () => ["o/canary"],
     exec: async (cmd, args) => {
       if (cmd === "docker" && args[0] === "inspect") return { code: 0, stdout: `${state[args.at(-1) ?? ""]}\n`, stderr: "" };
       if (cmd === "docker" && args[0] === "logs") return { code: 0, stdout: '{"is_error":false,"total_cost_usd":0.5}', stderr: "" };
