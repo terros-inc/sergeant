@@ -3,7 +3,7 @@ import { renderBoundedHumanFeedback, renderReview, renderTask } from "./brief-co
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/14";
+export const WORKER_RULES_VERSION = "s2-worker-rules/15";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -73,8 +73,12 @@ ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.n
    permissions. You may change CI workflow files on your non-default branch; say clearly in the PR
    and report that the change requires human review and human merge, and report that its head
    needs review: a fresh reviewer always reviews it.
-7. Follow the repository's own agent guidance (AGENTS.md / CLAUDE.md). Validate in proportion to the
-   change; CI is the full gate, so run the targeted checks you can.
+7. Follow the repository's own agent guidance (AGENTS.md / CLAUDE.md), including the testing policy
+   it links. Validate in proportion to the change; CI is the full gate, so run the targeted checks you
+   can. Test in proportion to risk: logic, state transitions, auth and tenant isolation, concurrency,
+   persistence, nontrivial parsing, and a regression test with each bug fix. Don't test simple data
+   objects, pass-throughs, routine wiring, wording, or for coverage; prefer extending an existing test
+   over a new file of mocks. In the PR body, say which realistic bug each nontrivial new test prevents.
 8. Validation you cannot perform here (missing access, a live environment): say so in knownGaps with
    what would be needed. Never seek broader credentials.
 9. For each PR, decide whether its head needs a fresh review by a separate reviewer. If in
