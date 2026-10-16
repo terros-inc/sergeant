@@ -22,7 +22,8 @@ test("exhausted wall time cancels the running worker, asks once, refuses effects
   let stopAt = Infinity;
 
   const { result, posted, merged } = await scenario({
-    state: { startedAt: threeHoursAgo, runIds: ["run_w"] },
+    // TECH-6165: the worker has been running for three hours, all of it active time.
+    state: { startedAt: threeHoursAgo, runIds: ["run_w"], budget: { activeSince: threeHoursAgo } },
     conversation: { humanComments: [before] },
     runner: {
       start: async (spec) => void started.push(spec.runId),
@@ -52,7 +53,7 @@ test("exhausted wall time cancels the running worker, asks once, refuses effects
   expect(result.outcome).toBe("stopped");
   expect(cancels).toBe(2);
   expect(posted).toHaveLength(1);
-  expect(posted[0]).toMatch(/budget is exhausted \(wall time exhausted at /);
+  expect(posted[0]).toMatch(/budget is exhausted \(active time exhausted \(/);
   // TECH-6021: the case made from the ledger, and the rubric's call with its rule.
   expect(posted[0]).toContain("**What happened in this window:** Worker was canceled at the deadline.");
   expect(posted[0]).toContain("Left: a review, then Sergeant's merge.");
@@ -140,7 +141,7 @@ test("a deadline that passes during the live reads before a start refuses the st
   });
 
   expect(started).toEqual([]);
-  expect((await saved()).recentTurns[0]?.outcomes[0]).toMatch(/^start_worker: denied by B1 \(wall time exhausted/);
+  expect((await saved()).recentTurns[0]?.outcomes[0]).toMatch(/^start_worker: denied by B1 \(active time exhausted/);
 });
 
 test("a start whose runner call fails after starting the run lets no other start through in its turn", async () => {
@@ -173,7 +174,7 @@ test("a start whose runner call fails after starting the run lets no other start
 test("a restart keeps the task's stored budget window whatever the options say", async () => {
   let turns = 0;
   const { posted } = await scenario({
-    state: { startedAt: new Date(Date.now() - 10 * 60_000).toISOString(), runIds: [], budget: { window: { wallMinutes: 5, costUsd: 1 } } },
+    state: { startedAt: new Date(Date.now() - 10 * 60_000).toISOString(), runIds: [], budget: { window: { wallMinutes: 5, costUsd: 1 }, activeMs: 10 * 60_000 } },
     runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },
     reasoner: async () => (turns++, turnOf([start])),
     onPoll: stopAfter(3),
@@ -181,7 +182,7 @@ test("a restart keeps the task's stored budget window whatever the options say",
   });
 
   expect(turns).toBe(0);
-  expect(posted[0]).toMatch(/budget is exhausted \(wall time exhausted at /);
+  expect(posted[0]).toMatch(/budget is exhausted \(active time exhausted \(/);
   expect((await saved()).budget.window).toEqual({ wallMinutes: 5, costUsd: 1 });
 });
 
@@ -192,7 +193,7 @@ test.each([
   const asked = new Date(Date.now() - 60_000).toISOString();
   const answeredAt = new Date(Date.parse(asked) + 1_000).toISOString();
   const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
-  const question = { id: commentIdFor(budgetQuestionKey(issue.id, startedAt)), createdAt: asked, body: "**Question for you** ... Continue?" };
+  const question = { id: commentIdFor(budgetQuestionKey(issue.id, startedAt, 0)), createdAt: asked, body: "**Question for you** ... Continue?" };
   const started: string[] = [];
   const { result, posted } = await scenario({
     // The question is on Linear, but nothing about it reached state.json.

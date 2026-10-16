@@ -256,27 +256,27 @@ Usage {
 BudgetStatus {                  // computed by BudgetMeter, never stored
   window: { wallMinutes, costUsd }
   taskStart                     // admittedAt
-  windowStart                   // admittedAt, or the latest human answer to a Sergeant question
-  wallDeadline                  // windowStart + window.wallMinutes; an answer's window: from the first turn or run after it
+  windowStart                   // admittedAt, or the latest human direction (07 §6)
+  wallDeadline                  // now + the window's active minutes not yet used (TECH-6165)
   spentUsd                      // reported cost of this window's runs and turns
   costLimitUsd                  // window.costUsd
   unknownCostRuns               // runs whose cost is not known yet
 }
 ```
 
-- **A budget is wall time and money only.** No count of turns or runs ends a task (TECH-5059).
-- **Windows**: a task's first window opens at admission. The first human answer after any Sergeant
-  question, the budget question included, opens a fresh one at the answer's timestamp, with zero spend
-  and the installation's current `defaults.budget.window`; so does a human review of the task's PR (07
-  §6, TECH-5218). Opening a window sets `windowStart`, copies the window, and moves the task's runs so far
-  into `priorRunIds`. An answer's window starts its wall time at the task's first turn or run after the
-  answer, so time queued for a task slot does not count (TECH-6127). One answer opens one window, also across a restart. There is no grant record, grant
+- **A budget is active time and money only.** No count of turns or runs ends a task (TECH-5059). Its
+  time counts only while a run or turn is running; no wait counts (TECH-6165, 07 §6).
+- **Windows**: a task's first window opens at admission. Any human direction opens a fresh one (07 §6):
+  the first human answer after any Sergeant question, the budget question included, at the answer's
+  timestamp, with zero spend and the installation's current `defaults.budget.window`; so does any other
+  human comment or review on the issue or its PRs (TECH-5218, TECH-6165). Opening a window sets
+  `windowStart`, copies the window, and moves the task's runs so far into `priorRunIds`. One answer opens one window, also across a restart. There is no grant record, grant
   action, or approver check: an extension is just an answer (03 §5, §9).
-- **Hard**: wall time. No new run, message, or merge after `wallDeadline` (B1), plus concurrency and
+- **Hard**: active time. No new run, message, or merge after `wallDeadline` (B1), plus concurrency and
   cancellation. Sergeant controls these itself.
 - **Best-effort**: cost. It is the sum of reported or estimated cost of this window's runs and turns.
   Where a provider reports usage live, BudgetMeter enforces it mid-run; otherwise it is known only when
-  the run ends, and the wall time is the backstop. Dev/stage resources, CI minutes, and tools with their
+  the run ends, and the active time is the backstop. Dev/stage resources, CI minutes, and tools with their
   own billing are outside it. There is no cross-provider billing ledger (captain, 2026-10-02).
 
 ---

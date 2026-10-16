@@ -19,7 +19,9 @@ export function serviceWebhooks(
   // delegated issue with no loop (one that ended idle, say) or a delegation change. Both coalesce: each wakes at
   // most once per `webhookGapSeconds`. An issue or PR no task knows is ignored; the polls cover it.
   const gapMs = (opts.webhookGapSeconds ?? 5) * 1000;
-  const nudge = ({ keys, intake, recheckOwner }: Nudge, source: "linear" | "github") => {
+  const nudge = ({ keys, intake, recheckOwner, feedback }: Nudge, source: "linear" | "github") => {
+    // TECH-6165: the woken loop rereads the PR's feedback.
+    if (feedback) deps.github.forgetFeedback?.(feedback.repo, feedback.number);
     const named = new Set(keys);
     let admit = intake;
     for (const [issueId, wake] of wakes) {

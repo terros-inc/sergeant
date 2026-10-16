@@ -1,42 +1,35 @@
-import { commentIdFor, outstandingChangeRequests, type HumanComment, type HumanPullRequestFeedback, type PullRequestFacts, type SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, outstandingChangeRequests, type HumanComment, type HumanPullRequestFeedback, type SituationReport } from "@terros/sergeant-contracts";
 import { handoffKey } from "./handoff.ts";
 import { rereviewKey } from "./rereview.ts";
 
-// TECH-5218: a required human PR action is a human wait, like a question (TECH-5059). Waiting on a
-// human's merge or re-review spends nothing of the task's window, and a human's review of the task's PR
-// opens a fresh window from the review, exactly as an answer does. Both are read from GitHub and Linear
+// TECH-5218: a required human PR action is a human wait, like a question (TECH-5059). TECH-6165: the
+// budget counts only active time (budget.ts), so the wait spends none of the task's window, and any human
+// direction on the issue or its PRs opens a fresh window from it. Both are read from GitHub and Linear
 // every poll; nothing new is stored.
 
-/** Every human review or inline review comment: each may open a window without an escalation. */
-export const humanPrFeedback = (pullRequests: PullRequestFacts[]): HumanPullRequestFeedback[] =>
-  pullRequests.flatMap((p) => p.humanFeedback).filter((f) => f.kind !== "comment");
-
-/** Human PR and issue feedback that opens a review window. Keep every reader of window starts here. */
-export function reviewWindowFeedback(situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">): (HumanPullRequestFeedback | HumanComment)[] {
-  const escalatedComments = situation.pullRequests.flatMap((pr) => {
-    const escalations = escalationComments(situation, pr);
-    const at = escalations.toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1)?.createdAt;
-    return at ? pr.humanFeedback.filter((f) => f.kind === "comment" && Date.parse(f.createdAt) > Date.parse(at)) : [];
-  });
-  const issueResponse = latestIssueResponseToPrWait(situation);
-  return [...humanPrFeedback(situation.pullRequests), ...escalatedComments, ...(issueResponse ? [issueResponse] : [])];
+/**
+ * Every human direction that opens a fresh window: each human comment on the issue (answers included),
+ * and each human review, inline comment or comment on the task's PRs. Bots' and apps' never are: the
+ * Linear adapter keeps them out of `humanComments` (a comment posted through a person's own account, by
+ * their assistant say, is that person's), and the GitHub adapter out of `humanFeedback`. Keep every
+ * reader of window starts here.
+ */
+export function humanDirection(situation: Pick<SituationReport, "conversation" | "pullRequests">): (HumanPullRequestFeedback | HumanComment)[] {
+  return [...situation.pullRequests.flatMap((p) => p.humanFeedback), ...situation.conversation.humanComments];
 }
 
-function escalationComments(situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">, pr: PullRequestFacts) {
+/**
+ * TECH-6165: the latest time Sergeant handed a now merged or closed PR to a human, to merge or to
+ * re-review. Its end is reconciled in a turn (poll-checks.ts `reconcileDue`), but it is not direction:
+ * GitHub's PR facts do not say who merged or closed it, so it opens no window.
+ */
+export function endedHandoff(situation: Pick<SituationReport, "conversation" | "pullRequests">): { pr: string; state: string; askedAt: string } | undefined {
   const { issue, agentComments } = situation.conversation;
-  // The handoff comment's key is durable even after changed conversation facts correctly drop the
-  // refusal record that enforced M12. Keep using that head-keyed comment as the escalation anchor.
-  const keys = [handoffKey(issue.id, pr), ...(outstandingChangeRequests(pr.humanFeedback).length > 0 ? [rereviewKey(issue.id, pr)] : [])];
-  return keys.flatMap((key) => agentComments.filter((c) => c.id === commentIdFor(key)));
-}
-
-/** The newest issue comment after a head-keyed handoff or re-review request. */
-function latestIssueResponseToPrWait(situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">): HumanComment | undefined {
-  const { humanComments } = situation.conversation;
-  const waits = situation.pullRequests.flatMap((pr) => escalationComments(situation, pr));
-  const lastWait = waits.toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
-  if (!lastWait) return undefined;
-  return humanComments.filter((c) => Date.parse(c.createdAt) > Date.parse(lastWait.createdAt)).toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).at(-1);
+  const ended = situation.pullRequests.filter((p) => p.state !== "open").flatMap((pr) => {
+    const keys = [handoffKey(issue.id, pr), rereviewKey(issue.id, pr)].map(commentIdFor);
+    return agentComments.filter((c) => keys.includes(c.id)).map((c) => ({ pr: `${pr.repo}#${pr.number}`, state: pr.state, askedAt: c.createdAt }));
+  });
+  return ended.toSorted((a, b) => Date.parse(a.askedAt) - Date.parse(b.askedAt)).at(-1);
 }
 
 /**

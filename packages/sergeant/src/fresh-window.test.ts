@@ -43,6 +43,7 @@ test("a question answered after the window would have expired continues without 
 });
 
 test("a runaway task still stops at its fresh window's end and asks once", async () => {
+  const startedAt = ago(300);
   const answeredAt = ago(240);
   let w = worker("running");
   let cancels = 0;
@@ -51,7 +52,7 @@ test("a runaway task still stops at its fresh window's end and asks once", async
   let seen: string[] = [];
   const { result, posted } = await scenario({
     // The answer opened a fresh window four hours ago, and the worker started in it is still running.
-    state: { startedAt: ago(300), runIds: ["run_w"], budget: { window: { wallMinutes: 120, costUsd: 25 }, since: answeredAt } },
+    state: { startedAt, runIds: ["run_w"], budget: { window: { wallMinutes: 120, costUsd: 25 }, since: answeredAt, activeSince: answeredAt, activeMs: 0, windowSeq: 1 } },
     conversation: { agentComments: [question(ago(270))], humanComments: [human("c1", answeredAt, "After 30 days.")] },
     runner: {
       start: async () => {},
@@ -72,10 +73,10 @@ test("a runaway task still stops at its fresh window's end and asks once", async
   expect(cancels).toBe(1);
   expect(turns).toBe(0);
   expect(posted).toHaveLength(1);
-  expect(posted[0]).toMatch(/budget is exhausted \(wall time exhausted at /);
+  expect(posted[0]).toMatch(/budget is exhausted \(active time exhausted \(/);
   // The old answer opened nothing more, and the question is the fresh window's own.
   expect((await saved()).budget.since).toBe(answeredAt);
-  expect(seen).toEqual(["q1", commentIdFor(budgetQuestionKey(issue.id, answeredAt))]);
+  expect(seen).toEqual(["q1", commentIdFor(budgetQuestionKey(issue.id, startedAt, 1))]);
 });
 
 // Budgets are time and money only: no count of turns ends a task. TECH-4989's loop ended silently at

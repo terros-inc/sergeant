@@ -29,6 +29,8 @@ export type Nudge = {
    * carries the live assignee), but it does not pay for a history read it has no reason to redo.
    */
   recheckOwner: boolean;
+  /** TECH-6165: the PR a review or comment it announces is on, so the PR's feedback is reread, not reused. */
+  feedback?: { repo: string; number: number };
 };
 
 /** How a task loop names what it watches, and an event what it is about; case-insensitive repos. */
@@ -117,7 +119,6 @@ const header = (req: IncomingMessage, name: string) => {
 const issueRef = z.object({ id: z.string().optional(), identifier: z.string().optional() });
 const LinearEvent = z.object({
   type: z.string(),
-  action: z.string().optional(),
   data: z
     .object({
       id: z.string().optional(),
@@ -168,6 +169,8 @@ const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const prNumbers = z.array(z.object({ number: z.number().int() })).default([]);
 const GitHubEvent = z.object({
   repository: z.object({ full_name: z.string() }),
+  review: z.object({}).optional(),
+  comment: z.object({}).optional(),
   number: z.number().int().optional(),
   pull_request: z.object({ number: z.number().int(), head: z.object({ sha }).optional() }).optional(),
   /** An `issue_comment` names its issue; only one that is a PR (it has `pull_request`) counts. */
@@ -194,8 +197,13 @@ export function githubNudge(event: string, payload: unknown, enrolled: Set<strin
   const repo = e.repository.full_name;
   if (!enrolled.has(repo.toLowerCase())) return undefined;
   const check = e.check_run ?? e.check_suite;
-  const numbers = [e.number, e.pull_request?.number, e.issue?.pull_request && e.issue.number, ...(check?.pull_requests.map((p) => p.number) ?? [])];
+  const pr = e.pull_request?.number ?? (e.issue?.pull_request && e.issue.number);
+  const numbers = [e.number, pr, ...(check?.pull_requests.map((p) => p.number) ?? [])];
   const heads = [e.pull_request?.head?.sha, check?.head_sha, e.sha, e.before, e.after];
+  // A review or comment, a bot's or App's too: the woken loop rereads the PR's feedback. Only a human's
+  // opens a fresh budget window (pr-wait.ts `humanDirection`).
+  const item = event === "pull_request_review" ? e.review : event === "pull_request_review_comment" || event === "issue_comment" ? e.comment : undefined;
+  const feedback = item && pr !== undefined ? { repo, number: pr } : undefined;
   return {
     keys: [
       ...new Set([
@@ -205,5 +213,6 @@ export function githubNudge(event: string, payload: unknown, enrolled: Set<strin
     ],
     intake: false,
     recheckOwner: false,
+    ...(feedback && { feedback }),
   };
 }

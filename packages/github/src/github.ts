@@ -79,6 +79,9 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
   const conditional = new Map<string, { etag: string; body: unknown }>();
   const unreadableProtection = new Map<string, number>();
   const feedbackMemo = new Map<string, { headSha: string; updatedAt: string; at: number; feedback: Awaited<ReturnType<typeof readHumanFeedback>> }>();
+  // TECH-6165: how often a webhook has dropped each PR's memo, so a read it overtook remembers nothing.
+  const feedbackCleared = new Map<string, number>();
+  const prKey = (repo: string, number: number) => `${repo.toLowerCase()}#${number}`;
 
   const request = async (path: string, init: RequestInit = {}, requestOptions: RequestOptions = {}): Promise<unknown | null> => {
     limiter.check();
@@ -232,16 +235,19 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const headSha = Sha.parse(live.head.sha);
       // A review or comment moves the PR's `updated_at`: with it and the head unchanged, the feedback
       // read a little earlier is reused, and reread at least every `FEEDBACK_MEMO_MS` regardless.
-      const key = `${repo}#${number}`;
+      // TECH-6165: a review does not always move `updated_at`, so its webhook drops the memo instead
+      // (`forgetFeedback`), and a read that began before the drop does not put its older feedback back.
+      const key = prKey(repo, number);
       const memo = feedbackMemo.get(key);
       const fresh = memo && live.updated_at && memo.headSha === headSha && memo.updatedAt === live.updated_at && now() - memo.at < FEEDBACK_MEMO_MS;
+      const cleared = feedbackCleared.get(key);
       const [observed, declared, humanFeedback, changedFiles] = await Promise.all([
         readObservedChecks(repo, headSha),
         readRequiredChecks(repo, live.base.ref),
         fresh ? memo.feedback : readHumanFeedback((path) => request(path), repo, number),
         readChangedFiles(repo, number),
       ]);
-      if (!fresh && live.updated_at) feedbackMemo.set(key, { headSha, updatedAt: live.updated_at, at: now(), feedback: humanFeedback });
+      if (!fresh && live.updated_at && feedbackCleared.get(key) === cleared) feedbackMemo.set(key, { headSha, updatedAt: live.updated_at, at: now(), feedback: humanFeedback });
       // Only the base branch's declared required checks count; one that never reported is
       // `missing`. With none declared the list is empty and M5 refuses the merge, unless this
       // repository explicitly opted into the observed-checks fallback.
@@ -281,6 +287,12 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     mergePolicy: (repo) => configFor(repo).config.mergePolicy,
 
     rateLimit: () => limiter.status(),
+
+    forgetFeedback(repo, number) {
+      const key = prKey(repo, number);
+      feedbackMemo.delete(key);
+      feedbackCleared.set(key, (feedbackCleared.get(key) ?? 0) + 1);
+    },
 
     async defaultBranchHead(repo) {
       configFor(repo);

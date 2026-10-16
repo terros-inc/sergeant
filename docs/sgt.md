@@ -118,41 +118,43 @@ Approvers also have `sgt admin` (§7).
 
 ### Budgets
 
-A task works in a **budget window** of wall time and money: by default 120 minutes and $25 from the
-task's start, or the installation's configured `budget` (a repository's own `budget` applies once the
-task has a run there). Wall time is hard; spend is the reported cost of the window's runs and
-reasoning turns. No count of turns or runs ends a task. Once either runs out, Sergeant cancels its runs
+A task works in a **budget window** of time and money: by default 120 minutes and $25, or the
+installation's configured `budget` (a repository's own `budget` applies once the task has a run there).
+The time is **active time** (TECH-6165): only while a worker or reviewer run or a Sergeant turn is
+running. Waiting on you, on CI, or for a task slot uses none of it. Time is hard; spend is the reported
+cost of the window's runs and reasoning turns. No count of turns or runs ends a task. Once either runs out, Sergeant cancels its runs
 and asks a **Question for you**: 1. Extend, 2. Accept as-is. The question makes the case (TECH-6021): what
 happened in the window, the PR's CI, review and mergeability with any open blocking findings and the
 steps left, and what Sergeant recommends (extend, stop, or no recommendation) under which rule of the
 stop rubric, with a rough estimate of the time and money left. A task only waiting on you (your merge,
-a re-review it asked for, a question) asks nothing.
+a re-review it asked for, a question) asks nothing and says nothing of its budget.
 
 - **`sgt stops`** shows, for each rubric rule and recommendation, how many budget questions were asked,
   how people replied (extend, stop, other), and how often the reply followed the recommendation.
   `--json` adds every stop.
 
-- **Any human answer to a Sergeant question opens a fresh window**: it starts at the answer's time,
-  with zero spend and the installation's budget as it is now (TECH-5059). The answer is the first human
-  comment on the issue after Sergeant's latest question. Its wall time runs from the task's first turn
-  or run after the answer, so a task that must first queue for a task slot does not spend its window
-  in the queue; until then the deadline `sgt task show` prints moves with the clock (TECH-6127).
+- **Any human direction opens a fresh window** and wakes a turn, with zero spend and the installation's
+  budget as it is now, however exhausted the old window was (TECH-5059, TECH-5218, TECH-6165): any
+  human comment on the issue (an answer to a Sergeant question included), or a review, inline comment
+  or comment on the task's PR. A comment your AI assistant posts as you (through the Linear MCP or `gh`)
+  counts as yours. A bot's or app's comment wakes the task but never opens one, and neither does
+  Sergeant's own. A PR review does not answer a question Sergeant asked on the issue: reply there.
+- **An edit to the issue, or your merge or close of a PR Sergeant handed to you, wakes a turn but opens
+  no window**, since Linear and GitHub do not say who made it. The turn runs even if the window is used
+  up; after it, a task with nothing left to wait on asks the budget question.
 - **The budget question is no different.** Answering `Extend.` or `1` is just such an answer, and
   the next turn carries on. Answering `Accept as-is` or `2` ends the task instead, leaving its PRs to you.
-- **A human review** (approval, change request, or comment) of the task's PR also opens a fresh window
-  (TECH-5218).
-- **Unblocking a task opens a fresh window** (TECH-5803). A task waiting on a Linear "blocked by" issue
-  keeps its window's clock running, so it may run out while it waits. Once the task's last open blocker
-  is Done or Canceled, or its "blocked by" relation is removed, the next poll (within about a minute)
-  opens a fresh window from that moment, with zero spend and the installation's budget now, however
-  exhausted the old one was, and the task carries on with no comment needed. One blocker of several
-  going opens none.
+- **Unblocking a task opens a fresh window** (TECH-5803). Once the task's last open Linear "blocked by"
+  issue is Done or Canceled, or its "blocked by" relation is removed, the next poll (within about a
+  minute) opens a fresh window from that moment, and the task carries on with no comment needed. One
+  blocker of several going opens none.
 - **`sgt task wake` does not touch the budget.** It asks for a turn now, which still waits for
   anything that holds it, an exhausted budget included.
 - **There is no command to reset a budget**, not even for approvers. Changing the installation's
   `budget` affects only new tasks and later fresh windows.
-- **`sgt task show <ID>`** shows the current window: spend of its limit, the wall-time deadline, and
-  `EXHAUSTED` with why once it has run out (`--json` adds `windowStart`).
+- **`sgt task show <ID>`** shows the current window: spend of its limit, when its time would run out if
+  the task worked without pause from now, and `EXHAUSTED` with why once it has run out (`--json` adds
+  `windowStart`).
 
 ## 6. Model accounts
 

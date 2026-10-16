@@ -47,7 +47,7 @@ test("a wall deadline that passes during the merge's live reads stops the merge"
   vi.useFakeTimers({ toFake: ["Date"] });
   try {
     const late = { ...situation, budget: { ...situation.budget, wallDeadline: deadline.toISOString() } };
-    expect(await execute(merge, late, p)).toMatchObject({ status: "denied", rule: "B1", reason: expect.stringContaining("wall time exhausted") });
+    expect(await execute(merge, late, p)).toMatchObject({ status: "denied", rule: "B1", reason: expect.stringContaining("active time exhausted") });
     expect(merged).toEqual([]);
   } finally {
     vi.useRealTimers();

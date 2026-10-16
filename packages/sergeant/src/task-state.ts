@@ -76,11 +76,15 @@ const TaskState = z.looseObject({
       since: z.iso.datetime({ offset: true }).optional(),
       /** Runs of earlier windows, which this one does not count. */
       priorRuns: z.array(RunId).default([]),
+      /** TECH-6165: the window's active time already counted, in ms (budget.ts `clockActive`). */
+      activeMs: z.number().nonnegative().optional(),
+      /** TECH-6165: since when a run or turn has been running, while one is. */
+      activeSince: z.iso.datetime({ offset: true }).optional(),
+      /** TECH-6165: which window of the task this is (budget.ts `openWindow`); absent means 0. */
+      windowSeq: z.number().int().nonnegative().optional(),
     }),
   /** TECH-5803: the issue's open blockers as the last poll read them; absent until a poll has. */
   blockedBy: z.array(z.string()).optional(),
-  /** TECH-5803: each window an unblock opened, by its start, so a budget question asked in one stays known by its key. */
-  unblockedAt: z.array(z.iso.datetime()).default([]),
   merged: z
     .looseObject({
       repo: RepoSlug,
@@ -199,7 +203,7 @@ export function applyTurn(
 
 /** The task's state, or a new task starting now with `window`; a task's stored window always wins. */
 export async function loadState(file: string, issueId: string, window: BudgetWindow): Promise<State> {
-  const budget = { window };
+  const budget = { window, activeMs: 0 };
   const state =
     (await readTaskState(file, window)) ??
     TaskState.parse({ issueId, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget });
@@ -216,9 +220,11 @@ export async function loadState(file: string, issueId: string, window: BudgetWin
 export async function readTaskState(file: string, window: BudgetWindow = DEFAULT_BUDGET): Promise<TaskState | undefined> {
   const raw = await readFile(file, "utf8").catch(() => undefined);
   if (raw === undefined) return undefined;
-  const stored = JSON.parse(raw) as { budget?: object };
-  // A task saved before it had a window adopts the one it is resumed with, once.
-  return TaskState.parse({ ...stored, budget: { window, ...stored.budget } });
+  const stored = JSON.parse(raw) as { startedAt?: string; budget?: { since?: string } };
+  // A task saved before it had a window adopts the one it is resumed with, once. TECH-6165: one saved
+  // before active time was kept counts the wall time its window has had as active, so it gains none.
+  const activeMs = Math.max(0, Date.now() - Date.parse(stored.budget?.since ?? stored.startedAt ?? "")) || 0;
+  return TaskState.parse({ ...stored, budget: { window, activeMs, ...stored.budget } });
 }
 
 /**

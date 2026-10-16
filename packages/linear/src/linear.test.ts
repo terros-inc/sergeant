@@ -61,6 +61,9 @@ test("reads every page, separates human-authored comments from the rest, and lin
       [
         authored("human-2", at(2), { user: { id: "human", name: "Human" } }),
         authored("bot", at(1), { botActor: { id: "bot-1", type: "app", name: "Integration" } }),
+        // TECH-6165: a person's assistant posting through their own account is that person; an app's own user is not.
+        authored("via-mcp", at(4), { user: { id: "human", name: "Human", app: false }, botActor: { id: "mcp", type: "oauthClient", name: "Linear MCP" } }),
+        authored("app-user", at(5), { user: { id: "agent-app", name: "Other agent", app: true } }),
       ],
       true,
       "cursor-1",
@@ -84,8 +87,8 @@ test("reads every page, separates human-authored comments from the rest, and lin
 
   expect(requests.map((r) => r.variables.after)).toEqual([null, "cursor-1"]);
   expect(conversation.issue).toMatchObject({ state: "Todo", stateType: "unstarted", delegate: { id: "sergeant-user" }, description: "", labels: ["sergeant:codex"] });
-  expect(conversation.humanComments.map((c) => c.id)).toEqual(["external-1", "human-2"]);
-  expect(conversation.agentComments.map((c) => c.id)).toEqual(["bot", "sergeant"]);
+  expect(conversation.humanComments.map((c) => c.id)).toEqual(["external-1", "human-2", "via-mcp"]);
+  expect(conversation.agentComments.map((c) => c.id)).toEqual(["bot", "sergeant", "app-user"]);
   expect(conversation.issue.linkedPullRequests).toEqual([{ repo: "o/canary", number: 7 }]);
   expect(conversation.issue.attachments?.map((a) => a.id)).toEqual(["a2", "a3"]);
 });

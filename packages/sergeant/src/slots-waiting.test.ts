@@ -130,7 +130,7 @@ test("an unanswered budget question releases its slot and is never ended by the 
       turns: 0,
       runIds: [],
       recentTurns: [],
-      budget: { window: { wallMinutes: 1, costUsd: 25 }, grants: [] },
+      budget: { window: { wallMinutes: 1, costUsd: 25 }, grants: [], activeMs: 2 * 60_000 },
     }));
   });
   await vi.waitFor(() => expect(f.turns).toEqual(["NEXT"]), { timeout: 5_000 });

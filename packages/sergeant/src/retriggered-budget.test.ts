@@ -27,9 +27,9 @@ const earlierTask = (key: string): AgentComment[] => [
 
 test.each([
   ["before TECH-5145, under the shared key", "budget-question:i1:0"],
-  ["under the earlier task's own key", budgetQuestionKey("i1", ago(720))],
+  ["under the earlier task's own key", budgetQuestionKey("i1", ago(720), 0)],
 ])("a re-triggered task asks its own budget question and waits for a reply to it (earlier question asked %s)", async (_case, earlierKey) => {
-  const ownQuestion = commentIdFor(budgetQuestionKey("i1", startedAt));
+  const ownQuestion = commentIdFor(budgetQuestionKey("i1", startedAt, 0));
   let turns = 0;
   let turnsBeforeReply = -1;
   let pollsWaited = 0;

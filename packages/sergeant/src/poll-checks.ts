@@ -2,6 +2,7 @@ import {
   checkBudget,
   checkLive,
   commentIdFor,
+  issueRevision,
   type AgentComment,
   type BudgetStatus,
   type Conversation,
@@ -17,7 +18,7 @@ import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
 import { reassigned, redelegated } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
-import { reviewWindowFeedback } from "./pr-wait.ts";
+import { endedHandoff, humanDirection } from "./pr-wait.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
 import { stopCase } from "./stop-case.ts";
 import { recordBudgetStop, recordReply, windowTurns } from "./stop-ledger.ts";
@@ -127,7 +128,12 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], c
  * them, a run whose status is unknown waits, and an open question waits. Returns the hold, if any.
  */
 export async function checkHolds(
-  poll: { conversation: Conversation; live: string[]; unknown: { unknown: string; error: string }[]; budgetOf: () => BudgetStatus },
+  poll: {
+    conversation: Conversation;
+    live: string[];
+    unknown: { unknown: string; error: string }[];
+    budgetOf: () => BudgetStatus;
+  },
   configured: BudgetWindow,
   ctx: PollContext,
 ): Promise<{ hold: "budget" | "unknown" | "question" } | (BudgetCheck & { hold?: undefined })> {
@@ -147,10 +153,9 @@ export async function checkHolds(
   }
   await openUnblockWindow(conversation, configured, ctx);
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a
-  // crash between posting it and saving anything loses nothing. The first window's key is the task's
-  // start, so an earlier task's budget question, answered or not, is never this one's (TECH-5145).
-  const windowStart = state.budget.since ?? state.startedAt;
-  const budgetKey = budgetQuestionKey(conversation.issue.id, windowStart);
+  // crash between posting it and saving anything loses nothing. The key names the task's start, so an
+  // earlier task's budget question, answered or not, is never this one's (TECH-5145).
+  const budgetKey = budgetQuestionKey(conversation.issue.id, state.startedAt, state.budget.windowSeq);
   const questionId = commentIdFor(budgetKey);
   const budgetAsked = conversation.agentComments.find((c) => c.id === questionId);
   const budget = poll.budgetOf();
@@ -177,7 +182,8 @@ export async function checkHolds(
   );
   // While the question Sergeant asked is unanswered it takes no turn and makes no effect, and no
   // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts.
-  // The loop also drops any question it still has to post.
+  // TECH-6165: PR feedback is not an answer to it, so the question stays open. The loop also drops any
+  // question it still has to post.
   const question = openQuestion(conversation);
   if (question) {
     if (live.length === 0) opts.slot?.waiting(Date.parse(question.createdAt));
@@ -191,7 +197,7 @@ export async function checkHolds(
  * TECH-5803: the task unblocked, its last open blocker completed or canceled or its "blocked by"
  * relation removed, opens a fresh window from the poll that sees it, exactly as an answer does (above),
  * however exhausted the window it replaces. Linear has no time for a removed relation, so the blockers
- * the last poll read are kept in `state.json`, and so is the window's start (budget.ts). A blocker list
+ * the last poll read are kept in `state.json`. A blocker list
  * Linear did not give (absent) changes nothing; one still open, or unread past its page, keeps waiting.
  */
 async function openUnblockWindow(conversation: Conversation, configured: BudgetWindow, { state, log, save }: PollContext): Promise<void> {
@@ -202,27 +208,43 @@ async function openUnblockWindow(conversation: Conversation, configured: BudgetW
   if (before?.length && blockedBy.length === 0) {
     const at = new Date().toISOString();
     openWindow(state, at, configured);
-    state.unblockedAt.push(at);
     log(`unblocked (was waiting on ${before.join(", ")}): a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
   }
   await save();
 }
 
 /**
- * TECH-5218, TECH-5913: human feedback on the task's PR, or an issue comment after Sergeant's review
- * escalation, opens a fresh window exactly as an answer does. Only input newer than the window's start
- * does, so it opens one window once, across restarts too. Returns whether it opened one.
+ * TECH-5218, TECH-5913, TECH-6165: any human direction on the issue or the task's PRs (pr-wait.ts
+ * `humanDirection`) opens a fresh window exactly as an answer does, however exhausted the window it
+ * replaces. Only input newer than the window's start does, so it opens one window once, across restarts
+ * too. Returns whether it opened one.
  */
-export async function openReviewWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
-  const feedback = reviewWindowFeedback(situation)
+export async function openDirectionWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
+  const direction = humanDirection(situation)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
-  if (!feedback || Date.parse(feedback.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
-  openWindow(state, feedback.createdAt, configured);
+  if (!direction || Date.parse(direction.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
+  openWindow(state, direction.createdAt, configured);
   await save();
-  const source = "url" in feedback ? `${feedback.author} responded on the PR (${feedback.url})` : `${feedback.author.name} commented on the issue`;
-  log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${feedback.createdAt}`);
+  const source = "url" in direction ? `${direction.author} responded on the PR (${direction.url})` : `${direction.author.name} commented on the issue`;
+  log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${direction.createdAt}`);
   return true;
+}
+
+/**
+ * TECH-6165: what changed since the last turn that the task reconciles in a turn even once its window is
+ * exhausted, without opening a fresh one: a merge or close of a PR Sergeant handed to a human in this
+ * window (`endedHandoff`), or an edit to the issue's title or description no turn has read (`state.seen`,
+ * as for the edit's notice, question.ts `noteEdit`). Neither GitHub's PR facts nor Linear say who did it,
+ * so neither is human direction. The turn can only ask or accept (B1, execute.ts); once nothing changes,
+ * the task waits or asks the budget question as before.
+ */
+export function reconcileDue(situation: SituationReport, fingerprint: string, state: Pick<TaskState, "lastFingerprint" | "seen" | "budget" | "startedAt">): string | undefined {
+  if (fingerprint === state.lastFingerprint) return undefined;
+  const ended = endedHandoff(situation);
+  if (ended && Date.parse(ended.askedAt) >= Date.parse(state.budget.since ?? state.startedAt)) return `${ended.pr}, handed to a human, was ${ended.state}`;
+  if (state.seen && state.seen.issue !== issueRevision(situation.conversation.issue)) return "the issue's title or description changed";
+  return undefined;
 }
 
 /**
@@ -235,8 +257,14 @@ export async function holdForBudget(
   check: BudgetCheck,
   { opts, deps, state, log }: PollContext,
   humanWait?: string,
+  reconcile?: string,
 ): Promise<boolean> {
   const { exhausted, budgetAsked } = check;
+  // TECH-6165: a handed-off PR's end or an issue edit is reconciled in a turn first (`reconcileDue`).
+  if (!exhausted.allowed && reconcile) {
+    log(`${reconcile}: a turn reconciles it in the window it has`);
+    return false;
+  }
   // One question per exhausted window, posted like any question but under a key of the task and the
   // window, and retried every poll until Linear shows it. Until a human replies after it, nothing
   // happens and no runaway guard ends the wait (UNF-727); the reply opens a fresh window (above) and
@@ -252,10 +280,12 @@ export async function holdForBudget(
     }
     return true;
   }
-  // The stop rubric's rule 0: a task only waiting on a human posts nothing (TECH-5218, TECH-5913).
+  // The stop rubric's rule 0: a task only waiting on a human posts nothing (TECH-5218, TECH-5913), and
+  // says nothing of its budget either (TECH-6165). The wait uses none of the window, so this is one the
+  // work before it used up: it does nothing until a human acts, which opens a fresh one.
   if (!exhausted.allowed && humanWait) {
     opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
-    log(`budget exhausted (${exhausted.reason}), but the task is waiting on ${humanWait}; parking quietly (rubric rule 0)`);
+    log(`waiting on ${humanWait}`);
     return true;
   }
   if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {

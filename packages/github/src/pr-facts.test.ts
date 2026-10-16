@@ -1,8 +1,8 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { createGitHubPort } from "./github.ts";
 
 const head = "a".repeat(40);
-const repo = "trevorallred/canary";
+const repo = "o/r";
 const pr = {
   number: 7,
   html_url: `https://github.com/${repo}/pull/7`,
@@ -42,4 +42,64 @@ test.each([
   ["one GitHub adds later", { mergeable_state: "queued" }],
 ])("reads a %s mergeable_state as unknown", async (_, live) => {
   expect((await read(live)).mergeableState).toBe("unknown");
+});
+
+// TECH-6165: submitting a review did not move the PR's `updated_at`, so the poll the review's webhook
+// woke reused the feedback remembered from before it, and the review went unanswered. The webhook drops
+// that memory, so the woken read rereads it at once, without waiting, and a read already under way when
+// the webhook came does not put its older feedback back.
+test("a webhook's review or comment is read though updated_at did not move, and an overtaken read is not remembered", async () => {
+  let reviews: object[] = [];
+  let reviewReads = 0;
+  let hold: Promise<void> | undefined;
+  const fetch = async (input: string | URL | Request) => {
+    const path = String(input);
+    if (path.endsWith("/pulls/7")) return Response.json({ ...pr, updated_at: "2026-10-16T03:00:00Z" });
+    if (path.includes("/check-runs")) return Response.json({ total_count: 0, check_runs: [] });
+    if (path.endsWith("/status?per_page=100")) return Response.json({ state: "success", total_count: 0, statuses: [] });
+    if (path.includes("/protection/")) return Response.json({ message: "Not Found" }, { status: 404 });
+    if (path.includes("/reviews?")) {
+      reviewReads++;
+      const listed = reviews;
+      await hold;
+      return Response.json(listed);
+    }
+    if (/\/rules\/branches\/main\?|\/(comments|files)\?per_page=100&page=1$/.test(path)) return Response.json([]);
+    throw new Error(`unexpected request: ${path}`);
+  };
+  const port = createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash" } }, fetch });
+  const ids = async () => (await port.readPullRequest(repo, 7)).humanFeedback.map((f) => f.id);
+  const review = { id: 41, user: { login: "captain", type: "User" }, state: "CHANGES_REQUESTED", body: "Rename the flag.", commit_id: head, submitted_at: "2026-10-16T03:07:00Z", html_url: `https://github.com/${repo}/pull/7#pullrequestreview-41` };
+
+  expect(await ids()).toEqual([]);
+  reviews = [review];
+  // Nothing announced it, and `updated_at` is unchanged: the remembered feedback stands.
+  expect(await ids()).toEqual([]);
+  expect(reviewReads).toBe(1);
+
+  // The webhook drops the memo (a repository named in another case too): the next read rereads.
+  port.forgetFeedback?.("O/R", 7);
+  const woken = Date.now();
+  expect(await ids()).toEqual(["review:41"]);
+  expect(reviewReads).toBe(2);
+  // It does not wait for GitHub to catch up first (an earlier fix slept 5 seconds before a second read).
+  expect(Date.now() - woken).toBeLessThan(1_000);
+  // Read once, and remembered again.
+  expect(await ids()).toEqual(["review:41"]);
+  expect(reviewReads).toBe(2);
+
+  // A read lists the reviews before a second review; its webhook comes while that read is still under way.
+  port.forgetFeedback?.(repo, 7);
+  let release = () => {};
+  hold = new Promise((resolve) => (release = resolve));
+  const overtaken = ids();
+  await vi.waitFor(() => expect(reviewReads).toBe(3));
+  reviews = [review, { ...review, id: 42, submitted_at: "2026-10-16T03:08:00Z" }];
+  port.forgetFeedback?.(repo, 7);
+  release();
+  hold = undefined;
+  expect(await overtaken).toEqual(["review:41"]);
+  // It did not remember what it read: the next read rereads and finds the second review.
+  expect(await ids()).toEqual(["review:41", "review:42"]);
+  expect(reviewReads).toBe(4);
 });

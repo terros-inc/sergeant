@@ -1,10 +1,11 @@
 import { createHmac } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Conversation, PullRequestFacts } from "@terros/sergeant-contracts";
+import { taskDir } from "./cancel.ts";
 import { startService, type Service, type ServiceDeps } from "./service.ts";
 import { linearNudge } from "./webhooks.ts";
 
@@ -62,7 +63,7 @@ async function start() {
   dir = await mkdtemp(join(tmpdir(), "sergeant-webhooks-test-"));
   const live = new Map([["UNF-1", conversation("UNF-1")]]);
   const delegated = ["UNF-1"];
-  const counts = { reads: new Map<string, number>(), ownerReads: 0, intakes: 0, turns: [] as string[] };
+  const counts = { reads: new Map<string, number>(), ownerReads: 0, intakes: 0, turns: [] as string[], forgotten: [] as string[] };
   const logs: string[] = [];
   const deps: ServiceDeps = {
     agentUserId: agent.id,
@@ -78,7 +79,13 @@ async function start() {
       readTaskOwner: async () => (counts.ownerReads++, { owner: { id: "user-ann", name: "Ann" } }),
       moveIssueToStarted: async () => ({ moved: false as const }),
     },
-    github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("unused")) },
+    github: {
+      readPullRequest: async () => pr,
+      closePullRequest: async () => {},
+      mergePolicy: () => "sergeant",
+      mergePullRequest: async () => Promise.reject(new Error("unused")),
+      forgetFeedback: (repo, number) => void counts.forgotten.push(`${repo}#${number}`),
+    },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
     reasoner: {
       async turn(situation) {
@@ -204,4 +211,33 @@ test("an issue update that touches nothing Sergeant reads is dropped", () => {
   expect(linearNudge({ type: "Issue", action: "update", data: issue, updatedFrom: { priority: 2, sortOrder: 1 } }, agent.id)).toBeUndefined();
   expect(linearNudge({ type: "Issue", action: "update", data: issue, updatedFrom: { stateId: "s" } }, agent.id)).toEqual({ keys: ["i-UNF-1", "UNF-1"], intake: false, recheckOwner: false });
   expect(linearNudge({ type: "Reaction", action: "create", data: { issueId: "i-UNF-1" } }, agent.id)).toBeUndefined();
+});
+
+test("a PR review or comment webhook drops that PR's remembered feedback before the woken reread (TECH-6165)", async () => {
+  const { counts, post, reads } = await start();
+  const before = reads("UNF-1");
+  const user = { type: "User" };
+  // A comment on a plain issue leaves the memo alone.
+  expect(await post("github", { repository: { full_name: "o/r" }, issue: { number: 8 }, comment: { id: 44, user } }, { event: "issue_comment" })).toBe(200);
+  expect(counts.forgotten).toEqual([]);
+
+  expect(await post("github", { repository: { full_name: "O/R" }, action: "submitted", pull_request: { number: 7 }, review: { id: 41, user } }, { event: "pull_request_review" })).toBe(200);
+  expect(await post("github", { repository: { full_name: "o/r" }, action: "created", pull_request: { number: 7 }, comment: { id: 42, user } }, { event: "pull_request_review_comment" })).toBe(200);
+  expect(await post("github", { repository: { full_name: "o/r" }, action: "created", issue: { number: 7, pull_request: {} }, comment: { id: 43, user } }, { event: "issue_comment" })).toBe(200);
+  expect(counts.forgotten).toEqual(["O/R#7", "o/r#7", "o/r#7"]);
+  await vi.waitFor(() => expect(reads("UNF-1")).toBeGreaterThan(before), { timeout: 2_000 });
+});
+
+test("a bot's or App's PR comment webhook drops the memo and wakes the loop, but opens no budget window (TECH-6165)", async () => {
+  const { counts, post, reads } = await start();
+  const before = reads("UNF-1");
+  expect(await post("github", { repository: { full_name: "o/r" }, action: "created", issue: { number: 7, pull_request: {} }, comment: { id: 45, user: { type: "Bot" } } }, { event: "issue_comment" })).toBe(200);
+  expect(counts.forgotten).toEqual(["o/r#7"]);
+  await vi.waitFor(() => expect(reads("UNF-1")).toBe(before + 1), { timeout: 2_000 });
+  await sleep(100);
+  // Woken, the task still works in the window it started with: a bot is never human direction.
+  const state = JSON.parse(await readFile(join(taskDir(dir, "UNF-1"), "state.json"), "utf8")) as { budget: { since?: string; windowSeq?: number } };
+  expect(state.budget.since).toBeUndefined();
+  expect(state.budget.windowSeq).toBeUndefined();
+  expect(counts.turns).toEqual(["UNF-1"]);
 });
