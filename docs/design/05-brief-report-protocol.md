@@ -194,9 +194,9 @@ Versioned text rendered into every worker brief. A change is a new version, reco
     Linear links to the issue. Partial or fuzzy matches never count; with none, the worker starts a
     fresh branch. One a human or another agent started is taken over without asking (decided Oct 15
     2026): the worker pushes to that same branch and PR, and its report's summary opens by naming
-    it, the sentence Sergeant's progress comment quotes. Once a worker's report names an open PR the
-    worker App did not open, Sergeant also names it on the issue in its own comment (`adopted.ts`, 07
-    §3), since such a PR gets no review round and so no progress comment.
+    it, the sentence Sergeant's progress comment quotes. Sergeant itself names on the issue what the
+    worker takes over when it starts the worker, before the run starts (`adopted.ts`, 07 §3): the open
+    linked PRs the worker App did not open, and the exact-identifier branches outside `sergeant/`.
     This reuses the brief's existing discovery (Linear's linked PRs, origin's branches, `gh`); there
     is no separate handoff record.
     **Stale hints.** File paths, line numbers and scope in the issue are hints written against an

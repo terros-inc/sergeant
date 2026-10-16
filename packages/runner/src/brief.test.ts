@@ -191,7 +191,7 @@ test("reviewer rule 12 counts a trade-off as settled only on the base branch or 
 test("worker and reviewer briefs carry the rebase rule and ask for dependencies in the report", () => {
   const base = spec([]);
   const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
-  expect(worker).toContain("## Rules (s2-worker-rules/19)");
+  expect(worker).toContain("## Rules (s2-worker-rules/20)");
   const rebase = worker.slice(worker.indexOf("14. Rebase early and often."), worker.indexOf("\n15. "));
   expect(rebase).toMatch(/before its first push, before you report a head for\s+review, and whenever the default branch has moved under its open PR/);
   expect(rebase).toMatch(/Resolve conflicts then, as\s+part of the task/);

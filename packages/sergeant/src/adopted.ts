@@ -1,41 +1,54 @@
-import { commentIdFor, type LinearPort, type SituationReport } from "@terros/sergeant-contracts";
+import type { Conversation, GitHubPort, LinearPort, PullRequestFacts, RepoSlug } from "@terros/sergeant-contracts";
+import { issueBranches } from "@terros/sergeant-runner";
 
-// TECH-6164: a worker takes over the issue's PR a human or another agent started, and pushes to it. The
-// issue then says which PR was taken over, once per PR, as soon as a worker's report names it: such a PR
-// gets no review round (its author is not the worker App, so G3 keeps Sergeant's reviewer off it), and so
-// no progress comment (progress.ts) that would quote the worker's summary.
+// TECH-6164: a worker takes over the issue's branch or PR a human or another agent started, and pushes to
+// it. The issue says which, in Sergeant's first comment for that work: the notice is decided and posted when
+// the worker is started (execute.ts), before the run starts and so before any comment about its work. Such
+// a PR gets no review round (its author is not the worker App, so G3 keeps Sergeant's reviewer off it).
 
-/** Once per adopted PR: the comment's id is derived from this key, so Linear shows whether it was posted. */
-export const adoptedKey = (issueId: string, pr: { repo: string; number: number }) => `adopted:${issueId}:${pr.repo}#${pr.number}`;
+/** Once per adopted set: the comment's id is derived from this key, so a later worker start posts nothing twice. */
+export const adoptedKey = (issueId: string, items: string[]) => `adopted:${issueId}:${items.join(",")}`;
 
-/** The open PRs a worker reported pushing to that the worker App did not open, not yet told on the issue. */
-export function pendingAdoptions(situation: Pick<SituationReport, "conversation" | "runs" | "pullRequests">, workerLogin: string) {
-  const { conversation, runs, pullRequests } = situation;
-  const reported = runs.flatMap((r) => (r.role === "worker" && r.report ? r.report.pullRequests : []));
-  return pullRequests.filter(
+/**
+ * What a worker starting on `repositories` takes over: the open PRs linked to the issue that the worker App
+ * did not open, and the branches whose name holds the identifier exactly (`issueBranches`) that are not
+ * Sergeant's own `sergeant/` ones. An unreadable branch list names only the PRs.
+ */
+export async function adoptions(
+  issue: Pick<Conversation["issue"], "identifier" | "linkedPullRequests">,
+  repositories: RepoSlug[],
+  pullRequests: PullRequestFacts[],
+  ports: { github: Pick<GitHubPort, "branches">; workerLogin: string; log?: (line: string) => void },
+): Promise<string[]> {
+  const prs = pullRequests.filter(
     (pr) =>
+      repositories.includes(pr.repo) &&
       pr.state === "open" &&
-      pr.author !== workerLogin &&
-      reported.some((p) => p.repo === pr.repo && p.number === pr.number) &&
-      !conversation.agentComments.some((c) => c.id === commentIdFor(adoptedKey(conversation.issue.id, pr))),
+      pr.author !== ports.workerLogin &&
+      issue.linkedPullRequests.some((l) => l.repo === pr.repo && l.number === pr.number),
   );
+  const branches = await Promise.all(
+    repositories.map(async (repo) => {
+      const names = await ports.github.branches?.(repo).catch((e: Error) => (ports.log?.(`${repo}: branches not read: ${e.message}`), []));
+      // `issueBranches` reads `<repo>: <branch>`, as the worker's brief lists them.
+      const own = issueBranches(issue.identifier, (names ?? []).filter((b) => !b.startsWith("sergeant/")).map((b) => `${repo}: ${b}`));
+      return own.map((b) => `branch \`${b.slice(repo.length + 2)}\` in ${repo}`);
+    }),
+  );
+  return [
+    ...prs.map((pr) => `[${pr.repo}#${pr.number}](${pr.url}), which ${pr.author} opened`),
+    ...branches.flat(),
+  ].sort();
 }
 
-/** Posts each pending adoption; a failed post is tried again next poll, and the key posts nothing twice. */
-export async function postAdoptions(
-  situation: Pick<SituationReport, "conversation" | "runs" | "pullRequests">,
-  workerLogin: string,
-  linear: Pick<LinearPort, "postComment">,
-  log: (line: string) => void,
-): Promise<void> {
-  const issueId = situation.conversation.issue.id;
-  for (const pr of pendingAdoptions(situation, workerLogin)) {
-    const body =
-      `Sergeant took over [${pr.repo}#${pr.number}](${pr.url}), which ${pr.author} opened, and continues on its branch. ` +
-      "Sergeant reviews and merges only PRs its own worker opened, so a human reviews and merges this one.";
-    await linear.postComment({ issueId, body, key: adoptedKey(issueId, pr) }).then(
-      () => log(`${pr.repo}#${pr.number}: told the issue the worker took it over`),
-      (e: Error) => log(`${pr.repo}#${pr.number}: takeover comment not posted: ${e.message}`),
-    );
-  }
+/** Posts the takeover notice, if any; a failed post is logged and never blocks the start. */
+export async function postAdoptions(issueId: string, items: string[], linear: Pick<LinearPort, "postComment">, log: (line: string) => void): Promise<void> {
+  if (items.length === 0) return;
+  const body =
+    `Sergeant took over ${items.join("; ")}, and its worker continues there. ` +
+    "Sergeant reviews and merges only PRs its own worker opened, so a human reviews and merges a PR taken over.";
+  await linear.postComment({ issueId, body, key: adoptedKey(issueId, items) }).then(
+    () => log(`told the issue the worker takes over ${items.join("; ")}`),
+    (e: Error) => log(`takeover comment not posted: ${e.message}`),
+  );
 }

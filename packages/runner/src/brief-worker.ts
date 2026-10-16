@@ -3,7 +3,7 @@ import { renderBoundedBotFeedback, renderBoundedHumanFeedback, renderReadAccess,
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/19";
+export const WORKER_RULES_VERSION = "s2-worker-rules/20";
 
 /**
  * TECH-6164: of origin's branches (`<repo>: <branch>`), the ones that are this issue's: their name holds
