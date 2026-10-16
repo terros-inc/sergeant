@@ -17,6 +17,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { closedComment, closedKey } from "./accepted.ts";
+import { adoptions, postAdoptions } from "./adopted.ts";
 import { withSource } from "./api-calls.ts";
 import { askHuman } from "./ask-human.ts";
 import { answeredBudgetQuestion } from "./budget.ts";
@@ -95,6 +96,12 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
           if (!verdict.allowed) return denied(verdict);
           const late = inBudget();
           if (!late.allowed) return denied(late);
+          // TECH-6164: the branch or PR someone else started that this worker takes over is named on the issue
+          // now, before the run starts, so it is Sergeant's first comment on that work (adopted.ts).
+          if (action.kind === "start_worker") {
+            const items = await adoptions(issue, action.repositories, situation.pullRequests, { ...ports, log: (l) => ports.log?.(l) });
+            await postAdoptions(issue.id, items, ports.linear, (l) => ports.log?.(l));
+          }
           const runId = `run_${randomUUID()}`;
           // Accepted: the deadline can pass during this milliseconds-long write, and the run still starts.
           const repositories = action.kind === "start_worker" ? action.repositories : [...new Set(action.subject.map((s) => s.repo))];

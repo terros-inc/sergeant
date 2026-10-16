@@ -1,42 +1,46 @@
 import { expect, test } from "vitest";
-import { commentIdFor, type Conversation, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
-import { postAdoptions } from "./adopted.ts";
+import type { ProposedAction, PullRequestFacts } from "@terros/sergeant-contracts";
+import { execute } from "./execute.ts";
+import { conversation, ports, pr, situation } from "./execute-fixtures.ts";
 
-// TECH-6164: the issue names the PR a worker took over from a human or another agent, once, even though
-// Sergeant never reviews such a PR and so never posts a progress comment on it.
+// TECH-6164: the branch or PR a human or another agent started, that a worker takes over, is named on the
+// issue when the worker is started, before the run starts and so before any other Sergeant comment on its
+// work, and only once however many workers start. Sergeant never reviews such a PR, so no progress comment
+// would name it either.
 
-const repo = "o/canary";
-const workerLogin = "sergeant-worker[bot]";
-const head = "a".repeat(40);
-const pr = (number: number, author: string): PullRequestFacts => ({
-  repo, number, url: `https://github.com/${repo}/pull/${number}`, state: "open", draft: false, author, headSha: head, mergedSha: null, baseRef: "main",
-  body: "", mergeable: true, mergeableState: "clean", checks: { sha: head, required: [] }, humanFeedback: [],
-});
-const worker = (numbers: number[]): RunRecord => ({
-  runId: "run_worker", role: "worker", status: "succeeded", provider: "anthropic/claude-code", model: "m",
-  report: {
-    reportVersion: "s2-worker-report/1", outcome: "completed", knownGaps: [], followups: [], summary: "s",
-    pullRequests: numbers.map((number) => ({ repo, number, headSha: head, url: `https://github.com/${repo}/pull/${number}`, closesIssue: true, review: { required: true, reason: "" } })),
-  },
-});
+const start: ProposedAction = { kind: "start_worker", objective: "Do UNF-1.", repositories: [pr.repo] };
+const linkedPr = (number: number, author: string): PullRequestFacts => ({ ...pr, number, url: `https://github.com/${pr.repo}/pull/${number}`, author });
 
-test("a PR another agent opened that the worker pushed to is named on the issue once; the worker's own and untouched ones are not", async () => {
-  const conversation: Conversation = {
-    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state: "In Progress", stateType: "started", delegate: null, assignee: null, linkedPullRequests: [] },
-    humanComments: [],
-    agentComments: [],
+test("a worker start names the taken-over PR and exact-ID branch first and once; resembling and Sergeant's own branches are not named", async () => {
+  const issue = { ...conversation.issue, linkedPullRequests: [3, 4].map((number) => ({ repo: pr.repo, number })) };
+  const { p } = ports({ conversation: { ...conversation, issue } });
+  const events: string[] = [];
+  const keys = new Set<string>();
+  p.linear.postComment = async ({ key, body }) => {
+    if (keys.has(key)) return; // Linear posts at most once per key.
+    keys.add(key);
+    events.push(`comment: ${body}`);
   };
-  // #3 is another agent's the worker took over; #4 the worker's own; #5 a human's the worker never touched.
-  const situation = { conversation, runs: [worker([3, 4])], pullRequests: [pr(3, "grok[bot]"), pr(4, workerLogin), pr(5, "someone")] };
-  const posted: { key: string; body: string }[] = [];
-  const linear = {
-    postComment: async (c: { issueId: string; key: string; body: string }) => {
-      posted.push(c);
-      conversation.agentComments.push({ id: commentIdFor(c.key), createdAt: "2026-10-16T00:00:00.000Z", body: c.body });
-    },
-  };
-  await postAdoptions(situation, workerLogin, linear, () => {});
-  await postAdoptions(situation, workerLogin, linear, () => {});
-  expect(posted.map((p) => p.key)).toEqual([`adopted:i1:${repo}#3`]);
-  expect(posted[0]?.body).toContain(`[${repo}#3](https://github.com/${repo}/pull/3), which grok[bot] opened`);
+  p.github.branches = async () => ["main", "grok/unf-1", "sergeant/unf-1-own", "dev/unf-10-other", "xunf-1"];
+  p.runner.start = async (spec) => void events.push(`start ${spec.role}`);
+  // #3 another agent's PR linked to the issue; #4 the worker App's own.
+  const facts = { ...situation, runs: [], pullRequests: [linkedPr(3, "grok[bot]"), linkedPr(4, p.workerLogin)] };
+
+  expect(await execute(start, facts, p)).toMatchObject({ status: "done" });
+  expect(await execute(start, facts, p)).toMatchObject({ status: "done" });
+  expect(events).toHaveLength(3);
+  expect(events[0]).toMatch(/^comment: Sergeant took over /);
+  expect(events[0]).toContain(`[${pr.repo}#3](https://github.com/${pr.repo}/pull/3), which grok[bot] opened`);
+  expect(events[0]).toContain(`branch \`grok/unf-1\` in ${pr.repo}`);
+  expect(events[0]).not.toMatch(/#4|unf-10|xunf|unf-1-own/);
+  expect(events.slice(1)).toEqual(["start worker", "start worker"]);
+});
+
+test("a worker start with nothing someone else started posts no takeover comment", async () => {
+  const { p, started } = ports();
+  const posted: string[] = [];
+  p.linear.postComment = async ({ key }) => void posted.push(key);
+  p.github.branches = async () => ["main", "sergeant/unf-1-own", "grok/unf-12"];
+  expect(await execute(start, { ...situation, runs: [] }, p)).toMatchObject({ status: "done" });
+  expect([posted, started.length]).toEqual([[], 1]);
 });
