@@ -109,3 +109,52 @@ export function checkSend(action: Extract<ProposedAction, { kind: "send_run" }>,
   if (run.status !== "running") return deny("S1", `${run.runId} is ${run.status}`);
   return allow;
 }
+
+/**
+ * TECH-6166: what `update_description`'s passages do to `description`. Each `old` must appear in it
+ * exactly once, apart from the others, so a passage never lands somewhere the model did not mean
+ * (`apply`, with the new text). An edit already made, every `old` gone and every `new` there once, is
+ * `applied`: a retry after its note failed posts only the note. Anything else is `invalid`.
+ */
+export function planDescriptionEdit(
+  description: string,
+  edits: { old: string; new: string }[],
+): { status: "apply"; description: string } | { status: "applied" } | { status: "invalid"; reason: string } {
+  const count = (passage: string) => description.split(passage).length - 1;
+  if (edits.every((e) => count(e.old) === 0 && (e.new === "" || count(e.new) === 1))) return { status: "applied" };
+  const at = edits.map((e) => ({ ...e, start: description.indexOf(e.old) }));
+  for (const e of at) {
+    if (e.old === e.new) return { status: "invalid", reason: "a passage's new text is its old text" };
+    if (count(e.old) !== 1) return { status: "invalid", reason: `"${e.old.slice(0, 80)}" appears ${count(e.old)} times in the description, not exactly once` };
+  }
+  at.sort((a, b) => a.start - b.start);
+  if (at.some((e, i) => i > 0 && e.start < at[i - 1]!.start + at[i - 1]!.old.length)) return { status: "invalid", reason: "two passages overlap" };
+  let next = description;
+  for (const e of at.reverse()) next = next.slice(0, e.start) + e.new + next.slice(e.start + e.old.length);
+  return { status: "apply", description: next };
+}
+
+/**
+ * TECH-6166: may Sergeant edit the issue's description because a human comment changed the scope?
+ * Only while the issue is delegated to Sergeant and not stopped (A1, A2), on the conversation the turn
+ * read, human feedback on its PRs included, so a human's edit or comment since is never overwritten and
+ * the next turn reads it (U1), with a
+ * note in a thread that is a human's comment on this issue when one is named (U2), and only for passages
+ * that each appear exactly once in the current description, or an edit already made (U3). Whether the
+ * comment changed the scope is reasoning's judgment, never this check's.
+ */
+export function checkDescriptionEdit(
+  action: Extract<ProposedAction, { kind: "update_description" }>,
+  /** `live` and `liveRevision` come from live Linear and PR reads made for this edit. */
+  facts: { live: Conversation; agentUserId: string; turnRevision: string; liveRevision: string },
+): GateVerdict {
+  const active = checkLive(facts.live.issue, facts.agentUserId);
+  if (!active.allowed) return active;
+  if (facts.liveRevision !== facts.turnRevision) return deny("U1", "the conversation changed since this turn's Situation Report; the next turn reads it");
+  if (action.commentId && !facts.live.humanComments.some((c) => c.id === action.commentId)) {
+    return deny("U2", `${action.commentId} is not a human comment on ${facts.live.issue.identifier}`);
+  }
+  const plan = planDescriptionEdit(facts.live.issue.description, action.edits);
+  if (plan.status === "invalid") return deny("U3", plan.reason);
+  return allow;
+}

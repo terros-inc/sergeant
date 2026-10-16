@@ -50,7 +50,7 @@ export function conversationReader({ request, sergeantUsers, log }: Omit<Followu
       a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
     const humanComments = comments.flatMap((item) => {
       const author = humanAuthor(item);
-      return author ? [{ id: item.id, author, createdAt: item.createdAt, updatedAt: item.updatedAt, body: item.body }] : [];
+      return author ? [{ id: item.id, author, createdAt: item.createdAt, updatedAt: item.updatedAt, body: item.body, ...(item.parentId && { parentId: item.parentId }) }] : [];
     });
     const agentComments = comments
       .filter((item) => !humanAuthor(item))

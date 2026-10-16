@@ -20,10 +20,11 @@ export const CheckSummary = z.object({
 export type CheckSummary = z.infer<typeof CheckSummary>;
 
 /**
- * One piece of human (non-bot) feedback on a PR (TECH-4987): a submitted review, an inline review
- * comment, or a comment on the PR's conversation. Humans' feedback outranks Sergeant's own reviewer.
+ * One piece of feedback on a PR: a submitted review, an inline review comment, or a comment on the PR's
+ * conversation. A human's (TECH-4987) is direction and outranks Sergeant's own reviewer; a bot's
+ * (TECH-6166: a review bot, the worker's own reply) is a finding or context, never steering.
  */
-export const HumanPullRequestFeedback = z.object({
+export const PullRequestFeedback = z.object({
   /** `review:<id>`, `review_comment:<id>`, or `comment:<id>`: unique within the PR. */
   id: z.string().min(1),
   kind: z.enum(["review", "review_comment", "comment"]),
@@ -45,8 +46,13 @@ export const HumanPullRequestFeedback = z.object({
    * has a role in the repository. Absent where a source does not know it.
    */
   association: z.string().optional(),
+  /** TECH-6166: the inline review comment (`review_comment:<id>`) whose thread this one replies in. */
+  inReplyTo: z.string().min(1).optional(),
 });
-export type HumanPullRequestFeedback = z.infer<typeof HumanPullRequestFeedback>;
+export type PullRequestFeedback = z.infer<typeof PullRequestFeedback>;
+/** Feedback whose author is a human, not a bot or an App. */
+export const HumanPullRequestFeedback = PullRequestFeedback;
+export type HumanPullRequestFeedback = PullRequestFeedback;
 
 /**
  * GitHub's `mergeable_state` (TECH-5013). `unknown` while GitHub is still computing it, and for any
@@ -83,6 +89,11 @@ export const PullRequestFacts = z.object({
   checks: CheckSummary,
   /** Every human review and comment on the PR, oldest first; never a bot's (Sergeant's own approval included). */
   humanFeedback: z.array(HumanPullRequestFeedback),
+  /**
+   * TECH-6166: every bot's review and comment on the PR, oldest first, the worker's own replies
+   * included: findings to answer, never steering. Absent where a source does not read them.
+   */
+  botFeedback: z.array(PullRequestFeedback).optional(),
 });
 export type PullRequestFacts = z.infer<typeof PullRequestFacts>;
 

@@ -21,12 +21,15 @@ import {
   delegatedPage,
   type DelegatedIssue,
   delegatedQuery,
+  issuePage,
   issueProgress,
   issueProgressShape,
+  issueQuery,
   issueWorkflow,
   issueWorkflowShape,
   moveState,
   resolveComment,
+  setDescription,
   usersQuery,
   viewerQuery,
 } from "./queries.ts";
@@ -71,6 +74,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   undelegate(issueId: string): Promise<void>;
   moveIssueToTodo(issueId: string): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
   closeIssue: NonNullable<LinearPort["closeIssue"]>;
+  updateDescription: NonNullable<LinearPort["updateDescription"]>;
   addLabel: NonNullable<LinearPort["addLabel"]>;
   findFollowupIssue: NonNullable<LinearPort["findFollowupIssue"]>;
   recordBlockedBy: NonNullable<LinearPort["recordBlockedBy"]>;
@@ -276,6 +280,16 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
       const { issue } = await request(issueProgress, { id: issueId }, issueProgressShape);
       if (!issue) throw new Error(`Linear issue not found: ${issueId}`);
       return { stateType: issue.state.type, completedAt: issue.completedAt };
+    },
+
+    async updateDescription(issueId, { from, to }) {
+      // The conversation's own issue query (its first page of comments), read just before the write.
+      const { issue } = await request(issueQuery, { id: issueId, after: null }, z.object({ issue: issuePage.nullable() }));
+      if (!issue) throw new Error(`Linear issue not found: ${issueId}`);
+      if ((issue.description ?? "") !== from) return { updated: false };
+      const { issueUpdate } = await request(setDescription, { id: issueId, description: to }, z.object({ issueUpdate: z.object({ success: z.boolean() }) }));
+      if (!issueUpdate.success) throw new Error("Linear issueUpdate did not succeed");
+      return { updated: true };
     },
 
     async undelegate(issueId) {

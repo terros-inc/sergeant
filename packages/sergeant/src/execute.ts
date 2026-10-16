@@ -25,6 +25,7 @@ import { handToHuman } from "./human-merge.ts";
 import type { ActionOutcome, Ports } from "./execute-types.ts";
 import { accountQuestion, notOwned } from "./owner.ts";
 import { questionKey } from "./question.ts";
+import { updateDescription } from "./update-description.ts";
 import { writtenAgainst } from "./written-against.ts";
 
 export { askHuman } from "./ask-human.ts";
@@ -311,6 +312,9 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
         const { created } = await ports.linear.recordBlockedBy({ blocked: action.blocked, blockedBy: action.blockedBy });
         return { action, status: "done", result: { linked: true, created } };
       }
+      case "update_description":
+        // TECH-6166 (update-description.ts): a human comment changed the scope, so the description follows it.
+        return await updateDescription(action, situation, ports);
     }
   } catch (e) {
     return { action, status: "failed", error: (e as Error).message };

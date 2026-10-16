@@ -28,6 +28,8 @@ export type Ports = {
   agentUserId: string;
   /** The worker App's GitHub login: Sergeant reviews and merges only PRs it opened (G3, M2). */
   workerLogin: string;
+  /** The control-plane App's GitHub login: Sergeant's own PR comments, which wake no turn (TECH-6166). */
+  controlPlaneLogin?: string;
   /**
    * Called with a run's id before the runner is asked to start it. The loop saves the id here, so a
    * crash between the start and the loop's save still leaves a run it can cancel (UNF-728). With it,
@@ -68,6 +70,8 @@ export type ActionOutcome =
       merged?: { pr: PullRequestFacts; mergedSha: string };
       /** The follow-up issue filed or already on record under the action's key. */
       followup?: FiledFollowup;
+      /** The issue description an `update_description` wrote: later runs in the turn get it (TECH-6166). */
+      description?: string;
     }
   | {
       action: ProposedAction;
@@ -85,4 +89,6 @@ export type ActionOutcome =
       handoffStep?: HumanHandoffStep;
       /** A question Linear did not accept: the loop asks it again every poll until it does. */
       unposted?: Extract<ProposedAction, { kind: "ask_human" }>;
+      /** The description an `update_description` wrote before its note failed: it is in Linear all the same. */
+      description?: string;
     };

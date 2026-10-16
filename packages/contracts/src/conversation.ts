@@ -18,6 +18,8 @@ export const HumanComment = z.object({
   createdAt: Instant,
   updatedAt: Instant,
   body: z.string(),
+  /** The thread's top comment when this is a reply (TECH-6166: where a note about it is posted). */
+  parentId: z.string().min(1).optional(),
 });
 export type HumanComment = z.infer<typeof HumanComment>;
 

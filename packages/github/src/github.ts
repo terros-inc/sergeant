@@ -1,6 +1,6 @@
 import { protectedCiFiles, PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
 import { z } from "zod";
-import { hasComment, readHumanFeedback } from "./pr-feedback.ts";
+import { hasComment, readFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 import { handToHuman } from "./hand-to-human.ts";
 import { rateLimiter } from "./rate-limit.ts";
@@ -78,7 +78,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
   // count against the rate limit) answers with that response's body.
   const conditional = new Map<string, { etag: string; body: unknown }>();
   const unreadableProtection = new Map<string, number>();
-  const feedbackMemo = new Map<string, { headSha: string; updatedAt: string; at: number; feedback: Awaited<ReturnType<typeof readHumanFeedback>> }>();
+  const feedbackMemo = new Map<string, { headSha: string; updatedAt: string; at: number; feedback: Awaited<ReturnType<typeof readFeedback>> }>();
   // TECH-6165: how often a webhook has dropped each PR's memo, so a read it overtook remembers nothing.
   const feedbackCleared = new Map<string, number>();
   const prKey = (repo: string, number: number) => `${repo.toLowerCase()}#${number}`;
@@ -241,13 +241,13 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const memo = feedbackMemo.get(key);
       const fresh = memo && live.updated_at && memo.headSha === headSha && memo.updatedAt === live.updated_at && now() - memo.at < FEEDBACK_MEMO_MS;
       const cleared = feedbackCleared.get(key);
-      const [observed, declared, humanFeedback, changedFiles] = await Promise.all([
+      const [observed, declared, feedback, changedFiles] = await Promise.all([
         readObservedChecks(repo, headSha),
         readRequiredChecks(repo, live.base.ref),
-        fresh ? memo.feedback : readHumanFeedback((path) => request(path), repo, number),
+        fresh ? memo.feedback : readFeedback((path) => request(path), repo, number),
         readChangedFiles(repo, number),
       ]);
-      if (!fresh && live.updated_at && feedbackCleared.get(key) === cleared) feedbackMemo.set(key, { headSha, updatedAt: live.updated_at, at: now(), feedback: humanFeedback });
+      if (!fresh && live.updated_at && feedbackCleared.get(key) === cleared) feedbackMemo.set(key, { headSha, updatedAt: live.updated_at, at: now(), feedback });
       // Only the base branch's declared required checks count; one that never reported is
       // `missing`. With none declared the list is empty and M5 refuses the merge, unless this
       // repository explicitly opted into the observed-checks fallback.
@@ -280,7 +280,8 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         mergeable: live.mergeable,
         mergeableState: live.mergeable_state,
         checks: { sha: headSha, required },
-        humanFeedback,
+        humanFeedback: feedback.human,
+        botFeedback: feedback.bot,
       });
     },
 
