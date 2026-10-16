@@ -190,7 +190,8 @@ thresholds as written there, applied in order, the first match deciding:
 - **Rule 0, park.** A task only waiting on a human posts nothing. This is the existing human wait, not
   a separate check: an open question holds the task before the budget is read, and a merge handed to a
   human or a re-review Sergeant asked for (TECH-5218), including the TECH-5913 escalation of a green PR
-  blocked on a required human review, parks quietly below.
+  blocked on a required human review, parks quietly below. A wait uses none of the window (below), so
+  only a window the work before the wait used up gets here, and it neither asks nor logs it.
 - **Rule 1, recommend stop.** Three or more fix cycles in the window (a worker run after a review that
   requested changes); the same blocking finding back after two fix cycles (the same `location`); two or
   more restarts or steers of one run with no report from any attempt; spend at 80% of the cap with no PR
@@ -217,18 +218,33 @@ itself. `GET /v1/stops` and `sgt stops` report, per rule and call, the questions
 kind, and how many followed the recommendation, the data a later task needs to authorize automatic
 extension for rule 2.
 
-A human's answer to any of Sergeant's questions, this one included, gives the task a fresh budget
-window (TECH-5059): from the answer, with zero spend and the installation's current budget. Its wall
-time runs from the task's first turn or run after the answer, so a task that gave up its task slot and
-queues for one in the usual order does not spend the window in the queue (TECH-6127). A human review
-or inline review comment on the task's PR gives a fresh window too, from that moment; after Sergeant escalates a review, an ordinary
-PR comment or a human comment on the issue does too (TECH-5218, TECH-5913). The task's unblocking—its
-last open "blocked by" issue completing or canceling, or that
-relation removed, from the poll that sees it (TECH-5803). Waiting on a human PR action is a human wait like a question: while the only thing left is
+**A window counts only active time (TECH-6165)**: the time a worker or reviewer run or a planner turn
+is running in it, up to the window's `wallMinutes`. Waiting on a human, on CI, or for a task slot never
+counts, so no wait runs a window out. The loop starts the clock when it sees a run running (or one whose
+status it cannot read) or starts a turn, and stops it when none is, keeping the time counted so far in
+`state.json` (`budget.activeMs`, and `activeSince` while the clock runs). Spend counts every finished run
+and turn of the window as before, the limit on runaway spending.
+
+**Any human direction gives the task a fresh window**, with zero spend and the installation's current
+budget, however exhausted the old one was, and wakes a turn (TECH-5059, TECH-5218, TECH-6165): a human's
+answer to any of Sergeant's questions, this one included, or any other human comment on the issue; a
+human's review, inline review comment, or comment on the task's PRs, even while a Sergeant question is
+open; an edit to the issue's title or description; and a merge or close of a PR Sergeant handed to a
+human to merge or re-review. A comment or review opens it from its own time; an edit, a merge or a close,
+which Linear and GitHub give no time for, from the poll that sees it. Each window has a number,
+`budget.windowSeq` in `state.json`, 0 for the task's first and one more for each window opened; the
+window's budget question is keyed by the task's start and that number, however the window opened, and a
+task saved before it had one is in window 0. A window saved before active time was kept counts the wall
+time it has had as used.
+A comment a person's assistant posts through that person's own account (the Linear MCP, `gh`) is that
+person's. A bot's or app's never opens one: a review bot that comments on every push would otherwise keep
+a task going forever. Linear app users and integrations are never human, the GitHub adapter reads no App
+account's feedback, and Sergeant's own comments are its own. So does the task's unblocking—its last open
+"blocked by" issue completing or canceling, or that relation removed, from the poll that sees it
+(TECH-5803). Waiting on a human PR action is a human wait like a question: while the only thing left is
 a human's merge of a PR Sergeant said is ready for a human to merge (a required review it cannot give,
-such as a code owner's) or a human's re-review it asked for, an exhausted window asks no budget
-question and takes no turn; human feedback opens a fresh window, and the merge ends the task. An
-extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
+such as a code owner's) or a human's re-review it asked for, the task takes no turn and posts nothing,
+whatever its window. An extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
 K1–K4, and `sgt task grant` in 03 §7 and 11). A reply that accepts the work as it is ends the task instead (TECH-5118): reasoning
 proposes `accept_as_is`, allowed only after a human replied to the budget question in the current budget window
 (TECH-5137: a reply from before a re-trigger never ends the fresh task), and Sergeant asks

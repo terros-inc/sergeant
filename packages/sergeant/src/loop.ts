@@ -6,7 +6,7 @@ import type { Reasoner } from "@terros/sergeant-reasoning";
 import { driveMerged, exists, mergedOf } from "./after-merge.ts";
 import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
-import { budgetStatus, DEFAULT_BUDGET, windowFor } from "./budget.ts";
+import { budgetStatus, clockActive, DEFAULT_BUDGET, windowFor } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import { performCiReruns } from "./ci-reruns.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
@@ -16,12 +16,12 @@ import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
-import { checkHolds, checkStop, holdForBudget, openReviewWindow, type PollContext } from "./poll-checks.ts";
+import { checkHolds, checkStop, holdForBudget, openDirectionWindow, type PollContext } from "./poll-checks.ts";
 import { describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, unsettledMerges, waitMs } from "./poll.ts";
 import { awaitedHumanPrAction } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
-import { answerTimes, latestAnswer, resolveAnswered } from "./question.ts";
+import { latestAnswer, resolveAnswered } from "./question.ts";
 import { recoverReports } from "./report-recovery.ts";
 import { recordReply } from "./stop-ledger.ts";
 import { postRereviewRequests } from "./rereview.ts";
@@ -129,8 +129,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     recordReviewFacts(runs, state, { issueId: opts.issueId, auditFollowups: files.auditFollowups, reviews: files.reviews, log, save });
 
 
-  const budgetOf = (runs: RunRecord[], unknownRuns: number, answers?: string[]) =>
-    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), unblockedAt: state.unblockedAt, answers, recentTurns: state.recentTurns, starts: state.starts, startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
+  const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
+    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), startedAt: state.startedAt, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
 
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };
@@ -171,6 +171,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const spent = (turnCostUsd: number) => ({ runs, unknownRuns: unknown.length, turnCostUsd, startedAt: state.startedAt });
     const turnsSoFar = () => taskTurnCost(files.turns, state.startedAt);
     const live = [...runs.filter((r) => r.status === "running").map((r) => r.runId), ...unknown.map((u) => u.unknown)];
+    // TECH-6165: the window's clock runs while a run does (one whose status is unreadable included).
+    if (clockActive(state.budget, live.length > 0)) await save();
     const conversation = await deps.linear.readConversation(opts.issueId);
     // What a webhook names to end this loop's wait (webhooks.ts): the issue, its PRs, and their heads.
     const watch = (prs: { repo: string; number: number; headSha?: string }[]) => {
@@ -199,7 +201,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     await resolveDue(conversation);
-    const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length, answerTimes(conversation)) }, configured, ctx);
+    const prDirectionAfter = async (at: string) =>
+      (await prPolls.read(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps)).some((p) => p.humanFeedback.some((f) => Date.parse(f.createdAt) > Date.parse(at)));
+    const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length), prDirectionAfter }, configured, ctx);
     if (holds.hold) {
       if (holds.hold === "question") unposted = undefined;
       // An open question waits on a human's reply, which Linear's webhook announces.
@@ -244,17 +248,16 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     await postHandoffs(conversation.issue.id, state.refusedMerges, deps.linear, log, save);
     await postRereviewRequests(situation, deps, deps.linear, log);
-    // Human feedback on the PR, or an issue comment after the escalation, resumes the task in a fresh
-    // window (TECH-5218, TECH-5913). The next pass rereads every fact under that window.
-    if (await openReviewWindow(situation, configured, ctx)) continue;
+    // Any human direction on the issue or the PR resumes the task in a fresh window (TECH-5218, TECH-5913,
+    // TECH-6165). The next pass rereads every fact under that window.
+    if (await openDirectionWindow(situation, configured, ctx)) continue;
     const retryDue = dueMergeRetries(state, retryGraceMs);
-    // TECH-5218: a window whose wall time ran out while nothing changed but Sergeant waiting on a human's
-    // merge or re-review is a human wait, like a question: no budget question and no turn. The human's
-    // review opens a fresh window (above); their merge is the task's end. Anything else that changes
-    // asks the budget question as before.
-    // Quiet parking is only for a stable wait with no active or unreadable run. A changed PR (red,
-    // behind, conflicted, or pushed) and work still in flight remain ordinary active work and ask the
-    // existing budget question when exhausted.
+    // TECH-5218: a task whose only work is waiting on a human's merge or re-review is a human wait, like a
+    // question: it takes no turn and posts nothing until something changes, and (TECH-6165) uses none of
+    // its window, which counts only active time. A human's review, comment, merge or close opens a fresh
+    // window (above); anything else that changes resumes it in the window it has.
+    // The wait is only a stable one with no active or unreadable run. A changed PR (red, behind,
+    // conflicted, or pushed) and work still in flight remain ordinary active work.
     const stable = state.lastFingerprint === undefined || fingerprint === state.lastFingerprint;
     const currentWindowCanceledWork = runs.some((r) => r.status === "canceled" && !state.budget.priorRuns.includes(r.runId));
     const humanWait = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable ? awaitedHumanPrAction(situation) : undefined;
@@ -307,6 +310,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const earlierTurns = await turnsSoFar();
     // A close posts the task's cost with its evidence, this turn's included (execute.ts).
     const costOf = (turnCostUsd: number) => costTotal({ ...spent(earlierTurns + turnCostUsd), at: new Date().toISOString() });
+    // TECH-6165: a planner turn is active time, as is any run it starts.
+    clockActive(state.budget, true);
+    await save();
     const { turn, outcomes } = await takeTurn(situation, { ...ports, costOf });
     prPolls.forget();
     const at = new Date().toISOString();
@@ -336,6 +342,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const close = outcomes.flatMap((o) => (o.status === "done" && o.action.kind === "close_issue" ? [o.action] : []))[0];
     if (close) state.accepted = { at, close: close.state, comment: closedComment(close) };
     recordMergeRetries(state, outcomes, situation, fingerprint, retryDue);
+    clockActive(state.budget, running.length > 0 || outcomes.some((o) => o.status === "done" && o.started !== undefined));
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
     // TECH-5227: each finished review round not yet told gets its own short comment (progress.ts), with

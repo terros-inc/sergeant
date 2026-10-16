@@ -82,13 +82,6 @@ export function latestAnswer(conversation: Conversation): HumanComment | undefin
   return conversation.humanComments.filter((c) => at(c) > at(asked)).sort((a, b) => at(a) - at(b))[0];
 }
 
-/** TECH-6127: the time of every human answer to one of Sergeant's questions, each the first comment after it. */
-export function answerTimes(conversation: Conversation): string[] {
-  const questions = conversation.agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING));
-  const replies = conversation.humanComments.toSorted((a, b) => at(a) - at(b));
-  return questions.flatMap((q) => replies.find((c) => at(c) > at(q))?.createdAt ?? []);
-}
-
 /** Sergeant's latest question comment, its budget question included. */
 export function latestQuestion(conversation: Conversation): AgentComment | undefined {
   return conversation.agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING)).sort((a, b) => at(b) - at(a))[0];

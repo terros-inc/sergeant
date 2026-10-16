@@ -19,7 +19,7 @@ const blocked = (live: Conversation, blockedBy: string[]): Conversation => ({ ..
 // Started four hours ago with a two-hour window, and its $25 already spent: exhausted both ways, and
 // the window's budget question asked and unanswered.
 const startedAt = ago(240);
-const budgetAsked = { id: commentIdFor(budgetQuestionKey(issue.id, startedAt)), createdAt: ago(120), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted.` };
+const budgetAsked = { id: commentIdFor(budgetQuestionKey(issue.id, startedAt, 0)), createdAt: ago(120), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted.` };
 
 async function exhaustedWhileBlocked(blockersAt: (poll: number) => string[] | Promise<string[]>) {
   const started: string[] = [];
@@ -48,10 +48,9 @@ test("an exhausted task whose last blocker goes resumes in a fresh window, with 
   expect(posted).toEqual([]);
   expect(turns).toBe(1);
   expect(started).toHaveLength(1);
-  const state = (await saved()) as Awaited<ReturnType<typeof saved>> & { blockedBy: string[]; unblockedAt: string[] };
+  const state = (await saved()) as Awaited<ReturnType<typeof saved>> & { blockedBy: string[] };
   expect(state.blockedBy).toEqual([]);
-  expect(state.unblockedAt).toHaveLength(1);
-  expect(state.budget.since).toBe(state.unblockedAt[0]);
+  expect(state.budget.windowSeq).toBe(1);
   expect(state.budget.window).toEqual({ wallMinutes: 120, costUsd: 25 });
   expect(state.budget.priorRuns).toEqual(["run_w"]);
   expect(Date.parse(state.budget.since ?? "")).toBeGreaterThan(Date.parse(startedAt));
@@ -85,9 +84,9 @@ test("an exhausted task with more than 50 relations resumes once every real bloc
   expect(posted).toEqual([]);
   expect(turns).toBe(1);
   expect(started).toHaveLength(1);
-  const state = (await saved()) as Awaited<ReturnType<typeof saved>> & { unblockedAt: string[] };
-  expect(state.unblockedAt).toHaveLength(1);
-  expect(state.budget.since).toBe(state.unblockedAt[0]);
+  const state = await saved();
+  expect(state.budget.windowSeq).toBe(1);
+  expect(state.budget.since).toBeDefined();
 });
 
 test("one blocker of two going, or a task never seen blocked, opens no window", async () => {
@@ -101,15 +100,20 @@ test("one blocker of two going, or a task never seen blocked, opens no window", 
   expect((await saved()).budget.since).toBeUndefined();
 });
 
-// A budget question asked in an unblock's window is keyed by that window's start, which no human comment
-// or review gives, so it is known from the unblocks the task recorded: a reply to it can accept the work.
-test("a reply to a budget question asked in an unblock's window is a reply to the budget question", () => {
-  const unblockedAt = ago(150);
-  const asked = { id: commentIdFor(budgetQuestionKey(issue.id, unblockedAt)), createdAt: ago(30), body: `${QUESTION_HEADING}\n\nContinue?` };
+// TECH-6165: a budget question is keyed by its task's start and its window's number (`windowSeq`), so
+// one asked in any window, however it opened (an unblock, an edit, a merge: none with a time of its own),
+// is known without a list of window starts; a task saved before `windowSeq` is in window 0.
+test("a reply to a budget question asked in any of this task's windows is a reply to the budget question", () => {
   const replyAt = ago(1);
-  const conversation: Conversation = { issue, agentComments: [asked], humanComments: [human("c1", replyAt, "Accept it as it is.")] };
+  const reply = (key: string) => ({
+    conversation: { issue, agentComments: [{ id: commentIdFor(key), createdAt: ago(30), body: `${QUESTION_HEADING}\n\nContinue?` }], humanComments: [human("c1", replyAt, "Accept it as it is.")] },
+  });
   // The reply has opened a window of its own by the time a turn reads it.
-  const situation = { conversation, pullRequests: [], refusedMerges: [] };
-  expect(answeredBudgetQuestion(situation, { taskStart: startedAt, windowStart: replyAt, unblockedAt: [unblockedAt] })).toBe(true);
-  expect(answeredBudgetQuestion(situation, { taskStart: startedAt, windowStart: replyAt })).toBe(false);
+  expect(answeredBudgetQuestion(reply(budgetQuestionKey(issue.id, startedAt, 1)), { taskStart: startedAt, windowStart: replyAt, windowSeq: 2 })).toBe(true);
+  expect(answeredBudgetQuestion(reply(budgetQuestionKey(issue.id, startedAt, 2)), { taskStart: startedAt, windowStart: replyAt, windowSeq: 1 })).toBe(false);
+  // An earlier task's, of the same window number, is not this one's (TECH-5145).
+  expect(answeredBudgetQuestion(reply(budgetQuestionKey(issue.id, ago(720), 1)), { taskStart: startedAt, windowStart: replyAt, windowSeq: 2 })).toBe(false);
+  // No `windowSeq`, saved before it: window 0.
+  expect(answeredBudgetQuestion(reply(budgetQuestionKey(issue.id, startedAt, 0)), { taskStart: startedAt, windowStart: replyAt })).toBe(true);
+  expect(answeredBudgetQuestion(reply(budgetQuestionKey(issue.id, startedAt, 1)), { taskStart: startedAt, windowStart: replyAt })).toBe(false);
 });

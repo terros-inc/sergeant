@@ -22,7 +22,7 @@ test("a repository's budget replaces each field it sets, and the largest of each
   expect(windowFor(installation, [repo, ios], override)).toEqual({ wallMinutes: 240, costUsd: 60 });
 });
 
-// A task three hours into its window, its worker running until the second poll: past the installation's
+// A task three hours into its window, its worker running all that time (TECH-6165: active time) and until the second poll: past the installation's
 // 120 minutes, within the repository's 240.
 async function threeHoursIn(repositoryBudget?: (r: string) => { wallMinutes?: number; costUsd?: number } | undefined) {
   const threeHoursAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
@@ -31,7 +31,7 @@ async function threeHoursIn(repositoryBudget?: (r: string) => { wallMinutes?: nu
   let polls = 0;
   const windows: BudgetStatus[] = [];
   const outcome = await scenario({
-    state: { startedAt: threeHoursAgo, runIds: ["run_w"], repositories: [repo] },
+    state: { startedAt: threeHoursAgo, runIds: ["run_w"], repositories: [repo], budget: { activeMs: 0, activeSince: threeHoursAgo } },
     runner: { start: async () => {}, status: async () => w, cancel: async () => void (cancels++, (w = worker("canceled"))) },
     reasoner: async (situation) => (windows.push(situation.budget), turnOf([])),
     onPoll: async (poll, live) => {
@@ -43,18 +43,21 @@ async function threeHoursIn(repositoryBudget?: (r: string) => { wallMinutes?: nu
   return { ...outcome, cancels, windows };
 }
 
-test("the wall-time deadline is the repository's: its worker is kept, and the task goes on, past the installation's window", async () => {
+test("the time limit is the repository's: its worker is kept, and the task goes on, past the installation's window", async () => {
   const { cancels, posted, windows } = await threeHoursIn(override);
   expect(cancels).toBe(0);
   expect(posted).toEqual([]);
   expect(windows[0]?.window).toEqual({ wallMinutes: 240, costUsd: 25 });
-  expect(Date.parse(windows[0]?.wallDeadline ?? "") - Date.parse(windows[0]?.windowStart ?? "")).toBe(240 * 60_000);
+  // Three hours of the window's 240 minutes were active: it runs out an hour after the turn, give or take the test's own time.
+  const deadline = Date.parse(windows[0]?.wallDeadline ?? "") - Date.parse(windows[0]?.windowStart ?? "");
+  expect(deadline).toBeGreaterThanOrEqual(240 * 60_000);
+  expect(deadline).toBeLessThan(240 * 60_000 + 5_000);
 });
 
 test("without the repository's budget the same task is stopped at the installation's window", async () => {
   const { cancels, posted, windows } = await threeHoursIn();
   expect(cancels).toBe(1);
-  expect(posted[0]).toMatch(/budget is exhausted \(wall time exhausted at /);
+  expect(posted[0]).toMatch(/budget is exhausted \(active time exhausted \(/);
   expect(windows).toEqual([]);
 });
 

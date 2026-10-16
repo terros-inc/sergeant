@@ -8,7 +8,8 @@ const comment = z.object({
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
   parentId: z.string().nullable(),
-  user: actor.nullable(),
+  /** TECH-6165: `app` marks an app's user (a Linear agent or integration), whose comments are never human. */
+  user: actor.extend({ app: z.boolean().nullish() }).nullable(),
   externalUser: actor.nullable(),
   botActor: z.object({ id: z.string().nullable(), type: z.string(), name: z.string().nullable() }).nullable(),
 });
@@ -55,7 +56,7 @@ export const issueQuery = `
       comments(first: 50, after: $after) {
         nodes {
           id body createdAt updatedAt parentId
-          user { id name }
+          user { id name app }
           externalUser { id name }
           botActor { id type name }
         }

@@ -14,7 +14,7 @@ afterEach(cleanup);
 test("a report-less review and a human's reply to the budget question: a turn reads the reply, no retry starts first", async () => {
   const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
   const asked = new Date(Date.now() - 60_000).toISOString();
-  const question = { id: commentIdFor(budgetQuestionKey(issue.id, startedAt)), createdAt: asked, body: "**Question for you** ... Continue?" };
+  const question = { id: commentIdFor(budgetQuestionKey(issue.id, startedAt, 0)), createdAt: asked, body: "**Question for you** ... Continue?" };
   const reply = human("c1", new Date(Date.parse(asked) + 1_000).toISOString(), "Extend, and look at the retry first.");
   const malformed: RunRecord = { runId: "run_r1", role: "reviewer", status: "succeeded", provider: "p", model: "m", report: null, reportProblem: "malformed", reportError: "✖ Invalid input → at verdict" };
   const started: string[] = [];

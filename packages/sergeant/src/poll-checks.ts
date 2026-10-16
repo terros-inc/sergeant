@@ -2,6 +2,7 @@ import {
   checkBudget,
   checkLive,
   commentIdFor,
+  issueRevision,
   type AgentComment,
   type BudgetStatus,
   type Conversation,
@@ -17,7 +18,7 @@ import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
 import { reassigned, redelegated } from "./owner.ts";
 import { cancelRuns, landedOf, readPullRequests } from "./poll.ts";
-import { reviewWindowFeedback } from "./pr-wait.ts";
+import { endedHandoff, humanDirection } from "./pr-wait.ts";
 import { latestAnswer, noteEdit, openQuestion } from "./question.ts";
 import { stopCase } from "./stop-case.ts";
 import { recordBudgetStop, recordReply, windowTurns } from "./stop-ledger.ts";
@@ -127,7 +128,14 @@ export async function checkStop(conversation: Conversation, runs: RunRecord[], c
  * them, a run whose status is unknown waits, and an open question waits. Returns the hold, if any.
  */
 export async function checkHolds(
-  poll: { conversation: Conversation; live: string[]; unknown: { unknown: string; error: string }[]; budgetOf: () => BudgetStatus },
+  poll: {
+    conversation: Conversation;
+    live: string[];
+    unknown: { unknown: string; error: string }[];
+    budgetOf: () => BudgetStatus;
+    /** TECH-6165: whether a human reviewed or commented on the task's PRs after `at`. */
+    prDirectionAfter?: (at: string) => Promise<boolean>;
+  },
   configured: BudgetWindow,
   ctx: PollContext,
 ): Promise<{ hold: "budget" | "unknown" | "question" } | (BudgetCheck & { hold?: undefined })> {
@@ -145,12 +153,12 @@ export async function checkHolds(
     await save();
     log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
   }
+  await openEditWindow(conversation, configured, ctx);
   await openUnblockWindow(conversation, configured, ctx);
   // The budget question of the current window, if Linear has it: its id is derived from a key, so a
-  // crash between posting it and saving anything loses nothing. The first window's key is the task's
-  // start, so an earlier task's budget question, answered or not, is never this one's (TECH-5145).
-  const windowStart = state.budget.since ?? state.startedAt;
-  const budgetKey = budgetQuestionKey(conversation.issue.id, windowStart);
+  // crash between posting it and saving anything loses nothing. The key names the task's start, so an
+  // earlier task's budget question, answered or not, is never this one's (TECH-5145).
+  const budgetKey = budgetQuestionKey(conversation.issue.id, state.startedAt, state.budget.windowSeq);
   const questionId = commentIdFor(budgetKey);
   const budgetAsked = conversation.agentComments.find((c) => c.id === questionId);
   const budget = poll.budgetOf();
@@ -176,10 +184,11 @@ export async function checkHolds(
     (e: Error) => log(`could not note the edit to ${conversation.issue.identifier}: ${e.message}`),
   );
   // While the question Sergeant asked is unanswered it takes no turn and makes no effect, and no
-  // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts.
-  // The loop also drops any question it still has to post.
+  // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts, and
+  // TECH-6165, a human's review or comment on the task's PR since. The loop also drops any question it
+  // still has to post.
   const question = openQuestion(conversation);
-  if (question) {
+  if (question && !(await poll.prDirectionAfter?.(question.createdAt))) {
     if (live.length === 0) opts.slot?.waiting(Date.parse(question.createdAt));
     log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);
     return { hold: "question" };
@@ -188,10 +197,25 @@ export async function checkHolds(
 }
 
 /**
+ * TECH-6165: a human's edit to the issue's title or description is direction, and opens a fresh window
+ * like an answer: the text differs from what the last turn read (`state.seen`, as for the edit's notice,
+ * question.ts `noteEdit`), and no window has opened since that turn. Linear gives no time for an edit, so
+ * the window opens from the poll that sees it. A Linear app's edit counts too: Linear does not say who edited.
+ */
+async function openEditWindow(conversation: Conversation, configured: BudgetWindow, { state, log, save }: PollContext): Promise<void> {
+  if (!state.seen || !state.lastTurnAt || state.seen.issue === issueRevision(conversation.issue)) return;
+  if (Date.parse(state.budget.since ?? state.startedAt) > Date.parse(state.lastTurnAt)) return;
+  const at = new Date().toISOString();
+  openWindow(state, at, configured);
+  await save();
+  log(`the issue's title or description changed: a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
+}
+
+/**
  * TECH-5803: the task unblocked, its last open blocker completed or canceled or its "blocked by"
  * relation removed, opens a fresh window from the poll that sees it, exactly as an answer does (above),
  * however exhausted the window it replaces. Linear has no time for a removed relation, so the blockers
- * the last poll read are kept in `state.json`, and so is the window's start (budget.ts). A blocker list
+ * the last poll read are kept in `state.json`. A blocker list
  * Linear did not give (absent) changes nothing; one still open, or unread past its page, keeps waiting.
  */
 async function openUnblockWindow(conversation: Conversation, configured: BudgetWindow, { state, log, save }: PollContext): Promise<void> {
@@ -202,26 +226,36 @@ async function openUnblockWindow(conversation: Conversation, configured: BudgetW
   if (before?.length && blockedBy.length === 0) {
     const at = new Date().toISOString();
     openWindow(state, at, configured);
-    state.unblockedAt.push(at);
     log(`unblocked (was waiting on ${before.join(", ")}): a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
   }
   await save();
 }
 
 /**
- * TECH-5218, TECH-5913: human feedback on the task's PR, or an issue comment after Sergeant's review
- * escalation, opens a fresh window exactly as an answer does. Only input newer than the window's start
- * does, so it opens one window once, across restarts too. Returns whether it opened one.
+ * TECH-5218, TECH-5913, TECH-6165: any human direction on the issue or the task's PRs (pr-wait.ts
+ * `humanDirection`) opens a fresh window exactly as an answer does, however exhausted the window it
+ * replaces. Only input newer than the window's start does, so it opens one window once, across restarts
+ * too. So does a merge or close of a PR Sergeant handed to a human since the window opened (`endedHandoff`),
+ * from the poll that sees it, as GitHub's facts give no time for it. Returns whether it opened one.
  */
-export async function openReviewWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
-  const feedback = reviewWindowFeedback(situation)
+export async function openDirectionWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
+  const since = Date.parse(state.budget.since ?? state.startedAt);
+  const direction = humanDirection(situation)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
-  if (!feedback || Date.parse(feedback.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
-  openWindow(state, feedback.createdAt, configured);
+  if (direction && Date.parse(direction.createdAt) > since) {
+    openWindow(state, direction.createdAt, configured);
+    await save();
+    const source = "url" in direction ? `${direction.author} responded on the PR (${direction.url})` : `${direction.author.name} commented on the issue`;
+    log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${direction.createdAt}`);
+    return true;
+  }
+  const ended = endedHandoff(situation);
+  if (!ended || Date.parse(ended.askedAt) <= since) return false;
+  const at = new Date().toISOString();
+  openWindow(state, at, configured);
   await save();
-  const source = "url" in feedback ? `${feedback.author} responded on the PR (${feedback.url})` : `${feedback.author.name} commented on the issue`;
-  log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${feedback.createdAt}`);
+  log(`${ended.pr}, handed to a human, was ${ended.state}: a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
   return true;
 }
 
@@ -252,10 +286,12 @@ export async function holdForBudget(
     }
     return true;
   }
-  // The stop rubric's rule 0: a task only waiting on a human posts nothing (TECH-5218, TECH-5913).
+  // The stop rubric's rule 0: a task only waiting on a human posts nothing (TECH-5218, TECH-5913), and
+  // says nothing of its budget either (TECH-6165). The wait uses none of the window, so this is one the
+  // work before it used up: it does nothing until a human acts, which opens a fresh one.
   if (!exhausted.allowed && humanWait) {
     opts.slot?.waiting(Date.parse(state.lastTurnAt ?? state.startedAt));
-    log(`budget exhausted (${exhausted.reason}), but the task is waiting on ${humanWait}; parking quietly (rubric rule 0)`);
+    log(`waiting on ${humanWait}`);
     return true;
   }
   if (budgetAsked && !conversation.humanComments.some((c) => Date.parse(c.createdAt) > Date.parse(budgetAsked.createdAt))) {

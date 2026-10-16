@@ -23,9 +23,9 @@ const replyTo = (live: Conversation, id: string, body: string): Conversation => 
 
 test("a budget question answered \"Extend\" is resolved after the turn that continues", async () => {
   const threeHoursAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
-  const budgetQuestion = commentIdFor(budgetQuestionKey("i1", threeHoursAgo));
+  const budgetQuestion = commentIdFor(budgetQuestionKey("i1", threeHoursAgo, 0));
   const { resolved, posted } = await scenario({
-    state: { startedAt: threeHoursAgo, runIds: [] },
+    state: { startedAt: threeHoursAgo, runIds: [], budget: { activeMs: 3 * 3_600_000 } },
     runner: { start: async () => {}, status: async () => worker("running"), cancel: async () => {} },
     // Continuing after the answer is a zero-action turn: it did not ask again, so the task has acted.
     reasoner: async () => turnOf([]),

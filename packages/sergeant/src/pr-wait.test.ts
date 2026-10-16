@@ -10,6 +10,7 @@ import { rereviewKey } from "./rereview.ts";
 // TECH-5218: in a repository that needs a human's review, the task's window ran out while Sergeant could
 // only wait on that human, and it asked the budget question for time it never spent. Waiting on a human
 // PR action is a human wait, and the human's review opens a fresh window, exactly as an answer does.
+// TECH-6165: the window counts only active time, so no wait uses any of it.
 
 afterEach(cleanup);
 
@@ -143,7 +144,8 @@ test("a changed PR fingerprint during an exhausted review wait asks the budget q
   const startedAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
   const wait = waits[0]![1](startedAt);
   const { posted } = await scenario({
-    state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges, lastFingerprint: "the-pr-before-it-changed" },
+    // The work before the handoff used the whole window.
+    state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges, lastFingerprint: "the-pr-before-it-changed", budget: { activeMs: 3 * 3_600_000 } },
     conversation: { agentComments: wait.agentComments },
     runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
     reasoner: async () => turnOf([]),
@@ -155,7 +157,7 @@ test("a changed PR fingerprint during an exhausted review wait asks the budget q
   expect(posted[0]).toContain("Continue?");
 });
 
-test("a task waiting on no human PR action still asks the budget question when its window runs out", async () => {
+test("a task with nothing running uses none of its window however long it waits, on a human or not", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   let turns = 0;
   const { posted } = await scenario({
@@ -171,7 +173,7 @@ test("a task waiting on no human PR action still asks the budget question when i
   });
 
   expect(turns).toBe(1);
-  expect(posted).toEqual([expect.stringMatching(/budget is exhausted \(wall time exhausted at /)]);
+  expect(posted).toEqual([]);
 });
 
 test("an accept-as-is reply to a budget question asked in a window a review opened ends the task", async () => {
@@ -179,9 +181,10 @@ test("an accept-as-is reply to a budget question asked in a window a review open
   // the review's time, was answered "Accept as-is". TECH-5118 must know that window's start.
   const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
   const approval = review("captain", "APPROVED", ago(250));
-  const asked = { ...agentComment(budgetQuestionKey(issue.id, approval.createdAt), ago(60)), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted (wall time exhausted). Continue?` };
+  const startedAt = ago(300);
+  const asked = { ...agentComment(budgetQuestionKey(issue.id, startedAt, 1), ago(60)), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted (active time exhausted). Continue?` };
   const { result } = await scenario({
-    state: { startedAt: ago(300), runIds: [], turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: approval.createdAt, priorRuns: [] } },
+    state: { startedAt, runIds: [], turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: approval.createdAt, priorRuns: [], activeMs: 120 * 60_000, windowSeq: 1 } },
     conversation: { agentComments: [asked], humanComments: [human("c1", ago(1), "2")] },
     runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
     reasoner: async () => turnOf([{ kind: "accept_as_is" }]),
@@ -197,9 +200,9 @@ test("an accept-as-is reply is recognized in a window opened by a post-escalatio
   const startedAt = ago(300);
   const wait = waits[0]![1](startedAt);
   const response = prComment("captain", ago(250));
-  const asked = { ...agentComment(budgetQuestionKey(issue.id, response.createdAt), ago(60)), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted (wall time exhausted). Continue?` };
+  const asked = { ...agentComment(budgetQuestionKey(issue.id, startedAt, 1), ago(60)), body: `${QUESTION_HEADING}\n\nSergeant stopped this task: its budget is exhausted (active time exhausted). Continue?` };
   const { result } = await scenario({
-    state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges, turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: response.createdAt, priorRuns: [] } },
+    state: { startedAt, runIds: [], refusedMerges: wait.refusedMerges, turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: response.createdAt, priorRuns: [], activeMs: 120 * 60_000, windowSeq: 1 } },
     conversation: { agentComments: [...wait.agentComments, asked], humanComments: [human("c1", ago(1), "Accept it as it is.")] },
     runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
     reasoner: async () => turnOf([{ kind: "accept_as_is" }]),

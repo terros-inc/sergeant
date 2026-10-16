@@ -38,10 +38,13 @@ export function conversationReader({ request, sergeantUsers, log }: Omit<Followu
       comments.push(...page.comments.nodes);
     }
 
-    // Bots, integrations, and Sergeant's own agents are context (`agentComments`), never human input.
+    // Bots, integrations, apps' users, and Sergeant's own agents are context (`agentComments`), never
+    // human input. TECH-6165: a comment an app posted for a person, through their own account (an
+    // assistant using the Linear MCP, say: Linear names the app as `botActor` and the person as `user`),
+    // is that person's.
     const humanAuthor = (item: (typeof comments)[number]) => {
-      const author = item.botActor ? null : (item.user ?? item.externalUser);
-      return author && !sergeantUsers.has(author.id) ? author : null;
+      const author = item.user ? (item.user.app ? null : item.user) : item.botActor ? null : item.externalUser;
+      return author && !sergeantUsers.has(author.id) ? { id: author.id, name: author.name } : null;
     };
     const byTime = (a: { id: string; createdAt: string }, b: { id: string; createdAt: string }) =>
       a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);

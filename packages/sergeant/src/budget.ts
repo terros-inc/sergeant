@@ -1,14 +1,15 @@
 import { commentIdFor, type BudgetStatus, type ProposedAction, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
-import { reviewWindowFeedback } from "./pr-wait.ts";
 import { latestAnswer, latestQuestion } from "./question.ts";
 import { recommendationLine, type StopCase } from "./stop-case.ts";
 
-// UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). Wall time runs from
-// the window's start, or for an answer's window from when the task first works in it (TECH-6127); spend is the reported cost of the window's finished runs and turns. When either
-// is exhausted, the loop cancels running work through the runner and asks the human, through the
-// ordinary question path (UNF-727), whether to continue. A human's answer to any of Sergeant's
-// questions, that one included, opens a fresh window (TECH-5059): "extend" needs nothing more. A reply
-// to it that accepts the work as it is ends the task instead (TECH-5118, accept_as_is).
+// UNF-728: a task-level budget, the hard boundary against runaway time (00 P7). TECH-6165: its time is
+// active time, the time a worker or reviewer run or a planner turn is running in the window; waiting on a
+// human, CI or a task slot never counts. Spend is the reported cost of the window's finished runs and
+// turns. When either is exhausted, the loop cancels running work through the runner and asks the human,
+// through the ordinary question path (UNF-727), whether to continue. Any human direction opens a fresh
+// window (TECH-5059, TECH-6165, poll-checks.ts): an answer to that question, so "extend" needs nothing
+// more, or any other human comment, review or edit; a bot's never does. A reply to it that accepts the
+// work as it is ends the task instead (TECH-5118, accept_as_is).
 
 export type BudgetWindow = BudgetStatus["window"];
 
@@ -37,34 +38,56 @@ export type TaskBudget = {
   since?: string | undefined;
   /** Runs of earlier windows, which this one does not count. */
   priorRuns: string[];
+  /** TECH-6165: the window's active time already counted, in ms (`clockActive`). */
+  activeMs?: number | undefined;
+  /** TECH-6165: since when a run or turn has been running, while one is; its time counts too. */
+  activeSince?: string | undefined;
+  /** TECH-6165: which window of the task this is, counting from 0 (`openWindow`); absent before any has opened. */
+  windowSeq?: number | undefined;
 };
 
 /**
  * The one way a task gets a fresh budget window: from `at`, with zero spend and `window`, the
- * installation's budget now. A human's answer to one of Sergeant's questions opens one (TECH-5059), as
- * do a human's review of its PR (TECH-5218) and its last blocker going (TECH-5803); so should any other
- * human decision that resets the clock.
+ * installation's budget now, and none of its active time used; work still running counts from now. Any
+ * human direction opens one (TECH-6165, poll-checks.ts): an answer to one of Sergeant's questions
+ * (TECH-5059), any other human comment or review on the issue or its PRs (TECH-5218, TECH-5913), an edit
+ * to the issue's title or description, a merge or close of a PR Sergeant handed to a human; so does its
+ * last blocker going (TECH-5803).
  */
 export function openWindow(state: { turnCostUsd: number; runIds: string[]; budget: TaskBudget }, at: string, window: BudgetWindow): void {
   state.turnCostUsd = 0;
-  state.budget = { window, since: at, priorRuns: [...state.runIds] };
+  const active = state.budget.activeSince !== undefined ? { activeSince: new Date().toISOString() } : {};
+  state.budget = { window, since: at, priorRuns: [...state.runIds], activeMs: 0, ...active, windowSeq: (state.budget.windowSeq ?? 0) + 1 };
 }
 
 /**
- * The budget question's idempotency key: one per task and window, keyed by the window's start (the
- * task's start for its first window), so a restart finds the question already asked from Linear alone
- * and never asks it twice. TECH-5145: the first window's key was `0` for every task, so a re-triggered
- * task's first budget question matched the earlier task's, Linear posted nothing, and the task found
- * that earlier, answered question and never waited for a human.
+ * TECH-6165: starts the window's clock when a run or turn is running (`active`) and stops it, counting
+ * the time, when none is. The loop calls it as it sees runs and around each turn. Returns whether it
+ * changed anything, to save.
  */
-export const budgetQuestionKey = (issueId: string, windowStart: string) => `budget-question:${issueId}:${windowStart}`;
+export function clockActive(budget: TaskBudget, active: boolean, at: number = Date.now()): boolean {
+  if (active === (budget.activeSince !== undefined)) return false;
+  if (active) budget.activeSince = new Date(at).toISOString();
+  else {
+    budget.activeMs = (budget.activeMs ?? 0) + Math.max(0, at - Date.parse(budget.activeSince ?? ""));
+    budget.activeSince = undefined;
+  }
+  return true;
+}
+
+/**
+ * The budget question's idempotency key: one per task and window, keyed by the task's start and the
+ * window's number (TECH-6165, `windowSeq`), so a restart finds the question already asked from Linear
+ * alone and never asks it twice. TECH-5145: the first window's key was `0` for every task, so a
+ * re-triggered task's first budget question matched the earlier task's, Linear posted nothing, and the
+ * task found that earlier, answered question and never waited for a human; the task's start keeps them apart.
+ */
+export const budgetQuestionKey = (issueId: string, taskStart: string, windowSeq: number | undefined) => `budget-question:${issueId}:${taskStart}:${windowSeq ?? 0}`;
 
 /**
  * TECH-5118: whether a human has replied to Sergeant's budget question, the question it asked last (or a
- * clarifying question in that question's thread). Read from the conversation alone, so it survives a
- * restart: a window opens at the task's start, at a later human comment's time, at a later human PR
- * review's time (TECH-5218), or when the task is unblocked (TECH-5803, kept in `state.json` as Linear has no
- * time for a removed relation), so every budget question of this task has the key of one of those times.
+ * clarifying question in that question's thread). Every budget question of this task has the key of one
+ * of its windows so far, 0 to `windowSeq` (TECH-6165), however each opened.
  *
  * TECH-5137: only a reply given in the current window counts. A reply to one of this task's questions
  * opens a window from itself (poll-checks.ts), so it is never older than `windowStart`; a reply from
@@ -74,32 +97,25 @@ export const budgetQuestionKey = (issueId: string, windowStart: string) => `budg
  * earlier task's budget question this task's, whatever was said after it.
  */
 export function answeredBudgetQuestion(
-  situation: Pick<SituationReport, "conversation" | "pullRequests" | "refusedMerges">,
-  budget: Pick<BudgetStatus, "taskStart" | "windowStart" | "unblockedAt">,
+  situation: Pick<SituationReport, "conversation">,
+  budget: Pick<BudgetStatus, "taskStart" | "windowStart" | "windowSeq">,
 ): boolean {
   const { conversation } = situation;
   const asked = latestQuestion(conversation);
   const reply = latestAnswer(conversation);
   if (!asked || !reply || Date.parse(reply.createdAt) < Date.parse(budget.windowStart)) return false;
-  const { issue, humanComments } = conversation;
   const thread = asked.parentId ?? asked.id;
-  const since = (at: string) => Date.parse(at) >= Date.parse(budget.taskStart);
-  const windows = [budget.taskStart, ...(budget.unblockedAt ?? []), ...[...humanComments, ...reviewWindowFeedback(situation)].map((c) => c.createdAt).filter(since)];
-  return windows.some((windowStart) => commentIdFor(budgetQuestionKey(issue.id, windowStart)) === thread);
+  return Array.from({ length: (budget.windowSeq ?? 0) + 1 }, (_, seq) => commentIdFor(budgetQuestionKey(conversation.issue.id, budget.taskStart, seq))).includes(thread);
 }
 
-/** The task's budget now, from what `state.json` keeps (start, window, turn spend) and the run records. */
+/** The task's budget now, from what `state.json` keeps (start, window, active time, turn spend) and the run records. */
 export function budgetStatus(input: {
   window: BudgetWindow;
   since?: string | undefined;
   priorRuns?: string[] | undefined;
-  /** TECH-5803: the start of every window an unblock opened. */
-  unblockedAt?: string[] | undefined;
-  /** TECH-6127: the times of humans' answers to Sergeant's questions (question.ts `answerTimes`). */
-  answers?: string[] | undefined;
-  /** The task's latest turns and run starts (`state.json`), each with its time if recorded. */
-  recentTurns?: { at: string }[] | undefined;
-  starts?: Record<string, { kind: string; at?: string | undefined }> | undefined;
+  windowSeq?: number | undefined;
+  activeMs?: number | undefined;
+  activeSince?: string | undefined;
   startedAt: string;
   turnCostUsd: number;
   runs: RunRecord[];
@@ -107,39 +123,20 @@ export function budgetStatus(input: {
   unknownRuns: number;
 }): BudgetStatus {
   const { window } = input;
-  const windowStart = input.since ?? input.startedAt;
   const runs = input.runs.filter((r) => !input.priorRuns?.includes(r.runId));
   const runCost = runs.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  const now = Date.now();
+  const activeMs = (input.activeMs ?? 0) + (input.activeSince ? Math.max(0, now - Date.parse(input.activeSince)) : 0);
   return {
     window,
     taskStart: input.startedAt,
-    windowStart,
-    ...(input.unblockedAt?.length ? { unblockedAt: input.unblockedAt } : {}),
-    wallDeadline: new Date(wallFrom(input, windowStart, runs) + window.wallMinutes * 60_000).toISOString(),
+    windowStart: input.since ?? input.startedAt,
+    ...(input.windowSeq !== undefined && { windowSeq: input.windowSeq }),
+    wallDeadline: new Date(now + window.wallMinutes * 60_000 - activeMs).toISOString(),
     spentUsd: round(runCost + input.turnCostUsd),
     costLimitUsd: window.costUsd,
     unknownCostRuns: runs.filter((r) => r.costUsd === undefined).length + input.unknownRuns,
   };
-}
-
-/**
- * TECH-6127: when the window's wall time starts. A window an answer opened starts at the task's first
- * turn or run after the answer, so a task that must queue for a task slot first does not spend its window
- * in the queue; until then, with nothing running, it floats from now. Any other window starts when it
- * opens. Read from what `state.json` already keeps: the latest turns (at most 8, so with no worker run's
- * start to fall back on, a window that has outlived them starts at the answer) and the worker runs' starts.
- */
-function wallFrom(input: Parameters<typeof budgetStatus>[0], windowStart: string, runs: RunRecord[]): number {
-  const since = Date.parse(windowStart);
-  if (input.since === undefined || !input.answers?.includes(input.since)) return since;
-  const turns = input.recentTurns ?? [];
-  const startedRuns = runs.flatMap((r) => input.starts?.[r.runId]?.at ?? []);
-  const after = [...turns.map((t) => t.at), ...startedRuns].map(Date.parse).filter((t) => t >= since);
-  if (turns.length >= 8 && turns.every((t) => Date.parse(t.at) >= since) && startedRuns.length === 0) return since;
-  if (after.length > 0) return Math.min(...after);
-  // A run of this window, or one still going, is work whose start is not on record: the answer it is.
-  const worked = runs.length > 0 || input.unknownRuns > 0 || input.runs.some((r) => r.status === "running");
-  return worked ? since : Math.max(since, Date.now());
 }
 
 /**

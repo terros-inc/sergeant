@@ -211,6 +211,11 @@ export interface GitHubPort {
   deletePullRequestBranch?(req: { repo: RepoSlug; number: number }): Promise<{ deleted: string } | { kept: string }>;
   /** The installation's API budget as GitHub last reported it (TECH-5336); null before any response. */
   rateLimit?(): GitHubRateLimit | null;
+  /**
+   * TECH-6165: a webhook announced a review or comment on this PR, so its next read rereads the PR's
+   * feedback rather than reuse a remembered one. Optional, so a fake without it remembers none.
+   */
+  forgetFeedback?(repo: string, number: number): void;
 }
 
 /**

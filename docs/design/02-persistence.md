@@ -185,7 +185,7 @@ duplicate is accepted (captain, 2026-10-02).
 | Merge | `merge:<taskId>:<repo>#<n>:<headSha>` | Merging the wrong head. GitHub's merge with the expected SHA; "already merged at that SHA" counts as success |
 | Follow-up issue | `followup:<taskId>:<semanticKey>` | Duplicate issues for humans to clean up. Client-supplied issue id (verify V1) or a lookup by the key before creating; reasoning picks `semanticKey`, so re-proposals deduplicate |
 | Close, cancel, release, complete | `close:<taskId>` | A stopped task restarting. One closing action per task; its steps are ordered and re-driven (03 §10) |
-| Budget question | `budget-question:<linearIssueId>:<windowStart>` | Asking twice in one window, or matching an earlier task's question. One per task and window; a window opens only from a human answer, so it needs no key of its own |
+| Budget question | `budget-question:<linearIssueId>:<taskStart>:<windowSeq>` | Asking twice in one window, or matching an earlier task's question. One per task and window, by the window's number (TECH-6165, 07 §6) |
 | Review disposition | `disposition:<taskId>:<repo>#<n>:<headSha>` | Write-once evidence |
 | Admit | `admit:<linearIssueId>:<observedAt>` | Two episodes of one issue. Partial unique index on open tasks per issue |
 | Linear comment, question, note | `comment:<taskId>:<turnId>:<n>`, `ask:<taskId>:<turnId>:<n>` | Best-effort: a client-supplied comment id where Linear supports it (V1). A rare duplicate comment after a crash is accepted |
@@ -198,8 +198,8 @@ Proposing an action whose key exists returns the earlier verdict and result inst
 
 - **Spend** (best-effort): `sum(runs.usage.costUsd) + sum(turns.usage.costUsd)` over the current
   window's task-charged runs and turns, from reported or estimated usage.
-- **Wall time** (hard): from `windowStart` to `wallDeadline` (`windowStart` + the window's minutes; for
-  an answer's window, from the task's first turn or run after the answer, TECH-6127).
+- **Active time** (hard): the time a run or turn is running in the window, up to the window's minutes
+  (TECH-6165); waits do not count.
 - Both count only the current window: runs in `tasks.budget.priorRunIds` and turns before
   `windowStart` belong to earlier windows (01 `TaskBudget`).
 - **Who did what**: `actions.actor`, `verdict`, `status`, `steps`.

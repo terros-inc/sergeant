@@ -909,11 +909,11 @@ Each task has a budget window, saved in `state.json` with the task's start befor
 happens. It is the installation config's `budget`, each field unset defaulting to 120 minutes and $25;
 `canary`'s `--budget-minutes` and `--budget-usd` override the config's for its task. A restart keeps
 the stored window and logs that it ignores a different one, so changing the config's `budget` affects
-only tasks that start afterward, and their next fresh window. A human's answer to any of the agent's
-questions gives the task a fresh window: from the answer's time, its wall time from the task's first
-turn or run after it (so time queued for a task slot does not count), with zero spend (runs of earlier
-windows no longer count) and the config's current `budget`. So do a human's review of the task's PR
-(TECH-5218) and the task's unblocking, its last open Linear "blocked by" issue completed or canceled or
+only tasks that start afterward, and their next fresh window. Any human direction gives the task a
+fresh window (`docs/design/07-linear-contract.md` §6): a human's answer to any of the agent's questions
+from the answer's time, with zero spend (runs of earlier windows no longer count) and the config's
+current `budget`, and so do any other human comment or review on the issue or the task's PR, and the
+task's unblocking, its last open Linear "blocked by" issue completed or canceled or
 that relation removed (TECH-5803): the loop logs `unblocked (was waiting on ...): a fresh budget window ...`.
 
 A repository's own `budget` (`repositories.<owner/name>.budget`, TECH-5219) replaces the stored
@@ -925,10 +925,10 @@ installation's; over several repositories the largest of each field holds. Unlik
 window of tasks already working in that repository. `canary` applies its repository's `budget` before
 its own flags.
 
-Wall time is hard and runs from the window's start, including time spent waiting for a human before an
-answer, and for a task slot after one. Spend is best-effort: the cost runs and reasoning turns report
-when they end (a turn's cost counts before its proposals run), so a running or canceled run's cost is
-unknown and the wall time is the backstop; there is no billing ledger.
+The window's minutes are hard and count only active time, while a run or turn is running (TECH-6165):
+waiting for a human, CI or a task slot does not count. Spend is best-effort: the cost runs and reasoning
+turns report when they end (a turn's cost counts before its proposals run), so a running or canceled
+run's cost is unknown and the time is the backstop; there is no billing ledger.
 
 Once either is exhausted, no run, message, follow-up, or merge happens (Gate rule B1, checked before
 every effect and again right after its live reads), running runs are canceled until the runner
@@ -1218,7 +1218,7 @@ say):
 **Budget.** On a controlled issue whose work takes more than a few minutes:
 
 1. Run `canary --budget-minutes 5`. Once a worker is running and five minutes have passed, expect
-   `budget exhausted (wall time exhausted at ...)` and `canceled run_...` log lines, `docker ps` showing
+   `budget exhausted (active time exhausted (5 minutes of work in this window))` and `canceled run_...` log lines, `docker ps` showing
    no `sergeant-run_*` container, and one **Question for you** comment from the agent with the spend,
    the runs (the worker `canceled`), any PR, and the extend / accept-as-is options. No run starts and
    nothing merges while it waits.

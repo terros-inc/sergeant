@@ -2,8 +2,8 @@ import { outstandingChangeRequests, type MergePolicy, type PullRequestFacts, typ
 
 // TECH-6021: the stop rubric of docs/findings/tech-5922-wall-time-windows.md §6, applied in order to
 // an exhausted window, the first rule that matches deciding. Rule 0 (only waiting on a human: park,
-// post nothing) is the loop's existing human wait (pr-wait.ts, TECH-5218, TECH-5913) and the open
-// question hold, so a window that reaches this asks. Rule 2's automatic extension is not built: its
+// post nothing) is the loop's existing human wait (pr-wait.ts, TECH-5218, TECH-5913), which uses none of
+// the window (TECH-6165), and the open question hold, so a window that reaches this asks. Rule 2's automatic extension is not built: its
 // cases still ask, "Sergeant recommends extend". Everything is read from the window's run records, PR
 // facts and turn ledger; nothing here launches a run or reads anything new.
 

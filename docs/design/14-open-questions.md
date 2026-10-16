@@ -54,7 +54,7 @@ Captain Question.
 | Workflow-file changes | The worker App has `workflows: write`; workers push changes on non-default branches, while the deterministic changed-file gate forces human review and human merge under every `mergePolicy` | PR and non-default-branch workflows cannot reach production secrets; those remain only in protected environments usable by approved default-branch workflows |
 | Paid evals (S1's persona-eval executor) | No executor; an eval-only credential, if needed, is ordinary runner-zone authority, with evidence integrity as a reviewer check | The posture: no capability mediation without a concrete material failure |
 | The laptop trial's identity | Its own installation identity (second region or account), its own Linear agent user and GitHub Apps, runs in a container | Consequences of ADR-0040 and the personal-credential boundary, not a product choice |
-| "About 2 h of task wall time" | Superseded by TECH-5059: wall time since the budget window opened (01 `BudgetStatus.wallDeadline`) | A human answer opens a fresh window, so a task waiting on a human gets its time back; waiting on a human merge or re-review asks nothing (07 §6) |
+| "About 2 h of task wall time" | Superseded by TECH-5059 and TECH-6165: the active time of the budget window (01 `BudgetStatus.wallDeadline`) | Any human direction opens a fresh window, and no wait on a human counts; waiting on a human merge or re-review asks nothing (07 §6) |
 
 ## Captain Questions
 
