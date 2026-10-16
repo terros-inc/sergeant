@@ -47,7 +47,10 @@ function outcome(r: RunRecord): string {
   return `requested changes (${blocking} blocking)`;
 }
 
-/** Each open PR's CI, review verdict and mergeability, its open blocking findings, and the steps left. */
+/**
+ * Each open PR, linked once as `[owner/name#n](url)` (TECH-6225: a bare URL before its colon showed as
+ * the link twice), its CI, review verdict and mergeability, its open blocking findings, and the steps left.
+ */
 export function standing(w: WindowFacts): string[] {
   const open = w.situation.pullRequests.filter((p) => p.state === "open");
   if (open.length === 0) {
@@ -59,7 +62,7 @@ export function standing(w: WindowFacts): string[] {
     const findings = review?.verdict === "changes_requested" ? review.findings.filter((f) => f.severity === "blocking") : [];
     const humans = outstandingChangeRequests(pr.humanFeedback);
     const verdict = !review ? "none at this head" : review.verdict === "approve" ? "approved at this head" : review.verdict === "needs_human" ? "reviewer asked for a human" : `changes requested (${findings.length} blocking)`;
-    const lines = [`${pr.url}: ${pr.draft ? "draft, " : ""}CI ${ci(pr)}; review: ${verdict}${humans.length ? `; changes requested by ${humans.join(", ")}` : ""}; mergeable: ${pr.mergeableState}.`];
+    const lines = [`[${pr.repo}#${pr.number}](${pr.url}): ${pr.draft ? "draft, " : ""}CI ${ci(pr)}; review: ${verdict}${humans.length ? `; changes requested by ${humans.join(", ")}` : ""}; mergeable: ${pr.mergeableState}.`];
     if (findings.length) lines.push(`Open blocking findings: ${findings.slice(0, 3).map((f) => `${f.location ? `${f.location}: ` : ""}${clip(f.description)}`).join("; ")}${findings.length > 3 ? `; and ${findings.length - 3} more` : ""}.`);
     lines.push(`Left: ${stepsLeft(w, pr).map((step) => step.label).join(", then ")}.`);
     return lines;
