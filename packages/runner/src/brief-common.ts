@@ -1,8 +1,8 @@
-import type { Conversation, HumanPullRequestFeedback, PullRequestFacts, ReviewReport } from "@terros/sergeant-contracts";
+import type { Conversation, HumanPullRequestFeedback, PullRequestFacts, PullRequestFeedback, ReviewReport } from "@terros/sergeant-contracts";
 import { conversationRevision } from "@terros/sergeant-contracts";
 
-// What the worker and reviewer briefs share (brief.ts): the Task section, a human's PR feedback, and an
-// earlier review.
+// What the worker and reviewer briefs share (brief.ts): the Task section, humans' and bots' PR feedback,
+// and an earlier review.
 
 export function renderTask(c: Conversation): string {
   const comments = c.humanComments.length
@@ -23,6 +23,18 @@ ${comments}`;
 
 /** One human review or comment on a PR, for a successor or reviewer that must check it (TECH-4987). */
 export function renderHumanFeedback(f: HumanPullRequestFeedback): string {
+  return renderFeedback(f);
+}
+
+/**
+ * One bot review or comment on a PR (TECH-6166), led by its id so a reply in its thread, which names
+ * the comment it answers, can be matched to it.
+ */
+export function renderBotFeedback(f: PullRequestFeedback): string {
+  return renderFeedback(f).replace(/^ {4}- /, `    - [${f.id}] `);
+}
+
+function renderFeedback(f: PullRequestFeedback): string {
   const what =
     f.kind === "review"
       ? `review, ${f.state}${f.commitId ? ` at \`${f.commitId.slice(0, 12)}\`` : ""}`
@@ -30,13 +42,20 @@ export function renderHumanFeedback(f: HumanPullRequestFeedback): string {
         ? `inline comment on \`${f.path}${f.line !== null ? `:${f.line}` : ""}\``
         : "comment";
   const body = f.body.trim() ? `\n${f.body.trim().replace(/^/gm, "      > ")}` : "";
-  return `    - ${f.author} — ${what} — ${f.updatedAt} — ${f.url}${body}`;
+  const reply = f.inReplyTo ? ` — reply to ${f.inReplyTo}` : "";
+  return `    - ${f.author} — ${what}${reply} — ${f.updatedAt} — ${f.url}${body}`;
 }
 
 /** How many characters of human PR feedback a brief carries inline, all its PRs together (05 §2). */
 export const HUMAN_FEEDBACK_BOUND = 48 * 1024;
+/** How many characters of bot PR feedback a brief carries inline, all its PRs together (TECH-6166). */
+export const BOT_FEEDBACK_BOUND = 24 * 1024;
 /** How much of a cut item's first line stays inline. */
 const EXCERPT = 120;
+
+type Rendering = { items: (p: PullRequestFacts) => PullRequestFeedback[]; render: (f: PullRequestFeedback) => string; bound: number };
+const human: Rendering = { items: (p) => p.humanFeedback, render: renderHumanFeedback, bound: HUMAN_FEEDBACK_BOUND };
+const bots: Rendering = { items: (p) => p.botFeedback ?? [], render: renderBotFeedback, bound: BOT_FEEDBACK_BOUND };
 
 /**
  * Each PR's human feedback as brief lines, oldest first ("" for a PR with none), within
@@ -46,14 +65,24 @@ const EXCERPT = 120;
  * to its full text. Headers are never dropped, so hundreds of items can still exceed the bound.
  */
 export function renderBoundedHumanFeedback(pullRequests: PullRequestFacts[]): string[] {
-  const whole = pullRequests.map((p) => p.humanFeedback.map(renderHumanFeedback));
-  const size = (items: string[][]) => items.flat().reduce((n, item) => n + item.length + 1, 0);
-  if (size(whole) <= HUMAN_FEEDBACK_BOUND) return whole.map((items) => items.join("\n"));
-  const rendered = pullRequests.map((p) => p.humanFeedback.map((f) => renderCut(f, excerptLength(f))));
+  return renderBounded(pullRequests, human);
+}
+
+/** Each PR's bot feedback the same way, within `BOT_FEEDBACK_BOUND` (TECH-6166). */
+export function renderBoundedBotFeedback(pullRequests: PullRequestFacts[]): string[] {
+  return renderBounded(pullRequests, bots);
+}
+
+function renderBounded(pullRequests: PullRequestFacts[], how: Rendering): string[] {
+  const { items, render, bound } = how;
+  const whole = pullRequests.map((p) => items(p).map(render));
+  const size = (rows: string[][]) => rows.flat().reduce((n, item) => n + item.length + 1, 0);
+  if (size(whole) <= bound) return whole.map((rows) => rows.join("\n"));
+  const rendered = pullRequests.map((p) => items(p).map((f) => renderCut(f, excerptLength(f), how)));
   const newestFirst = pullRequests
-    .flatMap((p, i) => p.humanFeedback.map((f, j) => ({ f, i, j })))
+    .flatMap((p, i) => items(p).map((f, j) => ({ f, i, j })))
     .sort((a, b) => b.f.createdAt.localeCompare(a.f.createdAt));
-  let left = HUMAN_FEEDBACK_BOUND - size(rendered);
+  let left = bound - size(rendered);
   for (const { f, i, j } of newestFirst) {
     const short = rendered[i]![j]!;
     const grow = whole[i]![j]!.length - short.length;
@@ -65,26 +94,26 @@ export function renderBoundedHumanFeedback(pullRequests: PullRequestFacts[]): st
     // Keep as much of this body as fits; quoting makes the rendered text longer than the body kept.
     const fits = short.length + left;
     let keep = excerptLength(f) + left;
-    while (keep > excerptLength(f) && renderCut(f, keep).length > fits) keep -= renderCut(f, keep).length - fits;
-    if (keep > excerptLength(f)) rendered[i]![j] = renderCut(f, keep);
+    while (keep > excerptLength(f) && renderCut(f, keep, how).length > fits) keep -= renderCut(f, keep, how).length - fits;
+    if (keep > excerptLength(f)) rendered[i]![j] = renderCut(f, keep, how);
     break;
   }
-  return rendered.map((items) => items.join("\n"));
+  return rendered.map((rows) => rows.join("\n"));
 }
 
-function excerptLength(f: HumanPullRequestFeedback): number {
+function excerptLength(f: PullRequestFeedback): number {
   const body = f.body.trim();
   const firstLine = body.indexOf("\n");
   return Math.min(firstLine < 0 ? body.length : firstLine, EXCERPT);
 }
 
 /** `f` with only the first `keep` characters of its body, and a note of the cut; whole if nothing is cut. */
-function renderCut(f: HumanPullRequestFeedback, keep: number): string {
+function renderCut(f: PullRequestFeedback, keep: number, { render, bound }: Rendering): string {
   const body = f.body.trim();
   const kept = body.slice(0, keep).trimEnd();
-  if (kept.length === body.length) return renderHumanFeedback(f);
-  const note = `[… ${body.length - kept.length} more characters cut to keep this brief's PR feedback within ${HUMAN_FEEDBACK_BOUND / 1024} KB; the full text is at ${f.url}]`;
-  return renderHumanFeedback({ ...f, body: kept ? `${kept}\n${note}` : note });
+  if (kept.length === body.length) return render(f);
+  const note = `[… ${body.length - kept.length} more characters cut to keep this brief's PR feedback within ${bound / 1024} KB; the full text is at ${f.url}]`;
+  return render({ ...f, body: kept ? `${kept}\n${note}` : note });
 }
 
 /** A review's verdict and findings, for any later run that must act on them or recheck them. */

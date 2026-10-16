@@ -109,3 +109,26 @@ export function checkSend(action: Extract<ProposedAction, { kind: "send_run" }>,
   if (run.status !== "running") return deny("S1", `${run.runId} is ${run.status}`);
   return allow;
 }
+
+/**
+ * TECH-6166: may Sergeant replace the issue's description because a human comment changed the scope?
+ * Only while the issue is delegated to Sergeant and not stopped (A1, A2), on the conversation the turn
+ * read, human feedback on its PRs included, so a human's edit or comment since is never overwritten and
+ * the next turn reads it (U1), with a note in a thread that is a human's comment on this issue when one
+ * is named (U2), and with a description that differs from the one the turn read (U3). Whether the
+ * comment changed the scope is reasoning's judgment, never this check's.
+ */
+export function checkDescriptionEdit(
+  action: Extract<ProposedAction, { kind: "update_description" }>,
+  /** `live` and `liveRevision` come from live Linear and PR reads made for this edit. */
+  facts: { live: Conversation; agentUserId: string; turnDescription: string; turnRevision: string; liveRevision: string },
+): GateVerdict {
+  const active = checkLive(facts.live.issue, facts.agentUserId);
+  if (!active.allowed) return active;
+  if (facts.liveRevision !== facts.turnRevision) return deny("U1", "the conversation changed since this turn's Situation Report; the next turn reads it");
+  if (action.commentId && !facts.live.humanComments.some((c) => c.id === action.commentId)) {
+    return deny("U2", `${action.commentId} is not a human comment on ${facts.live.issue.identifier}`);
+  }
+  if (action.description === facts.turnDescription) return deny("U3", "the new description is the one the issue already has");
+  return allow;
+}

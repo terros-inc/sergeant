@@ -275,3 +275,27 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
     { identifier: "UNF-5", priority: 2, createdAt: at(0), state: { name: "Todo", type: "unstarted" }, blockedBy: ["UNF-1", "UNF-2"] },
   ]);
 });
+
+// TECH-6166 (review f3): a description edit must not overwrite a human's edit made since Sergeant read
+// it. The write happens only while the description still reads what the turn read.
+test("updateDescription writes only while the description is still the one the turn read", async () => {
+  let description = "Keep the single-record update.";
+  const writes: unknown[] = [];
+  const linear = createLinearPort({
+    apiKey: "test",
+    sergeantUserIds: [],
+    fetch: async (_i, init) => {
+      const req = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+      if (req.query.includes("SergeantIssue(")) {
+        const read = issue([], false, null);
+        return Response.json({ data: { issue: { ...read.data.issue, description } } });
+      }
+      writes.push(req.variables);
+      description = String(req.variables.description);
+      return Response.json({ data: { issueUpdate: { success: true } } });
+    },
+  });
+  expect(await linear.updateDescription("i1", { from: "Keep the single-record update.", to: "Drop it." })).toEqual({ updated: true });
+  expect(await linear.updateDescription("i1", { from: "Keep the single-record update.", to: "Drop it, and more." })).toEqual({ updated: false });
+  expect(writes).toEqual([{ id: "i1", description: "Drop it." }]);
+});

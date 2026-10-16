@@ -112,6 +112,8 @@ export type Installation = {
   linearOrganizationId: string;
   /** The worker App's GitHub login: only a PR it opened is ever this task's (M2). */
   workerLogin: string;
+  /** The control-plane App's GitHub login: its own PR comments wake no turn (TECH-6166). */
+  controlPlaneLogin: string;
   github: GitHubPort;
   controlPlaneApp: GitHubApp;
   workerApp: GitHubApp;
@@ -166,7 +168,7 @@ export async function connect(
   const viewer = await linear.viewer();
   if (viewer.id !== agentUserId) throw new Error(`the Linear token acts as ${viewer.name} (${viewer.id}), not the configured V2 agent`);
 
-  const workerLogin = await workerApp.login();
+  const [workerLogin, controlPlaneLogin] = await Promise.all([workerApp.login(), controlPlaneApp.login()]);
   const repositoryConfigs = Object.fromEntries(enrolled.flatMap(([r, c]) => (c ? [[r, c]] : [])));
   // The control plane's token covers exactly the enrolled repositories, so a change mints a new one.
   let scoped: { key: string; token: () => Promise<string> } | undefined;
@@ -181,6 +183,7 @@ export async function connect(
     agentUserId,
     linearOrganizationId: viewer.organizationId,
     workerLogin,
+    controlPlaneLogin,
     // A rate-limit pause is logged once as it starts (TECH-5336), in serve's log format.
     github: createGitHubPort({
       token: controlPlaneToken,

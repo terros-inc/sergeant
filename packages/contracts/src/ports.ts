@@ -156,6 +156,12 @@ export interface LinearPort {
    * is already completed or canceled, so a replay, or a state a human chose since, changes nothing.
    */
   closeIssue?(issueId: string, as: "done" | "canceled"): Promise<{ moved: false } | { moved: true; from: string; to: string }>;
+  /**
+   * TECH-6166: sets the issue's description to `to`, after a human comment changed what it asks, only
+   * if it still reads `from` just before the write: `{ updated: false }` when it does not. Linear has
+   * no conditional write, so an edit in the instant between that read and the write is an accepted race.
+   */
+  updateDescription?(issueId: string, change: { from: string; to: string }): Promise<{ updated: boolean }>;
 }
 
 export interface GitHubPort {

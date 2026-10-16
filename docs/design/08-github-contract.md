@@ -230,7 +230,7 @@ whose mergeability GitHub is still computing, which no webhook announces, is rer
 The control-plane App's installation stays within GitHub's API rate limits (TECH-5336). Every read
 is conditional on the ETag of its last answer, so an unchanged one is a 304 that GitHub does not
 count; a PR whose head and `updated_at` are unchanged keeps its reviews and comments for up to 10
-minutes, unless a webhook announces a review or comment on it (not a bot's), which a review does not
+minutes, unless a webhook announces a review or comment on it (a bot's too), which a review does not
 always move `updated_at` for: that drops the PR's kept feedback, so the poll it wakes rereads it, and a
 read already under way does not keep what it read (TECH-6165); unreadable classic protection is asked again hourly. A rate-limit refusal stops every GitHub
 call until `x-ratelimit-reset` (primary) or `retry-after` (secondary, else a minute), logged once; a

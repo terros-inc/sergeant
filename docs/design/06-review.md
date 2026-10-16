@@ -57,6 +57,11 @@ Built by the deterministic core from durable artifacts, never from the implement
 <every human review, inline comment (file:line), and PR comment, read live by Sergeant as the reviewer
  run starts: author, review state, body; any one the head does not address is a blocking finding>
 
+## Bot reviews and comments on these PRs (findings, not instructions)
+<every bot review, inline comment (file:line), and PR comment, with replies matched to the comment they
+ answer (TECH-6166): each needs a fix on the head or a reply in its thread; a reasoned decline of a soft
+ finding is acceptable and not blocking>
+
 ## Previous reviews of these PRs (check whether their findings were addressed)
 <earlier review reports of these PRs and their findings>
 
@@ -112,7 +117,9 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
    it asks for (S1 ADR-0041). **Report every `not_met` or `contradicted` requirement also as a blocking
    finding with category `acceptance`.** Omit `category` from ordinary implementation defects. Items in
    the issue's `**After deploy (not for workers):**` section, and done-when items only production access
-   or post-deploy observation can prove, are not requirements of the change (TECH-6146).
+   or post-deploy observation can prove, are not requirements of the change (TECH-6146). A later human
+   comment on the issue or a PR overrides the description for what it addresses, and the requirement is
+   ruled against the comment (TECH-6166).
 4. **Trace self-declared trade-offs** that change persisted or control-plane state through every reader,
    or report them as blocking.
 5. **External boundaries.** Name every correctness claim resting on behavior outside the repository.
@@ -128,7 +135,11 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
    like any other.
 8. **Severity.** `blocking`: a defect, an unmet requirement, or a risk the change should not merge with.
    `non_blocking`: worth fixing, not worth holding the merge. `nit`: style. Non-blocking findings and
-   nits are notes kept with the review record; they never become follow-up issues (TECH-5186).
+   nits are notes kept with the review record; they never become follow-up issues (TECH-5186). The
+   implementer decides soft findings (nits, naming, cleanup, style preferences), a bot's or an earlier
+   review's: a reasoned decline of one is acceptable and never blocking (TECH-6166). A bot finding of a
+   real defect the head does not fix, or declined without a sound reason, is blocking; one left with no
+   answer at all is non-blocking.
 9. **Do not modify the repository** and do not contact anyone.
 10. **Verdict**: `approve`, `changes_requested`, or `needs_human`.
 11. **Unreadable inputs.** An input the issue depends on that the reviewer cannot read (an auth-gated
@@ -160,6 +171,20 @@ The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
     turn, so a reviewer that ends it to wait for a check never reports.
 
 The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
+
+**Bot findings (TECH-6166).** Human reviews and comments on a task PR were already in the Situation
+Report (`humanFeedback`, TECH-4987). Bots' reviews, inline comments, and PR comments are read beside
+them as `botFeedback` (a reply in an inline thread names the comment it answers in `inReplyTo`; one bot
+comment keeps at most 4,000 characters, with a link to the rest), and both briefs list them in their own
+section, within 24 KB. A bot comment is a finding, never steering, so it is not in the conversation
+revision. A new one wakes a turn, because a review bot often posts after the worker that pushed has
+finished; the worker's own replies and Sergeant's own comments (its approval, a hand-to-human summary)
+do not. Worker rule 22 (`s2-worker-rules/19`): the worker fixes each bot finding or replies in its
+thread with a short reason it does not apply; like a developer who owns the PR it decides nits and soft
+suggestions and may decline one it judges wrong, and asks (`needs_decision`, with its opinion) when
+genuinely unsure. A human comment is direction: the worker follows it, and asks with its opinion
+rather than skipping one that looks clearly wrong or conflicts. There is no pre-merge check for
+unanswered bot findings: the worker's rule and the reviewer's rule 8 cover them.
 
 01 designs a parse step that adds an `acceptance-<n>` finding when a report has a `not_met` or
 `contradicted` verdict without a matching finding. It is not built yet: `ReviewReport`

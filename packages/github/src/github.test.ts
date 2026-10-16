@@ -185,10 +185,13 @@ test("a failed approval prevents the merge", async () => {
 
 // TECH-4987: the captain's "Request changes" and inline comments were invisible to Sergeant. Every
 // human review and comment must reach the PR facts (M8 reads them), and a bot's, Sergeant's own
-// approval included, must never pass for human input.
-test("reads human reviews and comments on the PR, never a bot's", async () => {
+// approval included, must never pass for human input. TECH-6166: a bot's are read too, apart, as
+// findings with their thread, so reasoning sees a review bot's inline comment and the worker's reply.
+test("reads human reviews and comments on the PR apart from bots' findings and replies", async () => {
   const human = { login: "captain", type: "User" };
   const bot = { login: "sergeant-control[bot]", type: "Bot" };
+  const reviewBot = { login: "review-bot[bot]", type: "Bot" };
+  const worker = { login: "sergeant-worker[bot]", type: "Bot" };
   const at = "2026-10-03T01:00:00Z";
   const url = `https://github.com/${repo}/pull/7`;
   const fetch = async (input: string | URL | Request) => {
@@ -206,7 +209,11 @@ test("reads human reviews and comments on the PR, never a bot's", async () => {
       ]);
     }
     if (path.endsWith("/pulls/7/comments?per_page=100&page=1")) {
-      return json([{ id: 4, user: human, body: "not here", path: "docs/a.md", line: 12, commit_id: head, created_at: "2026-10-03T01:59:00Z", updated_at: "2026-10-03T02:01:00Z", html_url: `${url}#c4` }]);
+      return json([
+        { id: 4, user: human, body: "not here", path: "docs/a.md", line: 12, commit_id: head, created_at: "2026-10-03T01:59:00Z", updated_at: "2026-10-03T02:01:00Z", html_url: `${url}#c4` },
+        { id: 8, user: reviewBot, body: `Nit: rename \`x\`.\n${"y".repeat(5_000)}`, path: "src/a.ts", line: 3, commit_id: head, created_at: "2026-10-03T02:06:00Z", updated_at: "2026-10-03T02:06:00Z", html_url: `${url}#c8` },
+        { id: 9, user: worker, body: "Keeping `x`: it matches the module's naming.", path: "src/a.ts", line: 3, in_reply_to_id: 8, commit_id: head, created_at: "2026-10-03T02:07:00Z", updated_at: "2026-10-03T02:07:00Z", html_url: `${url}#c9` },
+      ]);
     }
     if (path.endsWith("/issues/7/comments?per_page=100&page=1")) {
       return json([
@@ -217,7 +224,15 @@ test("reads human reviews and comments on the PR, never a bot's", async () => {
     throw new Error(`unexpected request: ${path}`);
   };
 
-  const { humanFeedback } = await adapter(fetch).readPullRequest(repo, 7);
+  const { humanFeedback, botFeedback = [] } = await adapter(fetch).readPullRequest(repo, 7);
+  expect(botFeedback.map((f) => [f.id, f.author, f.state, f.path, f.line, f.inReplyTo])).toEqual([
+    ["review:1", "sergeant-control[bot]", "APPROVED", null, null, undefined],
+    ["comment:5", "sergeant-control[bot]", null, null, null, undefined],
+    ["review_comment:8", "review-bot[bot]", null, "src/a.ts", 3, undefined],
+    ["review_comment:9", "sergeant-worker[bot]", null, "src/a.ts", 3, "review_comment:8"],
+  ]);
+  // A bot's long body is cut, with a link to the rest.
+  expect(botFeedback[2]!.body).toMatch(/^Nit: rename `x`\.\ny+\n\[… 1017 more characters; the full text is at https:\/\/github.com\/.+#c8\]$/);
   expect(humanFeedback.map((f) => [f.id, f.author, f.state, f.path, f.line])).toEqual([
     ["review_comment:4", "captain", null, "docs/a.md", 12],
     ["review:2", "captain", "CHANGES_REQUESTED", null, null],

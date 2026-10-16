@@ -59,6 +59,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   await mkdir(opts.dir, { recursive: true });
   // The installation's budget now: a new task's window, and any fresh window it opens later.
   const configured = { ...DEFAULT_BUDGET, ...opts.budget };
+  // TECH-6166: Sergeant's own PR comments wake no turn (fingerprintOf).
+  const own = deps.controlPlaneLogin ? [deps.controlPlaneLogin] : [];
   // Whether this resumes a task under way: read first, so a stop that sets it aside meanwhile is seen.
   const resumed = await exists(files.state);
   const state = await loadState(files.state, opts.issueId, configured);
@@ -238,11 +240,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     let situation = situationOf(conversation, pullRequests, runs, budget, state, opts);
-    let fingerprint = fingerprintOf(situation);
+    let fingerprint = fingerprintOf(situation, [], own);
     if (reconcileMergeRetries(state, fingerprint)) {
       await save();
       situation = SituationReport.parse({ ...situation, refusedMerges: state.refusedMerges });
-      fingerprint = fingerprintOf(situation);
+      fingerprint = fingerprintOf(situation, [], own);
     }
     await postHandoffs(conversation.issue.id, state.refusedMerges, deps.linear, log, save);
     await postRereviewRequests(situation, deps, deps.linear, log);
@@ -329,7 +331,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
-    const committed = failedAsk || failedClose ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled) : fingerprint;
+    const committed = failedAsk || failedClose ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled, own) : fingerprint;
     const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above). A

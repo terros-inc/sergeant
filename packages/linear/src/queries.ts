@@ -96,6 +96,12 @@ export const resolveComment = `
 `;
 export const viewerQuery = `query SergeantViewer { viewer { id name organization { id } } }`;
 export const usersQuery = `query SergeantUsers($ids: [ID!]) { users(filter: { id: { in: $ids } }, first: 50) { nodes { id name } } }`;
+export const setDescription = `
+  mutation SergeantSetDescription($id: String!, $description: String!) {
+    issueUpdate(id: $id, input: { description: $description }) { success }
+  }
+`;
+
 export const clearDelegate = `
   mutation SergeantUndelegate($id: String!) {
     issueUpdate(id: $id, input: { delegateId: null }) { success }

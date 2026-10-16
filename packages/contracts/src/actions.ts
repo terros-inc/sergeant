@@ -120,6 +120,23 @@ export const RecordBlockedBy = z.object({
 });
 export type RecordBlockedBy = z.infer<typeof RecordBlockedBy>;
 
+/**
+ * TECH-6166: a human comment on the issue or a PR changed what the issue asks, so Sergeant edits the
+ * description to match and notes the edit, so workers and reviewers check against one current source.
+ * The whole description is replaced, only while it is still the one the turn read. The note is a reply
+ * in the thread of `commentId` (a human Linear comment) when given, else on the issue.
+ */
+export const UpdateDescription = z.object({
+  kind: z.literal("update_description"),
+  /** The whole new description: the current one with only what the comment changed rewritten. */
+  description: z.string().min(1).max(100_000),
+  /** What changed and which human comment asked for it (author, and where: the issue or PR, with its link). */
+  why: z.string().min(1).max(2_000),
+  /** The human Linear comment that changed the scope, when it was one; a PR comment has none. */
+  commentId: z.string().min(1).optional(),
+});
+export type UpdateDescription = z.infer<typeof UpdateDescription>;
+
 /** Everything reasoning may propose. Reasoning only proposes; the core gates and performs. */
 export const ProposedAction = z.discriminatedUnion("kind", [
   StartWorker,
@@ -131,6 +148,7 @@ export const ProposedAction = z.discriminatedUnion("kind", [
   CloseIssue,
   CreateFollowup,
   RecordBlockedBy,
+  UpdateDescription,
 ]);
 export type ProposedAction = z.infer<typeof ProposedAction>;
 

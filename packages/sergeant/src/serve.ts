@@ -182,6 +182,7 @@ const service = await startService(
     linear: installation.linear,
     agentUserId: installation.agentUserId,
     workerLogin: installation.workerLogin,
+    controlPlaneLogin: installation.controlPlaneLogin,
     linearProfileForGitHubLogin: reviewerProfileLookup(config),
     githubLoginForLinearProfile: githubLoginLookup(config),
     github: installation.github,

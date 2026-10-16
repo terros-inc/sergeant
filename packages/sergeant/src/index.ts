@@ -60,6 +60,12 @@ export async function takeTurn(
     outcomes.push(outcome);
     if (outcome.status === "done" && outcome.merged) merged = true;
     if (outcome.status === "done" && outcome.started) current = { ...current, runs: [...current.runs, outcome.started] };
+    // TECH-6166: a run started later in the turn works from the description just written, not the old one,
+    // even when the edit's note then failed: the description is in Linear either way.
+    const written = outcome.status === "denied" ? undefined : outcome.description;
+    if (written !== undefined) {
+      current = { ...current, conversation: { ...current.conversation, issue: { ...current.conversation.issue, description: written } } };
+    }
     const filed = outcome.status === "done" ? outcome.followup : undefined;
     if (filed && !current.followups.some((f) => f.key === filed.key)) current = { ...current, followups: [...current.followups, filed] };
   }

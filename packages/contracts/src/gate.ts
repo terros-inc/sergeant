@@ -10,6 +10,7 @@ import { checkLive, isOwned, type GateVerdict, type Ownership } from "./action-g
 export {
   checkClose,
   checkDelegation,
+  checkDescriptionEdit,
   checkIssueState,
   checkLive,
   checkSend,

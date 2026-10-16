@@ -40,6 +40,7 @@ access.
 | Outcome | 2–6 lines: what landed (PR links), known gaps, each after-deploy check as "not verified (after deploy)" with its follow-up (TECH-6146, a follow-up keyed `after-deploy-…`), other follow-ups filed, anything a human should check, and the task's total cost | posted when the work lands or for a non-code outcome; the cost line (TECH-5227, `cost.ts`) is an estimate split by provider, run counts by role, wall time and accounts, a run with no reported cost counted as unknown; Sergeant's own turns count over the whole task (`turns.jsonl`), not only the current budget window |
 | After each review round | about 5 lines: what changed (from the worker report), the PR and reviewed head, the verdict with blocking/non-blocking counts and up to two findings, what happens next, the estimated cost so far (worker and review runs by role, and Sergeant's turns, up to the previous turn) | TECH-5227, `progress.ts`; its own comment for every finished review still current, keyed `progress:<issue>:<reviewRunId>`, posted after the next turn even when that turn also asks or merges; `review.progressComments: false` turns it off |
 | Answers to human comments | when the comment asked something Sergeant can answer | |
+| Description updated (TECH-6166) | one line: what changed in the description and whose comment asked for it | with `update_description`, a reply in the thread of the human Linear comment that changed the scope, else a comment on the issue (a PR comment); keyed by the issue and the new description |
 | Post-merge audit findings | one comment listing blocking findings and a report link (06 §8) | guardrail, rare |
 | Stopped | two lines when Sergeant stops because of undelegation, cancellation, or `release_task`: why it stopped, listing open PRs, then the task's total cost line | an accept-as-is ending's line gets it too |
 
@@ -353,6 +354,23 @@ comments. Sergeant decides:
 - a change to what the issue requires after a review: a new review of the current head against the new
   text, because earlier verdicts were against the old text;
 - a change that invalidates the work: cancel the worker, say so in a short comment, and start again.
+
+The latest human comment, on the issue or a task PR, overrides earlier instructions, the description
+included, but only for what it addresses (TECH-6166). When one changes what the issue asks, reasoning
+proposes `update_description(description, why, commentId?)`: the whole new description, with only what
+the comment changed rewritten. Sergeant writes it only while the live description is still the one the
+turn read, then posts the note above, so workers and reviewers check against one current source. The Gate:
+
+| Rule | Check |
+| --- | --- |
+| U1 | the live conversation revision, human feedback on the task's PRs included (each PR re-read for the edit), is the one the turn read, so a human's edit or comment since, on the issue or a PR, is never overwritten; the write itself happens only while the description, re-read just before it, is the one the turn read (Linear has no conditional write, so an edit in the instant between is an accepted race, as for M10) |
+| U2 | a note's thread (`commentId`) is a human comment on this issue |
+| U3 | the new description differs from the one the turn read |
+
+The note is keyed by the issue and the new description, so it is posted at most once. When the write
+succeeds and the note fails, the action fails with that said, and the description stays written. The
+edit changes the issue revision, so a review or skip from before it gives no standing (M13). A run
+started later in the same turn gets the new text, even when the note failed.
 
 Before a merge or `mark_complete`, the Gate re-reads the issue and its comments (M10, X5). If the
 conversation revision changed after the proposing turn's snapshot, the action is refused and a fresh

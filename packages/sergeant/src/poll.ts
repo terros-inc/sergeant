@@ -120,9 +120,10 @@ export function waitMs(opts: Pick<LoopOptions, "slowPollSeconds">, pollMs: numbe
 
 /**
  * What a turn depends on. `generatedAt` and recentTurns are excluded: they change every poll. The PRs
- * in `unsettled` count as GitHub still computing their mergeability (`unsettledMerges`).
+ * in `unsettled` count as GitHub still computing their mergeability (`unsettledMerges`). `ownLogins`
+ * are Sergeant's own GitHub Apps besides the worker, whose PR comments wake no turn (TECH-6166).
  */
-export function fingerprintOf(s: SituationReport, unsettled: string[] = []): string {
+export function fingerprintOf(s: SituationReport, unsettled: string[] = [], ownLogins: string[] = []): string {
   const facts = {
     conversation: s.conversationRevision,
     // A PR newly linked to the issue can make a refused review or merge allowable.
@@ -136,7 +137,13 @@ export function fingerprintOf(s: SituationReport, unsettled: string[] = []): str
       return [p.repo, p.number, p.state, p.draft, p.headSha, p.baseSha, settled ? p.mergeable : null, settled ? p.mergeableState : "unknown", p.checks];
     }),
   };
-  return createHash("sha256").update(JSON.stringify(facts)).digest("hex");
+  // TECH-6166: a bot's new finding wakes a turn, often after the worker that pushed has finished. The
+  // worker's own replies on its PR do not: they answer findings, and its run's end wakes the turn. Nor
+  // do Sergeant's own comments (its approval, a hand-to-human summary): it posted them in a turn. Left
+  // out while there are none, so a task's earlier fingerprints still match.
+  const own = (author: string, p: PullRequestFacts) => author === p.author || ownLogins.includes(author);
+  const bots = s.pullRequests.flatMap((p) => (p.botFeedback ?? []).filter((f) => !own(f.author, p)).map((f) => [p.repo, p.number, f.id, f.updatedAt]));
+  return createHash("sha256").update(JSON.stringify(bots.length > 0 ? { ...facts, bots } : facts)).digest("hex");
 }
 
 export const describePr = (p: PullRequestFacts) =>
