@@ -105,14 +105,17 @@ Admission and ordering are in `docs/design/07-linear-contract.md` (§5, §12) an
 - Validate in proportion to the change and its risks. There is no blanket requirement that every
   change add a test, and there is no coverage target.
 - Every nontrivial test should answer: "What realistic regression or subtle failure does this protect
-  us from?" Focused tests are right at deterministic boundaries where a bug could cause material harm.
-- Prefer high-value boundary and integration tests—and the real canary or integration path when it
-  gives stronger confidence—over piles of tiny unit tests or mocks of mocks.
+  us from?" Say the answer in the PR body. Focused tests are right at deterministic boundaries where a
+  bug could cause material harm. A bug fix comes with the regression test that would have caught it.
+- Prefer extending an existing test, or one high-value boundary or integration test—and the real
+  canary or integration path when it gives stronger confidence—over new files of tiny unit tests or
+  mocks of mocks.
 - Use TDD for genuinely complex algorithms or state logic, but first ask whether a simpler design can
   avoid that complexity. A large unit-test matrix is a reason to simplify the implementation.
-- Don't test getters, constructors, trivial wrappers, obvious branches, schema wiring, implementation
-  details, or other code solely for coverage. Reviewers may delete test code whose cost exceeds its
-  protection. Documentation-only and mechanical changes may need no tests.
+- Don't test getters, constructors, trivial wrappers, obvious branches, schema wiring, a new schema
+  field, help or message wording, implementation details, or other code solely for coverage.
+  Reviewers may delete or merge test code whose cost exceeds its protection. Documentation-only and
+  mechanical changes may need no tests.
 - During development, run the narrowest relevant test or package task. CI runs the full suite; don't
   run it repeatedly. Record checks actually observed and report anything the environment cannot verify.
 - Tests run by CI must not call live services, require real credentials, or launch externally visible

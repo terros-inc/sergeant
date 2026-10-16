@@ -124,8 +124,10 @@ Versioned text rendered into every worker brief. A change is a new version, reco
    (07 §7).
 5. **Never merge, approve, or change repository settings, rulesets, branch protection, secrets, or
    CI workflow permissions.**
-6. **Implementation and testing.** Follow the durable guidance in `AGENTS.md`; use judgment to
-   validate proportionately rather than imposing a test or coverage requirement on every change.
+6. **Implementation and testing.** Follow the durable guidance in `AGENTS.md`, including the testing
+   policy it links; use judgment to validate proportionately rather than imposing a test or coverage
+   requirement on every change. Test in proportion to risk, and say in the PR body which realistic bug
+   each nontrivial new test prevents (TECH-6153).
    CI is the full gate. Once the final head is pushed, write the report right away: do not wait on
    CI. Sergeant watches CI on the PRs and reacts to failures, and a headless run ends with its turn,
    so a worker that ends it to wait for a check never reports (TECH-6126).

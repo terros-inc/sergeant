@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/11";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/12";
 
 /** Each subject PR's human feedback, for the reviewer to check was addressed (TECH-4990); "" if none. */
 function renderSubjectFeedback(pullRequests: PullRequestFacts[]): string {
@@ -107,7 +107,13 @@ ${subjects.map((s) => `- ${renderDependencies(s)}`).join("\n")}
    otherwise mark it unverified (not blocking by itself).
 6. Size and simplification claims need \`git diff --numstat\` evidence.
 7. Run the tests and targeted probes a requirement, claim, or finding needs; the dependencies are
-   installed. CI is the full test gate: do not rerun the whole suite.
+   installed. CI is the full test gate: do not rerun the whole suite. Hold the change's new and changed
+   tests to the repository's testing policy (its AGENTS.md and the policy that links): tests belong
+   where a realistic bug could hide (logic, state transitions, auth and tenant isolation, concurrency,
+   persistence, nontrivial parsing, a fixed regression), not on simple data objects, pass-throughs,
+   routine wiring, wording, or coverage. Report each test that falls short, a nontrivial test whose PR
+   does not say which bug it prevents, or a bug fix without its regression test, as a finding like
+   any other, asking to delete, merge, or simplify the test or to add the missing one.
 8. Severity: \`blocking\` (a defect, an unmet requirement, or a risk the change should not merge
    with), \`non_blocking\` (worth fixing, not worth holding the merge), \`nit\` (style). Your
    non-blocking findings and nits are notes kept with this review's record; they never become
