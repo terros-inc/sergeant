@@ -203,8 +203,7 @@ TaskStatus (derived, display only):
 ```
 admit_task                                   → open
 last step of a closing action (03 §10)       open → closed (done | canceled)
-a human answer to a Sergeant question        open → open, with a fresh budget window
-a human PR review, or the last blocker going open → open, with a fresh budget window (TECH-5218, TECH-5803)
+human direction, or the last blocker going   open → open, with a fresh budget window (07 §6)
 re-delegation or reopening after close       → a new Task row with a fresh budget
 ```
 
@@ -264,20 +263,13 @@ BudgetStatus {                  // computed by BudgetMeter, never stored
 }
 ```
 
-- **A budget is active time and money only.** No count of turns or runs ends a task (TECH-5059). Its
-  time counts only while a run or turn is running; no wait counts (TECH-6165, 07 §6).
-- **Windows**: a task's first window opens at admission. Any human direction opens a fresh one (07 §6):
-  the first human answer after any Sergeant question, the budget question included, at the answer's
-  timestamp, with zero spend and the installation's current `defaults.budget.window`; so does any other
-  human comment or review on the issue or its PRs (TECH-5218, TECH-6165). Opening a window sets
-  `windowStart`, copies the window, and moves the task's runs so far into `priorRunIds`. One answer opens one window, also across a restart. There is no grant record, grant
-  action, or approver check: an extension is just an answer (03 §5, §9).
+- What counts, which events open a fresh window, and what happens when one runs out are in 07 §6.
+  Opening a window sets `windowStart`, copies the window, and moves the task's runs so far into
+  `priorRunIds`.
 - **Hard**: active time. No new run, message, or merge after `wallDeadline` (B1), plus concurrency and
-  cancellation. Sergeant controls these itself.
-- **Best-effort**: cost. It is the sum of reported or estimated cost of this window's runs and turns.
-  Where a provider reports usage live, BudgetMeter enforces it mid-run; otherwise it is known only when
-  the run ends, and the active time is the backstop. Dev/stage resources, CI minutes, and tools with their
-  own billing are outside it. There is no cross-provider billing ledger (captain, 2026-10-02).
+  cancellation. **Best-effort**: cost, the reported or estimated cost of this window's runs and turns;
+  dev/stage resources, CI minutes, and separately billed tools are outside it, and there is no
+  cross-provider billing ledger (captain, 2026-10-02).
 
 ---
 

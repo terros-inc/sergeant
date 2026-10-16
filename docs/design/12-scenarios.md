@@ -136,7 +136,7 @@ next credential vend includes it.
 
 **Known dead.** The host reboots. [G] run-reconcile: the adapter finds no process and no result →
 `failed(lost)`; the run token stops working; wake. [S]: the last progress note and a WIP branch pushed 20
-minutes ago (rule 3). `start_worker` successor: "The previous worker was lost; branch … has WIP at abc123;
+minutes ago (05 §3). `start_worker` successor: "The previous worker was lost; branch … has WIP at abc123;
 continue from it or start over as you judge." Up to 30 minutes of work is redone.
 
 **Unreachable.** A cloud provider's status API times out. [G] the run stays non-terminal with
@@ -197,18 +197,16 @@ Nothing restarts unattended (02 §9).
 
 1. At about 80%: [G] wake `budget_soft`. [S] `send_run`: "Nearly out of budget. Wrap up: push, open the
    PR as a draft if incomplete, report."
-2. Exhausted: 2 h elapsed since the window opened (hard), or reported spend reached $25 (best-effort: mid-run for a
+2. Exhausted: 2 h of active time used in the window (hard), or reported spend reached $25 (best-effort: mid-run for a
    profile with `liveUsage`, otherwise known when a run ends). [G] `enforce_budget`: a wrap-up message,
    then cancellation after 10 minutes; B1 denies new starts; wake `budget_exhausted`.
 3. [S] (within the $2 reasoning reserve): `ask_human(purpose: budget_extension, blocking)` with context
    (07 §6).
-4. [H] replies "one more window". The answer itself opens a fresh window at the answer's timestamp,
-   with zero spend and the installation's current wall-time and money budget. [S] records the question
+4. [H] replies "one more window". The answer opens a fresh window (07 §6). [S] records the question
    as answered and `start_worker(continueFrom)`; no separate grant action or approver check exists.
-5. The same rule applies to any human answer to any Sergeant question. Reasoning still interprets the
-   answer: "stop" opens the window mechanically but causes Sergeant to stop rather than spend it.
+   Reasoning still interprets the answer: "stop" opens the window but Sergeant stops rather than spend it.
 
-Without `liveUsage`, one long run can spend past $25 before its cost is known; the 2-hour wall-clock is
+Without `liveUsage`, one long run can spend past $25 before its cost is known; the 2 hours of active time are
 then the hard backstop. There is no count of turns in the budget. Accepted (01 `Budget`).
 
 ## 11. The worker gets distracted or stuck

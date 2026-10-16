@@ -19,7 +19,7 @@ job) · **DELETE** · **UNDECIDED** (in `14`).
 | `TaskState` ACTIVE/WAITING/DONE/CANCELED | SIMPLIFY | open or closed; "waiting" derived from the one `HumanWait` | Waiting meant many things in S1; in S2 it means one thing (P10) |
 | `current_phase` PLANNING→…→DONE (ADR-0031) | DELETE | none | The fixed lifecycle is what Sergeant's judgment replaces. ADR-0031 even needed `phase-mismatch:` human decisions when history and phase disagreed |
 | Waits (`wait_json`: GITHUB_EVIDENCE, HUMAN_INPUT; deadlines, timeout actions) | SIMPLIFY | `HumanWait` only; GitHub "waits" are wake reasons on facts | A GitHub wait is just "wake me when CI finishes" |
-| Grants (`retry`, `fresh_run`, `rethink`, `active_budget`) | DELETE | none; a human answer to a Sergeant question opens a fresh budget window (TECH-5059) | Retry, fresh run, and rethink are Sergeant's decisions; budget continues through an ordinary answer |
+| Grants (`retry`, `fresh_run`, `rethink`, `active_budget`) | DELETE | none; human direction opens a fresh budget window (07 §6) | Retry, fresh run, and rethink are Sergeant's decisions; budget continues through an ordinary answer |
 | Planner / simplify role (ADR-0038, UNF-341, UNF-569) | MOVE TO RUNNER, MOVE TO REASONING | the worker plans; Sergeant decides scope, repos, and decomposition | A planning run that only chooses a repo and work units is overhead for a capable worker |
 | Execution plan, work units, tiers, validation level | DELETE | none | The 2026-09-30 retro (F4) found planner tiers did not even drive model choice |
 | Implement / fix / repair roles | MOVE TO RUNNER | one primary worker, continued or succeeded | They are the same engineering job with different context |
@@ -60,7 +60,7 @@ job) · **DELETE** · **UNDECIDED** (in `14`).
 | Drain as quiesce (ADR-0040) | KEEP | `POST /v1/drain` | |
 | Workspace ownership, retained Task worktree, observation worktrees (ADR-0018/0019/0031) | MOVE TO RUNNER | disposable per-run workspace; continuity by pushed branches | P4: redo beats recovery machinery |
 | Bare repo cache | MOVE TO RUNNER | adapter cache, never correctness-bearing | |
-| Stow and reclaim (ADR-0034), `sgt/recover/*` branches | DELETE | workers push WIP regularly (rule 3) | |
+| Stow and reclaim (ADR-0034), `sgt/recover/*` branches | DELETE | workers push WIP regularly (05 §3) | |
 | Build cache hygiene (UNF-699) | MOVE TO RUNNER | adapter-owned, capped cache on the data volume | |
 | Sergeant pushes candidates; credential-free staging push (ADR-0020 + amendment) | MOVE TO RUNNER | the worker pushes with the worker App | The planted-hook risk disappears because the control-plane credential never runs in a worker-writable place |
 | PR creation and PR body content (UNF-538) | MOVE TO RUNNER | the worker writes a self-contained PR body (rule 4) | |

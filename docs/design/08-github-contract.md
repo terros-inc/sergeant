@@ -141,8 +141,8 @@ live GitHub and Linear facts at execution time:
 | M14 | every input a run reported it could not read (`unreadableInputs`: an auth-gated link, a missing file or attachment, an issue file not downloaded) is named in a Sergeant question on the issue (a comment starting with "**Question for you**"; other bot comments do not count): reasoning asked a human about it. Q1 then holds the task only until a human next changes the conversation, which need not be an answer; M14 checks that the question was asked, and the turn that follows judges whether the change answers it (TECH-5034) |
 | M15 | if the PR changes `.github/workflows/**` or another protected CI definition (`.github/actions/**`, `.circleci/**`, `.buildkite/**`, `.gitlab-ci.yml`, or a `Jenkinsfile`), or its changed-file list is unknown (fails closed), the standing must be an independent reviewer's approval of this exact head, never the worker's `not_required`; and whatever the `mergePolicy`, Sergeant never approves, merges, or enables auto-merge and uses the human handoff below. One matcher (`protectedCiFiles` in contracts) serves the Gate, `execute`, and the adapter, each reading the live changed files |
 
-Plus G1–G3 (not paused, task open, PR belongs to the task). Budget exhaustion does not block a merge:
-merging spends nothing, and landing finished work is the cheapest way to stop.
+Plus G1–G3 (not paused, task open, PR belongs to the task) and B1: an exhausted budget window holds
+the merge until a fresh one opens (07 §6).
 
 Each M rule exists for a material risk: M1, M3–M7 and M9 for an unreviewed, red, or wrong-head merge
 (L1, and L2 where a merge deploys); M2 so only this task's PRs are merged; M8 and M10 so a human's hold,
@@ -210,11 +210,8 @@ The worker owns rebasing and conflict resolution (05 §3). Sergeant decides when
   (`sinceReviewedSha`), which decides whether another review is needed (06 §3);
 - a conflict that needs product judgment comes back as a question.
 
-Workers do not wait to be told (TECH-5278): they rebase onto the current default branch before the
-first push, before each review round, and whenever it moves under an open PR (05 §3). A stacked PR,
-based on another PR's branch, is allowed; once its base merges, a worker retargets it to the default
-branch and rebases it. A dependency between tasks is recorded as a Linear "blocked by" relation
-(03 §4 `record_blocked_by`), so intake waits instead of colliding.
+Workers also rebase without being told, and may stack PRs (05 §3, TECH-5278). A dependency between
+tasks is recorded as a Linear "blocked by" relation (03 §4 `record_blocked_by`).
 
 Sergeant does not rebase, merge main into branches, or resolve anything itself.
 

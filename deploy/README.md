@@ -113,13 +113,11 @@ anything, and the state backend and the provider refuse any other account.
 
    To confirm the id, read the `botActor.id` on a delegation the connector made (the issue's history
    in Linear's API), or Sergeant's refusal comment on such an issue, which names the app and its id
-   (TECH-5321): "delegated through the app … (id `…`)". **Known issue
-   ([TECH-5280](https://linear.app/terros/issue/TECH-5280/app-delegation-name-matching-document-the-known-issue-and-flag)):**
-   an app's delegation counts as the assignee's own only when Linear's `botActor.userDisplayName`, the
-   user the app acted for, equals the assignee's `displayName`; Linear gives no id or email for that
-   user, so list only apps you trust to report it. Two edge cases are accepted all the same: an empty
-   name matches an empty name, and a match overrides a different human Linear reports as the actor.
-   Either one logs a `warning:` line and is noted as `owner.warning` in the task's `state.json`. On an
+   (TECH-5321): "delegated through the app … (id `…`)". How an app's delegation is matched to the
+   assignee, and its known issue (TECH-5280), are in
+   [`docs/design/07-linear-contract.md` §5](../docs/design/07-linear-contract.md#5-intake-and-admission),
+   item 8: list only apps you trust to report the user they acted for. A flagged match logs a
+   `warning:` line and is noted as `owner.warning` in the task's `state.json`. On an
    existing installation, add the field to the installation-config parameter, then restart or update
    (Restart or update with `sgt` below); an issue refused before then needs delegating again.
 
@@ -188,14 +186,10 @@ mutation:
 
 ### Webhooks
 
-Webhooks are Sergeant's primary signal, and polling only their backup (TECH-5942). A task with nothing
-in flight polls, rereads its PRs, and is resumed once its loop ended only every 15 minutes unless an
-event names it, and the post-merge feedback sweep runs every 30 minutes. That holds whether or not
-deliveries arrive: falling back to fast polling when webhooks stop would multiply Linear and GitHub
-load at the worst time, so without them every change is still found, but up to 15 minutes late. Only
-what no webhook announces keeps the 1-minute poll (`--poll-seconds`): a run in flight, a PR whose
-mergeability GitHub is still computing, and a pending merge retry. The intake still lists delegated
-issues every 2 minutes. `sgt admin status` shows each source's deliveries and whether it is delivering
+Webhooks are Sergeant's primary signal, and polling only their backup (TECH-5942): how often a task
+polls is under The service below, and it does not change when deliveries stop, since falling back to
+fast polling would multiply Linear and GitHub load at the worst time. Without webhooks every change
+is still found, but up to 15 minutes late. `sgt admin status` shows each source's deliveries and whether it is delivering
 (one accepted in the last 30 minutes); a source refused 5 times in a row, or with no delivery accepted for 6 hours (its secret configured but never
 delivered to included), is logged once as `WARNING: <source> webhook: ...` and shown there as an
 alert until a delivery is accepted. Set them up once per installation, in this order, and expect
@@ -242,13 +236,10 @@ accounts (Model accounts below); the installation has no Codex credential (TECH-
 `packages/runner/README.md`, under Codex.
 
 Which provider works and which reviews is chosen for each run from the owner's registered accounts and
-their live quota. A worker takes the owner's best-paced account, whichever its provider (the
-`sergeant:codex` label forces Codex for that issue's workers, TECH-5084). A reviewer takes the other
-provider than its worker's whenever the owner has a usable account of it, however its pace compares;
-an owner with no usable account of the other provider is reviewed by the worker's provider. So once a
-task's owner has registered both a Claude and a Codex account, its reviews come from the other
-provider than its worker's. There is no setting for either choice: an older config's
-`runners.worker`/`runners.reviewer` is ignored, and serve logs a deprecation warning for it.
+their live quota ([`docs/design/04-runner-contract.md` §10](../docs/design/04-runner-contract.md#10-adapters),
+Provider by quota; the `sergeant:codex` label forces Codex for that issue's workers, TECH-5084). There
+is no setting for either choice: an older config's `runners.worker`/`runners.reviewer` is ignored, and
+serve logs a deprecation warning for it.
 
 - **Model.** Codex runs `gpt-5.6-sol`, the model the installations ran before it became the default,
   unless the config's optional `"codex": { "model": "<Codex model>" }` names another. `serve`'s
@@ -319,17 +310,16 @@ and a brief that does not fit alone fails the start with an error saying so.
 ### Model accounts: each task's owner pays (TECH-5179)
 
 Workers and reviewers run only on model accounts people register with `sgt`, and each task only on its
-owner's: the issue's human assignee, who must also be the one who delegated it to Sergeant
-(`packages/sergeant/src/owner.ts`); reassigning the issue hands it off: the runs stop, PRs and branches
-are kept, and the issue goes back to Todo, undelegated, for the new assignee to continue or delegate
-(`cancel.ts`). The model token is
+owner's (who that is, and the handoff when the issue is reassigned, are in
+[`docs/design/07-linear-contract.md` §5](../docs/design/07-linear-contract.md#5-intake-and-admission)
+and §8). The model token is
 Sergeant's system account: it runs reasoning, retros, and system-health work only, never a worker or
 reviewer (not even the post-merge audit), so Sergeant can still tell an owner what is wrong when their
 accounts are spent. Each person registers their own subscription, personal or company-paid
 (TECH-5198); the installation config has no model accounts or Codex credential of its own, and a
 config that still names `modelAccounts` or `codex.credentialSecret` does not parse (TECH-5184).
-Each launch runs on the owner's usable account
-whose quota is furthest ahead of its weekly and 5-hour reset schedule (`packages/runner/README.md`). Every run records its `account`, and `sgt account list` shows
+Which of the owner's accounts a launch uses is in
+[`docs/design/04-runner-contract.md` §10](../docs/design/04-runner-contract.md#10-adapters). Every run records its `account`, and `sgt account list` shows
 what each one paid for. An owner with no registered account, or none usable, gets a comment on the
 issue saying what to do, and nothing starts.
 
@@ -566,8 +556,7 @@ aws ssm put-parameter --name /sergeant/v2/installation-config --type String --ov
 ```
 
 Only tasks that start after the update get the new window. A task already running keeps the one it
-started with (the log says `ignoring the budget options`) until its next fresh window: any human
-answer to one of its questions, "extend" included, or a human review of its PR (Budget below).
+started with (the log says `ignoring the budget options`) until its next fresh window (Budget below).
 
 A repository whose builds, tests, and CI need a longer (or cheaper) window gets its own `budget` in
 its `repositories` entry, for example
@@ -681,14 +670,9 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 }
 ```
 
-- **`repositories.<owner/name>.mergePolicy`** says who merges in it: `sergeant` approves and merges a
-  gated head; `human` never does, and a repository without one is `human`, so it fails safe. In a
-  `human` repository the same merge checks decide when a head is ready, and Sergeant then hands it to a
-  human instead: it marks the PR ready, requests review from the code owners GitHub asked or else the
-  issue's assignee (their Linear profile in `linear.reviewerProfiles`), posts the review summary on the
-  PR and the issue, and waits. A human's review or comment is feedback as always; their merge finishes
-  the task as Sergeant's own would. The GitHub adapter rereads the live policy before any approval or
-  merge call and refuses in a `human` repository whatever asked it to merge. A repository's
+- **`repositories.<owner/name>.mergePolicy`** says who merges in it, `sergeant` or `human`, and a
+  repository without one is `human`; the human handoff is in
+  [`docs/design/08-github-contract.md` §7](../docs/design/08-github-contract.md#7-merging). A repository's
   `"observedChecksFallback": true` treats every check observed on the exact head as required (GitHub
   Apps and rulesets below).
 - **`github.ciRerunApp`** (optional, TECH-5839) is a separate GitHub App, never the worker App, with
@@ -709,9 +693,7 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   comments are not human input.
 - **`linear.delegatingAppIds`** (optional) lists Linear app ids (`botActor.id`), such as Linear's MCP
   connector (`f69dcc4d4c3c994d8f7f1475b2b23a11` in every workspace), whose delegations count as the
-  assignee's own when the app acted for a user with the assignee's display name; any other app's
-  delegation is refused. Setting it, confirming the id, and the known issue with the display-name
-  match (TECH-5280) are under Before the first apply above, step 8.
+  assignee's own (Before the first apply above, step 8).
 - **`gitIdentity`** is only the fallback commit identity (TECH-5593). A run's commits are authored and
   committed as the person who requested it: the task owner, by the name and Linear login email they
   registered their model account with (`sgt account register`), so GitHub attaches each commit to the
@@ -752,7 +734,7 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   ([`packages/runner/README.md`](../packages/runner/README.md#codex-codex-local-tech-5009)). People
   register Codex accounts with or without it.
 - **`retro`** (optional) is the Sergeant project's Linear id and the team its issues are filed in
-  (Retros below).
+  (Follow-ups, Sergeant feedback, and retros below).
 - **`registeredAccountsSecret`** (optional) names the registered-accounts secret (Model accounts above).
 - **`publicDataDenylistSecret`** (optional, TECH-5914) names a secret whose value is the customer
   names, one per line, that a worker's push to a public repository must not carry. Add the name to
@@ -764,22 +746,12 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 
 ### GitHub Apps and rulesets
 
-The control-plane App reads PRs, checks, and branch rules, and approves then merges; it needs contents
-and pull requests write, checks and commit statuses read, and metadata read. The worker App needs
-contents and pull requests write, and checks and actions read, and commit statuses read so `gh pr
-checks` can read statuses (TECH-5839; run tokens ask for it only once the installation holds it); it may also hold workflows write
-(TECH-5797), which lets workers push workflow changes on non-default branches once an organization
-owner accepts it on the installation (run tokens ask for it only then). Any PR that changes protected
-CI configuration needs an independent review and is always handed to a human to review and merge.
-Neither App may hold administration, secrets, environments, deployments, or actions write (only the
-optional `ciRerunApp` holds actions write, above), the
-control-plane App may not hold workflows, and the worker App must not be a ruleset bypass actor. Contents write would let the worker App merge its own green PR, so each
-repository's ruleset must require at least one approving review: GitHub never lets a PR's author
-approve it, and the control-plane App submits that approval on the exact gated head only after every
-Gate check passes, immediately before its SHA-guarded merge. A failed approval stops the merge. Only
-the base branch's declared required checks count toward a merge (ruleset `required_status_checks`), so
-a repository with none cannot be merged; a repository's `"observedChecksFallback": true` instead
-treats every check observed on the exact head as required.
+Each App's permissions, what neither may hold, and why the ruleset's required approving review is
+what keeps the worker App from merging its own PR are in
+[`docs/design/08-github-contract.md` §1](../docs/design/08-github-contract.md#1-github-identities-per-installation);
+§2 there is the enrollment checklist. Only the base branch's declared required checks count toward a
+merge (ruleset `required_status_checks`), so a repository with none cannot be merged; a repository's
+`"observedChecksFallback": true` instead treats every check observed on the exact head as required.
 
 **A ruleset for a newly enrolled repository.** Someone with admin on the repository creates it once,
 before or right after `sgt admin repo add`. It covers the default branch: no deletion or force push, a
@@ -897,11 +869,9 @@ pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8
   makes no effect until a human comments or edits the issue. No timeout decides for the human; `STOP`
   or undelegation still ends the loop. The wait is never stored locally: a restart finds the question
   on the issue.
-- **Closing without a PR.** When a worker's verification shows nothing to change and the task opened
-  no PR, reasoning proposes `close_issue` instead of asking: it posts its evidence in one comment and
-  moves the issue to Done (main already covers it) or Canceled (obsolete), and the loop ends
-  `accepted`. Gate rules C1–C4 refuse it with any PR in the task, without evidence, before a worker
-  finished, or once the conversation changed.
+- **Closing without a PR** (`close_issue`, Gate rules C1–C4) is in
+  [`docs/design/07-linear-contract.md` §6](../docs/design/07-linear-contract.md#6-budget-asks-and-fresh-windows),
+  "Nothing to change"; the loop then ends `accepted`.
 - **Run ids.** A run's id is saved before the runner starts it, so a crash in between still leaves a
   run the loop cancels; one the runner never started is dropped once a cancel confirms it.
 
@@ -911,12 +881,10 @@ Each task has a budget window, saved in `state.json` with the task's start befor
 happens. It is the installation config's `budget`, each field unset defaulting to 120 minutes and $25;
 `canary`'s `--budget-minutes` and `--budget-usd` override the config's for its task. A restart keeps
 the stored window and logs that it ignores a different one, so changing the config's `budget` affects
-only tasks that start afterward, and their next fresh window. Any human direction gives the task a
-fresh window (`docs/design/07-linear-contract.md` §6): a human's answer to any of the agent's questions
-from the answer's time, with zero spend (runs of earlier windows no longer count) and the config's
-current `budget`, and so do any other human comment or review on the issue or the task's PR, and the
-task's unblocking, its last open Linear "blocked by" issue completed or canceled or
-that relation removed (TECH-5803): the loop logs `unblocked (was waiting on ...): a fresh budget window ...`.
+only tasks that start afterward, and their next fresh window. What the window counts, what opens a
+fresh one (the loop logs `a human answered (...)` or `unblocked (was waiting on ...)`, then `a fresh
+budget window ...`), and the budget question with its accept-as-is reply are in
+[`docs/design/07-linear-contract.md` §6](../docs/design/07-linear-contract.md#6-budget-asks-and-fresh-windows).
 
 A repository's own `budget` (`repositories.<owner/name>.budget`, TECH-5219) replaces the stored
 window's fields for a task once it has a run in that repository: `state.json` records the
@@ -927,96 +895,25 @@ installation's; over several repositories the largest of each field holds. Unlik
 window of tasks already working in that repository. `canary` applies its repository's `budget` before
 its own flags.
 
-The window's minutes are hard and count only active time, while a run or turn is running (TECH-6165):
-waiting for a human, CI or a task slot does not count. Spend is best-effort: the cost runs and reasoning
-turns report when they end (a turn's cost counts before its proposals run), so a running or canceled
-run's cost is unknown and the time is the backstop; there is no billing ledger.
-
 Once either is exhausted, no run, message, follow-up, or merge happens (Gate rule B1, checked before
-every effect and again right after its live reads), running runs are canceled until the runner
-confirms it, and the agent asks one **Question for you**, summarizing spend, runs, and PRs, with the
-options to extend or accept as-is. It is posted like any question, under a key of the task and the
-window, so a restart finds it on Linear instead of asking again, and nothing happens until a human
-replies after it. A reply opens a fresh window like any answer, so "extend" needs nothing more: the
-next turn carries on with the work, and a steer is carried out in it. A task that runs away in its
-fresh window is stopped at that window's end and asked once more.
-
-On "accept as-is" (the option's number, or the same in the human's own words) reasoning proposes
-`accept_as_is`: the loop ends `accepted` with nothing more asked, and `state.json` is set aside so
-intake does not resume it, leaving its PRs and the issue for a human. One line on the issue says so,
-posted under a key of the accepting reply, so a retried turn posts no second one. Gate rule Q2 refuses
-it unless a human replied to the budget question, and unless the live conversation is still the one
-reasoning read, so a reply posted while it reasoned is read by the next turn instead. An
-`accepted.json` marker keeps intake from starting the issue afresh while it stays delegated and in
-Todo; moving the issue out of Todo (or undelegating it, or `sgt task wake`) clears it, so back in Todo
-it starts a fresh task, as after a stop.
+every effect and again right after its live reads), and running runs are canceled until the runner
+confirms it. After an accept-as-is reply, an `accepted.json` marker keeps intake from starting the
+issue afresh while it stays delegated and in Todo; moving the issue out of Todo (or undelegating it,
+or `sgt task wake`) clears it.
 
 The outcome comment after a merge is the one effect B1 does not hold back: it reports a merge that
 already happened, and withholding it would hide the merge from the human.
 
-### Follow-ups
+### Follow-ups, Sergeant feedback, and retros
 
-A follow-up issue is only for a concrete bug, required unfinished work from the task's own scope, a
-real blocker, or a current operational or security problem. There is no per-task quota, but more than
-one from a task is exceptional. Workers suggest them in their report's `followups`, each with its
-`category` and why it meets it; everything else they noticed (what made the task harder or slower,
-what could be better, whether it will recur) goes in the report's `feedback` and its short Feedback
-section, and is never filed. Reviewers' `non_blocking` findings and nits never become follow-ups, nor
-do theoretical edge cases, future robustness, generalized cleanup, speculative rollback hazards, or
-abstraction improvements. The exception is after-deploy checks (TECH-6146): a done-when item only
-production access or post-deploy observation can prove, or an item in the issue's `**After deploy (not
-for workers):**` section, gets one follow-up per check (key `after-deploy-<slug>`) in the turn that
-starts the worker on the rest, instead of a question to a human; the merged outcome comment lists each
-as "not verified (after deploy)", and workers and reviewers treat them as out of scope.
-
-Reasoning decides whether a suggestion deserves an issue and proposes `create_followup` with its
-category, why, and a short key naming the idea; the filed issue opens with the category and why, and
-ends with the default-branch commit of each repository it concerns, read when it is filed (TECH-5258),
-so whoever picks it up can see how far main has moved since. Workers treat a follow-up's paths, line
-numbers and scope as hints and check them on the current default branch before planning. The
-agent files it in the task issue's team and project, related to the issue (or blocked by it), with no
-delegate or assignee, so humans triage it. Linear's client-supplied ids, derived from
-`followup:<task>:<key>`, make it at most one issue and one relation per key, even across a crash or a
-rerun; filed follow-ups are kept in `state.json`, shown to every later turn, and listed in the outcome
-comment.
-
-### Sergeant feedback comments
-
-With the closing PR's merge, reasoning may give up to three short feedback lines worth keeping, from
-the workers' feedback and any non-blocking review notes worth keeping. After the outcome comment,
-Sergeant posts them once as a **Sergeant feedback** comment on the issue, keyed by the merge like the
-outcome, and adds the `sergeant-feedback` label. A merge reasoning did not make (a human's) uses only
-the closing worker's explicit feedback. An issue completed in Linear without a recognized closing merge
-gets the same from the latest worker, posted once as its stop finishes (keyed by the stop) while the
-issue is still delegated to Sergeant. Delivery is the comment and the label: until both succeed, the
-feedback is not marked posted and the task is neither seen through nor its stop finished, so a later
-pass retries, and the key keeps the comment to one. A task with nothing worth keeping ("Nothing
-notable") gets neither. Retros read these comments; no other store holds them. The `sergeant-feedback`
-label must already exist (a workspace label, or one in the issue's team); Sergeant never creates it.
-
-### Retros
-
-A **Sergeant retro** (`packages/sergeant/src/retro.ts`) sees across tasks what a single worker can't.
-With the installation config's `retro`, serve checks hourly and runs one when about 10 tasks got a
-Sergeant feedback comment since the last retro, or at most 2 weeks after the last one if anything new
-happened; `sgt retro` runs one now. Nothing else schedules it, so a healthy system that leaves less
-feedback gets rarer retros. It runs on the control plane with Sergeant's own reasoning model, never a
-worker or a person's model account.
-
-It reads two inputs only: the Sergeant feedback comments posted since the last retro, and what became
-of the issues Sergeant filed in that time (done, canceled, or still waiting), plus the previous retro
-and its issues as they stand now. Reasoning first says in one paragraph whether the last retro's
-recommendations happened and their themes stopped recurring, then gives themes with their evidence
-(task ids) and a recommendation each, and rarely an issue: only for repeated evidence across tasks, a
-meaningful recurring cost or risk, a clear systemic defect, or a strong simplification, preferring
-removing complexity, then guidance, then docs or tooling, then new machinery (at most 3).
-
-Sergeant files those in Backlog in the Sergeant project, unassigned and not delegated, for a human to
-promote, and posts the retro as one Linear document there titled `Sergeant retro <date>`. Linear is the
-store: the newest such document is when the last window ended and what it filed. `<dir>/retro.json`
-only keeps an answer whose filing or posting failed, so the retry pays for no second answer; issue and
-document ids derive from the window, so a retry files and posts each once. A failed retro is retried a
-day later, or at the next `sgt retro`.
+When a follow-up issue is filed, the **Sergeant feedback** comment after a merge, and the **Sergeant
+retro** across tasks are in
+[`docs/design/07-linear-contract.md` §11](../docs/design/07-linear-contract.md#11-follow-up-issues). Filed
+follow-ups are kept in `state.json`, shown to every later turn, and listed in the outcome comment. The
+`sergeant-feedback` label must already exist (a workspace label, or one in the issue's team);
+Sergeant never creates it. Retros need the installation config's `retro`
+(`packages/sergeant/src/retro.ts`); `<dir>/retro.json` only keeps an answer whose filing or posting
+failed, so the retry pays for no second answer.
 
 ### Review telemetry
 
@@ -1091,21 +988,10 @@ shell over the canary's per-task loop, not a workflow engine:
   loop, or a delegation change to or from the agent, runs an intake now. Nothing else happens: no event
   owes a turn or is recorded, repeated events coalesce (each loop, and intake, wakes at most once per 5
   seconds), an issue or PR no task watches is ignored, and the polls still find every change.
-- **Post-merge feedback.** While a task is active, a human's comment is part of its conversation. Once
-  its completing PR (`Fixes`) merged or its issue is Done, the loop takes no more turns, so a sweep
-  every 30 minutes reads those issues (delegated to `agentUserId` and completed in the last 14 days,
-  open and delegated, or merged by this host in that time): human comments on the issue after the work
-  landed, and comments, review comments, and reviews on its merged worker-App PRs after their merge
-  from the repository's owners, members, and collaborators. A reasoning call judges each one; an
-  acknowledgement or discussion files nothing. Actionable feedback becomes one ordinary follow-up issue
-  (Backlog, assigned to the origin's owner, not delegated), related to the origin, whose description is
-  the delta reasoning wrote, the feedback verbatim, links to the original issue and the merged PRs,
-  and the default-branch commit it was written against; a comment on the origin says so. A human starts it like any issue, by moving it to Todo and
-  delegating it to Sergeant. Its Linear id is derived from the feedback, so the same feedback never
-  files a second issue. `<state dir>/feedback.json` records what was judged and failed attempts, and
-  its `since` (the first sweep) keeps feedback from before the rollout out. Per issue, at most 3
-  follow-ups are filed and 10 pieces of feedback judged; past that, or after 3 failed attempts at one
-  piece, Sergeant says so in a comment on the issue rather than dropping it silently.
+- **Post-merge feedback** is swept every 30 minutes
+  ([`docs/design/07-linear-contract.md` §11](../docs/design/07-linear-contract.md#11-follow-up-issues)).
+  `<state dir>/feedback.json` records what was judged and failed attempts, and its `since` (the first
+  sweep) keeps feedback from before the rollout out.
 - **API usage** (TECH-6208). `<state dir>/api-usage.json` keeps 7 days of serve's GitHub and Linear
   API calls per hour by source and endpoint, the budgets their responses report (sampled every 5
   minutes), GitHub's budget windows, rate-limit pauses with the tasks they paused, and low-budget
@@ -1204,7 +1090,7 @@ human pushes a deliberately failing commit to the worker's PR):
    a `followups` entry. In the turn that merges (or earlier), `turns.jsonl` shows a
    `create_followup <key>: done {"identifier":...}` outcome.
 2. In Linear, exactly one new issue exists for it: in the origin issue's team and project, with no
-   delegate or assignee, a description that stands alone and links back, and a `related` (or
+   delegate, assigned as `docs/design/07-linear-contract.md` §11 says, a description that stands alone and links back, and a `related` (or
    blocked-by) relation to the origin. The outcome comment lists it under "Follow-ups filed".
 3. Rerun the same command, and once more with `state.json` restored from before that turn: no second
    issue or relation appears.

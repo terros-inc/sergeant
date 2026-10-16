@@ -90,7 +90,7 @@ takeTurn(taskId)                                          // owner: Scheduler
 - **Idempotency**: a turn is not idempotent; its effects are, through action keys.
 - **Invocation bounds**: an individual model call has `maxTurnCostUsd` (default $1.50),
   `maxTurnSeconds` (300), and `maxToolCalls` (40). These bound one invocation; no count of turns ends
-  a task. The task budget is wall time and money only (§9).
+  a task. The task budget is active time and money only (07 §6).
 
 ## 4. Tools
 
@@ -166,8 +166,7 @@ Rule ids refer to §7, `06` §6, and `08` §7.
 
 **`create_followup_task(key, title, category, why, description, relation: blocks | blocked_by | related, delegate)`**
 → `{ issueId, identifier, url }`
-- Only for a concrete bug, required unfinished work, a real blocker, or a current operational or
-  security problem (`category`), with `why` it meets it (07 §11, TECH-5186).
+- Only for a `category` 07 §11 allows, with `why` it meets it.
 - The filed description ends with the default-branch commit it was written against (07 §11, TECH-5258).
 - Gate: G1–G3, F2–F3. Key: `followup:<taskId>:<key>`.
 
@@ -240,7 +239,7 @@ Three plain facts keep a human decision from being silently abandoned (L4):
 1. **Every Linear change wakes a turn.** Webhooks append `linear_comment` or `linear_issue_changed`. The
    intake reconcile (every 2 minutes, 07 §5) recomputes each open task's conversation revision and wakes
    the task if it differs from the revision its last completed turn saw, which catches missed webhooks
-   and failed turns; a task at rest is reread when a webhook names it or every 15 minutes, whether or not webhooks deliver (TECH-5942). The wake coalesces and does not shorten a failure backoff.
+   and failed turns; a task at rest is reread as often as `deploy/README.md`, The service, says. The wake coalesces and does not shorten a failure backoff.
 2. **Every turn sees every human comment.** The Situation Report lists all of them, marking those created
    or edited since the last completed turn (01 `SituationReport`).
 3. **Merge and completion carry the proposing turn's revision.** M10 and X5 re-read Linear and refuse if
@@ -251,10 +250,7 @@ Three plain facts keep a human decision from being silently abandoned (L4):
 What a comment means is judgment. Reasoning may answer it, act on it, or let it pass; prompts and evals,
 not the Gate, check that judgment. The one durable semantic record is the `HumanWait`: an open question
 Sergeant asked stays open until a turn reads a reply as its answer (`answeredQuestion`) or withdraws it.
-Independently, the first human comment after Sergeant's latest question opens a fresh budget window at
-the comment's timestamp, with zero spend and the installation's current wall-time and money budget. One
-answer opens one window, including across a restart; a comment that does not answer a Sergeant question
-opens none. A turn that still has no `end_turn` after two nudges is `incomplete` and is re-woken with
+Which human input opens a fresh budget window is in 07 §6. A turn that still has no `end_turn` after two nudges is `incomplete` and is re-woken with
 backoff (`previous_turn_incomplete`).
 
 ## 6. Proposing an action
@@ -288,7 +284,7 @@ nothing is left for reasoning to notice and correct in another turn.
 | G3 | auth | reasoning's actions | every referenced run, PR, comment, or question belongs to this task |
 | G4 | L4 | start_worker, start_reviewer | the issue does not carry the `sergeant:hold` label (07 §12) |
 | RS1 | L2 | set_repositories | every repo is enrolled and enabled |
-| B1 | L3 | task-charged starts | budget not exhausted |
+| B1 | L3 | task-charged starts, merge_pr | budget not exhausted (07 §6) |
 | B2 | L3 | task-charged starts | the run's limits fit in what remains |
 | B3 | L3 | starts | run starts on this task in the last hour < `budget.maxRunStartsPerHour` |
 | R1 | L3, captain rule | start_worker | no other worker run on this task is `starting`, `running`, or `waiting`, except one whose status is unknown and whose cancellation was already requested: reasoning may replace an unreachable worker after asking it to stop, accepting possible duplicated work (one primary worker; F04) |
@@ -363,19 +359,9 @@ history pointers to older comments, review dispositions, and actions.
 
 ## 9. Reasoning and the budget
 
-- A task's budget is one window of active time and money (TECH-6165: only while a run or turn is
-  running). No count of turns ends the task.
-- Turns count toward the task's `costUsd`.
-- The first human answer after any Sergeant question opens a fresh window from the answer, with zero
-  spend and the installation's current budget. Continuing after a budget question needs no separate
-  action or approval rule.
-- Any other human comment or review on the issue or the task's PRs opens a fresh window too; an issue
-  edit or a handed-off PR's merge or close only wakes a turn (07 §6). Waiting on a
-  human's merge or re-review never causes a budget question (TECH-5218, TECH-5913, TECH-6165, 07 §6).
-- The budget question itself is not a reasoning turn: the poll builds its case and the stop rubric's
-  recommendation from the ledger (TECH-6021, 07 §6), and the next turn reads the human's reply as usual.
-- So does the task's unblocking, its last open "blocked by" issue completed or canceled or that relation
-  removed, from the poll that sees it (TECH-5803, 07 §6).
+- The budget window, what opens a fresh one, and the budget question are in 07 §6. Turns count toward
+  the task's `costUsd`, and continuing after a budget question needs no separate action or approval
+  rule. The budget question is not a reasoning turn; the next turn reads the human's reply as usual.
 - Over the soft threshold, turns run normally and the Situation Report says so.
 - After exhaustion, turns run while spend < limit + `reasoningReserveUsd`, so reasoning can write a
   useful ask (S1 retro F5). Beyond the reserve, turns run only for `linear_comment` and `human_cli`
@@ -489,8 +475,8 @@ Product content, versioned and iterated with evals. Required content:
    carries the closing reference. Use `mark_complete` only for non-code outcomes.
 9. **Budget.** Near the limit, steer the worker to wrap up. When exhausted, ask (`purpose:
    budget_extension`) with context: what is done, what remains, PR and CI state, spend so far, and a
-   recommended next window. Any human answer opens that fresh window; interpret whether the answer says
-   to continue, stop, or do something else.
+   recommended next window. The answer opens that fresh window (07 §6); interpret whether it says to
+   continue, stop, or do something else.
 10. **Linear.** Comment at most for: start (a short plan), questions, real blockers, and outcomes. Never
     per run, per push, or per CI result.
 11. **Ending a turn.** Always `end_turn` with a 1–3 sentence summary, the answered question if a reply
@@ -503,7 +489,7 @@ Product content, versioned and iterated with evals. Required content:
 | Merge without green required checks on the exact head | M5, and GitHub branch protection |
 | Merge of a head with no fresh-review standing | M6 + D1–D6 |
 | Merge or completion that overtakes a comment or issue edit made since the proposing turn's snapshot | M10, X5 (re-read Linear; refuse on a changed conversation revision; a fresh turn decides) |
-| Runaway time or concurrency; spend past budget where usage is observable | BudgetMeter, B1–B3, R1–R3, `enforce_budget`; every fresh window requires a human answer to a Sergeant question, a human review of the task's PR (TECH-5218), or the task's last Linear blocker going (TECH-5803) |
+| Runaway time or concurrency; spend past budget where usage is observable | BudgetMeter, B1–B3, R1–R3, `enforce_budget`; every fresh window requires human direction or the task's last Linear blocker going (07 §6) |
 | A human comment or question silently dropped | §5: every Linear change wakes a turn that sees every comment; `HumanWait`; M10, X4, X5 |
 | Two implementation workers on one task | R1 (an unreachable worker may be replaced only after its cancellation was requested) |
 | A worker reaching production, admin, personal, or control-plane authority | the runner zone holds none of it (09 §3), except the run's selected model credential, an accepted exception to the personal-credential boundary (09 §3a) |

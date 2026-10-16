@@ -16,7 +16,7 @@ captain's review of draft 3 and what changed.
 | Sergeant does not write code; it manages | 00 P5, 03 §1 |
 | One primary worker per task; parallel engineering via the worker's own subagents | 03 R1, 04 §8 |
 | Sergeant chooses each task's repository set; the worker may change all of it and open several PRs; no per-repo lifecycle | 01 `RepositorySet`, 03 RS1, 04 §9, 08 §4 |
-| Only Sergeant creates Linear issues; workers suggest follow-ups | 03 F2–F3, 05 rule 12, 07 §11 |
+| Only Sergeant creates Linear issues; workers suggest follow-ups | 03 F2–F3, 05 §3, 07 §11 |
 | The required review is a separately launched fresh-context reviewer run; review and CI run in parallel; tiny fixes may skip re-review, material changes get a fresh one | 06 §1–7 |
 | Worker-launched subagent reviews are measurement-only; no preset threshold; Firstmate brings the comparison to the captain later | 06 §5, §9 |
 | Review-need policy: no hard thresholds; if in doubt, review ("80/20, not 99/1"); an occasional wrong skip is an accepted cost; track over- and under-review | 05 §5, 06 §1, §9 |
@@ -47,7 +47,7 @@ Captain Question.
 | Was | Answer | Why it is settled |
 |---|---|---|
 | Who merges where merging to main deploys to production | Per-repository `mergePolicy`: `human` for repositories whose default branch auto-deploys to production, `sergeant` elsewhere | The hard boundary excludes production authority; a merge that deploys is production authority |
-| Who may delegate, answer, grant budget, waive review | Anyone in the allowed Linear teams delegates and answers; configured approvers waive review and receive escalations. Superseded for budget by TECH-5059: any human answer to a Sergeant question opens a fresh budget window, with no grant or approver check | Waivers are the human authority the Gate relies on; everything else follows "Linear is the human surface" |
+| Who may delegate, answer, grant budget, waive review | Anyone in the allowed Linear teams delegates and answers; configured approvers waive review and receive escalations. Superseded for budget by TECH-5059: human direction opens a fresh budget window, with no grant or approver check (07 §6) | Waivers are the human authority the Gate relies on; everything else follows "Linear is the human surface" |
 | Reasoning runtime | A plain model tool-use loop with Sergeant-defined tools and Sergeant-managed sessions, behind a thin interface so the model is swappable; a provider agent SDK only if it honors 03 §8's contract | Small auditable tool surface; provider neutrality (P12) |
 | Separating runners from the control plane | One shared runner zone: a separate OS user with the metadata endpoint blocked on the host, a container on the laptop; no per-run isolation | The captain's posture: per-task isolation is not a requirement; the control-plane boundary is |
 | Auto-delegating follow-ups | Per-installation setting: on for Personal (depth 1), off for Terros at first | The captain's UNF-625 direction ("don't make a human do bookkeeping"), bounded for fan-out |

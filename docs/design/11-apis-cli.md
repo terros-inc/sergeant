@@ -174,5 +174,4 @@ or pins it, through the same `sergeant-update` (§2).
 
 Removed from S1: `sgt tool …` (capability/tool authorization), phase, wait, all grant commands,
 repo-scope, fresh-run, retry, rethink, decision-answer commands, and safety governor views. Budget
-continuation happens through a human answer to Sergeant's question, which opens a fresh wall-time and
-money window; `sgt task show` absorbs what an operator needs to see.
+continuation happens through human direction, which opens a fresh window (07 §6); `sgt task show` absorbs what an operator needs to see.
