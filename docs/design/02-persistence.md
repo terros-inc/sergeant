@@ -43,8 +43,8 @@ it verbatim (01 `TaskExcerpt`).
 **A local PR association cache?** No. Linear attachments are the association, re-read each turn and
 before each merge. An in-memory index rebuilt at startup routes GitHub webhooks.
 
-**Phases, waits, grants, leases?** Only the human wait (P10). No grants: a human's answer to a Sergeant
-question opens a fresh budget window, recorded in `tasks.budget` (01 `TaskBudget`). No
+**Phases, waits, grants, leases?** Only the human wait (P10). No grants: human direction opens a fresh
+budget window (07 §6), recorded in `tasks.budget` (01 `TaskBudget`). No
 leases: one daemon per ledger, enforced with an exclusive lock (S1's UNF-567 decision).
 
 **An inbound inbox or an outbox?** No. Comments are read from Linear each turn. No per-comment

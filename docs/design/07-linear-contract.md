@@ -143,15 +143,13 @@ A guardrail admits an issue when **all** of these hold (deterministic):
    ordinary question (§4), so their reply resumes the task in a fresh budget window (TECH-5217).
 
 Issues that fail only (5), (6), or (7) stay queued in Linear and are re-checked on every intake pass,
-highest Linear priority first, then oldest delegation. No comment is posted for queueing;
-`sgt task list --queued` shows them with the reason.
+with no comment posted; the order task slots go in is under The service in `deploy/README.md`.
 
 Delegation arrives by webhook; a reconcile poll (every 2 minutes, and at startup) catches anything
 missed (S1 ADR-0040's "nothing missed while down", kept). The same poll recomputes each open task's
 conversation revision and wakes the task when it differs from the revision its last completed turn saw,
 so a missed comment webhook or a failed turn never leaves human input unread (03 §5). A task whose
-loop ended is reread that way only when an event names it or every 15 minutes, whether or not webhooks
-deliver (TECH-5942).
+loop ended is reread less often (`deploy/README.md`, The service).
 
 On admission the task row is created with the default budget and an empty repository set, and the
 task is woken with `admitted`. The issue moves to the team's first `started` state when the first
@@ -323,7 +321,8 @@ fresh budget.
 | `sgt task cancel UNF-123` | same, plus removes Sergeant's delegation so the issue is not re-admitted |
 | Comments "stop" / "pause this" / "never mind" | Sergeant's reasoning interprets it: `release_task`, or cancel the worker and wait |
 
-Open PRs are left open; the note lists them and humans decide. Branches are left in place.
+Which open PRs a stop closes, and which branches it deletes, are in `deploy/README.md`, How a task
+runs, and 08 §3.
 
 ## 9. Reopening and re-delegation
 
@@ -400,14 +399,20 @@ latest worker's `feedback`, keyed `feedback:<issue>:stop:<request>`, and adds th
 intent is removed. No custom field or other store: a retro across tasks (TECH-5187) reads these
 comments and the label.
 
-**Sergeant retro (TECH-5187).** When about 10 issues got a Sergeant feedback comment since the last
-retro, at most 2 weeks after it (if anything new happened), or on a human's `sgt retro`, reasoning on
-the control plane reads those comments and the state of every issue the agent created since, checks
-the previous retro, and answers with themes, evidence, recommendations, and rarely an issue (high bar,
-at most 3). Its issues go to the configured Sergeant project's team, in its first `backlog` state,
+**Sergeant retro (TECH-5187).** Serve checks hourly and runs one when about 10 issues got a Sergeant
+feedback comment since the last retro, at most 2 weeks after it (if anything new happened), or on a
+human's `sgt retro`; nothing else schedules it, so a healthy system that leaves less feedback gets
+rarer retros. Sergeant's own reasoning on the control plane (never a worker or a person's model
+account) reads those comments and the state of every issue the agent created since, first says
+whether the previous retro's recommendations happened and their themes stopped recurring, and answers
+with themes, evidence (task ids), recommendations, and rarely an issue: only for repeated evidence
+across tasks, a meaningful recurring cost or risk, a clear systemic defect, or a strong
+simplification, preferring removing complexity, then guidance, then docs or tooling, then new
+machinery (at most 3). Its issues go to the configured Sergeant project's team, in its first `backlog` state,
 unassigned and not delegated, keyed `retro:<window start>:<key>`; the retro is one Linear document in
 that project, `Sergeant retro <date>`, keyed `retro:<window start>`. The newest such document is the
 last retro: its first line names where its window ended and its "Issues filed" section what it filed.
+A failed retro is retried a day later, or at the next `sgt retro`.
 
 - Same team, linked to the origin (`related`, or `blocked_by` when it must wait).
 - Description: why it exists, what was learned, a link back. Written to stand alone. It ends with the
@@ -421,19 +426,22 @@ last retro: its first line names where its window ended and its "Issues filed" s
   the origin to Sergeant when Linear's history shows it, else unassigned.
 - Limits: no per-task count (TECH-5186); `maxDepth` (F2–F3); deduplicated by Sergeant's semantic key
   (02 §6).
-- After-deploy checks (TECH-6146): a done-when item only production access or post-deploy observation
-  can prove gets one such follow-up per check, keyed `after-deploy-<slug>`, instead of a question to a
-  human (03 §12). Nothing else differs: same Backlog state, relation, owner, and dedup.
+- After-deploy checks get one such follow-up each (03 §12); nothing else about them differs.
 
-**Feedback after the work landed (TECH-4985).** Once the completing PR merged or the issue is Done,
-the task loop takes no more turns, so a human comment on the issue, or a comment or review on its
-merged PR from someone with a role in the repository, would otherwise be lost. Sergeant sweeps
-recently landed issues, reasoning judges each new piece of feedback, and actionable feedback becomes
-one ordinary follow-up under the rule above (Backlog, owner-assigned, not delegated), keyed by the
-feedback, with the delta, the feedback verbatim, links to the issue and the merged PRs, and the
-default-branch commit it was written against. A human
-starts it the normal way, by moving it to Todo and delegating it; nothing about it is special after
-that. Feedback while the task is active stays part of its conversation (§10) and never files one.
+**Feedback after the work landed (TECH-4985).** Once the completing PR (`Fixes`) merged or the issue
+is Done, the task loop takes no more turns, so a human comment on the issue, or a comment, review
+comment, or review on its merged worker-App PRs from the repository's owners, members, and
+collaborators, would otherwise be lost. A sweep every 30 minutes reads issues delegated to Sergeant
+and completed in the last 14 days, open and delegated, or merged by this host in that time; reasoning
+judges each new piece of feedback, and an acknowledgement or discussion files nothing. Actionable
+feedback becomes one ordinary follow-up under the rule above (Backlog, assigned to the origin's
+owner, not delegated, related to the origin), keyed by the feedback so it is never filed twice, with
+the delta, the feedback verbatim, links to the issue and the merged PRs, and the default-branch commit
+it was written against; a comment on the origin says so. Per issue, at most 3 follow-ups are filed and
+10 pieces of feedback judged; past that, or after 3 failed attempts at one piece, Sergeant says so in
+a comment on the issue rather than dropping it silently. A human starts it the normal way, by moving
+it to Todo and delegating it; nothing about it is special after that. Feedback while the task is
+active stays part of its conversation (§10) and never files one.
 
 Multi-repository work does not need follow-ups: one worker handles all repositories in the task's set
 (S1's UNF-625 machinery is not needed).

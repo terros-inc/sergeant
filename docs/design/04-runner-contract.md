@@ -183,7 +183,7 @@ on startup, for runs with status = starting and no handle:
   others from its repository set as needed. A worker may change any repository in the set and open one
   PR per repository (or more if it judges that right). Multi-repo work is ordinary.
 - **Continuity between runs comes from pushed branches** plus the previous report's `handoff`. Worker
-  rule 3 (05 §3) requires pushing work in progress regularly and before stopping.
+  the worker rules (05 §3) require pushing work in progress before stopping.
 - Caches (bare repositories, build caches) are an adapter optimization on the data volume, capped and
   pruned (UNF-699). Never correctness-bearing.
 - The agent's own subagents run with the same workspace and credentials. Sergeant neither sees nor
@@ -272,9 +272,7 @@ of the 5-hour window, about 0.6% of the week), and the lower of the two windows'
 quota would expire unused; below 1 it runs out before its reset. An account whose provider reports
 only one window (a personal ChatGPT plan has no 5-hour one) is scored on that window's pace alone, and
 its reason says so (TECH-5342). One whose quota could not be read, or has a window without a reset
-time, ranks after every scored one. A reviewer takes the best usable account of
-another provider than its worker's whenever there is one (the provider choice above), else the best
-overall. Nothing is remembered between launches: no burn
+time, ranks after every scored one. A reviewer's provider is chosen as above. Nothing is remembered between launches: no burn
 history, stickiness, or round-robin. No low-quota warning is posted. A run that fails
 on the account's quota or authentication (`failureReason`) sets the account aside for an hour, or until the window it ran out of resets if sooner, in
 memory. That window is the one at 0% in the account's quota read again, past the cache, as the run fails; with none

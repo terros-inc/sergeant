@@ -46,10 +46,9 @@ the credential is used inside run containers, and how to remove and revoke it.
 ## 4. Delegate an issue to Sergeant in Linear
 
 1. **Check the repository.** `sgt repo list` shows the repositories Sergeant works in and who merges in
-   each. In a `sergeant` repository Sergeant merges once its Gate passes. In a `human` one it never
-   approves or merges: it gets the PR green and reviewed, marks it ready, requests review (from the
-   code owners, else you if the operator configured your reviewer profile), and posts **Ready for a human to
-   merge** on the PR and the issue; you merge it, and Sergeant then finishes the task. A repository not
+   each. In a `sergeant` repository Sergeant merges once its Gate passes. In a `human` one it gets the
+   PR ready, posts **Ready for a human to merge** on the PR and the issue, and you merge it
+   ([design 08 §7](design/08-github-contract.md#7-merging)). A repository not
    listed needs an approver to enroll it.
 2. **Open or create the issue** in your installation's Linear workspace. Write it so it stands on its
    own: what to change, in which repository, and how to tell it is done.
@@ -71,9 +70,8 @@ merge, Sergeant posts one outcome comment.
 **When it refuses.** Sergeant starts only when Linear's history shows the assignee delegated the issue
 themselves. If the issue has no human assignee, or someone else delegated it, or an app did it on your
 behalf (such as an MCP connector), Sergeant posts one comment on the issue saying so, and nothing
-starts. An app's delegation counts as yours only when the installation lists the app in
-`linear.delegatingAppIds` and Linear names the user it acted for with exactly your display name.
-To fix any of these, assign the issue to yourself, then remove the delegate and add it again yourself
+starts. When an app's delegation counts as yours is in
+[design 07 §5](design/07-linear-contract.md#5-intake-and-admission), item 8. To fix any of these, assign the issue to yourself, then remove the delegate and add it again yourself
 in Linear. With no usable model account
 registered, it says that instead (step 3).
 

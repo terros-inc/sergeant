@@ -3,7 +3,7 @@ import { renderBoundedBotFeedback, renderBoundedHumanFeedback, renderReadAccess,
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/19";
+export const WORKER_RULES_VERSION = "s2-worker-rules/20";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -124,10 +124,12 @@ ${renderReadAccess(enrolled)}
     them on the current default branch: files moved, code removed or never merged, work another task
     already did, scope grown or shrunk. Work from what is true now, and say in your report what had
     changed.
-17. When your change touches a settled decision or removes config, search the whole repository
-    (\`docs/design/\`, READMEs, Terraform and other IaC, every other doc) for the old claim, and update
-    every place that still makes it before you call the work done. A list of places in the Task is a
-    starting point, not the scope.
+17. When your change touches a settled decision or removes config, update the rule in its owning doc:
+    the one section that states it in full, which the other docs link to. Then search the whole
+    repository (\`docs/design/\`, READMEs, Terraform and other IaC, every other doc) for the old claim:
+    where another place restates the rule instead of linking to its owner, replace the restatement
+    with a one-line link to the owning section rather than editing the copy, and fix any link or
+    one-line mention that is now wrong. A list of places in the Task is a starting point, not the scope.
 18. In a public repository (\`gh repo view <owner/name> --json visibility\`), never put customer or
     company names, people's names, Terros IDs (\`C.\`, \`U.\`, \`Program.\`, \`Account.\` and so on),
     emails, phone numbers, addresses, internal Slack or Linear links to customer cases, or customer

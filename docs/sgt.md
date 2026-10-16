@@ -118,36 +118,17 @@ Approvers also have `sgt admin` (§7).
 
 ### Budgets
 
-A task works in a **budget window** of time and money: by default 120 minutes and $25, or the
+A task works in a **budget window** of active time and money: by default 120 minutes and $25, or the
 installation's configured `budget` (a repository's own `budget` applies once the task has a run there).
-The time is **active time** (TECH-6165): only while a worker or reviewer run or a Sergeant turn is
-running. Waiting on you, on CI, or for a task slot uses none of it. Time is hard; spend is the reported
-cost of the window's runs and reasoning turns. No count of turns or runs ends a task. Once either runs out, Sergeant cancels its runs
-and asks a **Question for you**: 1. Extend, 2. Accept as-is. The question makes the case (TECH-6021): what
-happened in the window, the PR's CI, review and mergeability with any open blocking findings and the
-steps left, and what Sergeant recommends (extend, stop, or no recommendation) under which rule of the
-stop rubric, with a rough estimate of the time and money left. A task only waiting on you (your merge,
-a re-review it asked for, a question) asks nothing and says nothing of its budget.
+Once either runs out, Sergeant cancels its runs and asks a **Question for you**: 1. Extend, 2. Accept
+as-is, with its recommendation. Your comment on the issue, or your review or comment on its PR, gives
+the task a fresh window. What the time counts, what opens a fresh window, and what the question says
+are in [design 07 §6](design/07-linear-contract.md#6-budget-asks-and-fresh-windows).
 
 - **`sgt stops`** shows, for each rubric rule and recommendation, how many budget questions were asked,
   how people replied (extend, stop, other), and how often the reply followed the recommendation.
   `--json` adds every stop.
 
-- **Any human direction opens a fresh window** and wakes a turn, with zero spend and the installation's
-  budget as it is now, however exhausted the old window was (TECH-5059, TECH-5218, TECH-6165): any
-  human comment on the issue (an answer to a Sergeant question included), or a review, inline comment
-  or comment on the task's PR. A comment your AI assistant posts as you (through the Linear MCP or `gh`)
-  counts as yours. A bot's or app's comment wakes the task but never opens one, and neither does
-  Sergeant's own. A PR review does not answer a question Sergeant asked on the issue: reply there.
-- **An edit to the issue, or your merge or close of a PR Sergeant handed to you, wakes a turn but opens
-  no window**, since Linear and GitHub do not say who made it. The turn runs even if the window is used
-  up; after it, a task with nothing left to wait on asks the budget question.
-- **The budget question is no different.** Answering `Extend.` or `1` is just such an answer, and
-  the next turn carries on. Answering `Accept as-is` or `2` ends the task instead, leaving its PRs to you.
-- **Unblocking a task opens a fresh window** (TECH-5803). Once the task's last open Linear "blocked by"
-  issue is Done or Canceled, or its "blocked by" relation is removed, the next poll (within about a
-  minute) opens a fresh window from that moment, and the task carries on with no comment needed. One
-  blocker of several going opens none.
 - **`sgt task wake` does not touch the budget.** It asks for a turn now, which still waits for
   anything that holds it, an exhausted budget included.
 - **There is no command to reset a budget**, not even for approvers. Changing the installation's
@@ -159,17 +140,14 @@ a re-review it asked for, a question) asks nothing and says nothing of its budge
 ## 6. Model accounts
 
 Each task's workers and reviewers run only on the model accounts its owner registered (TECH-5179): the
-issue's human assignee, who delegated it to Sergeant themselves. Among them Sergeant takes the usable
-one whose quota is furthest ahead of its reset schedule (TECH-5213): for each of the weekly and 5-hour
-windows, percent left over percent of the window's time left, the tighter of the two governing, so
-quota that would otherwise expire unused is spent first. A worker has no provider preference: Claude or
-Codex, the best-paced account wins. A reviewer uses the other provider from its worker's whenever you have a
-usable account of it, however its pace compares; if you have none usable there, your reviews use the
-worker's provider. Every Sergeant takes both Claude and Codex accounts: registering a Codex account is
-all it takes for your tasks to use Codex (TECH-5390). No installation setting chooses providers. A task whose Linear issue has the
-`sergeant:codex` label runs its workers on your best usable Codex account, and on the usual choice when you
-have none usable, as the run's account reason says (TECH-5084); its reviewers are chosen as above. Sergeant's own system account runs
-its reasoning only, never a worker or reviewer. Register your own accounts, as many as you like, and
+issue's human assignee, who delegated it to Sergeant themselves. Sergeant takes the usable one whose
+quota is furthest ahead of its reset schedule, and a reviewer uses the other provider from its
+worker's when you have a usable account of it; the exact rule is in
+[design 04 §10](design/04-runner-contract.md#10-adapters). Registering a Codex account is all it takes
+for your tasks to use Codex (TECH-5390); no installation setting chooses providers. A task whose Linear
+issue has the `sergeant:codex` label runs its workers on your best usable Codex account, and on the
+usual choice when you have none usable (TECH-5084). Sergeant's own system account runs its reasoning
+only, never a worker or reviewer. Register your own accounts, as many as you like, and
 remove them at any time:
 
 ```sh
@@ -250,17 +228,9 @@ names the approver who changed it. They do not require AWS access or a restart, 
 them: Sergeant takes its retro target from the parameter at every start. `set` refuses a
 project or team id that does not exist in the installation's Linear workspace.
 
-- `restart` and `update` wait for the outcome and print it, with the reason when it failed (exit 1).
-  Sergeant is unreachable for part of it; that is expected and waited out.
-- An `update` with nothing newer to install changes nothing, not even the config: if the installation
-  config changed in AWS since Sergeant started, it says so, and `sgt admin restart` rereads it.
-- The restart is bounded: Sergeant stops taking new work and asks each task to end at its next poll,
-  then forces its own exit after five seconds if shutdown stalls. Running workers and reviewers are
-  left running; the new process picks them up.
-- One action at a time: another is refused until the host has finished the first. The host keeps only
-  its latest outcome, so if an automatic update starts before `sgt` reads yours, `sgt` says so (exit 1)
-  instead of waiting. Every request, and
-  who made it, is logged on the host. An update that fails to install puts back the previous release.
+`restart` and `update` wait for the outcome and print it, with the reason when it failed (exit 1);
+Sergeant is unreachable for part of it. How the host carries out each request, one at a time, is in
+[`deploy/README.md`, Restart or update with `sgt`](../deploy/README.md#restart-or-update-with-sgt-tech-5195).
 
 ## 8. Enrolled repositories
 

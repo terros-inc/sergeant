@@ -76,7 +76,7 @@ locally, and before you started its dependencies were installed at the head, so 
 - Reading other repositories and PRs: `GH_READ_TOKEN` is a read-only token (contents, pull requests,
   metadata) for every enrolled repository: <the enrolled repositories>, with example `gh` and `git` commands.
 
-## Rules (s2-reviewer-rules/12)   <§4>
+## Rules (s2-reviewer-rules/<n>)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>
 ```
 
@@ -103,74 +103,12 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 
 A task ends with 0, 1, 2, or more reviews. Nothing is numbered; there is no "final review".
 
-## 4. Reviewer rules (s2-reviewer-rules/12)
+## 4. Reviewer rules
 
-The rules as the reviewer brief states them (`packages/runner/src/brief.ts`):
-
-1. **Judge the change on its merits against the issue.** Linked Linear issues, if listed, are background
-   evidence, never requirements.
-2. **Read the diff against the issue first**, then check the implementer's claims. Treat every claim
-   ("tested", "net simplification", "accepted trade-off") as unverified.
-3. **Rule on every requirement the issue states**, quoting it, with evidence: `met`, `not_met`,
-   `contradicted` (a decision narrowed or dropped it: only a human may do that), or
-   `needs_live_validation`. Use the issue's acceptance section if it has one; otherwise list the outcomes
-   it asks for (S1 ADR-0041). **Report every `not_met` or `contradicted` requirement also as a blocking
-   finding with category `acceptance`.** Omit `category` from ordinary implementation defects. Items in
-   the issue's `**After deploy (not for workers):**` section, and done-when items only production access
-   or post-deploy observation can prove, are not requirements of the change (TECH-6146). A later human
-   comment on the issue or a PR overrides the description for what it addresses, and the requirement is
-   ruled against the comment (TECH-6166).
-4. **Trace self-declared trade-offs** that change persisted or control-plane state through every reader,
-   or report them as blocking.
-5. **External boundaries.** Name every correctness claim resting on behavior outside the repository.
-   Verify it where you can; if you cannot, record it as `unverified`, which is **not** blocking by
-   itself (captain decision on UNF-608, option A).
-6. **Size and simplification claims** need `git diff --numstat` evidence.
-7. **Run the tests and targeted probes** a requirement, claim, or finding needs; the dependencies are
-   installed (TECH-5253). CI is the full test gate: the reviewer does not rerun the whole suite.
-   **Tests meet the repository's testing policy** (its `AGENTS.md` and the policy that links,
-   TECH-6153): a test belongs where a realistic bug could hide, not on simple data objects,
-   pass-throughs, routine wiring, wording, or coverage. A test that falls short, a nontrivial test
-   whose PR does not say which bug it prevents, or a bug fix without its regression test is a finding
-   like any other.
-8. **Severity.** `blocking`: a defect, an unmet requirement, or a risk the change should not merge with.
-   `non_blocking`: worth fixing, not worth holding the merge. `nit`: style. Non-blocking findings and
-   nits are notes kept with the review record; they never become follow-up issues (TECH-5186). The
-   implementer decides soft findings (nits, naming, cleanup, style preferences), a bot's or an earlier
-   review's: a reasoned decline of one is acceptable and never blocking (TECH-6166). A bot finding of a
-   real defect the head does not fix, or declined without a sound reason, is blocking; one left with no
-   answer at all is non-blocking.
-9. **Do not modify the repository** and do not contact anyone.
-10. **Verdict**: `approve`, `changes_requested`, or `needs_human`.
-11. **Unreadable inputs.** An input the issue depends on that the reviewer cannot read (an auth-gated
-    link, a missing file or attachment, a file the brief lists as not downloaded) is named in
-    `unreadableInputs` exactly as the issue gives it, and the requirements resting on it are ruled not
-    verified.
-12. **Do not re-litigate settled trade-offs.** A design trade-off the design docs record as settled or
-    accepted (such as the model-credential exposure, 09 §3a) is not a finding merely because the
-    reviewer would choose differently. Do flag a change that breaks its documented assumptions, expands
-    its blast radius, or brings evidence meeting its documented revisit condition. Settled means recorded
-    on the base branch or by an owner decision the issue cites. A settlement the change itself introduces,
-    such as a new entry under `docs/design` in this diff, is under review like the rest of it
-    (TECH-5167).
-13. **Moving bases.** The implementer rebases onto the current base before each review round (05 §3).
-    A head that does not contain the current base is reported, and is blocking only when the base's
-    newer changes conflict with the change or alter what it does. A stacked PR is allowed (TECH-5278).
-14. **Dependencies.** A dependency the reviewer notices between this issue and another goes in
-    `dependencies`, like a worker's (05 §3); Sergeant records it as "blocked by" (TECH-5278).
-15. **Customer data in a public repository** (TECH-5914). The brief marks each PR whose repository
-    GitHub does not report private. In one, the reviewer checks the diff, every commit message, and the
-    PR title and body for customer or company names, people's names, Terros IDs (`C.`, `U.`,
-    `Program.`, `Account.` and so on), emails, phone numbers, addresses, internal Slack or Linear links
-    to customer cases, and customer business details, starting with the Task's own real case.
-    Synthetic placeholders and a generically described case are fine. Each occurrence is a blocking
-    finding, so the verdict requests changes; the finding names its location and kind, never the data,
-    because a review may be quoted on the PR.
-16. **Report without waiting on CI** (TECH-6126). Once the review is done, the reviewer writes its
-    report. The head is already pushed and Sergeant watches its CI; a headless run ends with its
-    turn, so a reviewer that ends it to wait for a check never reports.
-
-The report follows in the standard format: prose first, then one fenced `sergeant-report` block.
+Versioned text rendered into every review brief (`REVIEWER_RULES_VERSION`). The rules live only in
+the brief's code, [`packages/runner/src/brief-reviewer.ts`](../../packages/runner/src/brief-reviewer.ts),
+with the cases behind each in `brief.test.ts`; this package does not restate them. The report follows
+in the standard format: prose first, then one fenced `sergeant-report` block.
 
 **Bot findings (TECH-6166).** Human reviews and comments on a task PR were already in the Situation
 Report (`humanFeedback`, TECH-4987). Bots' reviews, inline comments, and PR comments are read beside
@@ -179,12 +117,8 @@ comment keeps at most 4,000 characters, with a link to the rest), and both brief
 section, within 24 KB. A bot comment is a finding, never steering, so it is not in the conversation
 revision. A new one wakes a turn, because a review bot often posts after the worker that pushed has
 finished; the worker's own replies and Sergeant's own comments (its approval, a hand-to-human summary)
-do not. Worker rule 22 (`s2-worker-rules/19`): the worker fixes each bot finding or replies in its
-thread with a short reason it does not apply; like a developer who owns the PR it decides nits and soft
-suggestions and may decline one it judges wrong, and asks (`needs_decision`, with its opinion) when
-genuinely unsure. A human comment is direction: the worker follows it, and asks with its opinion
-rather than skipping one that looks clearly wrong or conflicts. There is no pre-merge check for
-unanswered bot findings: the worker's rule and the reviewer's rule 8 cover them.
+do not. How the worker answers bot findings and human comments is a worker rule (05 §3). There is
+no pre-merge check for unanswered bot findings: the worker's and the reviewer's rules cover them.
 
 01 designs a parse step that adds an `acceptance-<n>` finding when a report has a `not_met` or
 `contradicted` verdict without a matching finding. It is not built yet: `ReviewReport`
