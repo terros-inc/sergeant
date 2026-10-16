@@ -414,7 +414,7 @@ that project, `Sergeant retro <date>`, keyed `retro:<window start>`. The newest 
 last retro: its first line names where its window ended and its "Issues filed" section what it filed.
 A failed retro is retried a day later, or at the next `sgt retro`.
 
-- Same team, linked to the origin (`related`, or `blocked_by` when it must wait).
+- Same team and project as the origin, linked to it (`related`, or `blocked_by` when it must wait).
 - Description: why it exists, what was learned, a link back. Written to stand alone. It ends with the
   default-branch commit of each repository it concerns (the task's PRs' repositories, else its one
   enrolled repository; for feedback, the merged PRs'), read when it is filed, so a worker can see how
