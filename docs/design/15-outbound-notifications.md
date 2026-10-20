@@ -12,18 +12,17 @@ JSON event to every **subscription** registered by the issue's assignee. Subscri
 agent harnesses (for example a scheduled agent routine with a webhook trigger, or Firstmate).
 
 - **Five events** (§1). Each one announces a Linear comment Sergeant has already posted, and **the
-  event id is that comment's id**. That one choice gives a stable dedup key across retries, restarts
-  and holds; the key for mapping a Slack reply back; a guarantee that a notification never says more
+  event id is that comment's id**. That one choice gives a stable dedup key across retries and
+  restarts; the key for mapping a Slack reply back; a guarantee that a notification never says more
   than the record; and no new Linear or GitHub reads.
 - **Linear stays the system of record.** Answers come back only as Linear comments, typed there or
-  relayed from Slack by the harness as the person who wrote them (§7). The existing Linear webhook
+  relayed from Slack by the harness as the person who wrote them (§6). The existing Linear webhook
   (TECH-5942) then wakes the task.
 - **Each person registers their own subscriptions through the authenticated `sgt` API** (§4), as
   they register model accounts today. Sergeant issues each subscription its own HMAC secret, shows
   it once, and keeps it in one Secrets Manager secret that only the host reads and writes.
-- **Quiet hours become an optional per-subscription setting, off by default** (§6). A harness that
-  pages a phone can ask Sergeant to hold overnight; one that queues or routes messages itself gets
-  everything at once.
+- **Every event goes out at once, at any hour** (§5). Quiet hours were considered and dropped by the
+  project owner's decision.
 
 ## 1. Events
 
@@ -58,8 +57,6 @@ type Notification = {
   occurredAt: string;
   /** The subscription this delivery is for (§4), so one harness can serve several. */
   subscriptionId: string;
-  /** Set when the subscription's quiet hours held the event: when the hold began. Otherwise null. */
-  held: { reason: "quiet_hours"; since: string } | null;
   issue: { id: string; identifier: string; url: string; title: string };
   /** The PR the event is about, if any. */
   pullRequest: { repo: string; number: number; url: string; headSha: string } | null;
@@ -92,10 +89,10 @@ subscription that lists it (§4). The one extra type, `ping`, is sent only by `s
 ### Signed example
 
 The secrets are placeholders. The event id is `commentIdFor("budget-question:9b1d6c2e-4a7f-4d3b-8e5a-2c6f1b0d9e74:2026-10-13T19:02:40.000Z:0")`.
-The body is the single line below, with no trailing newline (1053 bytes):
+The body is the single line below, with no trailing newline (1041 bytes):
 
 ```
-{"schemaVersion":"sergeant-notify/1","eventId":"0b5edfd1-890d-4d65-b4c6-98503c429a28","eventType":"task.budget_exhausted","occurredAt":"2026-10-13T21:05:12.000Z","subscriptionId":"sub_7Q2mX9","held":null,"issue":{"id":"9b1d6c2e-4a7f-4d3b-8e5a-2c6f1b0d9e74","identifier":"ENG-123","url":"https://linear.app/example-org/issue/ENG-123/example-task","title":"Example task"},"pullRequest":{"repo":"example-org/example-repo","number":42,"url":"https://github.com/example-org/example-repo/pull/42","headSha":"0123456789abcdef0123456789abcdef01234567"},"needed":"Budget window used up ($25.00 of $25.00): reply Extend to continue or Accept as-is to stop here.","replyOptions":[{"label":"Extend","reply":"Extend"},{"label":"Accept as-is","reply":"Accept as-is"}],"reply":{"linearIssueId":"9b1d6c2e-4a7f-4d3b-8e5a-2c6f1b0d9e74","linearCommentId":"0b5edfd1-890d-4d65-b4c6-98503c429a28","url":"https://linear.app/example-org/issue/ENG-123/example-task#comment-0b5edfd1"},"recipient":{"linearUserId":"5e8a2b7c-1d4f-4c9e-a3b6-7f0e9d2c8a15","name":"Example Assignee"}}
+{"schemaVersion":"sergeant-notify/1","eventId":"0b5edfd1-890d-4d65-b4c6-98503c429a28","eventType":"task.budget_exhausted","occurredAt":"2026-10-13T21:05:12.000Z","subscriptionId":"sub_7Q2mX9","issue":{"id":"9b1d6c2e-4a7f-4d3b-8e5a-2c6f1b0d9e74","identifier":"ENG-123","url":"https://linear.app/example-org/issue/ENG-123/example-task","title":"Example task"},"pullRequest":{"repo":"example-org/example-repo","number":42,"url":"https://github.com/example-org/example-repo/pull/42","headSha":"0123456789abcdef0123456789abcdef01234567"},"needed":"Budget window used up ($25.00 of $25.00): reply Extend to continue or Accept as-is to stop here.","replyOptions":[{"label":"Extend","reply":"Extend"},{"label":"Accept as-is","reply":"Accept as-is"}],"reply":{"linearIssueId":"9b1d6c2e-4a7f-4d3b-8e5a-2c6f1b0d9e74","linearCommentId":"0b5edfd1-890d-4d65-b4c6-98503c429a28","url":"https://linear.app/example-org/issue/ENG-123/example-task#comment-0b5edfd1"},"recipient":{"linearUserId":"5e8a2b7c-1d4f-4c9e-a3b6-7f0e9d2c8a15","name":"Example Assignee"}}
 ```
 
 ```
@@ -107,7 +104,7 @@ Sergeant-Event-Id: 0b5edfd1-890d-4d65-b4c6-98503c429a28
 Sergeant-Event-Type: task.budget_exhausted
 Sergeant-Delivery-Id: 6a0f3e1b-2c4d-4b8e-9f7a-1d2c3b4a5e6f
 Sergeant-Attempt: 1
-Sergeant-Signature: t=1791925513,v1=68ec656f51b7ebfc568a6c1ed4e27317095c951e4ee5f81ad5b8c496b5173ffe,v1=9bd3bd3aaf1714432676ffd86301fd34de50759736993a6ecbb6b1db11213816
+Sergeant-Signature: t=1791925513,v1=13adcd015d26e1ddd8a3d01fce4a37c6d69e4a3fdf99100d41f0a5ef517f860e,v1=159d56d2f1887f21a2eb8efe3a155055a6ddf5544d7ab7674a7bafebca4e9705
 ```
 
 The first `v1` is HMAC-SHA256 with the key `example-secret-current-do-not-use` over `1791925513.`
@@ -182,8 +179,8 @@ shared, team-wide harness, and v1 has none (Decisions for the captain, D2).
 
 | Endpoint | Inputs → outputs | Side effects | Who |
 |---|---|---|---|
-| `GET /v1/notifications` | → the caller's subscriptions (approvers: everyone's), never a secret: id, name, URL, events, quiet hours, created, and delivery health (§5) | — | team members |
-| `POST /v1/notifications/subscribe` | `name`, `url`, `events?` (default all five), `quietHours?` (§6) → the subscription and its **secret, shown once** | stores the subscription with a fresh secret; replaces the caller's subscription of that name, with a new secret | team members, as themselves |
+| `GET /v1/notifications` | → the caller's subscriptions (approvers: everyone's), never a secret: id, name, URL, events, created, and delivery health (§5) | — | team members |
+| `POST /v1/notifications/subscribe` | `name`, `url`, `events?` (default all five) → the subscription and its **secret, shown once** | stores the subscription with a fresh secret; replaces the caller's subscription of that name, with a new secret | team members, as themselves |
 | `POST /v1/notifications/rotate` | `name` → the **new secret, shown once** | adds a second secret; both sign until `finish` or 7 days pass | the owner |
 | `POST /v1/notifications/rotate/finish` | `name` → done | drops the older secret | the owner |
 | `POST /v1/notifications/test` | `name` → the HTTP status the URL answered | sends one signed `ping` event (not one of the five, `replyOptions` empty) | the owner |
@@ -191,7 +188,7 @@ shared, team-wide harness, and v1 has none (Decisions for the captain, D2).
 
 ```
 sgt notify list
-sgt notify subscribe <name> --url <https-url> [--events a,b] [--quiet-hours 07:00-19:00 --tz America/Los_Angeles]
+sgt notify subscribe <name> --url <https-url> [--events a,b]
 sgt notify rotate <name> [--finish]
 sgt notify test <name>
 sgt notify remove <name>
@@ -245,7 +242,7 @@ Each person may hold at most 10 subscriptions.
 **Idempotency.**
 
 - `eventId` is the source comment's id, a pure function of its key (`commentIdFor`), so the same fact
-  yields the same `eventId` across retries, restarts, holds and duplicate turns. A clarifying follow-up
+  yields the same `eventId` across retries, restarts and duplicate turns. A clarifying follow-up
   is a new comment, so a new event.
 - Subscribers dedup on `eventId` for at least 7 days and treat a repeat as success (`2xx`).
 - Delivery is at least once, never exactly once, with no ordering promise; `occurredAt` orders events
@@ -275,10 +272,13 @@ Each wait has ±20% jitter.
   for that subscription.
 - **Permanent failures:** any other `4xx` gives up at once. `410 Gone` also pauses the subscription
   until its owner runs `sgt notify test` successfully, so a removed endpoint is not hammered.
-- **Staleness:** before each attempt Sergeant checks that the event is still current (§6, step 2). A
-  stale event is dropped, not retried. `task.done` and `task.failed` never go stale.
-- **Quiet hours:** a retry that falls inside the subscription's quiet hours waits for its window, and
-  that wait does not count against the 24 h cap.
+- **Staleness:** before each attempt Sergeant checks that the event is still current, using only what
+  the task loops have recorded, with no new reads. Stale means: a question a human has answered since,
+  a budget question whose window was extended or accepted, a PR event whose head changed or whose PR
+  closed, or any actionable event whose task has finished. Each of those arrives as a webhook that
+  wakes that task's loop, whose pass marks the event stale; the 15-minute safety-net polls cover a
+  missed webhook, as for everything else. A stale event is dropped, not retried. `task.done` and
+  `task.failed` never go stale.
 - **Restarts:** retry timers live in memory. After a restart, every undelivered, unexpired, still-current
   event in the state files is retried from attempt 1; a duplicate costs the subscriber one dedup.
 
@@ -289,74 +289,12 @@ failing subscriber never delays a turn. At most 4 requests are in flight per sub
 last error, and `sgt admin status` the service-wide totals, as for inbound webhooks
 (`webhook-health.ts`). A give-up posts no Linear comment: Linear already holds the question.
 
-## 6. Quiet hours
+**No quiet hours.** Sergeant sends every event the moment it is derived, at any hour, and never holds
+one for a time of day. Quiet hours (holding delivery outside 07:00–19:00 PT, as first agreed, later
+proposed as an optional per-subscription setting) were considered and dropped by the project owner's
+decision. A harness that should not wake someone overnight holds or routes events itself.
 
-### What they are for
-
-The agreed design held notifications outside 07:00–19:00 PT. Their purpose is **not to wake people**:
-a harness that turns an event into a phone push or a Slack DM would otherwise ping someone at 02:00
-because a budget window ran out overnight. A side effect is that a person's morning gets one current
-notification per task, not a stale overnight trail.
-
-### Are they still needed?
-
-Not as a fixed, installation-wide rule. Two things changed since it was agreed:
-
-- Subscriptions are personal (§4), so people are in different time zones and keep different hours.
-  One Pacific window would be wrong for some of them.
-- Many harnesses decide for themselves when to interrupt someone. Firstmate queues work; a Slack app
-  can rely on Slack's own notification schedule and do-not-disturb. Holding in Sergeant then only
-  delays the harness's own triage.
-
-But some harnesses cannot hold: a routine with a webhook trigger typically acts the moment it is
-called. For those people, Sergeant holding is the only quiet-hours option.
-
-**Recommendation: keep quiet hours as an optional per-subscription setting, off by default.** A
-subscription without them gets every event at once. One with them (`--quiet-hours 07:00-19:00 --tz
-America/Los_Angeles`, any IANA zone, so daylight saving is handled) gets events only inside its window.
-The extra cost is small, because the hold reuses what retries need anyway: the per-event record in
-`state.json`, the staleness check, and "next attempt at time T". Per subscription rather than per
-person, because one person may want their phone harness quiet overnight and Firstmate fed at once.
-Dropping quiet hours entirely is the simpler alternative (D3).
-
-### Behavior when a subscription has them
-
-1. **Hold.** An event derived outside the window is recorded with `held.since` and not sent. Holding is
-   a property of the clock: the sender checks the window before each attempt; there is no state machine.
-2. **At window open, recheck staleness without new reads.** Sergeant does not wake every task loop
-   then, which would recreate the TECH-5974 stampede. Every way a held event goes stale (a human
-   answers in Linear, a PR is merged or reviewed, the issue is undelegated or canceled) is itself a
-   webhook that wakes that task's loop when it happens, and the loop's pass marks the event stale. The
-   sender uses only what the loops have recorded; the 15-minute safety-net polls cover a missed
-   webhook, as for everything else. Stale means: a question a human has answered since, a budget
-   question whose window was extended or accepted, a PR event whose head changed or whose PR closed,
-   or any actionable event whose task has finished.
-3. **Coalesce per task.** Send only the latest still-current actionable event per task, and the
-   task's `task.done` or `task.failed` if it has one (§6, "`task.done`").
-4. **Send**, spread over the first 5 minutes of the window by a stable hash of `eventId`, each carrying
-   `held: { reason: "quiet_hours", since }`.
-
-**Overnight restarts.** Held events reload from the state files. Each loop's first pass after a restart,
-paced by the TECH-5974 owner-read pacer, recomputes whether its events are current. A held event whose
-loop has not passed yet is still sent at window open, because it was current when last seen; at worst a
-person gets one notification about a question they already answered, marked `held`, and an answer to
-an already-answered thread is ignored as today.
-
-Nothing bypasses a subscription's quiet hours in v1; an "urgent" override waits until someone asks.
-
-### `task.done` during quiet hours
-
-Recommendation: **hold it and deliver it at window open; once a task has a `task.done` (or
-`task.failed`), drop that task's earlier held actionable events as stale.** Reasons:
-
-- A finished task's questions are moot, so the morning gets one notification for the task, the outcome,
-  not a question nobody needs to answer followed by "done".
-- `task.done` is informational and never stale, so holding it loses nothing, and dropping it would
-  leave a harness that tracks task state believing the task is still open.
-- A person who does not want completion notifications leaves `task.done` out of the subscription's
-  `events` instead.
-
-## 7. The Slack-thread reply path (settled)
+## 6. The Slack-thread reply path (settled)
 
 Settled: **the harness posts a Slack reply into the Linear question thread as the person who wrote
 it.** Sergeant never reads Slack and stores no Slack-to-Linear mapping; the mapping key travels in
@@ -387,7 +325,7 @@ before anyone relies on it.
 **Rejected:** a Slack app inside Sergeant, with its own event endpoint and a stored thread map: a new
 inbound surface, new persisted state, and a Slack-to-Linear identity mapping the harness relay avoids.
 
-## 8. How this fits TECH-5942 and TECH-5974
+## 7. How this fits TECH-5942 and TECH-5974
 
 - **TECH-5942 (#216, merged): webhooks primary, polling backup.** Outbound is its other half and
   changes nothing in it. Answers come back only through the existing `POST /webhooks/linear` (and `POST
@@ -403,8 +341,8 @@ inbound surface, new persisted state, and a Slack-to-Linear identity mapping the
     comment it just posted, its PR facts, `state.json`).
   - A reply, typed or relayed from Slack, is a plain `Comment` webhook, so it costs a wake and no
     history reread.
-  - Window-open delivery of held events wakes no loops (§6), and restart redelivery reads only the
-    state files; the loops' own post-restart passes go through the pacer as they already do.
+  - Restart redelivery reads only the state files; the loops' own post-restart passes go through the
+    pacer as they already do.
   - Registration calls cost one Linear read each, the caller lookup every `sgt` call already makes.
 
   **Sequencing:** the agreed precondition, that TECH-5974 land first, is met. Implementation can start
@@ -413,7 +351,7 @@ inbound surface, new persisted state, and a Slack-to-Linear identity mapping the
   if we lose it?" (§5). The subscription list is configuration people own, kept like registered model
   accounts; losing it means people subscribe again, and no decision is lost. Linear remains the record.
 
-## 9. Decisions for the captain
+## 8. Decisions for the captain
 
 1. **D1 — Registration through `sgt`, per person (recommended), or static config.** Recommended:
    `sgt notify …` as in §4, each person registering only their own, secrets issued by Sergeant and shown
@@ -423,12 +361,6 @@ inbound surface, new persisted state, and a Slack-to-Linear identity mapping the
 2. **D2 — Team-wide harnesses.** v1 has only personal subscriptions, which receive their owner's tasks.
    Should anyone be able to subscribe to *every* task (a shared team channel bot)? Recommended: not in
    v1; if wanted, approvers only, through the same API.
-3. **D3 — Quiet hours.** Recommended: optional per subscription, off by default (§6). Alternatives:
-   drop them from Sergeant entirely (harnesses hold for themselves; the simplest), or keep one
-   installation-wide 07:00–19:00 PT window as originally agreed. If kept: every day, or weekdays only?
-   Recommended: every day, as written.
-4. **D4 — `task.done` during quiet hours.** Recommended: hold it, deliver at window open, and let it
-   supersede the task's held questions (§6). Alternative: drop it when held.
-5. **D5 — Slack replies from people with no linked Linear identity.** Recommended: never count; the
-   harness answers in Slack with the Linear link (§7). Also confirm Linear's Slack-sync attribution on a
+3. **D3 — Slack replies from people with no linked Linear identity.** Recommended: never count; the
+   harness answers in Slack with the Linear link (§6). Also confirm Linear's Slack-sync attribution on a
    test issue before allowing that zero-code path.
