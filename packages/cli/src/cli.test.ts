@@ -87,6 +87,37 @@ test("login signs in through the browser with PKCE, keeps the token privately, a
   expect(seen.at(-1)?.authorization).toBeUndefined();
 });
 
+// A remote browser cannot call this process's localhost. The complete callback preserves OAuth's
+// state check; a copied bare code is still bound to this login by the PKCE verifier.
+test("login accepts a pasted callback URL or bare code and rejects another login's state", async () => {
+  const me = { auth: "linear", user: { id: "u1", name: "Ada Example", email: "ada@example.com" }, approver: false, enrolledRepositories: [], registration: { providers: [] }, approvers: [] };
+  const { api } = await fakeApi({ "GET /v1/auth/config": { json: { linear: { clientId: "client-1" } } }, "GET /v1/whoami": { json: me } });
+  const exchanged: string[] = [];
+  const fetch: typeof globalThis.fetch = async (url, init) => {
+    if (String(url) !== TOKEN_URL) return globalThis.fetch(url, init);
+    exchanged.push(new URLSearchParams(String(init?.body)).get("code") ?? "");
+    return Response.json({ access_token: `token-${exchanged.length}`, refresh_token: "refresh-1", expires_in: 86_400 });
+  };
+
+  let authorize: URL | undefined;
+  const unavailableBrowser = (url: string) => ((authorize = new URL(url)), false);
+  const callback = () => {
+    const url = new URL(authorize?.searchParams.get("redirect_uri") ?? "");
+    url.search = new URLSearchParams({ code: "callback-code", state: authorize?.searchParams.get("state") ?? "" }).toString();
+    return url.toString();
+  };
+  const full = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => callback() }, api, "login");
+  expect(full).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+
+  const bare = await sgtWith({ fetch, prompt: async () => "bare-code" }, api, "login", "--paste");
+  expect(bare).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+  expect(exchanged).toEqual(["callback-code", "bare-code"]);
+
+  const mismatched = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => `${callback()}-changed` }, api, "login");
+  expect(mismatched).toMatchObject({ code: 1, err: expect.stringContaining("pasted callback has a different login's state") });
+  expect(exchanged).toHaveLength(2);
+});
+
 test("-v and --version print Sergeant's git version and exit 0 without touching the API", async () => {
   // A fetch that fails the test if the version flag reaches the API; no server is running either.
   const fetch = (() => {

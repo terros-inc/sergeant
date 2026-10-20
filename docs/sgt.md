@@ -61,13 +61,18 @@ sgtw task list
 ## 4. Log in
 
 ```sh
-sgt login     # opens Linear in your browser; approve, then return to the terminal
+sgt login             # opens Linear in your browser; approve, then return to the terminal
+sgt login --paste     # remote/headless: paste the callback URL or its code
 sgt whoami    # who the installation takes you for, and the repositories it works in
 ```
 
-`sgt login` signs you in as yourself with Linear. If no browser opens, it prints the URL to visit.
-The login needs local port 4546 free while it waits for the browser (`SGT_LOGIN_PORT` changes the
-port, and the installation's Linear app must then list that callback URL too). It is kept per
+`sgt login` signs you in as yourself with Linear. If no browser opens, it prints the URL to visit and
+prompts for the callback URL or code. Use `sgt login --paste` to choose this flow immediately on a
+remote or headless machine: open its printed URL in your browser, approve access, copy the dead
+`localhost` callback URL from the address bar (or copy just its `code` parameter), and paste it into
+the terminal. The normal login needs local port 4546 free while it waits for the browser
+(`SGT_LOGIN_PORT` changes the port, and the installation's Linear app must then list that callback URL
+too); if sgt cannot listen there, it automatically uses the paste flow. The login is kept per
 installation URL in `~/.config/sergeant/credentials.json` (or under `XDG_CONFIG_HOME`), readable only by
 you, and renewed automatically; `sgt logout` forgets it on this machine, and revoking the app in your
 Linear account settings ends it at Linear.

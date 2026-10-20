@@ -21,7 +21,9 @@ export type Io = {
   err: (text: string) => void;
   fetch?: typeof globalThis.fetch;
   /** Shows the human a URL in their browser (`sgt login`); it is printed either way. */
-  openUrl?: (url: string) => void;
+  openUrl?: (url: string) => boolean | void | Promise<boolean | void>;
+  /** Reads one visible line from the terminal (`sgt login --paste`). */
+  prompt?: (message: string) => Promise<string>;
   /** All of standard input when it is piped: a credential to register, never an argument a shell history would keep. */
   stdin?: () => Promise<string>;
   /** With nothing piped, the credential from the provider's own sign-in on this terminal (signin.ts). */
@@ -32,7 +34,7 @@ export type Io = {
   sleep?: (ms: number) => Promise<void>;
 };
 
-export type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined; "merge-method"?: string | undefined; "merge-policy"?: string | undefined; hours?: string | undefined };
+export type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined; "merge-method"?: string | undefined; "merge-policy"?: string | undefined; hours?: string | undefined; paste?: boolean | undefined };
 /**
  * `token`: the Linear access token sent as the caller's bearer, when signed in. `warned`: whether this
  * invocation has said its server is older than it, shared by every copy of the context.
