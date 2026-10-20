@@ -76,8 +76,8 @@ login needs local port 4546 free while it waits for the browser
 too); in an interactive terminal, if sgt cannot listen there, it automatically uses the paste flow.
 If the listener receives no callback for five minutes, sgt keeps listening and, in an interactive
 terminal, also prompts for pasted input. With non-interactive stdin, automatic fallback leaves stdin
-untouched and keeps waiting on loopback; use `--paste` to choose piped input, including when the port is
-unavailable. The login is kept per
+untouched and waits up to five minutes for loopback; use `--paste` to choose piped input, including
+when the port is unavailable. The login is kept per
 installation URL in `~/.config/sergeant/credentials.json` (or under `XDG_CONFIG_HOME`), readable only by
 you, and renewed automatically; `sgt logout` forgets it on this machine, and revoking the app in your
 Linear account settings ends it at Linear.

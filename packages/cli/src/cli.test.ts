@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { chmod, open, readFile, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { MIN_CLI_HEADER, MIN_CLI_VERSION } from "@terros/sergeant-contracts";
 import { TOKEN_URL } from "@terros/sergeant-contracts/credentials";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { USAGE } from "./cli.ts";
 import { config, fakeApi, sgt, sgtWith } from "./fake-api.ts";
+import { linearLogin } from "./login.ts";
 
 // What every `sgt` command shares: its errors, its login, its version, and how it meets a Sergeant
 // older or newer than it.
@@ -161,6 +163,43 @@ test("login accepts pasted input, races it with loopback, and rejects another lo
   const mismatched = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => `${callback()}-changed` }, api, "login");
   expect(mismatched).toMatchObject({ code: 1, err: expect.stringContaining("pasted callback has a different login's state") });
   expect(exchanged).toHaveLength(5);
+});
+
+// Non-interactive callers cannot use the paste prompt, but still need the original bounded wait: an
+// abandoned login must fail and release its loopback port so a later login can start.
+test("login without a prompt times out and releases its loopback port", async () => {
+  vi.useFakeTimers();
+  let showAuthorize: (authorize: URL) => void = () => {};
+  const shown = new Promise<URL>((resolve) => (showAuthorize = resolve));
+  try {
+    const login = linearLogin({
+      clientId: "client-1",
+      env: { SGT_LOGIN_PORT: "0" },
+      fetch: (() => {
+        throw new Error("a timed-out login must not exchange a token");
+      }) as unknown as typeof globalThis.fetch,
+      paste: false,
+      show: (url) => {
+        showAuthorize(new URL(url));
+      },
+      warn: () => {},
+      open: () => true,
+    });
+    const authorize = await shown;
+    const rejection = expect(login).rejects.toThrow("no sign-in within 5 minutes");
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await rejection;
+
+    const callback = new URL(authorize?.searchParams.get("redirect_uri") ?? "");
+    const probe = createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(Number(callback.port), "127.0.0.1", resolve);
+    });
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("-v and --version print Sergeant's git version and exit 0 without touching the API", async () => {

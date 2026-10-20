@@ -3,9 +3,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { type Credential, tokenRequest } from "@terros/sergeant-contracts/credentials";
 
 // `sgt login` (TECH-4938, TECH-6416): Linear OAuth 2.0 with PKCE, as the human (`actor=user`),
-// against the installation's Linear OAuth app. The browser normally returns to the loopback redirect.
-// On a headless machine the human can instead paste that callback URL (or its code) into sgt; the
-// PKCE verifier still proves this process started the exchange, and a URL's state must match it.
+// against the installation's Linear OAuth app, whose public client id the API serves. No client
+// secret is ever on a laptop: the PKCE verifier proves this process started the exchange. The browser
+// normally returns to the loopback redirect; on a headless machine the human can instead paste that
+// callback URL (or its code), and a URL's state must match this login. The resulting Linear token is
+// stored per API URL by contracts' credentials.ts, which `sgt-mcp` reads too. The server reads who it
+// is from Linear on every call.
 
 const AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 /** Enough to read the caller's own user and teams; `sgt` acts in Sergeant, never in Linear. */
@@ -56,7 +59,8 @@ export async function linearLogin(opts: LoginOptions): Promise<Credential> {
   if (!opts.paste) {
     // `localhost` may resolve to either loopback address, so listen on both; IPv6 may be absent.
     port = await listen(handler, servers, "127.0.0.1", configuredPort).catch((error: Error) => {
-      opts.warn(`Cannot listen for the login redirect on 127.0.0.1:${configuredPort} (${error.message}); falling back to pasted input. Set SGT_LOGIN_PORT to a free port the Linear app also lists.`);
+      const fallback = opts.prompt ? "; falling back to pasted input" : "";
+      opts.warn(`Cannot listen for the login redirect on 127.0.0.1:${configuredPort} (${error.message})${fallback}. Set SGT_LOGIN_PORT to a free port the Linear app also lists.`);
       return configuredPort;
     });
     if (servers.length) await listen(handler, servers, "::1", port).catch(() => {});
@@ -88,7 +92,10 @@ export async function linearLogin(opts: LoginOptions): Promise<Credential> {
         // A non-interactive parent may leave stdin empty or open indefinitely. Do not touch it during
         // automatic fallback; the printed URL and live loopback listener remain the completion path.
         void opened;
-        code = await callback;
+        const timeout = new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("no sign-in within 5 minutes; run `sgt login` again")), LOGIN_TIMEOUT_MS);
+        });
+        code = await Promise.race([callback, timeout]);
       } else {
         const prompt = opts.prompt;
         const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, LOGIN_TIMEOUT_MS)));
