@@ -9,7 +9,8 @@ import { graphqlErrors, pullRequestReviewers } from "./schemas.ts";
 // TECH-6374: once the latest summary is on the PR, the control-plane App's own earlier comments there
 // (earlier heads' summaries) are minimized as outdated, so only the latest status shows. "Own" is
 // GitHub's record of who posted it: a bot account, through this App's ID (`performed_via_github_app`),
-// never a login a human or another App could resemble. Without `appId` nothing is hidden.
+// never a login a human or another App could resemble. Without `appId`, or when it is not confirmed
+// as the App that posted the latest summary, nothing is hidden.
 export type HandoffContext = { appId?: number; log: (line: string) => void };
 
 type Request = (path: string, init?: RequestInit, options?: { allowStatuses?: number[] }) => Promise<unknown>;
@@ -55,14 +56,21 @@ export async function handToHuman(
   if (asked.length > 0) {
     if (await atStep("request reviewers", () => request(`${path}/requested_reviewers`, { ...json, body: JSON.stringify({ reviewers: asked }) }, { allowStatuses: [422] }))) requested.push(...asked);
   }
-  const comments = await atStep("post review summary", async () => {
+  const { comments, latest } = await atStep("post review summary", async () => {
     const all = await readAll((p) => request(p), `/repos/${repo}/issues/${number}/comments`, issueComment);
-    if (!all.some((c) => c.body === comment)) {
-      await request(`/repos/${repo}/issues/${number}/comments`, { ...json, body: JSON.stringify({ body: comment }) });
-    }
-    return all;
+    const posted = all.filter((c) => c.body === comment);
+    if (posted.length > 0) return { comments: all, latest: posted };
+    const created = issueComment.safeParse(await request(`/repos/${repo}/issues/${number}/comments`, { ...json, body: JSON.stringify({ body: comment }) }));
+    return { comments: all, latest: created.success ? [created.data] : [] };
   });
-  const own = appId === undefined ? [] : comments.filter((c) => c.user?.type === "Bot" && c.performed_via_github_app?.id === appId);
+  // Fail closed: `appId` is configuration, and if it named another App, matching on it alone would hide
+  // that App's comments. So it must be the App GitHub records on the summary this token just posted (or,
+  // on a retry, every comment already carrying it); otherwise nothing is hidden.
+  const confirmed = appId !== undefined && latest.length > 0 && latest.every((c) => c.user?.type === "Bot" && c.performed_via_github_app?.id === appId);
+  if (appId !== undefined && !confirmed) {
+    log(`${repo}#${number}: hid no outdated comments: could not confirm the configured App ID ${appId} posted the latest summary`);
+  }
+  const own = confirmed ? comments.filter((c) => c.user?.type === "Bot" && c.performed_via_github_app?.id === appId) : [];
   // REST does not say whether a comment is already minimized, so an earlier one is asked again.
   for (const c of own.filter((c) => c.body !== comment && c.node_id)) {
     // Best effort: an earlier summary left visible is untidy, while failing here would undo a handoff

@@ -185,7 +185,9 @@ merged a production change in a repository whose ruleset its own approval satisf
   denied as `H1`. Once it is posted, the App minimizes its own earlier comments on that PR (earlier
   heads' summaries) as outdated (TECH-6374), so only the latest status shows. Its own means a bot
   comment GitHub records as posted through the control-plane App's ID, never a match on login text, so
-  a human's or another bot's comment is never hidden. Hiding is best effort: a failure is logged and
+  a human's or another bot's comment is never hidden. That ID is configuration, so it fails closed:
+  unless GitHub records the configured ID on the summary just posted (or on every copy of it already
+  there), nothing is hidden and that is logged. Hiding is best effort: a failure is logged and
   the handoff stands. Sergeant's only formal review, the approval inside a merge (§7), is not
   minimizable on GitHub and needs no hiding, since the merge follows it at once.
 - The handoff is recorded like a merge GitHub refused, without the bounded re-check: one
