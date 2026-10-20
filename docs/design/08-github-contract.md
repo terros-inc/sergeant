@@ -8,7 +8,7 @@ links PRs to the Linear issue, and merges under the Gate's rules.
 
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
-| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
+| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, handing a gated head to a human with a summary comment and minimizing its own outdated comments (§7), closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
 | **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write and statuses: read (each only while the installation holds it), checks: read, actions: read, metadata: read. Reviewers: no write token (the host checks out their PRs with a read-only token that never enters the run). Every run, worker and reviewer, also gets `GH_READ_TOKEN`: contents: read, pull_requests: read, metadata: read, for all the enrolled repositories (TECH-6194) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs and statuses (`gh pr checks`); reading another enrolled repository or PR |
 | **rerun App** (optional, TECH-5839) | Sergeant's deterministic core only; each call mints a token for one repository with only `actions` | actions: write, metadata: read | rerunning the failed jobs of a workflow run a worker asked for (§6), nothing else |
 
@@ -182,7 +182,14 @@ merged a production change in a repository whose ruleset its own approval satisf
   assignee (their GitHub login from `linear.reviewerProfiles`) only when GitHub shows nobody's review
   requested (the code owners it asks come first), and posts the review summary (the approving
   reviewer's summary, or the worker's reason no fresh review was needed) on the PR; the outcome is
-  denied as `H1`.
+  denied as `H1`. Once it is posted, the App minimizes its own earlier comments on that PR (earlier
+  heads' summaries) as outdated (TECH-6374), so only the latest status shows. Its own means a bot
+  comment GitHub records as posted through the control-plane App's ID, never a match on login text, so
+  a human's or another bot's comment is never hidden. That ID is configuration, so it fails closed:
+  unless GitHub records the configured ID on the summary just posted (or on every copy of it already
+  there), nothing is hidden and that is logged. Hiding is best effort: a failure is logged and
+  the handoff stands. Sergeant's only formal review, the approval inside a merge (§7), is not
+  minimizable on GitHub and needs no hiding, since the merge follows it at once.
 - The handoff is recorded like a merge GitHub refused, without the bounded re-check: one
   "Ready for a human to merge" comment on the issue per head, with the summary and who was asked;
   M12 refuses another `merge_pr` at the same facts; the loop waits on the human without spending the
@@ -264,6 +271,6 @@ holds up pauses like any other task loop, not retried and logged at every poll.
 
 ## 11. What Sergeant never does on GitHub
 
-Push code, create branches, delete a branch other than a closed PR's (§3), open PRs, rebase, resolve conflicts, comment on PRs, approve a PR other
+Push code, create branches, delete a branch other than a closed PR's (§3), open PRs, rebase, resolve conflicts, comment on PRs other than a handoff summary or a stopped task's closing comment, hide any comment but its own outdated ones (§7), approve a PR other
 than as the first step of its gated merge (§7), change settings, rulesets, secrets, or workflows, or
 dispatch workflows.
