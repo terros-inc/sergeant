@@ -128,18 +128,34 @@ test("the Codex reviewer schema is in step with ReviewReport", () => {
   expect(props.dependencies.items.properties.relation.enum).toEqual(["blocked_by", "blocks"]);
 });
 
-// TECH-6356: each unreadable input carries why it could not be read. Reports and run records written
-// before that hold bare strings; they must still parse, or a stored record stops reading after a deploy.
-test("an unreadable input keeps its reason, and a bare string still reads as one with none", () => {
+// TECH-6356: each unreadable input carries why it could not be read, so one without a reason, or a
+// blank one, is malformed rather than read as an input with no explanation. Reports and run records
+// written before that hold bare strings; they must still parse, and so must the record they parse to
+// once it is stored again, or a stored record stops reading after a deploy.
+test("an unreadable input needs a reason that is not blank, and a bare string still reads", () => {
   const base = { reportVersion: "s2-review-report/1", reviewed: [{ repo: "o/r", number: 7, headSha: "a".repeat(40) }], verdict: "needs_human", findings: [], dependencies: [], summary: "s" };
   const read = (unreadableInputs: unknown[]) => {
     const parsed = parseJsonReport(JSON.stringify({ ...base, unreadableInputs }), ReviewReport);
-    return parsed.ok ? parsed.report.unreadableInputs : parsed;
+    return parsed.ok ? parsed.report.unreadableInputs : undefined;
   };
-  expect(read(["https://example.com/spec.pdf", { input: "o/other", reason: "not found" }])).toEqual([
-    { input: "https://example.com/spec.pdf", reason: "" },
+  const legacy = read(["https://example.com/spec.pdf", { input: "o/other", reason: "not found" }]);
+  expect(legacy).toEqual([
+    { input: "https://example.com/spec.pdf", reason: expect.stringMatching(/\S/) },
     { input: "o/other", reason: "not found" },
   ]);
+  expect(read(legacy ?? [])).toEqual(legacy);
+
+  const workerWith = (entry: unknown) => parseReport(report({ ...worker({ required: true, reason: "" }), unreadableInputs: [entry] }), WorkerReport).ok;
+  expect(workerWith({ input: "o/other", reason: "not found" })).toBe(true);
+  for (const entry of [{ input: "o/other" }, { input: "o/other", reason: "" }, { input: "o/other", reason: " \t\n" }]) {
+    expect(read([entry]), JSON.stringify(entry)).toBeUndefined();
+    expect(workerWith(entry), JSON.stringify(entry)).toBe(false);
+  }
+
+  // The Codex reviewer schema says the same with a pattern (strict mode has no minLength).
+  const reasonPattern = new RegExp(REVIEW_REPORT_SCHEMA.properties.unreadableInputs.items.properties.reason.pattern);
+  for (const reason of ["", " ", "\t\n"]) expect(reasonPattern.test(reason), JSON.stringify(reason)).toBe(false);
+  expect(reasonPattern.test("not found")).toBe(true);
 });
 
 // TECH-5392: every value the schema admits must parse, so each ReviewReport value constraint has a schema
