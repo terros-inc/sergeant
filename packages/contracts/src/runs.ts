@@ -50,10 +50,19 @@ const ReportedPr = { repo: RepoSlug, number: z.number().int().positive(), headSh
 
 /**
  * Inputs the issue depends on that the run could not read (an auth-gated link, a missing file or
- * attachment), each named as the issue names it. Sergeant must ask a human about each before it
- * merges (M14).
+ * attachment), each named as the issue names it, with why it could not be read (TECH-6356: a
+ * repository not enrolled, a refused token, not found), so Sergeant's question can say what would fix
+ * it. Sergeant must ask a human about each before it merges (M14). An entry without a reason, or a
+ * blank one, is malformed: the explanation is the point. A bare string, as reports and stored records
+ * before TECH-6356 wrote, still reads, with a reason that says none was given; it is not blank, so a
+ * record parsed once and stored again still reads.
  */
-const UnreadableInputs = z.array(z.string()).optional();
+const UnreadableInput = z.union([
+  z.string().transform((input) => ({ input, reason: "no reason given (reported before runs gave one)" })),
+  z.object({ input: z.string(), reason: z.string().regex(/\S/) }),
+]);
+export type UnreadableInput = z.infer<typeof UnreadableInput>;
+const UnreadableInputs = z.array(UnreadableInput).optional();
 
 /**
  * TECH-5278: dependencies between this task's issue and another that the run noticed (shared files, an
@@ -176,8 +185,9 @@ export type ReviewReport = z.infer<typeof ReviewReport>;
  * OpenAI structured output: every property is required and every object forbids extra ones; a field
  * that may be absent is nullable instead (the parser reads `null` as absent). The contract's value
  * constraints are spelled with keywords strict mode supports: `minItems` for a non-empty `reviewed`,
- * `minimum` for a positive PR number, and `pattern` for the repo slug and a non-blank finding id
- * (strict mode has no `minLength`), so every schema-valid answer parses as `ReviewReport`.
+ * `minimum` for a positive PR number, and `pattern` for the repo slug, a non-blank finding id and a
+ * non-blank unreadable input's reason (strict mode has no `minLength`), so every schema-valid answer
+ * parses as `ReviewReport`.
  */
 export const REVIEW_REPORT_SCHEMA = {
   type: "object",
@@ -215,7 +225,15 @@ export const REVIEW_REPORT_SCHEMA = {
         },
       },
     },
-    unreadableInputs: { type: "array", items: { type: "string" } },
+    unreadableInputs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["input", "reason"],
+        properties: { input: { type: "string" }, reason: { type: "string", pattern: "\\S" } },
+      },
+    },
     dependencies: {
       type: "array",
       items: {

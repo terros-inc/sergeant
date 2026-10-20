@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { issueRevision, NoModelAccount, type RunSpec } from "@terros/sergeant-contracts";
 import { containerRunner } from "./runner.ts";
-import { annClaude, ENROLLED, fakeHost, GH, READ, REPORT, spec, started, TOKEN } from "./runner-fixtures.ts";
+import { annClaude, ENROLLED, fakeHost, GH, ON_CODEX, READ, REPORT, spec, started, TOKEN } from "./runner-fixtures.ts";
 
 
 // The container is the hard boundary between runs and the operator's personal and control-plane
@@ -41,11 +41,16 @@ test("only the model token, the run's scoped worker-App tokens, and the human gi
 // TECH-6194: a reviewer could read only its PR's checkout, so an issue naming a file in another
 // enrolled repository, or another PR, stopped for a human. It now gets the same read-only token for
 // the repositories enrolled at its launch, and still no write token: a reviewer must never push.
-test("a reviewer gets the enrolled repositories' read-only token and no write token", async () => {
+// TECH-6356: a Codex reviewer still reported an enrolled repository's code as "not provided in the
+// review workspace", so a reviewer on either provider gets the same token and the same brief.
+test.each([
+  ["Claude", {}],
+  ["Codex", ON_CODEX],
+])("a %s reviewer gets the enrolled repositories' read-only token and no write token", async (_, provider) => {
   const enrolled = [...ENROLLED];
   const reviewer = { ...spec, role: "reviewer", subject: [{ repo: "o/canary", number: 9, headSha: "a".repeat(40) }], pullRequests: [] } as unknown as RunSpec;
   const fetch = (async () => Response.json({ html_url: "https://github.com/o/canary/pull/9", title: "T", body: "", base: { ref: "main" } })) as typeof globalThis.fetch;
-  const { host, minted, rootDir } = await started({ fetch, enrolledRepositories: () => enrolled }, reviewer);
+  const { host, minted, rootDir } = await started({ ...provider, fetch, enrolledRepositories: () => enrolled }, reviewer);
 
   expect(minted).toEqual([
     { repositories: ["o/canary"], access: "read" },
@@ -59,10 +64,11 @@ test("a reviewer gets the enrolled repositories' read-only token and no write to
   expect(run?.opts.env?.GH_READ_TOKEN).toBe(READ);
   const brief = await readFile(join(rootDir, "run_t1", "workspace", "sergeant-brief.md"), "utf8");
   expect(brief).toContain("  - o/canary\n  - o/wiki\n");
+  expect(brief.replace(/\s+/g, " ")).toContain('default-branch source of a listed repository that the issue, a PR, or a claim refers to is never "not provided": read it with this token');
 
   // A repository removed from enrollment is out of the next run's token.
   enrolled.splice(enrolled.indexOf("o/wiki"), 1);
-  const next = await started({ fetch, enrolledRepositories: () => enrolled }, reviewer);
+  const next = await started({ ...provider, fetch, enrolledRepositories: () => enrolled }, reviewer);
   expect(next.minted.at(-1)).toEqual({ repositories: ["o/canary"], access: "read" });
 });
 

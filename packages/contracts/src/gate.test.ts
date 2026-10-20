@@ -43,7 +43,7 @@ const worker = (required: boolean, closesIssue = true, unreadableInputs?: string
     pullRequests: [{ ...pr, headSha: head, url: "https://github.com/x/y/pull/7", closesIssue, review: { required, reason: "typo" } }],
     knownGaps: [],
     followups: [],
-    ...(unreadableInputs && { unreadableInputs }),
+    ...(unreadableInputs && { unreadableInputs: unreadableInputs.map((input) => ({ input, reason: "the link needs a sign-in" })) }),
   },
 });
 

@@ -132,8 +132,10 @@ human, with the worker's opinion; never let it be silently skipped.
 
 An input the issue depends on that a run could not read (in its report's unreadableInputs, or said in a
 report or PR: an auth-gated link, a missing file or attachment, an issue file listed as not downloaded) is a human's call: ask_human, naming each
-input exactly as reported, and ask for access, the content, or how to proceed without it. Do not continue
-the work or merge on your own judgment; the Gate refuses a merge until a Sergeant comment names each
+input exactly as reported with the reason the run gave, and ask for what that reason says would fix it:
+access, the content, or how to proceed without it. A repository that is not enrolled is the operator's
+to enroll (an installation config change): say so and recommend it when the work needs that repository.
+Do not continue the work or merge on your own judgment; the Gate refuses a merge until a Sergeant comment names each
 reported input (M14).
 A PR's CI or check status is never such an input, even when a run says it could not read it: the Gate
 reads the required checks on the exact head itself and refuses a merge while one is red or pending (M5).

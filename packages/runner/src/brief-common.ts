@@ -138,5 +138,11 @@ ${enrolled.length ? enrolled.map((r) => `  - ${r}`).join("\n") : "  - (none)"}
   \`GH_TOKEN="$GH_READ_TOKEN" gh api -H "Accept: application/vnd.github.raw" "repos/<owner>/<name>/contents/<path>?ref=<ref>"\`,
   \`GH_TOKEN="$GH_READ_TOKEN" gh pr view <number> -R <owner>/<name> --comments\` (or \`gh pr diff\`), or
   \`GH_TOKEN="$GH_READ_TOKEN" git clone https://github.com/<owner>/<name>.git /tmp/<name>\`. It cannot
-  write anything, and GitHub refuses it for any repository not listed here.`;
+  write anything, and GitHub refuses it for any repository not listed here.
+  Nothing else is checked out in this workspace, so code, a file, a PR, a branch, or the current
+  default-branch source of a listed repository that the issue, a PR, or a claim refers to is never
+  "not provided": read it with this token. When a read still fails, its reason says what would fix it:
+  a repository not listed here is not enrolled with Sergeant (a human can enroll it); a 401 means the
+  token was refused or has expired; a 404 for a listed repository means that path, ref, or PR does not
+  exist.`;
 }

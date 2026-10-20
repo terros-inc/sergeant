@@ -119,9 +119,9 @@ test("a finished worker's PR awaiting its first review is rule 2; a worker that 
   expect(recommend(facts([worker("run_w", "succeeded", 3)]))).toMatchObject({ call: "extend", rule: "2", estimate: "a first review, about 5 min and a cost not yet known (no reviewer run of this task has reported a cost yet)" });
 
   const blocked = worker("run_w");
-  if (blocked.role === "worker" && blocked.report) blocked.report = { ...blocked.report, outcome: "blocked", unreadableInputs: ["https://example.com/spec.pdf"] };
+  if (blocked.role === "worker" && blocked.report) blocked.report = { ...blocked.report, outcome: "blocked", unreadableInputs: [{ input: "https://example.com/spec.pdf", reason: "not found" }] };
   const r = recommend(facts([blocked]));
-  expect(r).toMatchObject({ call: "stop", rule: "1", reason: "the work cannot finish without inputs it could not read: https://example.com/spec.pdf" });
+  expect(r).toMatchObject({ call: "stop", rule: "1", reason: "the work cannot finish without inputs it could not read: https://example.com/spec.pdf (not found)" });
 });
 
 test("first review is classified only from worker and review records for the current head", () => {
