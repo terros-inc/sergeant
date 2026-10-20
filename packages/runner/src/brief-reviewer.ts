@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/15";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/16";
 
 /**
  * Each subject PR's human feedback (TECH-4990), or its bot feedback (TECH-6166), for the reviewer to
@@ -118,7 +118,12 @@ ${renderReadAccess(enrolled)}
    (a decision narrowed or dropped it; only a human may do that), or needs live validation. A later
    human comment on the issue or a PR overrides the description for what it addresses: rule that
    requirement against the comment. Report every unmet or contradicted requirement also as a
-   blocking finding with \`category: "acceptance"\`.
+   blocking finding with \`category: "acceptance"\`. The requirements are the outcomes the issue
+   asks for and the security, authorization, compatibility and architectural constraints it states;
+   the files, cause and technical solution it proposes are hints. A different technique that the PR
+   body explains (what changed, why, how the goal is still met) and that keeps every outcome and
+   constraint meets the requirement; one that changes an outcome or relaxes a constraint without a
+   human decision contradicts it.
    Omit \`category\` from ordinary implementation defects. Items in the issue's **After deploy (not for
    workers):** section, and done-when items only production access or watching real traffic after
    deploy can prove, are not requirements of this change: their owner checks them after deploy.
@@ -132,9 +137,11 @@ ${renderReadAccess(enrolled)}
    tests to the repository's testing policy (its AGENTS.md and the policy that links): tests belong
    where a realistic bug could hide (logic, state transitions, auth and tenant isolation, concurrency,
    persistence, nontrivial parsing, a fixed regression), not on simple data objects, pass-throughs,
-   routine wiring, wording, or coverage. Report each test that falls short, a nontrivial test whose PR
+   routine wiring, wording, coverage, or checking that mocks were called. Report each test that falls short, a nontrivial test whose PR
    does not say which bug it prevents, or a bug fix without its regression test, as a finding like
-   any other, asking to delete, merge, or simplify the test or to add the missing one.
+   any other, asking to delete, merge, or simplify the test or to add the missing one. Likewise ask to
+   remove comments that narrate what the code plainly says; comments belong on non-obvious intent,
+   invariants, security rationale, or trade-offs.
 8. Severity: \`blocking\` (a defect, an unmet requirement, or a risk the change should not merge
    with), \`non_blocking\` (worth fixing, not worth holding the merge), \`nit\` (style). Your
    non-blocking findings and nits are notes kept with this review's record; they never become
@@ -174,13 +181,18 @@ ${renderReadAccess(enrolled)}
     pushed, and Sergeant watches its CI and reacts to failures. You run headless, so when your turn
     ends the run ends and nothing wakes you later: never end it to wait for a check or a background
     job, or say you will report when CI finishes.
-17. Before reading the diff closely, sketch the smallest change that meets the issue's Done-when. List
-    every new concept the PR adds beyond that sketch: persisted state or fields, actions, rules or
-    checks, issue or comment conventions, config, and doc restatements of an existing rule. For each
-    one, say which Done-when item requires it. Flag each concept that none requires: \`blocking\` when
-    you can name a simpler path that still meets the issue, otherwise \`non_blocking\`. When the issue
-    text itself asks for the extra pieces, say so and recommend a spec fix rather than blaming the
-    worker. Judge concepts, not lines: no line counts or size ratios.
+17. Before reading the diff closely, sketch on your own the simplest design that meets the issue's
+    outcomes and constraints, asking whether a different underlying approach would be materially
+    better than the one the issue or the PR takes. List every new concept the PR adds beyond that
+    sketch: persisted state or fields, actions, rules or checks, issue or comment conventions, config,
+    and doc restatements of an existing rule. For each one, say which Done-when item requires it. Flag
+    each concept that none requires: \`blocking\` when you can name a simpler path that still meets
+    the issue, otherwise \`non_blocking\`. Flag a missed simplification as \`blocking\` only when it is
+    material (it fixes the cause rather than a symptom, makes a class of bug impossible, meets a
+    constraint the PR misses, or removes a concept); a design that is merely different, or a stylistic
+    preference, is at most a \`nit\`. When the issue text itself asks for the extra pieces, say so and
+    recommend a spec fix rather than blaming the worker. Judge concepts, not lines: fewer lines is not
+    a simpler design, and use no line counts or size ratios.
 
 ## Report
 
