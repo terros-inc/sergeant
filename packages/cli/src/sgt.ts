@@ -18,10 +18,20 @@ process.exitCode = await main(process.argv.slice(2), {
       child.once("exit", (code) => resolve(code === 0));
       child.unref();
     }),
-  prompt: (message) =>
-    new Promise<string>((resolve) => {
+  prompt: (message, signal) =>
+    new Promise<string>((resolve, reject) => {
       const lines = createInterface({ input: process.stdin, output: process.stderr });
-      lines.question(message, (answer) => (lines.close(), resolve(answer)));
+      const cancel = () => {
+        lines.close();
+        reject(new DOMException("The login prompt was closed", "AbortError"));
+      };
+      if (signal.aborted) return cancel();
+      signal.addEventListener("abort", cancel, { once: true });
+      lines.question(message, (answer) => {
+        signal.removeEventListener("abort", cancel);
+        lines.close();
+        resolve(answer);
+      });
     }),
   // Standard input only when something is piped to it; a terminal signs in instead (TECH-5196).
   ...(!process.stdin.isTTY && {

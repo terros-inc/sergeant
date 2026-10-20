@@ -20,8 +20,9 @@ type LoginOptions = {
   fetch: typeof fetch;
   paste: boolean;
   show: (url: string) => void;
+  warn: (message: string) => void;
   open: (url: string) => boolean | void | Promise<boolean | void>;
-  prompt: (message: string) => Promise<string>;
+  prompt: (message: string, signal: AbortSignal) => Promise<string>;
 };
 
 /** Runs the browser or paste login and returns the new credential, unsaved. */
@@ -54,7 +55,10 @@ export async function linearLogin(opts: LoginOptions): Promise<Credential> {
   const servers: Server[] = [];
   if (!opts.paste) {
     // `localhost` may resolve to either loopback address, so listen on both; IPv6 may be absent.
-    port = await listen(handler, servers, "127.0.0.1", configuredPort).catch(() => configuredPort);
+    port = await listen(handler, servers, "127.0.0.1", configuredPort).catch((error: Error) => {
+      opts.warn(`Cannot listen for the login redirect on 127.0.0.1:${configuredPort} (${error.message}); falling back to pasted input. Set SGT_LOGIN_PORT to a free port the Linear app also lists.`);
+      return configuredPort;
+    });
     if (servers.length) await listen(handler, servers, "::1", port).catch(() => {});
   }
 
@@ -62,26 +66,38 @@ export async function linearLogin(opts: LoginOptions): Promise<Credential> {
   const authorize = authorizeUrl(opts.clientId, redirectUri, state, verifier);
   opts.show(authorize);
 
-  let timer: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const promptController = new AbortController();
+  let cleanedUp = false;
+  const cleanup = async () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    clearTimeout(timer);
+    promptController.abort();
+    // The browser may keep its connection open, which would hold `close` up.
+    await Promise.all(servers.map((server) => new Promise((resolve) => (server.close(resolve), server.closeAllConnections()))));
+  };
   try {
     let code: string;
     if (!servers.length) {
-      code = await pastedCode(opts.prompt, state);
+      code = await pastedCode(opts.prompt, state, promptController.signal);
     } else {
-      const opened = await opts.open(authorize);
-      if (opened === false) {
-        code = await pastedCode(opts.prompt, state);
-      } else {
-        const timeout = new Promise<undefined>((resolve) => (timer = setTimeout(resolve, LOGIN_TIMEOUT_MS)));
-        const received = await Promise.race([callback, timeout]);
-        code = received ?? (await pastedCode(opts.prompt, state));
-      }
+      const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, LOGIN_TIMEOUT_MS)));
+      const promptNeeded = (async () => {
+        const opened = await Promise.race([
+          Promise.resolve().then(() => opts.open(authorize)).catch(() => false),
+          timeout.then(() => false),
+        ]);
+        if (opened !== false) await timeout;
+        return pastedCode(opts.prompt, state, promptController.signal);
+      })();
+      // Keep accepting the loopback while fallback input is visible. The winner closes the other path.
+      code = await Promise.race([callback, promptNeeded]);
     }
+    await cleanup();
     return await tokenRequest(opts.fetch, opts.clientId, { grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier });
   } finally {
-    clearTimeout(timer);
-    // The browser may keep its connection open, which would hold `close` up.
-    await Promise.all(servers.map((server) => new Promise((resolve) => (server.close(resolve), server.closeAllConnections()))));
+    await cleanup();
   }
 }
 
@@ -112,8 +128,8 @@ function listen(handler: (req: IncomingMessage, res: ServerResponse) => void, se
   });
 }
 
-async function pastedCode(prompt: LoginOptions["prompt"], state: string): Promise<string> {
-  const value = (await prompt("Paste the callback URL or code, then press Enter: ")).trim();
+async function pastedCode(prompt: LoginOptions["prompt"], state: string, signal: AbortSignal): Promise<string> {
+  const value = (await prompt("Paste the callback URL or code, then press Enter: ", signal)).trim();
   if (!value) throw new Error("no callback URL or code was pasted; run `sgt login --paste` again");
   return callbackCode(value, state);
 }

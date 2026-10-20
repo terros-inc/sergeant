@@ -72,7 +72,8 @@ remote or headless machine: open its printed URL in your browser, approve access
 `localhost` callback URL from the address bar (or copy just its `code` parameter), and paste it into
 the terminal. The normal login needs local port 4546 free while it waits for the browser
 (`SGT_LOGIN_PORT` changes the port, and the installation's Linear app must then list that callback URL
-too); if sgt cannot listen there, it automatically uses the paste flow. The login is kept per
+too); if sgt cannot listen there, it automatically uses the paste flow. If the listener receives no
+callback for five minutes, sgt keeps listening and also prompts for pasted input. The login is kept per
 installation URL in `~/.config/sergeant/credentials.json` (or under `XDG_CONFIG_HOME`), readable only by
 you, and renewed automatically; `sgt logout` forgets it on this machine, and revoking the app in your
 Linear account settings ends it at Linear.

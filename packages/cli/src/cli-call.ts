@@ -23,7 +23,7 @@ export type Io = {
   /** Shows the human a URL in their browser (`sgt login`); it is printed either way. */
   openUrl?: (url: string) => boolean | void | Promise<boolean | void>;
   /** Reads one visible line from the terminal (`sgt login --paste`). */
-  prompt?: (message: string) => Promise<string>;
+  prompt?: (message: string, signal: AbortSignal) => Promise<string>;
   /** All of standard input when it is piped: a credential to register, never an argument a shell history would keep. */
   stdin?: () => Promise<string>;
   /** With nothing piped, the credential from the provider's own sign-in on this terminal (signin.ts). */

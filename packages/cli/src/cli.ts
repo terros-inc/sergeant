@@ -102,14 +102,15 @@ const commands: Record<string, Command> = {
         show: (url) => {
           ctx.io.err(`Sign in to Sergeant at ${ctx.api} with Linear. If no browser opens, visit:\n  ${url}\n`);
         },
+        warn: (message) => ctx.io.err(`${message}\n`),
         open: (url) => (ctx.io.openUrl ? ctx.io.openUrl(url) : false),
-        prompt: async (message) => {
+        prompt: async (message, signal) => {
           if (ctx.io.stdin) {
             const piped = (await ctx.io.stdin()).trim();
             if (!piped) throw new Error("no callback URL or code was piped; run `sgt login --paste` in a terminal or pipe a value to it");
             return piped;
           }
-          if (ctx.io.prompt) return ctx.io.prompt(message);
+          if (ctx.io.prompt) return ctx.io.prompt(message, signal);
           throw new Error("cannot read a pasted callback here; run `sgt login --paste` in a terminal or pipe the callback URL or code to it");
         },
       }).catch((e: Error) => fail(ctx, "unauthorized", e.message));

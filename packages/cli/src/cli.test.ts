@@ -89,7 +89,7 @@ test("login signs in through the browser with PKCE, keeps the token privately, a
 
 // A remote browser cannot call this process's localhost. The complete callback preserves OAuth's
 // state check; a copied bare code is still bound to this login by the PKCE verifier.
-test("login accepts a pasted callback URL or bare code and rejects another login's state", async () => {
+test("login accepts pasted input, races it with loopback, and rejects another login's state", async () => {
   const me = { auth: "linear", user: { id: "u1", name: "Ada Example", email: "ada@example.com" }, approver: false, enrolledRepositories: [], registration: { providers: [] }, approvers: [] };
   const { api } = await fakeApi({ "GET /v1/auth/config": { json: { linear: { clientId: "client-1" } } }, "GET /v1/whoami": { json: me } });
   const exchanged: string[] = [];
@@ -113,9 +113,35 @@ test("login accepts a pasted callback URL or bare code and rejects another login
   expect(bare).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
   expect(exchanged).toEqual(["callback-code", "bare-code"]);
 
+  let promptClosed = false;
+  const failedOpenWithLoopback = (callbackState?: string) => (url: string) => {
+    authorize = new URL(url);
+    const redirect = new URL(authorize.searchParams.get("redirect_uri") ?? "");
+    redirect.search = new URLSearchParams({ code: "loopback-code", state: callbackState ?? authorize.searchParams.get("state") ?? "" }).toString();
+    setTimeout(() => void globalThis.fetch(redirect).catch(() => {}), 0);
+    return false;
+  };
+  const waitingPrompt = (_message: string, signal: AbortSignal) =>
+    new Promise<string>((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        promptClosed = true;
+        reject(new DOMException("closed", "AbortError"));
+      }, { once: true });
+    });
+  const loopback = await sgtWith({ fetch, openUrl: failedOpenWithLoopback(), prompt: waitingPrompt }, api, "login");
+  expect(loopback).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+  expect(exchanged).toEqual(["callback-code", "bare-code", "loopback-code"]);
+  expect(promptClosed).toBe(true);
+
+  promptClosed = false;
+  const forgedLoopback = await sgtWith({ fetch, openUrl: failedOpenWithLoopback("forged"), prompt: waitingPrompt }, api, "login");
+  expect(forgedLoopback).toMatchObject({ code: 1, err: expect.stringContaining("different login's state") });
+  expect(promptClosed).toBe(true);
+  expect(exchanged).toHaveLength(3);
+
   const mismatched = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => `${callback()}-changed` }, api, "login");
   expect(mismatched).toMatchObject({ code: 1, err: expect.stringContaining("pasted callback has a different login's state") });
-  expect(exchanged).toHaveLength(2);
+  expect(exchanged).toHaveLength(3);
 });
 
 test("-v and --version print Sergeant's git version and exit 0 without touching the API", async () => {
