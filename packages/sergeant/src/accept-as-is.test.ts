@@ -237,10 +237,13 @@ test("a re-triggered task accepts a reply to its own budget question, with an ac
   // for that window was answered "2".
   const question = { id: "q1", createdAt: ago(260), body: `${QUESTION_HEADING}\n\nAt once, or after 30 days?` };
   const answered = human("c1", ago(250), "At once.");
-  const asked = { ...budgetAsked, id: commentIdFor(budgetQuestionKey("i1", ago(300), 1)), createdAt: ago(60) };
+  // One timestamp for both: the question's key names the task's start, so a millisecond tick between two
+  // `ago(300)` calls would make it another task's question and deny the acceptance.
+  const startedAt = ago(300);
+  const asked = { ...budgetAsked, id: commentIdFor(budgetQuestionKey("i1", startedAt, 1)), createdAt: ago(60) };
   const reply = human("c2", ago(1), "2");
   const { result, live } = await scenario({
-    state: { startedAt: ago(300), runIds: ["run_w"], turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: answered.createdAt, priorRuns: [], activeMs: 0, windowSeq: 1 } },
+    state: { startedAt, runIds: ["run_w"], turnCostUsd: 0, budget: { window: { wallMinutes: 120, costUsd: 25 }, since: answered.createdAt, priorRuns: [], activeMs: 0, windowSeq: 1 } },
     conversation: { agentComments: [...earlier, question, asked], humanComments: [oldReply, answered, reply] },
     runner: runner([]),
     reasoner: async () => turnOf([accept]),

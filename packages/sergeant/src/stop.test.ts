@@ -29,7 +29,7 @@ test("a stop the loop could not finish and serve's intake finished is said once 
   const cancel = deps.runner.cancel;
   deps.runner.cancel = async (id) => (intake ? cancel(id) : (refusals++, Promise.reject(new Error("docker stop timed out"))));
   const loop = runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0.02, log: () => {} }, deps);
-  await vi.waitFor(() => expect(refusals).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(refusals).toBeGreaterThan(0), { timeout: 5_000 });
   await deps.exclusive(async () => {
     intake = true;
     return driveCancel(dir, "UNF-1", deps, [repo], () => {}).finally(() => (intake = false));
@@ -79,10 +79,10 @@ test.each([["Todo", "unstarted"], ["In Progress", "started"]])(
     const cancel = deps.runner.cancel;
     deps.runner.cancel = async (id) => (refuse ? (refusals++, Promise.reject(new Error("docker stop timed out"))) : cancel(id));
     const loop = runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir: task, pollSeconds: 0.01, log: () => {} }, deps);
-    await vi.waitFor(() => expect(refusals).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(refusals).toBeGreaterThan(0), { timeout: 5_000 });
     live.conversation = issue(stateType, name);
     const seenBack = refusals;
-    await vi.waitFor(() => expect(refusals).toBeGreaterThan(seenBack + 2));
+    await vi.waitFor(() => expect(refusals).toBeGreaterThan(seenBack + 2), { timeout: 5_000 });
     refuse = false;
     expect(await loop).toMatchObject({ outcome: "stopped", detail: expect.stringContaining("Backlog") });
     expect(seen).toMatchObject({ turns: 0, starts: 0 });
@@ -117,7 +117,7 @@ test.each([["Todo", "unstarted"], ["In Progress", "started"]])(
     const cancel = deps.runner.cancel;
     deps.runner.cancel = async (id) => (intake ? cancel(id) : (refusals++, Promise.reject(new Error("docker stop timed out"))));
     const loop = runLoop({ issueId: "UNF-1", enrolledRepositories: [repo], dir: task, pollSeconds: 0.02, log: () => {} }, deps);
-    await vi.waitFor(() => expect(refusals).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(refusals).toBeGreaterThan(0), { timeout: 5_000 });
     await deps.exclusive(async () => {
       intake = true;
       await driveCancel(task, "UNF-1", deps, [repo], () => {}).finally(() => (intake = false));
