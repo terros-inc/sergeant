@@ -202,6 +202,37 @@ test("login without a prompt times out and releases its loopback port", async ()
   }
 });
 
+// Closing or interrupting the fallback prompt must end the login and its still-live listener; otherwise
+// the command hangs and the next login cannot bind the configured port.
+test("a rejected login prompt releases its loopback port", async () => {
+  let showAuthorize: (authorize: URL) => void = () => {};
+  const shown = new Promise<URL>((resolve) => (showAuthorize = resolve));
+  const login = linearLogin({
+    clientId: "client-1",
+    env: { SGT_LOGIN_PORT: "0" },
+    fetch: (() => {
+      throw new Error("an interrupted login must not exchange a token");
+    }) as unknown as typeof globalThis.fetch,
+    paste: false,
+    show: (url) => showAuthorize(new URL(url)),
+    warn: () => {},
+    open: () => false,
+    prompt: async () => {
+      throw new Error("login prompt closed before a callback URL or code was entered");
+    },
+  });
+  const authorize = await shown;
+  await expect(login).rejects.toThrow("login prompt closed before a callback URL or code was entered");
+
+  const callback = new URL(authorize.searchParams.get("redirect_uri") ?? "");
+  const probe = createServer();
+  await new Promise<void>((resolve, reject) => {
+    probe.once("error", reject);
+    probe.listen(Number(callback.port), "127.0.0.1", resolve);
+  });
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+});
+
 test("-v and --version print Sergeant's git version and exit 0 without touching the API", async () => {
   // A fetch that fails the test if the version flag reaches the API; no server is running either.
   const fetch = (() => {

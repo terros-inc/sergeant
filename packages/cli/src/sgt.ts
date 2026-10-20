@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
 import { main } from "./cli.ts";
+import { terminalPrompt } from "./prompt.ts";
 import { askSecret, signIn } from "./signin.ts";
 
 const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
@@ -18,21 +18,7 @@ process.exitCode = await main(process.argv.slice(2), {
       child.once("exit", (code) => resolve(code === 0));
       child.unref();
     }),
-  prompt: (message, signal) =>
-    new Promise<string>((resolve, reject) => {
-      const lines = createInterface({ input: process.stdin, output: process.stderr });
-      const cancel = () => {
-        lines.close();
-        reject(new DOMException("The login prompt was closed", "AbortError"));
-      };
-      if (signal.aborted) return cancel();
-      signal.addEventListener("abort", cancel, { once: true });
-      lines.question(message, (answer) => {
-        signal.removeEventListener("abort", cancel);
-        lines.close();
-        resolve(answer);
-      });
-    }),
+  prompt: terminalPrompt,
   // Standard input only when something is piped to it; a terminal signs in instead (TECH-5196).
   ...(!process.stdin.isTTY && {
     stdin: async () => {
