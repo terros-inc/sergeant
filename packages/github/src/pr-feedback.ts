@@ -29,9 +29,12 @@ const reviewComment = z.object({
   html_url: z.url(),
   author_association: z.string().optional(),
 });
-const issueComment = z.object({
+export const issueComment = z.object({
   id: z.number().int(), user, body: z.string().nullable(), created_at: z.string(), updated_at: z.string(), html_url: z.url(),
   author_association: z.string().optional(),
+  node_id: z.string().optional(),
+  /** The GitHub App whose token posted the comment; null for one a person or Actions posted directly. */
+  performed_via_github_app: z.object({ id: z.number().int() }).nullish(),
 });
 /** Pages of feedback read per list; more than this fails the read rather than hiding a review. */
 const MAX_FEEDBACK_PAGES = 10;
@@ -45,7 +48,7 @@ const botBody = (body: string, url: string) =>
   body.length <= BOT_BODY_CHARS ? body : `${body.slice(0, BOT_BODY_CHARS)}\n[… ${body.length - BOT_BODY_CHARS} more characters; the full text is at ${url}]`;
 
 /** Every page of a list endpoint, oldest first as GitHub lists them, up to `MAX_FEEDBACK_PAGES`. */
-async function readAll<T>(request: Get, path: string, item: z.ZodType<T>): Promise<T[]> {
+export async function readAll<T>(request: Get, path: string, item: z.ZodType<T>): Promise<T[]> {
   const items: T[] = [];
   for (let page = 1; page <= MAX_FEEDBACK_PAGES; page++) {
     const batch = z.array(item).parse(await request(`${path}?per_page=100&page=${page}`));

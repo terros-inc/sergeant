@@ -1,15 +1,22 @@
 import { HumanHandoffError, type GitHubPort } from "@terros/sergeant-contracts";
-import { hasComment } from "./pr-feedback.ts";
+import { issueComment, readAll } from "./pr-feedback.ts";
 import { graphqlErrors, pullRequestReviewers } from "./schemas.ts";
 
 // TECH-5244: in a `human` repository Sergeant never approves or merges. Once a head passes the merge
 // gate, it is handed to a human: marked ready for review, review requested, and the review summary
 // posted on the PR. Every step is safe to repeat.
 
+// TECH-6374: once the latest summary is on the PR, the control-plane App's own earlier comments there
+// (earlier heads' summaries) are minimized as outdated, so only the latest status shows. "Own" is
+// GitHub's record of who posted it: a bot account, through this App's ID (`performed_via_github_app`),
+// never a login a human or another App could resemble. Without `appId` nothing is hidden.
+export type HandoffContext = { appId?: number; log: (line: string) => void };
+
 type Request = (path: string, init?: RequestInit, options?: { allowStatuses?: number[] }) => Promise<unknown>;
 type HandToHuman = NonNullable<GitHubPort["handToHuman"]>;
 
 const READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }";
+const MINIMIZE = "mutation($id: ID!) { minimizeComment(input: { subjectId: $id, classifier: OUTDATED }) { minimizedComment { isMinimized } } }";
 
 async function atStep<T>(step: HumanHandoffError["step"], operation: () => Promise<T>, context?: string): Promise<T> {
   try {
@@ -19,7 +26,11 @@ async function atStep<T>(step: HumanHandoffError["step"], operation: () => Promi
   }
 }
 
-export async function handToHuman(request: Request, { repo, number, expectedHeadSha, reviewers, comment }: Parameters<HandToHuman>[0]): ReturnType<HandToHuman> {
+export async function handToHuman(
+  request: Request,
+  { repo, number, expectedHeadSha, reviewers, comment }: Parameters<HandToHuman>[0],
+  { appId, log }: HandoffContext,
+): ReturnType<HandToHuman> {
   const path = `/repos/${repo}/pulls/${number}`;
   const json = { method: "POST", headers: { "Content-Type": "application/json" } };
   let live = await atStep("read pull request", async () => pullRequestReviewers.parse(await request(path)));
@@ -44,10 +55,24 @@ export async function handToHuman(request: Request, { repo, number, expectedHead
   if (asked.length > 0) {
     if (await atStep("request reviewers", () => request(`${path}/requested_reviewers`, { ...json, body: JSON.stringify({ reviewers: asked }) }, { allowStatuses: [422] }))) requested.push(...asked);
   }
-  await atStep("post review summary", async () => {
-    if (!(await hasComment((p) => request(p), repo, number, comment))) {
+  const comments = await atStep("post review summary", async () => {
+    const all = await readAll((p) => request(p), `/repos/${repo}/issues/${number}/comments`, issueComment);
+    if (!all.some((c) => c.body === comment)) {
       await request(`/repos/${repo}/issues/${number}/comments`, { ...json, body: JSON.stringify({ body: comment }) });
     }
+    return all;
   });
+  const own = appId === undefined ? [] : comments.filter((c) => c.user?.type === "Bot" && c.performed_via_github_app?.id === appId);
+  // REST does not say whether a comment is already minimized, so an earlier one is asked again.
+  for (const c of own.filter((c) => c.body !== comment && c.node_id)) {
+    // Best effort: an earlier summary left visible is untidy, while failing here would undo a handoff
+    // whose summary is already posted.
+    try {
+      const answer = graphqlErrors.parse(await request("/graphql", { ...json, body: JSON.stringify({ query: MINIMIZE, variables: { id: c.node_id } }) }));
+      if (answer.errors?.length) throw new Error(answer.errors.map((e) => e.message).join("; "));
+    } catch (e) {
+      log(`${repo}#${number}: could not minimize outdated comment ${c.html_url}: ${(e as Error).message}`);
+    }
+  }
   return { requested };
 }

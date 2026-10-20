@@ -29,7 +29,9 @@ export type GitHubAdapterOptions = {
   repositories: Readonly<Record<string, GitHubRepositoryConfig>>;
   apiUrl?: string;
   fetch?: typeof globalThis.fetch;
-  /** Where a rate-limit pause is logged, once as it starts. */
+  /** The control-plane App's ID: a handoff minimizes the earlier PR comments this App posted (TECH-6374). */
+  appId?: number;
+  /** Where a rate-limit pause, or an outdated comment left visible, is logged. */
   log?: (line: string) => void;
   now?: () => number;
 };
@@ -73,7 +75,8 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
   const fetchFn = options.fetch ?? globalThis.fetch;
   const apiUrl = (options.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
   const now = options.now ?? Date.now;
-  const limiter = rateLimiter(options.log ?? (() => {}), now);
+  const log = options.log ?? (() => {});
+  const limiter = rateLimiter(log, now);
   // TECH-5336: every GET is conditional on the ETag of its last 200, and a 304 (which GitHub does not
   // count against the rate limit) answers with that response's body.
   const conditional = new Map<string, { etag: string; body: unknown }>();
@@ -369,7 +372,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       }
     },
 
-    handToHuman: (req) => (configFor(req.repo), handToHuman(request, req)),
+    handToHuman: (req) => (configFor(req.repo), handToHuman(request, req, { ...(options.appId !== undefined && { appId: options.appId }), log })),
 
     async closePullRequest({ repo, number, comment }) {
       configFor(repo);

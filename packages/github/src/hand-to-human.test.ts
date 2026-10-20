@@ -10,11 +10,13 @@ const repo = "terros-inc/sales";
 const merge = { repo, number: 7, expectedHeadSha: head, squash: { issueIdentifier: "TECH-1", closesIssue: true, builtBy: "Built by Sergeant" } };
 const json = (value: unknown, status = 200) => Response.json(value, { status });
 
-function port(config: GitHubRepositoryConfig, answer: (path: string, method: string, body: unknown) => Response) {
+function port(config: GitHubRepositoryConfig, answer: (path: string, method: string, body: unknown) => Response, appId?: number, log?: (line: string) => void) {
   const calls: { path: string; method: string; body: unknown }[] = [];
   const repositories: Record<string, GitHubRepositoryConfig> = { [repo]: config };
   const github = createGitHubPort({
     token: async () => "test",
+    ...(appId !== undefined && { appId }),
+    ...(log && { log }),
     repositories,
     fetch: async (input, init) => {
       const call = { path: String(input).replace("https://api.github.com", ""), method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined };
@@ -114,4 +116,48 @@ test("a handoff identifies a failed post review summary step", async () => {
   });
 
   await expect(github.handToHuman?.(handoff)).rejects.toMatchObject({ name: "HumanHandoffError", step: "post review summary", message: "GitHub was unavailable" });
+});
+
+// TECH-6374: each head's summary used to stay visible, so a PR handed over three times showed three
+// "Ready" comments. Only the App's own earlier ones are hidden: a human's or another bot's never is,
+// even one posted through this same App on a person's behalf or under a look-alike login.
+test("a handoff minimizes only this App's own earlier comments as outdated, never the latest or anyone else's", async () => {
+  const app = 42;
+  const comment = (id: number, body: string, user: { login: string; type: string }, via: number | null) => ({
+    id, node_id: `IC_${id}`, body, user, performed_via_github_app: via === null ? null : { id: via }, created_at: "", updated_at: "", html_url: `https://github.com/c/${id}`,
+  });
+  const self = { login: "acme-sergeant[bot]", type: "Bot" };
+  const existing = [
+    comment(1, "**Ready for a human to merge** (an earlier head)", self, app),
+    comment(2, "Please hold this until Friday.", { login: "reviewer-login", type: "User" }, null),
+    comment(3, "Posted by a person through the same App", { login: "reviewer-login", type: "User" }, app),
+    comment(4, "**Ready for a human to merge** (another bot)", self, 99),
+    comment(5, "Review complete: 0 findings", { login: "other-review-bot[bot]", type: "Bot" }, 7),
+    comment(6, "**Ready for a human to merge** (an earlier head, the second)", self, app),
+  ];
+  const minimized: string[] = [];
+  const logged: string[] = [];
+  const { github } = port({ mergeMethod: "squash", mergePolicy: "human" }, (path, method, body) => {
+    if (path.endsWith("/pulls/7")) return json(livePr({ requested_reviewers: [{ login: "codeowner" }] }));
+    if (path.includes("/issues/7/comments") && method === "GET") return json(existing);
+    if (path.endsWith("/issues/7/comments")) return existing.push(comment(8, (body as { body: string }).body, self, app)), json({ id: 8 }, 201);
+    if (path === "/graphql") {
+      const { query, variables } = body as { query: string; variables: { id: string } };
+      expect(query).toContain("classifier: OUTDATED");
+      minimized.push(variables.id);
+      // GitHub answers a refused mutation with 200 and `errors`: logged, and the handoff still stands.
+      return json(variables.id === "IC_6" ? { errors: [{ message: "refused" }] } : { data: {} });
+    }
+    throw new Error(`unexpected ${method} ${path}`);
+  }, app, (line) => logged.push(line));
+
+  expect(await github.handToHuman?.(handoff)).toEqual({ requested: ["codeowner"] });
+  expect(minimized).toEqual(["IC_1", "IC_6"]);
+  expect(logged).toEqual([expect.stringContaining("could not minimize outdated comment https://github.com/c/6: refused")]);
+
+  // A retry at the same head posts nothing new and keeps its summary, the latest, visible.
+  minimized.length = 0;
+  expect(await github.handToHuman?.(handoff)).toEqual({ requested: ["codeowner"] });
+  expect(existing.filter((c) => c.body === handoff.comment)).toHaveLength(1);
+  expect(minimized).toEqual(["IC_1", "IC_6"]);
 });

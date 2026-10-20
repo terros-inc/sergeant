@@ -187,6 +187,7 @@ export async function connect(
     // A rate-limit pause is logged once as it starts (TECH-5336), in serve's log format.
     github: createGitHubPort({
       token: controlPlaneToken,
+      appId: config.github.controlPlaneApp.appId,
       repositories: repositoryConfigs,
       log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
       ...(fetchFor.github && { fetch: fetchFor.github }),
