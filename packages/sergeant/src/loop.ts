@@ -27,6 +27,7 @@ import { recordReply } from "./stop-ledger.ts";
 import { postRereviewRequests } from "./rereview.ts";
 import { recordReviews as recordReviewFacts } from "./review-telemetry.ts";
 import { admitOwner } from "./owner.ts";
+import { ownerAssignments } from "./assign-owner.ts";
 import { applyTurn, loadState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 import { watchKey } from "./webhooks.ts";
@@ -125,6 +126,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
   const resolvedThreads = new Set<string>();
   const prPolls = pullRequestPolls(pullRequestPollMs(opts), opts.wake);
+  // TECH-6428: each of the worker's PRs is assigned to the task's requestor once (assign-owner.ts).
+  const assignOwner = ownerAssignments(ports, log);
   const resolveDue = (conversation: Conversation) => resolveAnswered(conversation, state.actedThrough, deps.linear, resolvedThreads, log);
 
   const recordReviews = (runs: RunRecord[]) =>
@@ -221,6 +224,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     unposted = undefined;
     const pullRequests = await prPolls.read(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
+    await assignOwner(pullRequests, conversation.issue);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's

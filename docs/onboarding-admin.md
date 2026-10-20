@@ -57,7 +57,9 @@ it. From then on every PR there, not only Sergeant's, needs an approving review 
   (`"<github-login>": "https://linear.app/<workspace>/profiles/<user>"`). In a human-merge repository
   Sergeant requests the assignee's GitHub review only through this mapping (when no code owner was
   asked); without it nobody is requested and they find the PR from the issue. It also makes re-review
-  requests mention them in Linear instead of as plain `@github-login` text.
+  requests mention them in Linear instead of as plain `@github-login` text, and assigns them the PRs
+  Sergeant opens for their tasks ([08 §10](design/08-github-contract.md#10-humans-on-github)); they must
+  be able to be assigned in the repository (a collaborator or org member).
 - **Budget.** Every task gets the config's `budget` window (default 120 minutes and $25); it is not
   per user
   ([`deploy/README.md`](../deploy/README.md), "Change the per-task budget").

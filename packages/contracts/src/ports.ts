@@ -206,6 +206,12 @@ export interface GitHubPort {
    * commit was committed. Optional, so a fake without it finds none.
    */
   issueBranches?(repo: RepoSlug, issueIdentifier: string): Promise<{ branch: string; sha: Sha; committedAt: string }[]>;
+  /**
+   * TECH-6428: adds `assignee` to the PR's GitHub assignees, keeping any others. Resolves whether
+   * GitHub now lists them: GitHub silently drops a login it cannot assign (not a collaborator, say).
+   * Safe to repeat. Optional, so a fake without it assigns nobody.
+   */
+  assignPullRequest?(req: { repo: RepoSlug; number: number; assignee: string }): Promise<{ assigned: boolean }>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**

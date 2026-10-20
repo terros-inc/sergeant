@@ -37,7 +37,7 @@ export const InstallationConfig = z.strictObject({
      * through it are admitted (TECH-5192). Every other app's delegation is refused.
      */
     delegatingAppIds: z.array(z.string().min(1)).default([]),
-    /** GitHub reviewer login to Linear profile URL; Linear renders the URL as a notifying mention. */
+    /** GitHub login to Linear profile URL: a notifying mention in Linear, and the GitHub account a task owner is assigned PRs and asked for review as. */
     reviewerProfiles: z
       .record(
         z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "expected a GitHub login"),

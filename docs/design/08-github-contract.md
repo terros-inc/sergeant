@@ -8,7 +8,7 @@ links PRs to the Linear issue, and merges under the Gate's rules.
 
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
-| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, handing a gated head to a human with a summary comment and minimizing its own outdated comments (§7), closing a stopped task's PRs and deleting their `sergeant/` branches (§3), nothing else |
+| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, handing a gated head to a human with a summary comment and minimizing its own outdated comments (§7), closing a stopped task's PRs and deleting their `sergeant/` branches (§3), assigning the worker's PRs to the task's requestor (§10), nothing else |
 | **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write and statuses: read (each only while the installation holds it), checks: read, actions: read, metadata: read. Reviewers: no write token (the host checks out their PRs with a read-only token that never enters the run). Every run, worker and reviewer, also gets `GH_READ_TOKEN`: contents: read, pull_requests: read, metadata: read, for all the enrolled repositories (TECH-6194) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs and statuses (`gh pr checks`); reading another enrolled repository or PR |
 | **rerun App** (optional, TECH-5839) | Sergeant's deterministic core only; each call mints a token for one repository with only `actions` | actions: write, metadata: read | rerunning the failed jobs of a workflow run a worker asked for (§6), nothing else |
 
@@ -251,6 +251,12 @@ holds up pauses like any other task loop, not retried and logged at every poll.
 
 ## 10. Humans on GitHub
 
+- **The requestor is assigned to the worker's PRs** (TECH-6428): each open PR the worker App opened
+  for a task gets the task's owner (07 §5, the issue's assignee who delegated it) as a GitHub assignee,
+  their login the one `linear.reviewerProfiles` maps their Linear profile to. The control-plane App
+  adds it once per PR per loop process, keeping any other assignees; a restart may add it again,
+  which changes nothing. It is best effort: with no owner or mapping, or an assignment GitHub refuses
+  or silently drops (the login is not a collaborator), a warning is logged and the PR and task go on.
 - **A human pushes to a worker's PR**: the new head has no worker recommendation. Sergeant starts a
   reviewer, or an approver waives (06 §3).
 - **A human requests changes or leaves a review comment**: every human review and comment on a task PR
