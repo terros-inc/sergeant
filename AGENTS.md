@@ -8,6 +8,9 @@ addresses, internal Slack or Linear links to customer cases, or customer busines
 tests, fixtures, docs, commit messages, branch names, PR titles or bodies, or review comments. Use
 synthetic placeholders (`C.example`, `user@example.test`, "Acme Solar") and describe a real case
 generically ("a customer's CRM sync sent a false alert"). A Linear issue's real case stays in Linear.
+Bare Linear issue identifiers (for example, `TECH-6339`) are allowed in public PR titles, commit
+messages, branch names, and closing references such as `Fixes TECH-6339` for traceability. This
+does not permit private Linear URLs, issue contents, customer cases, or other internal-only details.
 A pushed PR stays public record even after an edit, so check before you push: `git config
 core.hooksPath .githooks` turns on the pre-push check, which CI (`public-data.yml`) repeats. Both
 read the customer-name denylist from `PUBLIC_DATA_DENYLIST`, kept privately and never committed here;
