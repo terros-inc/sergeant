@@ -224,11 +224,11 @@ shared, team-wide harness, and v1 has none (Decisions for the captain, D2).
 | Endpoint | Inputs → outputs | Side effects | Who |
 |---|---|---|---|
 | `GET /v1/notifications` | → the caller's subscriptions (approvers: everyone's), never a secret: id, name, URL, events, created, and delivery health (§5) | — | team members |
-| `POST /v1/notifications/subscribe` | `name`, `url`, `events?` (default all five) → the subscription and its **secret, shown once** | stores the subscription with a fresh secret; replaces the caller's subscription of that name, with a new secret | team members, as themselves |
-| `POST /v1/notifications/rotate` | `name` → the **new secret, shown once** | adds a second secret; both sign until `finish` or 7 days pass | the owner |
-| `POST /v1/notifications/rotate/finish` | `name` → done | drops the older secret | the owner |
+| `POST /v1/notifications/subscribe` | `requestId`, `name`, `url`, `events?` (default all five) → the subscription and its **secret, shown once** | stores the subscription with a fresh secret; replaces the caller's subscription of that name, with a new secret | team members, as themselves |
+| `POST /v1/notifications/rotate` | `requestId`, `name` → the **new secret, shown once** | adds a second secret; both sign until `finish` or 7 days pass | the owner |
+| `POST /v1/notifications/rotate/finish` | `requestId`, `name` → done | drops the older secret | the owner |
 | `POST /v1/notifications/test` | `name` → the HTTP status the URL answered | sends one signed test delivery (§2): no task fields, not one of the five events, not retried or recorded | the owner |
-| `POST /v1/notifications/remove` | `name` (approvers: `id`) → `removed` | deletes the subscription and its secrets | the owner, or an approver |
+| `POST /v1/notifications/remove` | `requestId`, `name` (approvers: `id`) → `removed` | deletes the subscription and its secrets | the owner, or an approver |
 
 ```
 sgt notify list
@@ -238,8 +238,25 @@ sgt notify test <name>
 sgt notify remove <name>
 ```
 
-Each changes durable state, so each is one action through the Gate, with keys
-`notify:<userId>:<name>` (subscribe and remove) and `notify-rotate:<userId>:<name>:<n>`.
+`subscribe`, `rotate`, `rotate/finish` and `remove` change durable state, so each is one action
+through the Gate. Because proposing an existing key returns the earlier result instead of acting (02
+§6), the key names one **invocation**, not a subscription name: `notify-<verb>:<callerUserId>:<requestId>`,
+where `<verb>` is `subscribe`, `rotate`, `rotate-finish` or `remove`, and `requestId` is a UUID that
+`sgt` generates once per command and sends with the request. It is a required input on these four
+endpoints, and a call without one is refused.
+
+- **A retry of the same command dedups.** `sgt`, the MCP or a harness resending after a lost
+  response reuses its `requestId`, so the action runs once. The action's stored params and result
+  never hold the secret, so a retried `subscribe` or `rotate` whose first attempt had already
+  succeeded returns the subscription without it and says to run `rotate` for a fresh one.
+- **Every later command runs.** A remove, a replace (`subscribe` again under the same name), a
+  resubscribe after a remove, or a second rotation is a new command with a new `requestId`, so it
+  never gets back an earlier action's result.
+- **A key cannot be reused for something else.** The key is scoped to the caller and the verb, and
+  the Gate refuses (`gate_denied`) a `requestId` it has already seen with different params (another
+  name, URL, events or target `id`) rather than returning the other action's result.
+
+`test` is not an action: it changes nothing durable, and a retried test sends one more test delivery.
 
 ### Secrets: issuance, display, storage and rotation
 
