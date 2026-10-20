@@ -185,7 +185,7 @@ function missingInput(runs: RunRecord[]): string | undefined {
   const last = runs.filter((r) => r.report).at(-1);
   if (!last?.report) return undefined;
   const inputs = last.report.unreadableInputs ?? [];
-  if (inputs.length > 0) return `inputs it could not read: ${inputs.join(", ")}`;
+  if (inputs.length > 0) return `inputs it could not read: ${inputs.map((i) => (i.reason ? `${i.input} (${i.reason})` : i.input)).join(", ")}`;
   if (last.role === "reviewer" && last.report.verdict === "needs_human") return `a human's call the reviewer asked for: ${clip(last.report.summary)}`;
   if (last.role === "worker" && (last.report.outcome === "needs_decision" || last.report.outcome === "blocked")) return `what the worker reported it needs (${last.report.outcome}): ${clip(last.report.summary)}`;
   return undefined;

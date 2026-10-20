@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/17";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/18";
 
 /**
  * Each subject PR's human feedback (TECH-4990), or its bot feedback (TECH-6166), for the reviewer to
@@ -130,7 +130,8 @@ ${renderReadAccess(enrolled)}
 4. Trace self-declared trade-offs that change persisted or control-plane state through every reader,
    or report them as blocking.
 5. Name every correctness claim that rests on behavior outside the repository; verify it if you can,
-   otherwise mark it unverified (not blocking by itself).
+   otherwise mark it unverified (not blocking by itself). Code in another enrolled repository is not
+   outside your reach: read it (rule 11) before you rule on a claim about it.
 6. Size and simplification claims need \`git diff --numstat\` evidence.
 7. Run the tests and targeted probes a requirement, claim, or finding needs; the dependencies are
    installed. CI is the full test gate: do not rerun the whole suite. Hold the change's new and changed
@@ -150,10 +151,15 @@ ${renderReadAccess(enrolled)}
    never a blocking finding.
 9. Do not modify the repository and do not contact anyone.
 10. Verdict: \`approve\`, \`changes_requested\`, or \`needs_human\`.
-11. An input the issue depends on that you cannot read (an auth-gated link, a missing file or
-    attachment, a file the brief lists as not downloaded): name it in \`unreadableInputs\` exactly
-    as the issue gives it, and rule the requirements that rest on it as not verified. A file or PR in
-    an enrolled repository is readable with \`GH_READ_TOKEN\` (Environment): read it instead.
+11. Code, a file, a PR, a branch, or the current source of an enrolled repository is readable with
+    \`GH_READ_TOKEN\` (Environment): when the review needs it, read it, and never report it as not
+    provided. An input the issue depends on that you still cannot read (an auth-gated link, a missing
+    file or attachment, a file the brief lists as not downloaded, a repository not enrolled, a read
+    that failed): list it in \`unreadableInputs\` as \`{ "input", "reason" }\`, the input exactly as
+    the issue gives it and the reason what stopped you (for example "not enrolled with Sergeant, so
+    GH_READ_TOKEN cannot read it; enrolling it would", "GH_READ_TOKEN refused with 401", "404: no such
+    path at main", "needs a sign-in"), so Sergeant's question to a human can say what would fix it.
+    Rule the requirements that rest on it as not verified.
     The PRs' CI and check status is not such an input, nor a reason for \`needs_human\`: you are not
     given it, and Sergeant reads the required checks on the exact head itself and refuses any merge
     while one is red or pending. Rule a requirement such as "CI passes" as covered by that merge gate,
@@ -211,7 +217,7 @@ with evidence), ending with exactly one fenced block tagged \`sergeant-report\` 
   "findings": [{ "id": "f1", "severity": "blocking" | "non_blocking" | "nit",
                  "category": "acceptance" (omit unless this is an unmet or contradicted requirement),
                  "description": "...", "location": "path:line" }],
-  "unreadableInputs": [],
+  "unreadableInputs": [{ "input": "<as the issue gives it>", "reason": "<why you could not read it>" }],
   "dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }],
   "summary": "<one paragraph>" }
 \`\`\`
@@ -224,7 +230,8 @@ This is the reviewer report, \`s2-review-report/1\`. Every field below is requir
 - \`verdict\`: exactly one of \`"approve"\`, \`"changes_requested"\`, \`"needs_human"\`.
 - \`findings\`: an array, \`[]\` when there are none; each finding has a non-empty \`id\`, a
   \`severity\`, and a \`description\`, with \`category\` and \`location\` as above.
-- \`unreadableInputs\` and \`dependencies\`: arrays, \`[]\` when there are none.
+- \`unreadableInputs\` and \`dependencies\`: arrays, \`[]\` when there are none; each unreadable
+  input has a non-empty \`input\` and \`reason\`.
 - \`summary\`: one paragraph.
 
 A minimal correct report with nothing to change:

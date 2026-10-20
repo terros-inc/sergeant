@@ -74,7 +74,9 @@ produced. You have no AWS or Linear credentials, and no GitHub write access. Eac
 locally, and before you started its dependencies were installed at the head, so you can run its tests:
 <per checkout: installed with `pnpm install --frozen-lockfile` / `npm ci`, failed (why, then its output fenced as untrusted), or no lockfile>
 - Reading other repositories and PRs: `GH_READ_TOKEN` is a read-only token (contents, pull requests,
-  metadata) for every enrolled repository: <the enrolled repositories>, with example `gh` and `git` commands.
+  metadata) for every enrolled repository: <the enrolled repositories>, with example `gh` and `git` commands,
+  and that such code is never "not provided"; a read that still fails says why (not enrolled, token
+  refused, not found), which each `unreadableInputs` entry carries as its `reason` (TECH-6356).
 
 ## Rules (s2-reviewer-rules/<n>)   <§4>
 ## Report (s2-review-report/1)   <ReviewReport: prose, then one fenced `sergeant-report` block>

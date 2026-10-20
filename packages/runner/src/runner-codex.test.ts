@@ -225,6 +225,15 @@ test("a Codex reviewer's invented worker-format block is overridden by its valid
   expect(record.reportProblem).toBeUndefined();
 });
 
+// TECH-6356: Sergeant's question to a human says what would fix an unreadable input only if the reason
+// the reviewer gave survives its structured result.
+test("a Codex reviewer's structured result keeps each unreadable input's reason", async () => {
+  const unreadableInputs = [{ input: "https://github.com/o/not-enrolled", reason: "not enrolled with Sergeant, so GH_READ_TOKEN cannot read it" }];
+  const structured = JSON.stringify({ ...JSON.parse(STRUCTURED), verdict: "needs_human", unreadableInputs });
+  const { record } = await endedReview(INVENTED, structured);
+  expect(record).toMatchObject({ status: "succeeded", report: { verdict: "needs_human", unreadableInputs } });
+});
+
 test("a Codex reviewer with no structured result still reads a valid Markdown block", async () => {
   const valid = `Approve.\n\n\`\`\`sergeant-report\n${STRUCTURED}\n\`\`\`\n`;
   const { record } = await endedReview(valid, undefined);

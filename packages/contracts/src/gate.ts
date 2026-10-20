@@ -129,7 +129,7 @@ export const QUESTION_HEADING = "**Question for you**";
  * was asked, not that the human's change answered it.
  */
 export function unaskedInputs(runs: RunRecord[], agentComments: AgentComment[]): string[] {
-  const inputs = new Set(runs.flatMap((r) => r.report?.unreadableInputs ?? []).map((i) => i.trim()).filter(Boolean));
+  const inputs = new Set(runs.flatMap((r) => r.report?.unreadableInputs ?? []).map((i) => i.input.trim()).filter(Boolean));
   const questions = agentComments.filter((c) => c.body.startsWith(QUESTION_HEADING)).map((c) => c.body.toLowerCase());
   return [...inputs].filter((i) => !questions.some((q) => q.includes(i.toLowerCase())));
 }

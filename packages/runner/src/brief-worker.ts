@@ -3,7 +3,7 @@ import { renderBoundedBotFeedback, renderBoundedHumanFeedback, renderReadAccess,
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/21";
+export const WORKER_RULES_VERSION = "s2-worker-rules/22";
 
 export function workerBrief(
   spec: Extract<RunSpec, { role: "worker" }>,
@@ -107,11 +107,14 @@ ${renderReadAccess(enrolled)}
     report with a short Feedback section, its lines also in \`feedback\`: what made this task harder or
     slower than it should have been, what Sergeant, the repo, tooling, docs, or process could have done
     better, one-off or likely to recur. "Nothing notable" is healthy (then leave \`feedback\` empty).
-13. An input the issue depends on that you cannot read (an auth-gated link, a missing file or
-    attachment, a file the brief lists as not downloaded): never guess its content. Name it in
-    \`unreadableInputs\` exactly as the issue gives it (its URL or path); Sergeant asks a human
-    about it before anything merges. A file or PR in an enrolled repository is readable with
-    \`GH_READ_TOKEN\` (Environment): read it instead.
+13. Code, a file, a PR, a branch, or the current source of an enrolled repository is readable with
+    \`GH_READ_TOKEN\` (Environment): read it. An input the issue depends on that you still cannot
+    read (an auth-gated link, a missing file or attachment, a file the brief lists as not downloaded,
+    a repository not enrolled, a read that failed): never guess its content. List it in
+    \`unreadableInputs\` as \`{ "input", "reason" }\`, the input exactly as the issue gives it (its
+    URL or path) and the reason what stopped you (for example "not enrolled with Sergeant, so
+    GH_READ_TOKEN cannot read it; enrolling it would", "GH_READ_TOKEN refused with 401", "needs a
+    sign-in"); Sergeant asks a human about it, saying what would fix it, before anything merges.
 14. Rebase early and often. Rebase each branch onto the current default branch (\`git fetch origin\`,
     then \`git rebase origin/<default branch>\`) before its first push, before you report a head for
     review, and whenever the default branch has moved under its open PR. Resolve conflicts then, as
@@ -193,7 +196,7 @@ what changed, validation, known gaps, decisions, a short Feedback section), endi
                      "closesIssue": true | false,
                      "review": { "required": true | false, "reason": "<why>" } }],
   "knownGaps": ["..."],
-  "unreadableInputs": [],
+  "unreadableInputs": [{ "input": "<as the issue gives it>", "reason": "<why you could not read it>" }],
   "dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }],
   "followups": [{ "title": "<standalone title>",
                    "category": "concrete_bug" | "required_unfinished_work" | "real_blocker" | "operational_or_security",

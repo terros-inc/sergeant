@@ -50,10 +50,17 @@ const ReportedPr = { repo: RepoSlug, number: z.number().int().positive(), headSh
 
 /**
  * Inputs the issue depends on that the run could not read (an auth-gated link, a missing file or
- * attachment), each named as the issue names it. Sergeant must ask a human about each before it
- * merges (M14).
+ * attachment), each named as the issue names it, with why it could not be read (TECH-6356: a
+ * repository not enrolled, a refused token, not found), so Sergeant's question can say what would fix
+ * it. Sergeant must ask a human about each before it merges (M14). A bare string, as reports and
+ * stored records before TECH-6356 wrote, reads as an input whose reason was not given.
  */
-const UnreadableInputs = z.array(z.string()).optional();
+const UnreadableInput = z.union([
+  z.string().transform((input) => ({ input, reason: "" })),
+  z.object({ input: z.string(), reason: z.string().default("") }),
+]);
+export type UnreadableInput = z.infer<typeof UnreadableInput>;
+const UnreadableInputs = z.array(UnreadableInput).optional();
 
 /**
  * TECH-5278: dependencies between this task's issue and another that the run noticed (shared files, an
@@ -215,7 +222,15 @@ export const REVIEW_REPORT_SCHEMA = {
         },
       },
     },
-    unreadableInputs: { type: "array", items: { type: "string" } },
+    unreadableInputs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["input", "reason"],
+        properties: { input: { type: "string" }, reason: { type: "string" } },
+      },
+    },
     dependencies: {
       type: "array",
       items: {

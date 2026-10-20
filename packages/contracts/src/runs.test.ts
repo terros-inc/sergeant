@@ -107,7 +107,7 @@ test("the Codex reviewer schema is in step with ReviewReport", () => {
       { id: "f1", severity: "blocking", category: "acceptance", description: "d", location: "x.ts:1" },
       { id: "f2", severity: "nit", category: null, description: "n", location: null },
     ],
-    unreadableInputs: [],
+    unreadableInputs: [{ input: "https://github.com/o/private-repo", reason: "not enrolled with Sergeant, so GH_READ_TOKEN cannot read it" }],
     dependencies: [],
     summary: "s",
   };
@@ -119,12 +119,27 @@ test("the Codex reviewer schema is in step with ReviewReport", () => {
   // A null optional reads as absent, never a value.
   expect(parsed.report.findings[1]?.category).toBeUndefined();
   expect(parsed.report.findings[1]?.location).toBeUndefined();
+  expect(parsed.report.unreadableInputs).toEqual(structured.unreadableInputs);
 
   const props = REVIEW_REPORT_SCHEMA.properties;
   expect(props.reportVersion.enum).toEqual(["s2-review-report/1"]);
   expect(props.verdict.enum).toEqual(["approve", "changes_requested", "needs_human"]);
   expect(props.findings.items.properties.severity.enum).toEqual(["blocking", "non_blocking", "nit"]);
   expect(props.dependencies.items.properties.relation.enum).toEqual(["blocked_by", "blocks"]);
+});
+
+// TECH-6356: each unreadable input carries why it could not be read. Reports and run records written
+// before that hold bare strings; they must still parse, or a stored record stops reading after a deploy.
+test("an unreadable input keeps its reason, and a bare string still reads as one with none", () => {
+  const base = { reportVersion: "s2-review-report/1", reviewed: [{ repo: "o/r", number: 7, headSha: "a".repeat(40) }], verdict: "needs_human", findings: [], dependencies: [], summary: "s" };
+  const read = (unreadableInputs: unknown[]) => {
+    const parsed = parseJsonReport(JSON.stringify({ ...base, unreadableInputs }), ReviewReport);
+    return parsed.ok ? parsed.report.unreadableInputs : parsed;
+  };
+  expect(read(["https://example.com/spec.pdf", { input: "o/other", reason: "not found" }])).toEqual([
+    { input: "https://example.com/spec.pdf", reason: "" },
+    { input: "o/other", reason: "not found" },
+  ]);
 });
 
 // TECH-5392: every value the schema admits must parse, so each ReviewReport value constraint has a schema
