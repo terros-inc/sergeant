@@ -54,6 +54,7 @@ const conversation = (identifier: string): Conversation => ({
 let dir = "";
 let service: Service | undefined;
 afterEach(async () => {
+  vi.useRealTimers();
   await service?.stop();
   service = undefined;
   await rm(dir, { recursive: true, force: true });
@@ -175,19 +176,36 @@ test("a Linear delegation event rechecks ownership now; a plain comment does not
 });
 
 test("a burst of delegation events for one task causes at most one ownership reread (TECH-5974)", async () => {
-  const { counts, post } = await start();
+  const { counts, post, reads } = await start();
   const before = counts.ownerReads;
+  // TECH-6378: the debounce's clock is faked, so how far apart the events land is set here, not by how fast
+  // the machine delivers them: on real time a loaded CI runner spaced the trickle past the gap and saw 2 or 3.
+  // The loop's own waits (node:timers/promises) and Date stay real.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
-  // Ten delegation events, a tight burst and then a trickle spanning several webhook gaps: without the
-  // per-task debounce each gap would redo the history read.
+  // Ten delegation events, a tight burst and then a trickle spanning several webhook gaps, each just inside
+  // the gap: without the per-task debounce each gap would redo the history read.
   const delegation = () => post("linear", { type: "Issue", action: "update", data: { id: "i-UNF-1", identifier: "UNF-1", delegateId: agent.id }, updatedFrom: { delegateId: "someone-else" } });
   await Promise.all(Array.from({ length: 5 }, delegation));
   for (let i = 0; i < 5; i++) {
-    await sleep(webhookGapMs / 2);
+    vi.advanceTimersByTime(webhookGapMs - 1);
     expect(await delegation()).toBe(200);
   }
-  await vi.waitFor(() => expect(counts.ownerReads).toBeGreaterThan(before), { timeout: 2_000 });
-  await sleep(webhookGapMs * 6);
+  // Nothing rereads while the burst lasts.
+  expect(counts.ownerReads).toBe(before);
+  vi.advanceTimersByTime(webhookGapMs);
+  await vi.waitFor(() => expect(counts.ownerReads).toBe(before + 1), { timeout: 2_000 });
+
+  // Every timer the burst left runs out, then two more passes of the loop each begin after it: the second
+  // starts only once the first has finished its owner check, so a recheck still owed would have shown.
+  vi.advanceTimersByTime(webhookGapMs * 6);
+  const comment = () => post("linear", { type: "Comment", action: "create", data: { issueId: "i-UNF-1" } });
+  const settled = reads("UNF-1");
+  for (const pass of [1, 2]) {
+    expect(await comment()).toBe(200);
+    vi.advanceTimersByTime(webhookGapMs);
+    await vi.waitFor(() => expect(reads("UNF-1")).toBeGreaterThanOrEqual(settled + pass), { timeout: 2_000 });
+  }
   expect(counts.ownerReads - before).toBe(1);
 });
 
