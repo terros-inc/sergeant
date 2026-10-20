@@ -26,7 +26,7 @@ export const DEFAULT_API = "http://127.0.0.1:8080";
 
 export const USAGE = `usage: sgt [--api <url>] [--json] <command>
 
-  login                              sign in with your Linear account (opens a browser)
+  login [--paste]                    sign in with Linear; --paste works without a local browser
   logout                             forget this machine's login for the API
   whoami                             who the API takes you for
   update                             update this sgt: fast-forward its checkout to main and install it
@@ -91,16 +91,32 @@ const commands: Record<string, Command> = {
   ...stopCommands,
   login: {
     args: 0,
+    flags: ["paste"],
     run: async (ctx) => {
       const { linear } = await call(ctx, "GET", "/v1/auth/config", LoginConfig);
       const credential = await linearLogin({
         clientId: linear.clientId,
         env: ctx.io.env,
         fetch: ctx.io.fetch ?? globalThis.fetch,
-        open: (url) => {
+        paste: ctx.flags.paste ?? false,
+        show: (url) => {
           ctx.io.err(`Sign in to Sergeant at ${ctx.api} with Linear. If no browser opens, visit:\n  ${url}\n`);
-          ctx.io.openUrl?.(url);
         },
+        warn: (message) => ctx.io.err(`${message}\n`),
+        open: (url) => (ctx.io.openUrl ? ctx.io.openUrl(url) : false),
+        // Piped stdin may already be empty or held open by a parent process. Only consume it when
+        // --paste explicitly chose that input; automatic fallback keeps the loopback path usable.
+        ...(ctx.flags.paste || !ctx.io.stdin ? {
+          prompt: async (message: string, signal: AbortSignal) => {
+            if (ctx.io.stdin) {
+              const piped = (await ctx.io.stdin()).trim();
+              if (!piped) throw new Error("no callback URL or code was piped; run `sgt login --paste` in a terminal or pipe a value to it");
+              return piped;
+            }
+            if (ctx.io.prompt) return ctx.io.prompt(message, signal);
+            throw new Error("cannot read a pasted callback here; run `sgt login --paste` in a terminal or pipe the callback URL or code to it");
+          },
+        } : {}),
       }).catch((e: Error) => fail(ctx, "unauthorized", e.message));
       // Kept only once the API accepts it: a login it refuses would fail every later command.
       const { value: me, answer } = await callAnswer({ ...ctx, token: credential.accessToken }, "GET", "/v1/whoami", WhoAmI);
@@ -160,6 +176,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         "merge-method": { type: "string" },
         "merge-policy": { type: "string" },
         hours: { type: "string" },
+        paste: { type: "boolean" },
         version: { type: "boolean", short: "v" },
         help: { type: "boolean", short: "h" },
       },
@@ -185,7 +202,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], hours: values.hours };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], hours: values.hours, paste: values.paste || undefined };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

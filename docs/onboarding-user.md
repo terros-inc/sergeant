@@ -26,6 +26,10 @@ sgt login     # approve in Linear in the browser
 sgt whoami    # you, and the repositories Sergeant works in
 ```
 
+On a remote or headless machine, run `sgt login --paste`, open the printed URL in your own browser,
+approve access, then paste the resulting callback URL (or its `code`) into sgt. See
+[`sgt.md` §4](sgt.md#4-log-in) for the automatic fallback and port details.
+
 Keep it current with `sgt update`: the installation refuses an `sgt` older than it supports and tells
 you to run it. More in [`sgt.md` §3–4](sgt.md#3-point-it-at-your-installation).
 

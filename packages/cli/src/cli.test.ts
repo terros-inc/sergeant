@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { chmod, open, readFile, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { MIN_CLI_HEADER, MIN_CLI_VERSION } from "@terros/sergeant-contracts";
 import { TOKEN_URL } from "@terros/sergeant-contracts/credentials";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { USAGE } from "./cli.ts";
 import { config, fakeApi, sgt, sgtWith } from "./fake-api.ts";
+import { linearLogin } from "./login.ts";
 
 // What every `sgt` command shares: its errors, its login, its version, and how it meets a Sergeant
 // older or newer than it.
@@ -85,6 +87,150 @@ test("login signs in through the browser with PKCE, keeps the token privately, a
   expect(await sgt(api, "logout")).toMatchObject({ code: 0, out: expect.stringContaining("signed out") });
   await sgt(api, "task", "list");
   expect(seen.at(-1)?.authorization).toBeUndefined();
+});
+
+// A remote browser cannot call this process's localhost. The complete callback preserves OAuth's
+// state check; a copied bare code is still bound to this login by the PKCE verifier.
+test("login accepts pasted input, races it with loopback, and rejects another login's state", async () => {
+  const me = { auth: "linear", user: { id: "u1", name: "Ada Example", email: "ada@example.com" }, approver: false, enrolledRepositories: [], registration: { providers: [] }, approvers: [] };
+  const { api } = await fakeApi({ "GET /v1/auth/config": { json: { linear: { clientId: "client-1" } } }, "GET /v1/whoami": { json: me } });
+  const exchanged: string[] = [];
+  const fetch: typeof globalThis.fetch = async (url, init) => {
+    if (String(url) !== TOKEN_URL) return globalThis.fetch(url, init);
+    exchanged.push(new URLSearchParams(String(init?.body)).get("code") ?? "");
+    return Response.json({ access_token: `token-${exchanged.length}`, refresh_token: "refresh-1", expires_in: 86_400 });
+  };
+
+  let authorize: URL | undefined;
+  const unavailableBrowser = (url: string) => ((authorize = new URL(url)), false);
+  const callback = () => {
+    const url = new URL(authorize?.searchParams.get("redirect_uri") ?? "");
+    url.search = new URLSearchParams({ code: "callback-code", state: authorize?.searchParams.get("state") ?? "" }).toString();
+    return url.toString();
+  };
+  const full = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => callback() }, api, "login");
+  expect(full).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+
+  const schemeLess = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => callback().replace(/^http:\/\//, "") }, api, "login");
+  expect(schemeLess).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+
+  const schemeLessMismatch = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => `${callback().replace(/^http:\/\//, "")}-changed` }, api, "login");
+  expect(schemeLessMismatch).toMatchObject({ code: 1, err: expect.stringContaining("pasted callback has a different login's state") });
+
+  const bare = await sgtWith({ fetch, stdin: async () => "bare-code" }, api, "login", "--paste");
+  expect(bare).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+  expect(exchanged).toEqual(["callback-code", "callback-code", "bare-code"]);
+
+  let promptClosed = false;
+  const failedOpenWithLoopback = (callbackState?: string) => (url: string) => {
+    authorize = new URL(url);
+    const redirect = new URL(authorize.searchParams.get("redirect_uri") ?? "");
+    redirect.search = new URLSearchParams({ code: "loopback-code", state: callbackState ?? authorize.searchParams.get("state") ?? "" }).toString();
+    setTimeout(() => void globalThis.fetch(redirect).catch(() => {}), 0);
+    return false;
+  };
+  const waitingPrompt = (_message: string, signal: AbortSignal) =>
+    new Promise<string>((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        promptClosed = true;
+        reject(new DOMException("closed", "AbortError"));
+      }, { once: true });
+    });
+  const loopback = await sgtWith({ fetch, openUrl: failedOpenWithLoopback(), prompt: waitingPrompt }, api, "login");
+  expect(loopback).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+  expect(exchanged).toEqual(["callback-code", "callback-code", "bare-code", "loopback-code"]);
+  expect(promptClosed).toBe(true);
+
+  let stdinRead = false;
+  const nonInteractive = await sgtWith({
+    fetch,
+    openUrl: failedOpenWithLoopback(),
+    stdin: async () => {
+      stdinRead = true;
+      return "";
+    },
+  }, api, "login");
+  expect(nonInteractive).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+  expect(stdinRead).toBe(false);
+  expect(exchanged.at(-1)).toBe("loopback-code");
+
+  promptClosed = false;
+  const forgedLoopback = await sgtWith({ fetch, openUrl: failedOpenWithLoopback("forged"), prompt: waitingPrompt }, api, "login");
+  expect(forgedLoopback).toMatchObject({ code: 1, err: expect.stringContaining("different login's state") });
+  expect(promptClosed).toBe(true);
+  expect(exchanged).toHaveLength(5);
+
+  const mismatched = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => `${callback()}-changed` }, api, "login");
+  expect(mismatched).toMatchObject({ code: 1, err: expect.stringContaining("pasted callback has a different login's state") });
+  expect(exchanged).toHaveLength(5);
+});
+
+// Non-interactive callers cannot use the paste prompt, but still need the original bounded wait: an
+// abandoned login must fail and release its loopback port so a later login can start.
+test("login without a prompt times out and releases its loopback port", async () => {
+  vi.useFakeTimers();
+  let showAuthorize: (authorize: URL) => void = () => {};
+  const shown = new Promise<URL>((resolve) => (showAuthorize = resolve));
+  try {
+    const login = linearLogin({
+      clientId: "client-1",
+      env: { SGT_LOGIN_PORT: "0" },
+      fetch: (() => {
+        throw new Error("a timed-out login must not exchange a token");
+      }) as unknown as typeof globalThis.fetch,
+      paste: false,
+      show: (url) => {
+        showAuthorize(new URL(url));
+      },
+      warn: () => {},
+      open: () => true,
+    });
+    const authorize = await shown;
+    const rejection = expect(login).rejects.toThrow("no sign-in within 5 minutes");
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await rejection;
+
+    const callback = new URL(authorize?.searchParams.get("redirect_uri") ?? "");
+    const probe = createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(Number(callback.port), "127.0.0.1", resolve);
+    });
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// Closing or interrupting the fallback prompt must end the login and its still-live listener; otherwise
+// the command hangs and the next login cannot bind the configured port.
+test("a rejected login prompt releases its loopback port", async () => {
+  let showAuthorize: (authorize: URL) => void = () => {};
+  const shown = new Promise<URL>((resolve) => (showAuthorize = resolve));
+  const login = linearLogin({
+    clientId: "client-1",
+    env: { SGT_LOGIN_PORT: "0" },
+    fetch: (() => {
+      throw new Error("an interrupted login must not exchange a token");
+    }) as unknown as typeof globalThis.fetch,
+    paste: false,
+    show: (url) => showAuthorize(new URL(url)),
+    warn: () => {},
+    open: () => false,
+    prompt: async () => {
+      throw new Error("login prompt closed before a callback URL or code was entered");
+    },
+  });
+  const authorize = await shown;
+  await expect(login).rejects.toThrow("login prompt closed before a callback URL or code was entered");
+
+  const callback = new URL(authorize.searchParams.get("redirect_uri") ?? "");
+  const probe = createServer();
+  await new Promise<void>((resolve, reject) => {
+    probe.once("error", reject);
+    probe.listen(Number(callback.port), "127.0.0.1", resolve);
+  });
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
 });
 
 test("-v and --version print Sergeant's git version and exit 0 without touching the API", async () => {
