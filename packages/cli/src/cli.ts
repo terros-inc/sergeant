@@ -104,15 +104,19 @@ const commands: Record<string, Command> = {
         },
         warn: (message) => ctx.io.err(`${message}\n`),
         open: (url) => (ctx.io.openUrl ? ctx.io.openUrl(url) : false),
-        prompt: async (message, signal) => {
-          if (ctx.io.stdin) {
-            const piped = (await ctx.io.stdin()).trim();
-            if (!piped) throw new Error("no callback URL or code was piped; run `sgt login --paste` in a terminal or pipe a value to it");
-            return piped;
-          }
-          if (ctx.io.prompt) return ctx.io.prompt(message, signal);
-          throw new Error("cannot read a pasted callback here; run `sgt login --paste` in a terminal or pipe the callback URL or code to it");
-        },
+        // Piped stdin may already be empty or held open by a parent process. Only consume it when
+        // --paste explicitly chose that input; automatic fallback keeps the loopback path usable.
+        ...(ctx.flags.paste || !ctx.io.stdin ? {
+          prompt: async (message: string, signal: AbortSignal) => {
+            if (ctx.io.stdin) {
+              const piped = (await ctx.io.stdin()).trim();
+              if (!piped) throw new Error("no callback URL or code was piped; run `sgt login --paste` in a terminal or pipe a value to it");
+              return piped;
+            }
+            if (ctx.io.prompt) return ctx.io.prompt(message, signal);
+            throw new Error("cannot read a pasted callback here; run `sgt login --paste` in a terminal or pipe the callback URL or code to it");
+          },
+        } : {}),
       }).catch((e: Error) => fail(ctx, "unauthorized", e.message));
       // Kept only once the API accepts it: a login it refuses would fail every later command.
       const { value: me, answer } = await callAnswer({ ...ctx, token: credential.accessToken }, "GET", "/v1/whoami", WhoAmI);

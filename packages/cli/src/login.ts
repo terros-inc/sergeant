@@ -22,7 +22,7 @@ type LoginOptions = {
   show: (url: string) => void;
   warn: (message: string) => void;
   open: (url: string) => boolean | void | Promise<boolean | void>;
-  prompt: (message: string, signal: AbortSignal) => Promise<string>;
+  prompt?: (message: string, signal: AbortSignal) => Promise<string>;
 };
 
 /** Runs the browser or paste login and returns the new credential, unsaved. */
@@ -80,19 +80,25 @@ export async function linearLogin(opts: LoginOptions): Promise<Credential> {
   try {
     let code: string;
     if (!servers.length) {
+      if (!opts.prompt) throw new Error("cannot listen for the login redirect or read pasted input here; run `sgt login --paste` and pipe the callback URL or code to it");
       code = await pastedCode(opts.prompt, state, promptController.signal);
     } else {
-      const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, LOGIN_TIMEOUT_MS)));
-      const promptNeeded = (async () => {
-        const opened = await Promise.race([
-          Promise.resolve().then(() => opts.open(authorize)).catch(() => false),
-          timeout.then(() => false),
-        ]);
-        if (opened !== false) await timeout;
-        return pastedCode(opts.prompt, state, promptController.signal);
-      })();
-      // Keep accepting the loopback while fallback input is visible. The winner closes the other path.
-      code = await Promise.race([callback, promptNeeded]);
+      const opened = Promise.resolve().then(() => opts.open(authorize)).catch(() => false);
+      if (!opts.prompt) {
+        // A non-interactive parent may leave stdin empty or open indefinitely. Do not touch it during
+        // automatic fallback; the printed URL and live loopback listener remain the completion path.
+        void opened;
+        code = await callback;
+      } else {
+        const prompt = opts.prompt;
+        const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, LOGIN_TIMEOUT_MS)));
+        const promptNeeded = (async () => {
+          if ((await Promise.race([opened, timeout.then(() => false)])) !== false) await timeout;
+          return pastedCode(prompt, state, promptController.signal);
+        })();
+        // Keep accepting the loopback while fallback input is visible. The winner closes the other path.
+        code = await Promise.race([callback, promptNeeded]);
+      }
     }
     await cleanup();
     return await tokenRequest(opts.fetch, opts.clientId, { grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier });
@@ -128,18 +134,23 @@ function listen(handler: (req: IncomingMessage, res: ServerResponse) => void, se
   });
 }
 
-async function pastedCode(prompt: LoginOptions["prompt"], state: string, signal: AbortSignal): Promise<string> {
+async function pastedCode(prompt: NonNullable<LoginOptions["prompt"]>, state: string, signal: AbortSignal): Promise<string> {
   const value = (await prompt("Paste the callback URL or code, then press Enter: ", signal)).trim();
   if (!value) throw new Error("no callback URL or code was pasted; run `sgt login --paste` again");
   return callbackCode(value, state);
 }
 
-/** A bare code has no state field; PKCE binds it to this login. Callback URLs must carry our state. */
+/** A bare code has no state field; PKCE binds it to this login. Callback URLs/queries must carry our state. */
 function callbackCode(value: string, state: string): string {
-  if (!/^https?:\/\//i.test(value)) return value;
-  const url = new URL(value);
-  if (url.searchParams.get("state") !== state) throw new Error("the pasted callback has a different login's state; run `sgt login` again");
-  const code = url.searchParams.get("code");
+  let params: URLSearchParams | undefined;
+  if (/^https?:\/\//i.test(value)) {
+    params = new URL(value).searchParams;
+  } else if (/(?:^|[?&])code=/.test(value)) {
+    params = new URLSearchParams(value.includes("?") ? value.slice(value.indexOf("?") + 1) : value.replace(/^\?/, ""));
+  }
+  if (!params) return value;
+  if (params.get("state") !== state) throw new Error("the pasted callback has a different login's state; run `sgt login` again");
+  const code = params.get("code");
   if (code) return code;
-  throw new Error(`Linear did not sign you in: ${url.searchParams.get("error_description") ?? url.searchParams.get("error") ?? "no code"}`);
+  throw new Error(`Linear did not sign you in: ${params.get("error_description") ?? params.get("error") ?? "no code"}`);
 }

@@ -109,9 +109,15 @@ test("login accepts pasted input, races it with loopback, and rejects another lo
   const full = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => callback() }, api, "login");
   expect(full).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
 
-  const bare = await sgtWith({ fetch, prompt: async () => "bare-code" }, api, "login", "--paste");
+  const schemeLess = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => callback().replace(/^http:\/\//, "") }, api, "login");
+  expect(schemeLess).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+
+  const schemeLessMismatch = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => `${callback().replace(/^http:\/\//, "")}-changed` }, api, "login");
+  expect(schemeLessMismatch).toMatchObject({ code: 1, err: expect.stringContaining("pasted callback has a different login's state") });
+
+  const bare = await sgtWith({ fetch, stdin: async () => "bare-code" }, api, "login", "--paste");
   expect(bare).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
-  expect(exchanged).toEqual(["callback-code", "bare-code"]);
+  expect(exchanged).toEqual(["callback-code", "callback-code", "bare-code"]);
 
   let promptClosed = false;
   const failedOpenWithLoopback = (callbackState?: string) => (url: string) => {
@@ -130,18 +136,31 @@ test("login accepts pasted input, races it with loopback, and rejects another lo
     });
   const loopback = await sgtWith({ fetch, openUrl: failedOpenWithLoopback(), prompt: waitingPrompt }, api, "login");
   expect(loopback).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
-  expect(exchanged).toEqual(["callback-code", "bare-code", "loopback-code"]);
+  expect(exchanged).toEqual(["callback-code", "callback-code", "bare-code", "loopback-code"]);
   expect(promptClosed).toBe(true);
+
+  let stdinRead = false;
+  const nonInteractive = await sgtWith({
+    fetch,
+    openUrl: failedOpenWithLoopback(),
+    stdin: async () => {
+      stdinRead = true;
+      return "";
+    },
+  }, api, "login");
+  expect(nonInteractive).toMatchObject({ code: 0, out: expect.stringContaining("signed in") });
+  expect(stdinRead).toBe(false);
+  expect(exchanged.at(-1)).toBe("loopback-code");
 
   promptClosed = false;
   const forgedLoopback = await sgtWith({ fetch, openUrl: failedOpenWithLoopback("forged"), prompt: waitingPrompt }, api, "login");
   expect(forgedLoopback).toMatchObject({ code: 1, err: expect.stringContaining("different login's state") });
   expect(promptClosed).toBe(true);
-  expect(exchanged).toHaveLength(3);
+  expect(exchanged).toHaveLength(5);
 
   const mismatched = await sgtWith({ fetch, openUrl: unavailableBrowser, prompt: async () => `${callback()}-changed` }, api, "login");
   expect(mismatched).toMatchObject({ code: 1, err: expect.stringContaining("pasted callback has a different login's state") });
-  expect(exchanged).toHaveLength(3);
+  expect(exchanged).toHaveLength(5);
 });
 
 test("-v and --version print Sergeant's git version and exit 0 without touching the API", async () => {
