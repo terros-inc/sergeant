@@ -21,6 +21,7 @@ export function agentFields(meta: RunMeta, agent: AgentResult, exitedOk: boolean
     ...(estimated !== undefined && { costUsd: estimated, costBasis: "estimated" }),
     ...(agent.tokens && { tokens: agent.tokens }),
     ...(agent.failureReason && { failureReason: agent.failureReason }),
+    ...(agent.authFailure && { authFailure: agent.authFailure }),
   } as const;
 }
 

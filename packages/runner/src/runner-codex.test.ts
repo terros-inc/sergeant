@@ -69,23 +69,27 @@ test("the config's Codex prices replace or add a model's; an unpriced model's co
 });
 
 // These are Codex 0.160.0's own messages. In particular, reuse is how a disposable container's
-// stored ChatGPT credential fails after another run rotated the refresh token (TECH-5020).
+// stored ChatGPT credential fails after another run rotated the refresh token (TECH-5020). TECH-6357:
+// the record says which one it was, so its owner knows what to fix, and never the message.
 test.each([
-  "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.",
-  "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
-  "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
-  "Your access token could not be refreshed. Please log out and sign in again.",
-  "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
-])("a Codex refresh failure is recorded as authentication: %s", async (message) => {
+  ["Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.", "refresh_token_expired", "has expired"],
+  ["Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.", "refresh_token_reused", "already used"],
+  ["Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.", "refresh_token_revoked", "was revoked"],
+  ["Your access token could not be refreshed. Please log out and sign in again.", "refresh_failed", "did not give"],
+  ["Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.", "signed_out", "signed out"],
+])("a Codex refresh failure is recorded as authentication, with which one: %s", async (message, authFailure, said) => {
   const run = await started(ON_CODEX);
   run.host.docker.running = false;
   run.host.docker.logErrors = `Error refreshing token: ${message}`;
 
-  expect(await run.runner.status("run_t1")).toMatchObject({
+  const record = await run.runner.status("run_t1");
+  expect(record).toMatchObject({
     status: "failed",
     failureReason: "authentication",
-    reportError: expect.stringContaining("replace the account's Codex credential"),
+    authFailure,
+    reportError: expect.stringMatching(new RegExp(`Codex authentication failed: [^;]*${said}[^;]*; replace the account's Codex credential`)),
   });
+  expect(record.reportError).not.toContain("Please");
 });
 
 // A reused refresh token on Codex 0.160.0 fails as this structured turn.failed, so it is the main
@@ -95,8 +99,15 @@ test("a Codex turn.failed 401 is recorded as authentication and keeps no key or 
   const message = "workspace routing discovery unauthorized (401): Incorrect API key provided: sk-proj***abcd, token codex-test-token";
   const run = await ended(ON_CODEX, JSON.stringify({ type: "turn.failed", error: { message } }), "");
 
-  expect(run).toMatchObject({ status: "failed", failureReason: "authentication", reportError: expect.stringContaining("replace the account's Codex credential") });
+  expect(run).toMatchObject({ status: "failed", failureReason: "authentication", authFailure: "rejected", reportError: expect.stringContaining("replace the account's Codex credential") });
   for (const fragment of ["sk-", "abcd", "codex-test-token", "workspace routing"]) expect(JSON.stringify(run)).not.toContain(fragment);
+
+  // TECH-6357: a 401 turn whose cause Codex wrote on stderr is recorded as that cause.
+  const reused = await started(ON_CODEX);
+  reused.host.docker.running = false;
+  reused.host.docker.logs = JSON.stringify({ type: "turn.failed", error: { message: "unexpected status 401 Unauthorized" } });
+  reused.host.docker.logErrors = "Error refreshing token: Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.";
+  expect(await reused.runner.status("run_t1")).toMatchObject({ failureReason: "authentication", authFailure: "refresh_token_reused" });
 });
 
 // Any other Codex failure keeps its message for the record, but with every credential it quotes

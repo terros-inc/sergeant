@@ -1,4 +1,4 @@
-import type { RunFailureReason, RunRecord } from "@terros/sergeant-contracts";
+import { CODEX_AUTH_FAILURES, type CodexAuthFailure, type RunFailureReason, type RunRecord } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { redactSecrets } from "./redact.ts";
 
@@ -18,6 +18,8 @@ export type AgentResult = {
   detail?: string;
   /** An actionable failure category, without credential or provider error text. */
   failureReason?: RunFailureReason;
+  /** Which Codex sign-in failure it was, when `failureReason` is authentication (TECH-6357). */
+  authFailure?: CodexAuthFailure;
   sessionId?: string;
   /** Only a dollar figure the CLI itself reported; never an estimate. */
   costUsd?: number;
@@ -100,18 +102,22 @@ const CodexEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn.failed"), error: z.object({ message: z.string() }) }),
 ]);
 
-// Verbatim user-facing refresh failures in the pinned Codex 0.160.0 binary. These can be emitted
-// before the JSON event stream starts, so stderr is checked only for these specific messages.
-const CODEX_REFRESH_FAILURES = [
-  "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.",
-  "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
-  "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
-  "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.",
-  "Your access token could not be refreshed. Please log out and sign in again.",
-] as const;
+// Verbatim user-facing refresh failures in the pinned Codex 0.160.0 binary, each with the failure it
+// names (TECH-6357): Codex maps the token endpoint's `refresh_token_expired`, `refresh_token_reused` and
+// `refresh_token_invalidated` codes to the first three. These can be emitted before the JSON event
+// stream starts, so stderr is checked only for these specific messages.
+const CODEX_REFRESH_FAILURES: [string, CodexAuthFailure][] = [
+  ["Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.", "refresh_token_expired"],
+  ["Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.", "refresh_token_reused"],
+  ["Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.", "refresh_token_revoked"],
+  ["Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.", "signed_out"],
+  ["Your access token could not be refreshed. Please log out and sign in again.", "refresh_failed"],
+];
 const CODEX_STRUCTURED_AUTH_FAILURE = /(?:\b401\b|unauthori[sz]ed|authentication failed|invalid[_ -]?grant)/i;
-const isCodexRefreshFailure = (text: string) => CODEX_REFRESH_FAILURES.some((message) => text.includes(message));
-const CODEX_AUTH_DETAIL = "Codex authentication failed; replace the account's Codex credential or switch to an OpenAI API key";
+const codexRefreshFailure = (text: string) => CODEX_REFRESH_FAILURES.find(([message]) => text.includes(message))?.[1];
+/** The run record's detail: which failure, and the fix. Never the CLI's text, which may quote a token. */
+const codexAuthDetail = (failure: CodexAuthFailure) =>
+  `Codex authentication failed: ${CODEX_AUTH_FAILURES[failure]}; replace the account's Codex credential or switch to an OpenAI API key`;
 // The pinned binary's usage-limit and credit messages ("Usage limit reached. You've reached your usage
 // limit.", "Your workspace is out of credits."), and the API's codes for them.
 const CODEX_QUOTA_FAILURE = /usage limit|out of credits|usage_limit_reached|insufficient_quota/i;
@@ -179,16 +185,19 @@ exec timeout "$wall" codex exec --json --model "$model" --cd /workspace --skip-g
       }
     }
     // Structured turn failures are authoritative. Login failures happen before JSON starts and are
-    // written to stderr. Never scan successful item text, which could merely discuss a 401.
-    const authenticationFailed =
-      (failure !== undefined && (isCodexRefreshFailure(failure) || CODEX_STRUCTURED_AUTH_FAILURE.test(failure))) ||
-      (tokens === undefined && isCodexRefreshFailure(stderr));
-    const quotaFailed = !authenticationFailed && failure !== undefined && CODEX_QUOTA_FAILURE.test(failure);
+    // written to stderr. Never scan successful item text, which could merely discuss a 401. A turn that
+    // failed unauthorized takes its cause from a refresh message on stderr when there is one.
+    const turnRejected = failure !== undefined && CODEX_STRUCTURED_AUTH_FAILURE.test(failure);
+    const authFailure: CodexAuthFailure | undefined =
+      (failure !== undefined ? codexRefreshFailure(failure) : undefined) ??
+      (turnRejected || tokens === undefined ? codexRefreshFailure(stderr) : undefined) ??
+      (turnRejected ? "rejected" : undefined);
+    const quotaFailed = !authFailure && failure !== undefined && CODEX_QUOTA_FAILURE.test(failure);
     return {
       ok: tokens !== undefined && failure === undefined,
       // OpenAI's errors quote part of an API key, or a ChatGPT token; a run record never holds any of it.
-      ...(authenticationFailed
-        ? { detail: CODEX_AUTH_DETAIL, failureReason: "authentication" as const }
+      ...(authFailure
+        ? { detail: codexAuthDetail(authFailure), failureReason: "authentication" as const, authFailure }
         : failure !== undefined
           ? { detail: redactSecrets(failure).slice(0, 300), ...(quotaFailed && { failureReason: "quota" as const }) }
           : tokens === undefined && { detail: "no completed turn" }),
