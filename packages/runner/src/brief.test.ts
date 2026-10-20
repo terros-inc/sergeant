@@ -157,7 +157,7 @@ test("the worker brief has the worker find and continue existing work, and lists
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/16)");
+  expect(brief).toContain("## Rules (s2-reviewer-rules/17)");
   const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
@@ -251,7 +251,7 @@ test("worker and reviewer briefs say to report once the head is pushed, without 
   expect(workerRule).toMatch(/Once your final head is pushed, write the report right away\. Do not wait on CI: Sergeant already\s+watches CI on your PRs and reacts to failures\./);
 
   const reviewer = reviewerBrief(spec([pr]), [subject], []);
-  expect(reviewer).toContain("## Rules (s2-reviewer-rules/16)");
+  expect(reviewer).toContain("## Rules (s2-reviewer-rules/17)");
   const reviewerRule = reviewer.slice(reviewer.indexOf("16. "), reviewer.indexOf("## Report"));
   expect(reviewerRule).toMatch(/Once your review is done, write the report right away\. Do not wait on CI: the head is already\s+pushed, and Sergeant watches its CI and reacts to failures\./);
 
@@ -259,6 +259,17 @@ test("worker and reviewer briefs say to report once the head is pushed, without 
     expect(rule).toContain("when your turn ends the run ends and nothing wakes you later");
     expect(rule).toContain("never end it to wait for a check or a background job");
   }
+});
+
+// TECH-6355: a reviewer has no read access to checks, so on an issue whose done-when says "CI passes" it
+// listed CI status as unreadable or returned needs_human, and every such entry holds the merge for a
+// human (M14) although the merge gate already refuses red or pending required checks (M5).
+test("the reviewer brief keeps CI status out of unreadable inputs and needs_human", () => {
+  const reviewer = reviewerBrief(spec([pr]), [subject], []);
+  const rule = reviewer.slice(reviewer.indexOf("11. "), reviewer.indexOf("\n12. ")).replace(/\s+/g, " ");
+  expect(rule).toContain("The PRs' CI and check status is not such an input, nor a reason for `needs_human`");
+  expect(rule).toContain("refuses any merge while one is red or pending");
+  expect(rule).toContain("never list CI or check status in `unreadableInputs`");
 });
 
 // TECH-6146: done-when items only production can prove are the follow-ups Sergeant filed, checked by

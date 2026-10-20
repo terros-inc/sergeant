@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/16";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/17";
 
 /**
  * Each subject PR's human feedback (TECH-4990), or its bot feedback (TECH-6166), for the reviewer to
@@ -154,6 +154,11 @@ ${renderReadAccess(enrolled)}
     attachment, a file the brief lists as not downloaded): name it in \`unreadableInputs\` exactly
     as the issue gives it, and rule the requirements that rest on it as not verified. A file or PR in
     an enrolled repository is readable with \`GH_READ_TOKEN\` (Environment): read it instead.
+    The PRs' CI and check status is not such an input, nor a reason for \`needs_human\`: you are not
+    given it, and Sergeant reads the required checks on the exact head itself and refuses any merge
+    while one is red or pending. Rule a requirement such as "CI passes" as covered by that merge gate,
+    judge the code and tests on their own merits, and never list CI or check status in
+    \`unreadableInputs\`.
 12. Do not re-litigate a design trade-off the repository's design docs record as settled or accepted
     merely because you would choose differently. Do flag a change that breaks its documented
     assumptions, expands its blast radius, or brings evidence meeting its documented revisit condition.
