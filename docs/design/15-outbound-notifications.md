@@ -36,11 +36,22 @@ comments' existing idempotency keys on `main`; the event id is `commentIdFor(key
 | `task.needs_decision` | Sergeant asked a blocking question, or a clarifying follow-up in that thread | `question:<issue>:<revision>` (`question.ts`) | the question's options, in order (empty for free text) |
 | `task.budget_exhausted` | The budget window ran out and Sergeant asked whether to continue | `budget-question:<issue>:<taskStart>:<windowSeq>` (`budget.ts`) | `Extend`, `Accept as-is` |
 | `task.done` | The PR merged and the outcome comment was posted, or a human accepted the work as-is | `outcome:<issue>:<repo>#<n>:<mergedSha>` (`after-merge.ts`); `accepted:<issue>:<reply>` or `closed:<issue>:<revision>` (`accepted.ts`) | `[]` (informational) |
-| `task.failed` | Sergeant cannot go on until a human fixes something it cannot: a model-login failure (`codex-auth-failure:<issue>:<run>`, `auth-alert.ts`), a human handoff that failed twice and needs manual help (`handoff.ts`, `humanFailure`), or any other stop Sergeant explains in a comment | that comment | `[]`, or the options the comment offers |
+| `task.failed` | The task has ended, not done and not accepted, and Sergeant will do no more on it until a human starts it again | `task-failed:<issue>:<revision>`, a terminal-failure comment the implementation adds (see below) | `[]` (informational) |
+
+Each source comment maps to exactly one event. A human handoff that failed twice (`humanFailure` in
+`handoff.ts`) posts under the same `merge-handoff:` key, so it is a `pr.ready_for_human`: the PR is ready
+and a human finishes the handoff by hand. `task.failed` is for **terminal** failures only. On `main`
+today no comment marks one: a failure that needs a human is already a blocking question
+(`task.needs_decision`) or a handoff (`pr.ready_for_human`). So the implementation adds one keyed comment
+at the point where a task ends that way, and `task.failed` announces it. Until such an ending exists,
+the event is defined but never sent.
 
 Not events: stops a human caused (undelegation, cancel, `sgt task cancel`), progress comments, the
-edit-noted comment, rate-limit pauses (they resume by themselves), and non-blocking questions. The rule
-is **no comment, no notification**: a future failure that has no comment today gets one first.
+edit-noted comment, rate-limit pauses (they resume by themselves), non-blocking questions, and
+model-login failures (`codex-auth-failure:<issue>:<run>`, `auth-alert.ts`). A login failure is not
+terminal: Sergeant runs on the provider's next account for the next hour, and the comment asks the
+account's holder to register it again, which is not the task's assignee's decision. The rule is **no
+comment, no notification**: a future failure that has no comment today gets one first.
 
 ## 2. Payload schema (`sergeant-notify/1`)
 
@@ -52,7 +63,7 @@ type Notification = {
   schemaVersion: "sergeant-notify/1";
   /** The source Linear comment's id: stable forever, the same for every subscription. The dedup key. */
   eventId: string; // UUID
-  eventType: "pr.ready_for_human" | "task.needs_decision" | "task.budget_exhausted" | "task.done" | "task.failed" | "ping";
+  eventType: "pr.ready_for_human" | "task.needs_decision" | "task.budget_exhausted" | "task.done" | "task.failed";
   /** When the source comment was posted (ISO 8601, UTC). */
   occurredAt: string;
   /** The subscription this delivery is for (§4), so one harness can serve several. */
@@ -84,7 +95,24 @@ Headers:
 
 Compatibility: fields may be added within `/1`, so subscribers must ignore unknown fields. Removing or
 renaming a field needs `/2`. A new event type stays within `/1`, because it is sent only to a
-subscription that lists it (§4). The one extra type, `ping`, is sent only by `sgt notify test` (§4).
+subscription that lists it (§4).
+
+**Test deliveries are not events.** `sgt notify test` (§4) sends a different, smaller body, so a
+harness can check its URL and secret without a task. It is signed and sent exactly like an event, with
+`Sergeant-Event-Type: test`, but carries no task fields and is never retried or recorded:
+
+```ts
+type TestDelivery = {
+  schemaVersion: "sergeant-notify/1";
+  test: true;
+  deliveryId: string; // UUID, fresh per test
+  subscriptionId: string;
+  sentAt: string; // ISO 8601, UTC
+};
+```
+
+A harness tells the two apart by `test: true` (or the header) and answers `2xx` without acting. Whether
+to keep it at all is D4 (§8).
 
 ### Signed example
 
@@ -109,8 +137,8 @@ Sergeant-Signature: t=1791925513,v1=13adcd015d26e1ddd8a3d01fce4a37c6d69e4a3fdf99
 
 The first `v1` is HMAC-SHA256 with the key `example-secret-current-do-not-use` over `1791925513.`
 followed by the body; the second uses `example-secret-next-do-not-use`, a secret being rotated in. Both
-were computed from the exact body above, and the pair is the test vector the reference verifier ships
-with.
+were computed from the exact body above, and the pair is the test vector for the reference verifier in
+§3.
 
 ## 3. Signing and verification
 
@@ -127,7 +155,23 @@ endpoint gets from `webhookTimestamp` (`webhooks.ts`, `LINEAR_REPLAY_MS`).
    expected value, compared in constant time (as `verifySignature` in `webhooks.ts` does).
 4. Only then parse the body. Dedup on `eventId` (§5), answer `2xx` quickly, and process asynchronously.
 
-The docs ship a ~30-line reference verifier and the test vector above.
+Reference verifier (Node; checked against the test vector in §2):
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+/** True when `header` (Sergeant-Signature) signs `rawBody` with one of `secrets`, within 300 s of `now`. */
+export function verifySergeant(rawBody: Buffer, header: string, secrets: string[], now = Date.now()): boolean {
+  const parts = header.split(",").map((p) => p.split("=", 2) as [string, string]);
+  const t = parts.find(([k]) => k === "t")?.[1];
+  if (!t || !/^\d+$/.test(t) || Math.abs(now / 1000 - Number(t)) > 300) return false;
+  const received = parts.filter(([k, v]) => k === "v1" && /^[0-9a-f]{64}$/.test(v)).map(([, v]) => Buffer.from(v, "hex"));
+  return secrets.some((secret) => {
+    const expected = createHmac("sha256", secret).update(`${t}.`).update(rawBody).digest();
+    return received.some((r) => timingSafeEqual(r, expected));
+  });
+}
+```
 
 **Transport rules (Sergeant's side).**
 
@@ -183,7 +227,7 @@ shared, team-wide harness, and v1 has none (Decisions for the captain, D2).
 | `POST /v1/notifications/subscribe` | `name`, `url`, `events?` (default all five) → the subscription and its **secret, shown once** | stores the subscription with a fresh secret; replaces the caller's subscription of that name, with a new secret | team members, as themselves |
 | `POST /v1/notifications/rotate` | `name` → the **new secret, shown once** | adds a second secret; both sign until `finish` or 7 days pass | the owner |
 | `POST /v1/notifications/rotate/finish` | `name` → done | drops the older secret | the owner |
-| `POST /v1/notifications/test` | `name` → the HTTP status the URL answered | sends one signed `ping` event (not one of the five, `replyOptions` empty) | the owner |
+| `POST /v1/notifications/test` | `name` → the HTTP status the URL answered | sends one signed test delivery (§2): no task fields, not one of the five events, not retried or recorded | the owner |
 | `POST /v1/notifications/remove` | `name` (approvers: `id`) → `removed` | deletes the subscription and its secrets | the owner, or an approver |
 
 ```
@@ -248,14 +292,29 @@ Each person may hold at most 10 subscriptions.
 - Delivery is at least once, never exactly once, with no ordering promise; `occurredAt` orders events
   within a task.
 
-**What Sergeant keeps.** Each task's `state.json` gets a small `notifications` record: per `eventId`,
-the event, and per subscription its `deliveredAt`, `gaveUp` or `dropped`. It is written when the event
-is first derived and updated on each outcome; its keys are kept across releases by the TECH-5163 rule.
-A finished task's record moves with it into its `state.completed-…json` file, which the sender still
-reads for 24 h, so a `task.done` is not lost when the task completes. The "what if we lose it?" test
-(00, 02): losing it costs at most one duplicate, which subscribers drop, or one missed notification,
-which falls back to today: the question still sits in Linear, so no decision is abandoned. No new
-ledger, queue or outbox.
+**What Sergeant keeps.** Each task directory (`tasks/<issue>/`) gets a small `notifications.json`,
+beside `state.json` rather than inside it. Endings move `state.json` aside under another name: an
+accepted or self-closed task at once (`state.accepted-…`, `accepted.ts`), a stopped one at once
+(`state.stopped-…`, `cancel.ts`), and a merged one when its issue is reopened (`state.completed-…`,
+`task-state.ts`). A record kept inside `state.json` would leave the sender's view exactly when a
+`task.done` for an accepted or self-closed task still needs delivering. `notifications.json` is never renamed by an
+ending, so there is one place to scan whatever happened to the task. It holds, per `eventId`, the
+payload and, per subscription:
+
+- `firstAttemptAt` and `attempts`: when the first attempt began, and how many have begun;
+- `nextAttemptAt`: when the next one is due;
+- the outcome, once there is one: `deliveredAt`, `gaveUp` or `dropped` (stale or revoked).
+
+The sender is its only writer. A task loop hands the sender a new event, or a mark that an event went
+stale, and the sender records it, so the loop and the sender never race on the file. It is written when
+an event is first derived, and **before** each attempt starts (`attempts` incremented, `nextAttemptAt`
+set from the schedule), so an attempt cut off by a crash still counts. An event is pruned 7 days after
+every subscription has an outcome, and the file is deleted when it is empty. Its keys are kept across
+releases by the TECH-5163 rule.
+
+The "what if we lose it?" test (00, 02): losing it costs at most one duplicate, which subscribers drop,
+or one missed notification, which falls back to today: the question still sits in Linear, so no
+decision is abandoned. No new ledger, queue or outbox.
 
 **Retry policy.** Sergeant retries on a network error, a timeout, `408`, `429` (honoring `Retry-After`
 up to 1 h) or `5xx`, after the first attempt:
@@ -268,8 +327,9 @@ Each wait has ±20% jitter.
 
 **Limits.**
 
-- **Cap:** at most 9 attempts, and none later than 24 h after the first; then the event is `gaveUp`
-  for that subscription.
+- **Cap:** at most 9 attempts, and none later than 24 h after `firstAttemptAt`; then the event is
+  `gaveUp` for that subscription. Both are checked against the persisted record, so the cap holds
+  across restarts.
 - **Permanent failures:** any other `4xx` gives up at once. `410 Gone` also pauses the subscription
   until its owner runs `sgt notify test` successfully, so a removed endpoint is not hammered.
 - **Staleness:** before each attempt Sergeant checks that the event is still current, using only what
@@ -279,8 +339,11 @@ Each wait has ±20% jitter.
   wakes that task's loop, whose pass marks the event stale; the 15-minute safety-net polls cover a
   missed webhook, as for everything else. A stale event is dropped, not retried. `task.done` and
   `task.failed` never go stale.
-- **Restarts:** retry timers live in memory. After a restart, every undelivered, unexpired, still-current
-  event in the state files is retried from attempt 1; a duplicate costs the subscriber one dedup.
+- **Restarts:** retry timers live in memory; the schedule does not. After a restart the sender scans
+  every `tasks/*/notifications.json` and resumes each event that has no outcome yet where it stopped:
+  attempt `attempts + 1`, at `nextAttemptAt` or at once if that has passed, unless it is stale or the
+  cap is already reached, in which case it is marked `gaveUp`. A restart never resets an event to
+  attempt 1. An attempt in flight at the crash may arrive twice; that costs the subscriber one dedup.
 
 **Isolation.** One service-wide sender, apart from the task loops, delivers everything, so a slow or
 failing subscriber never delays a turn. At most 4 requests are in flight per subscription.
@@ -341,13 +404,13 @@ inbound surface, new persisted state, and a Slack-to-Linear identity mapping the
     comment it just posted, its PR facts, `state.json`).
   - A reply, typed or relayed from Slack, is a plain `Comment` webhook, so it costs a wake and no
     history reread.
-  - Restart redelivery reads only the state files; the loops' own post-restart passes go through the
-    pacer as they already do.
+  - Restart redelivery reads only the `notifications.json` files; the loops' own post-restart passes go
+    through the pacer as they already do.
   - Registration calls cost one Linear read each, the caller lookup every `sgt` call already makes.
 
   **Sequencing:** the agreed precondition, that TECH-5974 land first, is met. Implementation can start
   as soon as this design is approved.
-- **Persistence charter (02):** the per-task `notifications` record is a convenience that passes "what
+- **Persistence charter (02):** the per-task `notifications.json` is a convenience that passes "what
   if we lose it?" (§5). The subscription list is configuration people own, kept like registered model
   accounts; losing it means people subscribe again, and no decision is lost. Linear remains the record.
 
@@ -364,3 +427,8 @@ inbound surface, new persisted state, and a Slack-to-Linear identity mapping the
 3. **D3 — Slack replies from people with no linked Linear identity.** Recommended: never count; the
    harness answers in Slack with the Linear link (§6). Also confirm Linear's Slack-sync attribution on a
    test issue before allowing that zero-code path.
+4. **D4 — Test deliveries.** `sgt notify test` sends a test delivery (§2) that is not one of the five
+   agreed events: no task fields, never retried or recorded. Keep it, or drop the command and its body?
+   Recommended: keep it. It is the only way a person can check a new URL and secret before a real task
+   needs them, and the only way to resume a subscription paused by `410 Gone` (§5). Without it, they
+   would remove and subscribe again.
