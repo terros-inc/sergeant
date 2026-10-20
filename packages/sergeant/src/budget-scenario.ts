@@ -5,6 +5,7 @@ import { vi } from "vitest";
 import {
   commentIdFor,
   type Conversation,
+  type GitHubPort,
   type HumanComment,
   type MergePr,
   type ProposedAction,
@@ -86,6 +87,8 @@ export async function scenario(opts: {
   beforePost?: (req: { key: string; parentId?: string }) => void;
   /** The PR GitHub shows now; `pr` when omitted. */
   pullRequest?: () => PullRequestFacts;
+  /** Optional assignment fake for loop-level owner-assignment tests. */
+  assignPullRequest?: NonNullable<GitHubPort["assignPullRequest"]>;
 }) {
   dir ||= await mkdtemp(join(tmpdir(), "sergeant-budget-test-"));
   if (opts.state) await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", turns: 1, recentTurns: [], ...opts.state }));
@@ -122,7 +125,14 @@ export async function scenario(opts: {
           return { moved: true as const, from: "In Progress", to: to.state };
         },
       },
-      github: { readPullRequest: async () => opts.pullRequest?.() ?? pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
+      github: {
+        readPullRequest: async () => opts.pullRequest?.() ?? pr,
+        ...(opts.assignPullRequest && { assignPullRequest: opts.assignPullRequest }),
+        closePullRequest: async () => {},
+        mergePolicy: () => "sergeant",
+        mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }),
+      },
+      ...(opts.assignPullRequest && { githubLoginForLinearProfile: () => "ann-gh" }),
       runner: opts.runner,
       reasoner: { turn: opts.reasoner },
     },

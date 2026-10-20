@@ -8,6 +8,7 @@ import {
   QUESTION_HEADING,
   type AgentComment,
   type Conversation,
+  type GitHubPort,
   type HumanPullRequestFeedback,
   type PullRequestFacts,
   type RefusedMerge,
@@ -53,6 +54,7 @@ async function waiting(opts: {
   state?: Record<string, unknown>;
   /** More of the conversation. */
   conversation?: (live: Conversation) => Partial<Conversation>;
+  assignPullRequest?: NonNullable<GitHubPort["assignPullRequest"]>;
   onPoll: (poll: number, world: { pullRequest: PullRequestFacts; live: Conversation }) => { pullRequest?: PullRequestFacts; live?: Conversation } | void;
 }) {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -69,6 +71,7 @@ async function waiting(opts: {
     // Nothing for Sergeant to do but wait on the human; each turn records the window it saw.
     reasoner: async (situation) => (turns.push(situation.budget.windowStart), turnOf([])),
     pullRequest: () => pullRequest,
+    ...(opts.assignPullRequest && { assignPullRequest: opts.assignPullRequest }),
     onPoll: async (poll, live) => {
       const changed = opts.onPoll(poll, { pullRequest, live });
       if (changed?.pullRequest) pullRequest = changed.pullRequest;
@@ -165,6 +168,22 @@ test("a human's PR review while Sergeant's own question is open leaves that ques
   const { budget } = await saved();
   expect(budget.since).toBeUndefined();
   expect(budget.windowSeq).toBeUndefined();
+});
+
+test("an existing worker PR is assigned while Sergeant's question remains unanswered", async () => {
+  const assignments: unknown[] = [];
+  await waiting({
+    activeMs: 30 * 60_000,
+    polls: 3,
+    conversation: (live) => ({
+      issue: { ...live.issue, assignee: { ...live.issue.assignee!, url: "https://linear.app/x/profiles/ann" } },
+      agentComments: [{ id: "question", createdAt: new Date().toISOString(), body: `${QUESTION_HEADING}\n\nShip the flag on, or off?` }],
+    }),
+    assignPullRequest: async (req) => (assignments.push(req), { assigned: true }),
+    onPoll: () => {},
+  });
+
+  expect(assignments).toEqual([{ repo: pr.repo, number: pr.number, assignee: "ann-gh" }]);
 });
 
 test.each([

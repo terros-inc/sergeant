@@ -206,6 +206,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     await resolveDue(conversation);
+    const pullRequests = await prPolls.read(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
+    watch(pullRequests);
+    await assignOwner(pullRequests, conversation.issue);
     const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length) }, configured, ctx);
     if (holds.hold) {
       if (holds.hold === "question") unposted = undefined;
@@ -222,9 +225,6 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     unposted = undefined;
-    const pullRequests = await prPolls.read(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
-    watch(pullRequests);
-    await assignOwner(pullRequests, conversation.issue);
     // A closing merge `state.json` never recorded (the process died between GitHub's merge and the
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
