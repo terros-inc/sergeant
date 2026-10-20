@@ -703,7 +703,9 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   identity is ever an agent's, and no agent co-author trailer is added.
 - **`linear.reviewerProfiles`** (optional) maps GitHub logins to Linear profile URLs. Sergeant puts the
   URL in a re-review request so Linear renders a real user mention and sends an Inbox notification; a
-  missing mapping or failed lookup leaves the plain `@github-login` text.
+  missing mapping or failed lookup leaves the plain `@github-login` text. The same mapping names the
+  GitHub account a task's PRs are assigned to ([08 §10](../docs/design/08-github-contract.md#10-humans-on-github))
+  and whose review a human-merge handoff requests; without it neither happens.
 - **`review.auditSampleRate`** (optional, 0 to 1, default 0.2) is the fraction of merged heads that
   skipped fresh review which get an audit review (Review telemetry below).
 - **`budget`** (optional) is the budget window a task gets when it starts or a human answers one of its

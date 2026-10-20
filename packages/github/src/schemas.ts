@@ -32,6 +32,8 @@ export const pullRequestHead = z.object({
   merged_at: z.string().nullable(),
   head: z.object({ ref: z.string().min(1), sha: z.string(), repo: z.object({ full_name: z.string() }).nullable() }),
 });
+/** What GitHub answers an assignment with (TECH-6428): the issue's assignees after it. */
+export const issueAssignees = z.object({ assignees: z.array(z.object({ login: z.string().min(1) })) });
 /** What a handoff to a human reads (TECH-5244): whether it is a draft, and whose review is requested. */
 export const pullRequestReviewers = z.object({
   node_id: z.string().min(1),

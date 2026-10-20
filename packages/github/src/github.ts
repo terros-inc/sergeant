@@ -1,7 +1,7 @@
 import { protectedCiFiles, PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { hasComment, readFeedback } from "./pr-feedback.ts";
-import { branchRules, checkRun, checkRuns, commitStatus, gitRef, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
+import { branchRules, checkRun, checkRuns, commitStatus, gitRef, issueAssignees, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 import { handToHuman } from "./hand-to-human.ts";
 import { rateLimiter } from "./rate-limit.ts";
 import { readSquashMessage } from "./squash-message.ts";
@@ -373,6 +373,14 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     },
 
     handToHuman: (req) => (configFor(req.repo), handToHuman(request, req, { ...(options.appId !== undefined && { appId: options.appId }), log })),
+
+    async assignPullRequest({ repo, number, assignee }) {
+      configFor(repo);
+      const issue = issueAssignees.parse(
+        await request(`/repos/${repo}/issues/${number}/assignees`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assignees: [assignee] }) }),
+      );
+      return { assigned: issue.assignees.some((a) => a.login.toLowerCase() === assignee.toLowerCase()) };
+    },
 
     async closePullRequest({ repo, number, comment }) {
       configFor(repo);
