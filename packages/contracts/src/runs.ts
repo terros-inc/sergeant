@@ -16,6 +16,23 @@ export type FollowupCategory = z.infer<typeof FollowupCategory>;
 export const RunFailureReason = z.enum(["authentication", "quota"]);
 export type RunFailureReason = z.infer<typeof RunFailureReason>;
 
+/**
+ * TECH-6357: which Codex sign-in failure ended a run, read from the CLI's own message (its refresh token
+ * expired, was already used, or was revoked; the login was signed out or replaced; a refresh failed
+ * without a stated reason; or the provider refused the credential without a refresh message), with the
+ * words the record and the alert say. Never the message itself, which may quote a token.
+ */
+export const CODEX_AUTH_FAILURES = {
+  refresh_token_expired: "its refresh token has expired",
+  refresh_token_reused: "its refresh token was already used",
+  refresh_token_revoked: "its refresh token was revoked",
+  signed_out: "it was signed out, or signed in to another account, since it was registered",
+  refresh_failed: "its access token could not be refreshed, for a reason Codex did not give",
+  rejected: "the provider refused it (unauthorized) without a refresh error",
+} as const;
+export const CodexAuthFailure = z.enum(Object.keys(CODEX_AUTH_FAILURES) as [keyof typeof CODEX_AUTH_FAILURES, ...(keyof typeof CODEX_AUTH_FAILURES)[]]);
+export type CodexAuthFailure = z.infer<typeof CodexAuthFailure>;
+
 const FAIL_SAFE = "fail-safe: missing or unjustified skip, so review is required";
 
 /**
@@ -301,6 +318,8 @@ const RunBase = {
   reportProblem: z.enum(["missing", "malformed"]).optional(),
   /** A distinct actionable cause when the runner can classify the failure safely. */
   failureReason: RunFailureReason.optional(),
+  /** With `failureReason: authentication` on Codex, which sign-in failure it was (TECH-6357). */
+  authFailure: CodexAuthFailure.optional(),
   /**
    * The `issueRevision` of the title and description the run started from, as the runner recorded it.
    * Absent on records made before TECH-5034.

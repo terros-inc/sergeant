@@ -52,3 +52,12 @@ test("a failed alert is left retryable", async () => {
   ).resolves.toBeUndefined();
   expect(logs).toEqual(["run_auth: model authentication alert not posted: offline"]);
 });
+
+// TECH-6357: the owner learns which account to re-register and what Codex said about it, never a token.
+test("a Codex alert says which sign-in failure it was", async () => {
+  const posted: string[] = [];
+  const run = { ...failed("run_cx", "authentication"), authFailure: "refresh_token_reused", account: { id: "person:u1:codexWork", group: "registered", holder: "Ada Example <ada@example.com>" } } as const;
+  await postAuthAlerts("i1", [run], [], { postComment: async ({ body }) => void posted.push(body) }, () => {});
+  expect(posted[0]).toContain("model account `person:u1:codexWork` (Ada Example <ada@example.com>): Codex said its refresh token was already used.");
+  expect(posted[0]).toContain("`sgt account register codex --name codexWork`");
+});

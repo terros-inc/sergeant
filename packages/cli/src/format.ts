@@ -81,7 +81,7 @@ export function showRun({ task, run }: RunDetail): string {
       ? `cost unknown, ${run.tokens.input} input and ${run.tokens.output} output tokens`
       : `${usd(run.costUsd)}${run.costBasis === "estimated" ? " estimated from tokens" : ""}`;
   const lines = [`${run.runId}  ${run.role}  ${run.status}  task ${task}, ${run.model}, ${cost}`];
-  if (run.failureReason) lines.push(`failure reason: ${run.failureReason}`);
+  if (run.failureReason) lines.push(`failure reason: ${run.failureReason}${run.authFailure ? ` (${run.authFailure})` : ""}`);
   if (run.account) lines.push(`account: ${run.account.id} (${run.account.holder})${run.accountReason ? `, ${run.accountReason}` : ""}`);
   if (run.providerChoice) {
     const c = run.providerChoice;

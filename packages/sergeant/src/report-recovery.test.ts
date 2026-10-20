@@ -147,6 +147,44 @@ test("a review whose head moved, or a run that failed on its account, is counted
   ]);
 });
 
+// TECH-6357: a reviewer whose model account failed sign-in left the head unreviewed until reasoning took it
+// up, or never when the task was waiting on something else. The runner has set that account aside, so a
+// retry at once runs on another of the owner's; a retry that fails sign-in too is retried again, on its
+// original focus, until the owner has no usable account left (the start then asks them).
+test("a run that failed authentication is retried at once, a retry too; any other retry failure goes to reasoning", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-report-recovery-test-"));
+  const seen = { revision: conversationRevision(situation.conversation), issue: "unused" };
+  const subject = [{ repo: situation.pullRequests[0]!.repo, number: 7, headSha: situation.pullRequests[0]!.headSha }];
+  const state = { seen, starts: { run_r1: { kind: "start_reviewer", subject, focus: "Check pagination." } }, reportRecoveries: {}, recentTurns: [] as { summary: string }[], unconfirmedStarts: [] };
+  const { p } = ports();
+  const specs: Extract<RunSpec, { role: "reviewer" }>[] = [];
+  p.runner.start = async (spec) => void specs.push(spec as Extract<RunSpec, { role: "reviewer" }>);
+  const signIn = (runId: string): RunRecord => ({
+    ...base, runId, role: "reviewer", status: "failed", reportProblem: "missing", reportError: "no report written; agent exited 1", failureReason: "authentication", authFailure: "refresh_token_reused",
+  });
+  const recover = (runs: RunRecord[]) => recoverReports({ ...situation, runs }, state as never, p, { issueId: "UNF-1", dir, log: () => {}, save: async () => {} });
+
+  expect(await recover([signIn("run_r1")])).toEqual({ retried: true });
+  const r2 = specs[0]!.runId;
+  expect(specs[0]).toMatchObject({ role: "reviewer", subject });
+  expect(state.recentTurns.at(-1)?.summary).toContain("failed authentication, so the retry runs on another");
+  expect(await recover([signIn("run_r1"), signIn(r2)])).toEqual({ retried: true });
+  const r3 = specs[1]!.runId;
+  // Rebuilt from the original start, not from the first retry's focus.
+  expect(specs[1]).toMatchObject({ subject, focus: expect.stringContaining("Check pagination.") });
+  expect(specs[1]!.focus?.match(/Sergeant reran this review/g)).toHaveLength(1);
+  // A retry that ends with no usable report for another reason is not retried again.
+  expect(await recover([signIn("run_r1"), signIn(r2), malformed(r3)])).toEqual({ retried: false });
+  expect(specs).toHaveLength(2);
+
+  const lines = (await readFile(join(dir, "report-recoveries.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+  expect(lines.map((l) => [l.runId, l.recovery, l.reason ?? l.retryRunId])).toEqual([
+    ["run_r1", "retried", r2],
+    [r2, "retried", r3],
+    [r3, "none", "it was itself a retry, and Sergeant retries a run once"],
+  ]);
+});
+
 test("a worker that pushed before it quit gets a report-only retry; one that pushed nothing finishes the objective", async () => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-report-recovery-test-"));
   const at = "2026-10-15T02:00:00.000Z";

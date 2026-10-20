@@ -53,9 +53,13 @@ export async function recoverReports(
     const error = (run.reportError ?? "").slice(0, ERROR_CHARS);
     const why = `${run.role} run ${run.runId} ended with no usable report (${problem}${error && `: ${error}`})`;
     const start = state.starts[run.runId];
-    const skip = run.failureReason
+    // TECH-6357: a run that failed authentication is retried, a retry too: the runner set its account
+    // aside, so each retry takes another of the owner's usable accounts, and the owner is asked once none
+    // is left (NoModelAccount). A quota failure is left to reasoning, which may rather wait for the reset.
+    const authentication = run.failureReason === "authentication";
+    const skip = run.failureReason && !authentication
       ? `it failed on ${run.failureReason}; its account is set aside and reasoning decides`
-      : Object.values(state.reportRecoveries).some((r) => r.retryRunId === run.runId)
+      : !authentication && Object.values(state.reportRecoveries).some((r) => r.retryRunId === run.runId)
         ? "it was itself a retry, and Sergeant retries a run once"
         : runs.length > i + 1
           ? "a later run has started since"
@@ -84,13 +88,16 @@ export async function recoverReports(
     const outcome = await execute(retryOf(run, start, why, pushed), situation, ports);
     const retryRunId = outcome.status === "done" ? (outcome.result.runId as string) : undefined;
     state.reportRecoveries[run.runId] = retryRunId ? { retryRunId } : {};
+    // The original start, so a retry that fails authentication in turn is retried on the same objective.
+    if (retryRunId) state.starts[retryRunId] = start;
     if (retryRunId) state.unconfirmedStarts = state.unconfirmedStarts.filter((id) => id !== retryRunId);
     retried ||= retryRunId !== undefined;
     if (outcome.status === "failed" && outcome.unposted) unposted ??= outcome.unposted;
     const described = describeOutcome(outcome);
     // The next turn's recentTurns say why the run was retried, or why the retry did not start.
     const reportOnly = pushed.length > 0 ? " It had pushed work, so the retry only reviews it and reports." : "";
-    const summary = `Sergeant retried ${run.role} run ${run.runId} at once, before this turn, because it ended with no usable report (${problem}).${reportOnly}`;
+    const onAnother = authentication ? " Its model account failed authentication, so the retry runs on another." : "";
+    const summary = `Sergeant retried ${run.role} run ${run.runId} at once, before this turn, because it ended with no usable report (${problem}).${onAnother}${reportOnly}`;
     state.recentTurns = [...state.recentTurns, { at, summary, outcomes: [described] }].slice(-8);
     lines.push(JSON.stringify({ ...fact, recovery: retryRunId ? "retried" : "retry_not_started", ...(retryRunId ? { retryRunId } : { reason: described }), ...(pushed.length > 0 && { reportOnly: true, pushed }) }));
     ctx.log(`${why}; retrying it${reportOnly && " report-only"}: ${described}`);

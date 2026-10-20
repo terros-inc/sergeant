@@ -1,4 +1,4 @@
-import { commentIdFor, type AgentComment, type LinearPort, type RunRecord } from "@terros/sergeant-contracts";
+import { CODEX_AUTH_FAILURES, commentIdFor, type AgentComment, type LinearPort, type RunRecord } from "@terros/sergeant-contracts";
 
 /**
  * Once per failed run; Linear derives the comment id from this key across retries and restarts. The
@@ -21,9 +21,10 @@ export function authAlertComment(run: RunRecord): string {
   return [
     `**${codex ? "Codex" : "Claude"} authentication failed**`,
     "",
-    `Run \`${run.runId}\` could not authenticate with ${account ? `model account \`${account.id}\` (${account.holder})` : `its ${codex ? "Codex" : "Claude"} credential`}. No token value was recorded.`,
+    `Run \`${run.runId}\` could not authenticate with ${account ? `model account \`${account.id}\` (${account.holder})` : `its ${codex ? "Codex" : "Claude"} credential`}${run.authFailure ? `: Codex said ${CODEX_AUTH_FAILURES[run.authFailure]}` : ""}. No token value was recorded.`,
     "",
-    `${fix} Sergeant will not repair or overwrite the credential automatically; for the next hour it runs on the provider's next account, if there is one.`,
+    // TECH-6357: report-recovery.ts reruns it at once; the set-aside account is passed over.
+    `${fix} Sergeant will not repair or overwrite the credential automatically. It reruns the ${run.role} at once on another usable account of the owner's, if there is one, and passes this one over for the next hour.`,
   ].join("\n");
 }
 

@@ -235,7 +235,11 @@ afterReport(run, r)                        // guardrails, then wake Sergeant
   objective with an instruction to finish and write its report, each told why. The retry goes through
   the Gate like any start, and one that also ends without a report is left to reasoning. So is the run
   itself while a human has said something no turn has read (a reply to the budget question, a comment,
-  an issue edit, a PR review): the reasoning turn reads it first and decides. Each such run
+  an issue edit, a PR review): the reasoning turn reads it first and decides. So is a run that failed on
+  its account's quota, since waiting for the reset may be the better call. A run that failed
+  authentication (TECH-6357) is retried even when it was itself a retry: the runner sets each failed
+  account aside (04 §10), so every retry runs on another of the owner's usable accounts, and once none
+  is left the start asks the owner to register or fix one. Each such run
   is one line in the task's `report-recoveries.jsonl` (`missing` or `malformed`, and what followed).
 
 ## 7. Progress notes and messages
