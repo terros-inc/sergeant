@@ -65,8 +65,12 @@ its parents), and file paths, renames included. It refuses Terros IDs (the exact
 rule is in the script and `AGENTS.md`), emails, phone numbers, and the denylisted customer names, and lets synthetic placeholders
 (`C.example`, `user@example.test`) through. It never prints a denylisted name, nor a file path that
 holds customer data. A two-character name (`3M`) matches only in its listed case. A repository that sets
-its own `core.hooksPath` replaces the hook, and `git push --no-verify` skips it; the repository's CI
-and Sergeant's reviewer are the gates after it. PR titles and bodies are not pushes, so CI and the
+its own `core.hooksPath` replaces the hook, and `git push --no-verify` skips it. A repository that keeps
+its own pre-push hook in `.githooks/` and expects each clone to set `core.hooksPath .githooks` (as
+`terros-inc/connect` and this repository do) gets it run anyway: a worker's clone does not set that, so the template's hook runs
+`.githooks/pre-push` first, with the same arguments and refs, and stops the push if it refuses
+(TECH-6222). That hook only adds a check: the template's own still runs after it. The repository's CI
+and Sergeant's reviewer are the gates after both. PR titles and bodies are not pushes, so CI and the
 reviewer check those. The same script is this repository's CI check (`.github/workflows/public-data.yml`)
 and its pre-push hook (`.githooks/pre-push`). In CI the denylist secret reaches only the default
 branch's copy of the script: `public-data-trusted.yml`, a `pull_request_target` job, checks out the

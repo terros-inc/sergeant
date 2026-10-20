@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -8,6 +8,7 @@ import { expect, test } from "vitest";
 // (container/check-public-data.mjs, TECH-5914). The denylisted name is synthetic: the real list is
 // never committed to a public repository.
 const SCRIPT = join(import.meta.dirname, "..", "container", "check-public-data.mjs");
+const HOOK = join(import.meta.dirname, "..", "container", "git-template", "hooks", "pre-push");
 const NAME = "Zephyr Roofing";
 // Joined at run time, so this file itself passes the check it tests.
 const COMPANY_ID = ["C", "Qx7Lp2Rk"].join(".");
@@ -134,6 +135,21 @@ test("as a pre-push hook it checks only what the remote does not have, and the b
   expect(push(clean, "sergeant/tech-1-zephyr-roofing").out).toMatch(/branch name:1: denylisted customer name/);
   const named = r.commit("new.md", "Zephyr Roofing\n");
   expect(push(named, "sergeant/tech-1-fix").code).toBe(1);
+});
+
+// TECH-6222: a worker's clone sets no `core.hooksPath`, so a repository's own `.githooks/pre-push` ran
+// only if the image's hook runs it. It must get the push's arguments and refs, and its refusal must stop
+// the push before the image's own check.
+test("the image's pre-push hook runs the repository's own .githooks/pre-push first, and its refusal stops the push", () => {
+  const r = repo();
+  mkdirSync(join(r.dir, ".githooks"));
+  const own = join(r.dir, ".githooks", "pre-push");
+  writeFileSync(own, `#!/bin/sh\necho "$@" > "$(dirname "$0")/seen"\ncat >> "$(dirname "$0")/seen"\nexit 1\n`);
+  chmodSync(own, 0o755);
+  const refs = `refs/heads/x ${r.base} refs/heads/x ${"0".repeat(40)}\n`;
+  const push = spawnSync("sh", [HOOK, "origin", "https://example.test/o/r.git"], { cwd: r.dir, input: refs, encoding: "utf8" });
+  expect(push.status).toBe(1);
+  expect(readFileSync(join(r.dir, ".githooks", "seen"), "utf8")).toBe(`origin https://example.test/o/r.git\n${refs}`);
 });
 
 test("with no denylist it still checks IDs and says names went unchecked", () => {

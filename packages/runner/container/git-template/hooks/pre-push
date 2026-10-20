@@ -3,6 +3,14 @@
 # the host's clones through `git clone --template` and the agent's own through the image's init.templateDir.
 # A public repository's push fails on customer data (check-public-data.mjs). Only a repository GitHub says is
 # private is skipped; an unknown answer is checked.
+# A repository that keeps its own pre-push hook in `.githooks/` expects each clone to set
+# `core.hooksPath .githooks`, which a worker's clone does not (TECH-6222): that hook runs first, with the
+# same arguments and refs, and its refusal stops the push. It can only add a check, never skip this one.
+refs=$(cat; echo .); refs=${refs%.}
+own="$(git rev-parse --show-toplevel)/.githooks/pre-push"
+if [ -f "$own" ] && [ -x "$own" ]; then
+  printf '%s' "$refs" | "$own" "$@" || exit 1
+fi
 slug=$(git remote get-url "$1" 2>/dev/null | sed -E 's#^https://github\.com/##; s#\.git$##')
 [ -n "$slug" ] && [ "$(gh api "repos/$slug" --jq .private 2>/dev/null)" = true ] && exit 0
-exec node /usr/local/lib/sergeant/check-public-data.mjs pre-push "$@"
+printf '%s' "$refs" | exec node /usr/local/lib/sergeant/check-public-data.mjs pre-push "$@"
