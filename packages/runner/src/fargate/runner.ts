@@ -145,6 +145,8 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
       const accounts = await opts.accounts(owner.id);
       const codexLabel = hasCodexLabel(spec.conversation.issue.labels);
       const { account, accountReason, providerChoice } = await pickAccount({ owner, accounts, read: opts.quota, isSetAside: asides.has, role: "worker", workerAdapter: undefined, codexLabel });
+      const workerProfile = opts.workerProfile?.(spec.repositories) ?? "base";
+      const profile = s.profiles[workerProfile];
       await mkdir(root, { recursive: true });
       try {
         await mkdir(p.dir);
@@ -198,6 +200,7 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
           repositories: spec.repositories,
           container: CONTAINER,
           backend: "fargate",
+          workerProfile,
           startedAt: now().toISOString(),
           issueRevision: issueRevision(spec.conversation.issue),
           ...(providerChoice && { providerChoice }),
@@ -215,8 +218,8 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
             secretString: async () => secret.secretString,
             taskDefinition: (l) =>
               taskDefinition({
-                family: s.taskFamily,
-                image: s.image,
+                family: profile.taskFamily,
+                image: profile.image,
                 adapter: l.adapter,
                 secretArn: l.secretArn,
                 attachments: secret.attachments,
@@ -224,8 +227,10 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
                 executionRoleArn: s.executionRoleArn,
                 logGroup: s.logGroup,
                 region: s.region,
-                cpu: s.cpu,
-                memory: s.memory,
+                cpu: profile.cpu,
+                memory: profile.memory,
+                architecture: profile.architecture,
+                ephemeralStorageGiB: profile.ephemeralStorageGiB,
                 gitIdentity: commitIdentity(account, opts.gitIdentity),
                 reportNonce: l.nonce,
                 command,

@@ -42,15 +42,15 @@ test("an approver's add and remove change only the parameter's repositories, the
   expect(added).toMatchObject({ status: 200, json: { repo: "terros-inc/two", changed: true, repositories: ["terros-inc/one", "terros-inc/two"] } });
   // Exactly the parameter as it was, plus the one repository, never Zod's defaults or anything else.
   // Enrolled with no merge policy, it is human-merged (TECH-5244): written so, not left to a default.
-  expect(JSON.parse(parameter.value)).toEqual({ ...CONFIG, repositories: { ...CONFIG.repositories, "terros-inc/two": { mergeMethod: "rebase", mergePolicy: "human" } } });
-  expect(parameter.descriptions).toEqual(["Grace Example enrolled terros-inc/two (rebase, merged by human)"]);
+  expect(JSON.parse(parameter.value)).toEqual({ ...CONFIG, repositories: { ...CONFIG.repositories, "terros-inc/two": { mergeMethod: "rebase", mergePolicy: "human", workerProfile: "base" } } });
+  expect(parameter.descriptions).toEqual(["Grace Example enrolled terros-inc/two (rebase, merged by human, base worker)"]);
   // The same array and record every holder (loops, webhooks, the GitHub port) reads.
   expect(repositories).toEqual(["terros-inc/one", "terros-inc/two"]);
-  expect(configs["terros-inc/two"]).toEqual({ mergeMethod: "rebase", mergePolicy: "human", observedChecksFallback: false, ciRerunWorkflows: [] });
-  expect(logs).toContain("Grace Example enrolled terros-inc/two (rebase, merged by human): the installation-config parameter and the running service have it");
+  expect(configs["terros-inc/two"]).toEqual({ mergeMethod: "rebase", mergePolicy: "human", workerProfile: "base", observedChecksFallback: false, ciRerunWorkflows: [] });
+  expect(logs).toContain("Grace Example enrolled terros-inc/two (rebase, merged by human, base worker): the installation-config parameter and the running service have it");
 
   // Everyone signed in may list; nobody but an approver may change.
-  expect(await call("GET", "/v1/repositories", "ada")).toMatchObject({ status: 200, json: { repositories: [{ repo: "terros-inc/one", mergeMethod: "squash", mergePolicy: "human" }, { repo: "terros-inc/two", mergeMethod: "rebase", mergePolicy: "human" }] } });
+  expect(await call("GET", "/v1/repositories", "ada")).toMatchObject({ status: 200, json: { repositories: [{ repo: "terros-inc/one", mergeMethod: "squash", mergePolicy: "human", workerProfile: "base" }, { repo: "terros-inc/two", mergeMethod: "rebase", mergePolicy: "human", workerProfile: "base" }] } });
   expect(await call("POST", "/v1/repositories/remove", "ada", { repo: "terros-inc/one" })).toMatchObject({ status: 403 });
 
   // Unreachable or malformed: refused. Already enrolled under another case: nothing to write.
@@ -60,9 +60,12 @@ test("an approver's add and remove change only the parameter's repositories, the
   expect(parameter.descriptions).toHaveLength(1);
   // A policy given for an enrolled repository sets it, live too; the same policy again writes nothing.
   expect(await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two", mergePolicy: "sergeant" })).toMatchObject({ status: 200, json: { changed: true } });
-  expect([JSON.parse(parameter.value).repositories["terros-inc/two"], configs["terros-inc/two"]?.mergePolicy]).toEqual([{ mergeMethod: "rebase", mergePolicy: "sergeant" }, "sergeant"]);
+  expect([JSON.parse(parameter.value).repositories["terros-inc/two"], configs["terros-inc/two"]?.mergePolicy]).toEqual([{ mergeMethod: "rebase", mergePolicy: "sergeant", workerProfile: "base" }, "sergeant"]);
+  expect(parameter.descriptions.at(-1)).toBe("Grace Example updated terros-inc/two's enrollment settings");
   expect(await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two", mergePolicy: "sergeant" })).toMatchObject({ status: 200, json: { changed: false } });
-  expect(parameter.descriptions.at(-1)).toBe("Grace Example set terros-inc/two's merge policy to sergeant");
+  expect(await call("POST", "/v1/repositories/add", "grace", { repo: "terros-inc/two", workerProfile: "android" })).toMatchObject({ status: 200, json: { changed: true } });
+  expect(configs["terros-inc/two"]?.workerProfile).toBe("android");
+  expect(parameter.descriptions.at(-1)).toBe("Grace Example updated terros-inc/two's enrollment settings");
 
   expect(await call("POST", "/v1/repositories/remove", "grace", { repo: "TERROS-INC/one" })).toMatchObject({ status: 200, json: { repo: "terros-inc/one", changed: true, repositories: ["terros-inc/two"] } });
   expect(Object.keys(JSON.parse(parameter.value).repositories)).toEqual(["terros-inc/two"]);

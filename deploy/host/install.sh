@@ -13,7 +13,7 @@ data=/var/lib/sergeant
 
 # --- Packages: Docker, git, Caddy, Node 24 (with corepack for the pinned pnpm), the claude CLI. ---
 apt-get update -q
-apt-get install -yq docker.io docker-buildx caddy git jq curl gnupg ca-certificates
+apt-get install -yq docker.io docker-buildx qemu-user-static binfmt-support caddy git jq curl gnupg ca-certificates
 if ! node --version 2>/dev/null | grep -q '^v24\.'; then
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
@@ -66,6 +66,16 @@ install -d -m 0755 /var/log/sergeant
 # --- The runner image and the source's dependencies. ---
 systemctl enable --now docker
 docker build -q -t sergeant-runner:local "$repo/packages/runner/container"
+# Android workers are x86-64 even on this ARM64 host, because Android's Linux AAPT2 is x86-64-only.
+# Keep a separate amd64 base only as the parent of the local Android image; base-profile runs use the
+# small native `sergeant-runner:local` image above and never pull the Android toolchain.
+builder=sergeant-multiarch
+docker buildx inspect "$builder" >/dev/null 2>&1 || docker buildx create --name "$builder" --driver docker-container >/dev/null
+docker buildx build --builder "$builder" --quiet --platform linux/amd64 --load \
+  -t sergeant-runner-base-amd64:local "$repo/packages/runner/container" >/dev/null
+docker buildx build --builder "$builder" --quiet --platform linux/amd64 --load \
+  -t sergeant-runner-android:local --build-arg BASE_IMAGE=sergeant-runner-base-amd64:local \
+  -f "$repo/packages/runner/container/Dockerfile.android" "$repo/packages/runner/container" >/dev/null
 (cd "$repo" && corepack pnpm install --frozen-lockfile --config.confirmModulesPurge=false)
 # Sergeant's version from git; a fallback (no tag, shallow clone) is logged, never fatal.
 # shellcheck disable=SC2016 # The dollar expressions below are JavaScript template literals.

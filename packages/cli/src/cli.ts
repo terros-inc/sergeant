@@ -77,7 +77,7 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   admin retro set <projectId> <teamId>
                                      an approver's: validate and use this Linear project and team now
   admin retro off                    an approver's: stop scheduling retros now
-  admin repo add <owner/name> [--merge-method squash|merge|rebase] [--merge-policy sergeant|human]
+  admin repo add <owner/name> [--merge-method squash|merge|rebase] [--merge-policy sergeant|human] [--worker-profile base|android]
                                      an approver's enrollment (default squash, human), once both GitHub
                                      Apps reach it; serve takes it at once, no host update. In a human
                                      repository Sergeant never approves or merges; a human merges.
@@ -194,6 +194,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         task: { type: "string" },
         "merge-method": { type: "string" },
         "merge-policy": { type: "string" },
+        "worker-profile": { type: "string" },
         "wall-minutes": { type: "string" },
         "cost-usd": { type: "string" },
         hours: { type: "string" },
@@ -228,7 +229,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], "wall-minutes": values["wall-minutes"], "cost-usd": values["cost-usd"], hours: values.hours, paste: values.paste || undefined, since: values.since, repo: values.repo, list: values.list || undefined, found: values.found || undefined, by: values.by };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], "worker-profile": values["worker-profile"], "wall-minutes": values["wall-minutes"], "cost-usd": values["cost-usd"], hours: values.hours, paste: values.paste || undefined, since: values.since, repo: values.repo, list: values.list || undefined, found: values.found || undefined, by: values.by };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

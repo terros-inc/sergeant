@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs the installation config into <dir> (/etc/sergeant on the host), with the runner image and
 # Fargate settings it needs: `install-config.sh <dir>`, run by install.sh before it restarts `serve`.
-# Needs AWS_REGION and SERGEANT_CONFIG_PARAMETER, and the runner image built as sergeant-runner:local.
+# Needs AWS_REGION and SERGEANT_CONFIG_PARAMETER. It builds and pushes the two Fargate images only
+# after Terraform's settings exist; the ordinary local base image was already built by install.sh.
 # A failure leaves <dir> with the previous installation, so a serve systemd restarts later still finds
 # a coherent one (TECH-5273).
 set -euo pipefail
@@ -32,20 +33,27 @@ workers=$(jq -r '.runners.workerBackend // "local"' "$staged/installation.json")
 fargate_parameter=/sergeant/v2/fargate-runner
 if fargate=$(aws ssm get-parameter --region "$AWS_REGION" --name "$fargate_parameter" --query Parameter.Value --output text 2>/dev/null); then
   ecr=$(jq -r .repositoryUrl <<<"$fargate")
-  image="$ecr:$(git -C "$repo" rev-parse HEAD)"
+  sha=$(git -C "$repo" rev-parse HEAD)
+  base_image="$ecr:$sha-base"
+  android_image="$ecr:$sha-android"
+  builder=sergeant-multiarch
   if aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ecr%%/*}" >/dev/null &&
-    docker tag sergeant-runner:local "$image" && docker push -q "$image" >/dev/null; then
+    { docker buildx inspect "$builder" >/dev/null 2>&1 || docker buildx create --name "$builder" --driver docker-container >/dev/null; } &&
+    docker buildx build --builder "$builder" --quiet --platform linux/arm64,linux/amd64 --push -t "$base_image" "$repo/packages/runner/container" >/dev/null &&
+    docker buildx build --builder "$builder" --quiet --platform linux/amd64 --push -t "$android_image" \
+      --build-arg "BASE_IMAGE=$base_image" -f "$repo/packages/runner/container/Dockerfile.android" "$repo/packages/runner/container" >/dev/null; then
     docker logout "${ecr%%/*}" >/dev/null 2>&1 || true
-    jq --arg image "$image" 'del(.repositoryUrl) + {image: $image}' <<<"$fargate" >"$staged/fargate-runner.json"
+    jq --arg base "$base_image" --arg android "$android_image" \
+      'del(.repositoryUrl) | .profiles.base.image = $base | .profiles.android.image = $android' <<<"$fargate" >"$staged/fargate-runner.json"
     install -m 0644 "$staged/fargate-runner.json" "$dir/fargate-runner.json"
-    echo "pushed the runner image to $image"
+    echo "pushed the base runner image to $base_image and Android runner image to $android_image"
   else
     docker logout "${ecr%%/*}" >/dev/null 2>&1 || true
     if [ "$workers" = fargate ]; then
-      echo "cannot push the runner image to $image, and the new config runs workers on Fargate; the previous config stays and serve was not restarted" >&2
+      echo "cannot push the runner images, and the new config runs workers on Fargate; the previous config stays and serve was not restarted" >&2
       exit 1
     fi
-    echo "cannot push the runner image to $image; workers run on this host, so the install goes on" >&2
+    echo "cannot push the runner images; workers run on this host, so the install goes on" >&2
   fi
 elif [ "$workers" = fargate ]; then
   echo "no $fargate_parameter (terraform/fargate.tf), and the new config runs workers on Fargate; the previous config stays and serve was not restarted" >&2

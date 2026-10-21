@@ -6,12 +6,12 @@ test("repo list is any signed-in user's, and only adding and removing are under 
     "GET /v1/repositories": { json: { repositories: [{ repo: "terros-inc/one", mergeMethod: "squash", mergePolicy: "sergeant" }] } },
     "POST /v1/repositories/add": { json: { repo: "terros-inc/two", changed: true, repositories: ["terros-inc/one", "terros-inc/two"] } },
   });
-  expect(await sgt(api, "repo", "list")).toMatchObject({ code: 0, out: "terros-inc/one  squash  merged by sergeant\n" });
+  expect(await sgt(api, "repo", "list")).toMatchObject({ code: 0, out: "terros-inc/one  squash  merged by sergeant  base worker\n" });
   expect((await sgt(api, "admin", "repo", "list")).code).toBe(2);
-  expect(await sgt(api, "admin", "repo", "add", "terros-inc/two", "--merge-method", "rebase", "--merge-policy", "human")).toMatchObject({ code: 0, out: expect.stringContaining("enrolled terros-inc/two") });
+  expect(await sgt(api, "admin", "repo", "add", "terros-inc/two", "--merge-method", "rebase", "--merge-policy", "human", "--worker-profile", "android")).toMatchObject({ code: 0, out: expect.stringContaining("enrolled terros-inc/two") });
   expect(seen.map((s) => [s.method, s.url, s.body && JSON.parse(s.body)])).toEqual([
     ["GET", "/v1/repositories", ""],
-    ["POST", "/v1/repositories/add", { repo: "terros-inc/two", mergeMethod: "rebase", mergePolicy: "human" }],
+    ["POST", "/v1/repositories/add", { repo: "terros-inc/two", mergeMethod: "rebase", mergePolicy: "human", workerProfile: "android" }],
   ]);
 });
 
@@ -26,7 +26,7 @@ test("admin repo budget sends each flag given, default as a clear, and refuses a
   // Refused before any request; 400 digits is Infinity, which JSON would send as null.
   for (const bad of ["abc", "0", "-3", "1e3", "9".repeat(400)]) expect((await sgt(api, "admin", "repo", "budget", "terros-inc/one", "--cost-usd", bad)).code).toBe(2);
   expect((await sgt(api, "admin", "repo", "budget", "terros-inc/one")).code).toBe(2);
-  expect(await sgt(api, "repo", "list")).toMatchObject({ code: 0, out: "terros-inc/one  squash  merged by human  60 min (own), $25\n" });
+  expect(await sgt(api, "repo", "list")).toMatchObject({ code: 0, out: "terros-inc/one  squash  merged by human  base worker  60 min (own), $25\n" });
   expect(seen.map((s) => [s.url, s.body && JSON.parse(s.body)])).toEqual([
     ["/v1/repositories/budget", { repo: "terros-inc/one", wallMinutes: 60 }],
     ["/v1/repositories/budget", { repo: "terros-inc/one", wallMinutes: 45.5, costUsd: "default" }],

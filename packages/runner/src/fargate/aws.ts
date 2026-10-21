@@ -27,12 +27,16 @@ export const FargateSettings = z.strictObject({
   securityGroup: z.string().min(1),
   executionRoleArn: z.string().min(1),
   logGroup: z.string().min(1),
-  /** Each run registers its own revision of this family, deregistered as the run is collected. */
-  taskFamily: z.string().min(1),
-  /** `<repository URL>:<commit>`, the runner image the host built and pushed at install. */
-  image: z.string().min(1),
-  cpu: z.string().default("2048"),
-  memory: z.string().default("8192"),
+  profiles: z.strictObject({
+    base: z.strictObject({
+      taskFamily: z.string().min(1), image: z.string().min(1), cpu: z.string().default("2048"), memory: z.string().default("8192"),
+      architecture: z.literal("ARM64"), ephemeralStorageGiB: z.number().int().min(21).default(21),
+    }),
+    android: z.strictObject({
+      taskFamily: z.string().min(1), image: z.string().min(1), cpu: z.string().default("4096"), memory: z.string().default("16384"),
+      architecture: z.literal("X86_64"), ephemeralStorageGiB: z.number().int().min(21).default(50),
+    }),
+  }),
 });
 export type FargateSettings = z.infer<typeof FargateSettings>;
 

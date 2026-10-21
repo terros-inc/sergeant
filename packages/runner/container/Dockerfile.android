@@ -1,0 +1,28 @@
+ARG BASE_IMAGE=sergeant-runner:local
+FROM ${BASE_IMAGE} AS base
+FROM eclipse-temurin:17.0.20.1_1-jdk AS temurin
+FROM base
+
+COPY --from=temurin /opt/java/openjdk /opt/java/openjdk
+
+ENV JAVA_HOME=/opt/java/openjdk \
+  ANDROID_HOME=/opt/android-sdk \
+  ANDROID_SDK_ROOT=/opt/android-sdk \
+  GRADLE_USER_HOME=/home/node/.gradle \
+  PATH=/opt/java/openjdk/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:${PATH}
+
+ARG ANDROID_COMMAND_LINE_TOOLS_VERSION=15859902
+
+RUN test "$(dpkg --print-architecture)" = amd64 \
+  && install -d /opt/android-sdk/cmdline-tools \
+  && curl -fsSLo /tmp/android-command-line-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_COMMAND_LINE_TOOLS_VERSION}_latest.zip" \
+  && echo "040d3996a65543d22ec4bf73e4c37aa37a8d4af4  /tmp/android-command-line-tools.zip" | sha1sum -c - \
+  && unzip -q /tmp/android-command-line-tools.zip -d /opt/android-sdk/cmdline-tools \
+  && mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest \
+  && yes | sdkmanager --licenses >/dev/null \
+  && sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;36.0.0" \
+  && install -d -o node -g node "$GRADLE_USER_HOME" \
+  && rm -f /tmp/android-command-line-tools.zip \
+  && java -version \
+  && sdkmanager --version \
+  && /opt/android-sdk/build-tools/36.0.0/aapt2 version

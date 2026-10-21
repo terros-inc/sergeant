@@ -94,6 +94,8 @@ export type TaskDefinitionInput = {
   region: string;
   cpu: string;
   memory: string;
+  architecture: "ARM64" | "X86_64";
+  ephemeralStorageGiB: number;
   gitIdentity: { name: string; email: string };
   reportNonce: string;
   /** The task's whole command; a definition per run, so nothing is overridden at RunTask. */
@@ -114,8 +116,8 @@ export function taskDefinition(i: TaskDefinitionInput) {
     networkMode: "awsvpc",
     cpu: i.cpu,
     memory: i.memory,
-    // The Sergeant host is Graviton; the image it builds is arm64.
-    runtimePlatform: { cpuArchitecture: "ARM64", operatingSystemFamily: "LINUX" },
+    runtimePlatform: { cpuArchitecture: i.architecture, operatingSystemFamily: "LINUX" },
+    ephemeralStorage: { sizeInGiB: i.ephemeralStorageGiB },
     executionRoleArn: i.executionRoleArn,
     containerDefinitions: [
       {

@@ -12,7 +12,7 @@ const script = join(import.meta.dirname, "../../../deploy/host/install-config.sh
 const example = join(import.meta.dirname, "../../../deploy/host/installation.example.json");
 
 // `aws ssm get-parameter` answers the config parameter with $STUB_CONFIG (version 8), and the Fargate
-// one with $STUB_FARGATE when it is set; `docker push` fails when $STUB_PUSH is `fail`.
+// one with $STUB_FARGATE when it is set; `docker buildx` fails when $STUB_PUSH is `fail`.
 const aws = `#!/usr/bin/env bash
 name=; while [ $# -gt 0 ]; do [ "$1" = --name ] && name=$2; shift; done
 case "$name" in
@@ -23,10 +23,16 @@ esac
 `;
 const docker = `#!/usr/bin/env bash
 [ "$1" = login ] && cat >/dev/null
-[ "$1" = push ] && [ "\${STUB_PUSH:-}" = fail ] && exit 1
+[ "$1" = buildx ] && [ "\${STUB_PUSH:-}" = fail ] && exit 1
 exit 0
 `;
-const fargate = JSON.stringify({ repositoryUrl: "123.dkr.ecr.us-west-2.amazonaws.com/sergeant-v2-runner", cluster: "sergeant-v2-runs" });
+const fargate = JSON.stringify({
+  repositoryUrl: "123.dkr.ecr.us-west-2.amazonaws.com/sergeant-v2-runner", cluster: "sergeant-v2-runs",
+  profiles: {
+    base: { taskFamily: "sergeant-v2-run-base", cpu: "2048", memory: "8192", architecture: "ARM64", ephemeralStorageGiB: 21 },
+    android: { taskFamily: "sergeant-v2-run-android", cpu: "4096", memory: "16384", architecture: "X86_64", ephemeralStorageGiB: 50 },
+  },
+});
 
 let dir: string;
 beforeEach(async () => {
@@ -66,7 +72,13 @@ test("a Fargate config is installed once its image is pushed; a local one whethe
   const pushed = await install("fargate", { fargate, push: "ok" });
   expect(pushed).toMatchObject({ exit: 0, version: "8\n" });
   expect(JSON.parse(pushed.config).runners).toEqual({ workerBackend: "fargate" });
-  expect(JSON.parse(pushed.fargate)).toEqual({ cluster: "sergeant-v2-runs", image: expect.stringMatching(/^123\.dkr\.ecr\.us-west-2\.amazonaws\.com\/sergeant-v2-runner:[0-9a-f]{40}$/) });
+  expect(JSON.parse(pushed.fargate)).toMatchObject({
+    cluster: "sergeant-v2-runs",
+    profiles: {
+      base: { architecture: "ARM64", image: expect.stringMatching(/:[0-9a-f]{40}-base$/) },
+      android: { architecture: "X86_64", ephemeralStorageGiB: 50, image: expect.stringMatching(/:[0-9a-f]{40}-android$/) },
+    },
+  });
 
   await writeFile(join(dir, "etc/fargate-runner.json"), "previous image\n");
   expect(await install("local", { fargate, push: "fail" })).toMatchObject({ exit: 0, version: "8\n", fargate: "previous image\n" });

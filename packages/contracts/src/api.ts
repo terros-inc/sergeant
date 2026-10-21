@@ -3,7 +3,7 @@ import { BudgetStatus } from "./budget.ts";
 import { CiRerun } from "./ci-rerun.ts";
 import { RepoSlug } from "./conversation.ts";
 import { MergePolicy } from "./github.ts";
-import { QuotaReading, QuotaWindowName, RunAccount, RunId, RunRecord } from "./runs.ts";
+import { QuotaReading, QuotaWindowName, RunAccount, RunId, RunRecord, WorkerProfile } from "./runs.ts";
 import { FiledFollowup } from "./situation.ts";
 
 // The client API (11 §2, UNF-713): what `serve` answers on `/v1` and `sgt` and `sgt-mcp` read. The
@@ -256,6 +256,7 @@ export const RepositoryList = z.object({
       repo: RepoSlug,
       mergeMethod: MergeMethod,
       mergePolicy: MergePolicy,
+      workerProfile: WorkerProfile.default("base"),
       budget: BudgetStatus.shape.window.optional(),
       ownBudget: RepositoryBudget.optional(),
       /** TECH-6617: the merged-PR audit's sample rate, when above 0; absent from a serve older than it. */
@@ -270,7 +271,12 @@ export type RepositoryList = z.infer<typeof RepositoryList>;
  * in place. A new repository's `mergePolicy` is `human` unless given (TECH-5244); given for one already
  * enrolled, it sets that repository's policy.
  */
-export const AddRepositoryRequest = z.strictObject({ repo: RepoSlug, mergeMethod: MergeMethod.default("squash"), mergePolicy: MergePolicy.optional() });
+export const AddRepositoryRequest = z.strictObject({
+  repo: RepoSlug,
+  mergeMethod: MergeMethod.default("squash"),
+  mergePolicy: MergePolicy.optional(),
+  workerProfile: WorkerProfile.optional(),
+});
 export const RemoveRepositoryRequest = z.strictObject({ repo: RepoSlug });
 /**
  * The repository as enrolled, whether this call changed the installation's config (false: it already

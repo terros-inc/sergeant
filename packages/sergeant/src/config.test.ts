@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { CODEX_PRICES } from "@terros/sergeant-runner";
-import { CODEX_DEFAULT_MODEL, fargateSettings, InstallationConfig, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { CODEX_DEFAULT_MODEL, fargateSettings, InstallationConfig, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget, workerProfileFor } from "./config.ts";
 import { runLoop } from "./loop.ts";
 
 const config = (controlPlaneAppId: number | string, workerAppId: number | string) => ({
@@ -16,6 +16,15 @@ const config = (controlPlaneAppId: number | string, workerAppId: number | string
   repositories: { "acme/app": { mergeMethod: "squash" } },
   modelTokenSecret: "sergeant/model",
   gitIdentity: { name: "Ada", email: "ada@example.com" },
+});
+
+test("an Android repository upgrades a multi-repository run while absent profiles stay base", () => {
+  const repositories = InstallationConfig.parse({
+    ...config(1, 2),
+    repositories: { "acme/app": { mergeMethod: "squash" }, "acme/mobile": { mergeMethod: "squash", workerProfile: "android" } },
+  }).repositories;
+  expect(workerProfileFor(repositories, ["acme/app"])).toBe("base");
+  expect(workerProfileFor(repositories, ["acme/app", "acme/mobile"])).toBe("android");
 });
 
 // One App in both roles would let a worker merge as the control plane.
@@ -154,9 +163,12 @@ test("Fargate settings are required only when workers run on Fargate", async () 
   const file = join(dir, "fargate-runner.json");
   const settings = {
     region: "us-west-2", cluster: "c", subnets: ["subnet-1"], securityGroup: "sg-1", executionRoleArn: "arn:role",
-    logGroup: "/g", taskFamily: "f", image: "repo:abc",
+    logGroup: "/g", profiles: {
+      base: { taskFamily: "f-base", image: "repo:base", architecture: "ARM64", ephemeralStorageGiB: 21 },
+      android: { taskFamily: "f-android", image: "repo:android", architecture: "X86_64", ephemeralStorageGiB: 50 },
+    },
   };
   await writeFile(file, JSON.stringify(settings));
-  expect(await fargateSettings(onFargate, file)).toMatchObject({ ...settings, cpu: "2048", memory: "8192" });
+  expect(await fargateSettings(onFargate, file)).toMatchObject({ ...settings, profiles: { base: { cpu: "2048", memory: "8192" }, android: { cpu: "4096", memory: "16384" } } });
   await rm(dir, { recursive: true });
 });
