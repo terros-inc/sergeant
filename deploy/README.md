@@ -273,7 +273,10 @@ steps, in this order; each one needs the one before it.
    commit and profile, and writes `/etc/sergeant/fargate-runner.json`. Gradle's cache directory is
    created with the right ownership, but dependencies are not preloaded: repository source is not
    present while this shared image is built, and baking repository-specific caches would make it
-   large and stale. Workers still run on the host. On an installation
+   large and stale. Workers still run on the host. When an upgrade still uses local workers and image
+   publication fails, the install migrates an existing single-image Fargate file to the two-profile
+   shape so `serve` can continue collecting older Fargate runs; it does not enable new Fargate launches.
+   On an installation
    whose config has no `humans` yet, `sgt admin update` cannot sign in: run this update over SSM
    (`sergeant-update main`, the operator's command under Update).
 3. **Turn it on.** Add `"workerBackend": "fargate"` to the installation config's `runners`, put the

@@ -26,6 +26,47 @@ if ! (cd "$repo/packages/sergeant" &&
 fi
 workers=$(jq -r '.runners.workerBackend // "local"' "$staged/installation.json")
 
+# A local installation still reads an existing Fargate file to collect runs that started there. When
+# this release first replaces the single-image shape, keep that old image only for those existing
+# runs; a later Fargate install must publish both current images before it can enable new launches.
+validate_fargate() {
+  (cd "$repo/packages/runner" &&
+    node --input-type=module -e 'const { FargateSettings } = await import("./src/fargate/aws.ts"); FargateSettings.parse(JSON.parse(await (await import("node:fs/promises")).readFile(process.argv[1], "utf8")))' "$1")
+}
+stage_existing_fargate() {
+  local current="$dir/fargate-runner.json"
+  [ -e "$current" ] || return 0
+  if validate_fargate "$current" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! jq -e '
+    (.region | type == "string" and length > 0) and
+    (.cluster | type == "string" and length > 0) and
+    (.subnets | type == "array" and length > 0) and
+    (.securityGroup | type == "string" and length > 0) and
+    (.executionRoleArn | type == "string" and length > 0) and
+    (.logGroup | type == "string" and length > 0) and
+    (.taskFamily | type == "string" and length > 0) and
+    (.image | type == "string" and length > 0)
+  ' "$current" >/dev/null 2>&1; then
+    echo "$current is neither the current nor legacy Fargate settings shape; serve was not restarted" >&2
+    exit 1
+  fi
+  jq '{
+    region, cluster, subnets, securityGroup, executionRoleArn, logGroup,
+    profiles: {
+      base: {
+        taskFamily: .taskFamily, image: .image, cpu: (.cpu // "2048"), memory: (.memory // "8192"),
+        architecture: "ARM64", ephemeralStorageGiB: 21
+      },
+      android: {
+        taskFamily: .taskFamily, image: .image, cpu: "4096", memory: "16384",
+        architecture: "X86_64", ephemeralStorageGiB: 50
+      }
+    }
+  }' "$current" >"$staged/fargate-runner.json"
+}
+
 # --- Workers on Fargate (TECH-5237). Once Terraform has made its resources (terraform/fargate.tf), the
 # runner image just built goes to ECR tagged by this commit, and where tasks run, with that image, goes to
 # <dir>/fargate-runner.json for serve. A failed push fails the install only when the staged config runs
@@ -45,7 +86,6 @@ if fargate=$(aws ssm get-parameter --region "$AWS_REGION" --name "$fargate_param
     docker logout "${ecr%%/*}" >/dev/null 2>&1 || true
     jq --arg base "$base_image" --arg android "$android_image" \
       'del(.repositoryUrl) | .profiles.base.image = $base | .profiles.android.image = $android' <<<"$fargate" >"$staged/fargate-runner.json"
-    install -m 0644 "$staged/fargate-runner.json" "$dir/fargate-runner.json"
     echo "pushed the base runner image to $base_image and Android runner image to $android_image"
   else
     docker logout "${ecr%%/*}" >/dev/null 2>&1 || true
@@ -53,15 +93,22 @@ if fargate=$(aws ssm get-parameter --region "$AWS_REGION" --name "$fargate_param
       echo "cannot push the runner images, and the new config runs workers on Fargate; the previous config stays and serve was not restarted" >&2
       exit 1
     fi
+    stage_existing_fargate
     echo "cannot push the runner images; workers run on this host, so the install goes on" >&2
   fi
 elif [ "$workers" = fargate ]; then
   echo "no $fargate_parameter (terraform/fargate.tf), and the new config runs workers on Fargate; the previous config stays and serve was not restarted" >&2
   exit 1
 else
+  stage_existing_fargate
   echo "no $fargate_parameter yet (terraform/fargate.tf): workers can run only on this host"
 fi
 
-# The config first: a serve restarted between the two finds it current, as it is.
+# The Fargate settings first: new code can read the migrated shape if serve restarts between writes.
+if [ -e "$staged/fargate-runner.json" ]; then
+  validate_fargate "$staged/fargate-runner.json"
+  install -m 0644 "$staged/fargate-runner.json" "$dir/.fargate-runner.json.new"
+  mv -f "$dir/.fargate-runner.json.new" "$dir/fargate-runner.json"
+fi
 install -m 0644 "$staged/installation.json" "$dir/installation.json"
 install -m 0644 "$staged/installation.json.version" "$dir/installation.json.version"
