@@ -123,11 +123,13 @@ by `sgt task show` and in the Situation Report. Sergeant never decides on its ow
 A required check can also go `missing` after it passed: GitHub deletes a workflow run, and its check
 results with it, once the repository's Actions retention passes, and an expired run cannot be rerun
 (TECH-6489). Sergeant's core (`packages/sergeant/src/expired-checks.ts`) records the required checks it
-sees pass on each of the task's PR heads (`passedChecks` in `state.json`). A required check `missing` on an
-open, ready, unconflicted PR the worker App opened counts as expired when Sergeant saw it pass on that
-same head, or when the head was committed longer ago than the repository's `actionsRetentionDays`
-(GitHub's default of 90 when unset; reading the setting needs `administration: read`, which the
-control-plane App does not hold). Sergeant then re-triggers CI on that head once, by converting the PR to
+sees pass on each of the task's PR heads, and when it first saw each head (`passedChecks` in `state.json`).
+A required check `missing` on an open, ready, unconflicted PR the worker App opened counts as expired when
+Sergeant saw it pass on that same head, or when that SHA has been the PR's head for longer than the
+repository's `actionsRetentionDays` (GitHub's default of 90 when unset; reading the setting needs
+`administration: read`, which the control-plane App does not hold). How long it has been the head is
+read from the earlier of Sergeant's first sighting and the first review submitted on that commit, never
+from the commit's date, which a rebased, cherry-picked or newly pushed head can carry from long ago. Sergeant then re-triggers CI on that head once, by converting the PR to
 draft and back to ready for review (`ready_for_review`), never by a commit, so the head and its approvals
 stay valid; GitHub's check-suite re-request is not used, since an expired run has nothing left to
 re-request. If the toggle fails, or the checks have not reported again within 15 minutes, Sergeant posts

@@ -245,7 +245,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     // TECH-6489: required checks GitHub expired on a PR's head are re-triggered on that head once, and the
-    // issue told if that does not bring them back (expired-checks.ts); a re-trigger rereads the PRs first.
+    // issue told if that does not bring them back (expired-checks.ts); either rereads the PRs and the issue
+    // first, so the turn sees the new checks or the human wait that comment starts.
     if (await recoverExpiredChecks(pullRequests, state, deps, { issueId: conversation.issue.id, agentComments: conversation.agentComments, log, save })) {
       prPolls.forget();
       continue;

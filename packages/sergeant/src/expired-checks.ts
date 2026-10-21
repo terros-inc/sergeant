@@ -5,7 +5,8 @@ import type { TaskState } from "./task-state.ts";
 // TECH-6489: GitHub deletes a workflow run, and its check results with it, once the repository's Actions
 // retention passes. A required check that had passed on a PR's head then reads `missing`, exactly like
 // one that has not reported yet, and an expired run cannot be rerun. Sergeant tells the two apart by what
-// it saw on that head before (`passedChecks`), or by the head being older than the retention, and then
+// it saw on that head before (`passedChecks`), or by the SHA having been the PR's head for longer than the
+// retention (never by its commit date: a rebased, cherry-picked or newly pushed head can carry an old one), and then
 // re-triggers CI on the same head once (the GitHub port's draft and ready toggle, never a commit, so the
 // head and its approvals stay valid). If that fails, or the checks have not come back after a grace, it
 // says so once on the issue, and the task waits on a human (pr-wait.ts). A new head whose checks have not
@@ -39,8 +40,10 @@ export function expiredChecksComment(pr: PullRequestFacts, r: Recovery, missing:
   ].join("\n");
 }
 
-/** Keeps, per PR, the required checks seen passed on its current head; a new head starts afresh. */
-function remember(state: Pick<TaskState, "passedChecks">, pr: PullRequestFacts): boolean {
+const DAY_MS = 24 * 60 * 60_000;
+
+/** Keeps, per PR, its current head, when Sergeant first saw it there, and the required checks seen passed on it; a new head starts afresh. */
+function remember(state: Pick<TaskState, "passedChecks">, pr: PullRequestFacts, at: string): boolean {
   const passed = pr.checks.required.filter((c) => c.state === "passed").map((c) => c.name);
   const kept = state.passedChecks.find((p) => samePr(p, pr));
   if (kept?.headSha === pr.headSha) {
@@ -48,27 +51,36 @@ function remember(state: Pick<TaskState, "passedChecks">, pr: PullRequestFacts):
     kept.checks.push(...added);
     return added.length > 0;
   }
-  if (!kept && passed.length === 0) return false;
-  state.passedChecks = [...state.passedChecks.filter((p) => !samePr(p, pr)), { repo: pr.repo, number: pr.number, headSha: pr.headSha, checks: passed }];
+  state.passedChecks = [...state.passedChecks.filter((p) => !samePr(p, pr)), { repo: pr.repo, number: pr.number, headSha: pr.headSha, since: at, checks: passed }];
   return true;
 }
 
+/**
+ * The earliest time the PR's head is known to have been its head: when Sergeant first saw it there, or a
+ * review submitted on that commit (a review keeps the head it was given on), whichever is earlier. Neither
+ * over-estimates how long the SHA has been the head, so a new head never reads as expired; the one
+ * exception, a head force-pushed back to a SHA reviewed long before, costs at most one extra toggle. An
+ * inline comment's `commit_id` follows later heads, so it says nothing here.
+ */
+function headSince(pr: PullRequestFacts, state: Pick<TaskState, "passedChecks">): number {
+  const reviewed = [...pr.humanFeedback, ...(pr.botFeedback ?? [])].filter((f) => f.kind === "review" && f.commitId === pr.headSha).map((f) => Date.parse(f.createdAt));
+  const seen = state.passedChecks.find((p) => samePr(p, pr) && p.headSha === pr.headSha)?.since;
+  return Math.min(...reviewed, ...(seen ? [Date.parse(seen)] : []));
+}
+
 /** Why the missing checks count as expired, or undefined while they may simply not have reported yet. */
-async function expiredBecause(pr: PullRequestFacts, missing: string[], state: Pick<TaskState, "passedChecks">, github: Ports["github"], log: Context["log"]): Promise<string | undefined> {
+function expiredBecause(pr: PullRequestFacts, missing: string[], state: Pick<TaskState, "passedChecks">, github: Ports["github"], now: number): string | undefined {
   const seen = state.passedChecks.find((p) => samePr(p, pr) && p.headSha === pr.headSha)?.checks ?? [];
   if (missing.some((c) => seen.includes(c))) return "Sergeant saw it pass on this head earlier";
-  const outlived = await github.outlivedActionsRetention?.(pr.repo, pr.headSha).catch((e: Error) => {
-    log(`${pr.repo}#${pr.number}: could not read when its head was committed: ${e.message}`);
-    return false;
-  });
-  return outlived ? "the head was committed longer ago than the repository keeps its Actions runs" : undefined;
+  const days = github.actionsRetentionDays?.(pr.repo);
+  return days !== undefined && now - headSince(pr, state) > days * DAY_MS ? "the commit has been the PR's head for longer than the repository keeps its Actions runs" : undefined;
 }
 
 /**
  * For each of the task's open, ready PRs from the worker whose head is missing required checks GitHub
  * expired: re-triggers CI on that head once, then tells the issue once if that failed or did not bring
- * the checks back within `RETRIGGER_GRACE_MS`. Returns how many it re-triggered, so the caller rereads
- * the PRs before a turn.
+ * the checks back within `RETRIGGER_GRACE_MS`. Returns how many it re-triggered or told the issue about,
+ * so the caller rereads the PRs, and the issue's comments its wait reads (pr-wait.ts), before a turn.
  */
 export async function recoverExpiredChecks(
   pullRequests: PullRequestFacts[],
@@ -77,16 +89,16 @@ export async function recoverExpiredChecks(
   ctx: Context,
 ): Promise<number> {
   const now = ctx.now ?? Date.now;
-  let retriggered = 0;
+  let acted = 0;
   for (const pr of pullRequests.filter((p) => p.state === "open")) {
-    if (remember(state, pr)) await ctx.save();
+    if (remember(state, pr, new Date(now()).toISOString())) await ctx.save();
     const missing = pr.checks.required.filter((c) => c.state === "missing").map((c) => c.name);
     // Only Sergeant's own PRs are toggled. A draft is not ready for CI, and a conflicted PR gets no
     // `pull_request` CI at all: its rebase makes a new head.
     if (missing.length === 0 || pr.draft || pr.author !== deps.workerLogin || pr.mergeableState === "dirty") continue;
     let recovery = state.checkRecoveries.find((r) => samePr(r, pr) && r.headSha === pr.headSha);
     if (!recovery) {
-      const why = await expiredBecause(pr, missing, state, deps.github, ctx.log);
+      const why = expiredBecause(pr, missing, state, deps.github, now());
       if (!why) continue;
       const attempt = { repo: pr.repo, number: pr.number, headSha: pr.headSha, checks: missing, why, at: new Date(now()).toISOString() };
       const retrigger = deps.github.retriggerChecks;
@@ -100,7 +112,7 @@ export async function recoverExpiredChecks(
       await ctx.save();
       ctx.log(`${pr.repo}#${pr.number}: required checks ${missing.join(", ")} missing (${why}); re-trigger on the same head ${recovery.outcome}: ${recovery.reason}`);
       if (recovery.outcome === "retriggered") {
-        retriggered++;
+        acted++;
         continue;
       }
     }
@@ -116,6 +128,7 @@ export async function recoverExpiredChecks(
     if (!posted) continue;
     recovery.reportedAt = new Date(now()).toISOString();
     await ctx.save();
+    acted++;
   }
-  return retriggered;
+  return acted;
 }

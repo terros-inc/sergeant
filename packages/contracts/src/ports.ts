@@ -213,11 +213,11 @@ export interface GitHubPort {
    */
   assignPullRequest?(req: { repo: RepoSlug; number: number; assignee: string }): Promise<{ assigned: boolean }>;
   /**
-   * TECH-6489: whether `sha` was committed longer ago than the repository's Actions retention
-   * (`actionsRetentionDays`, GitHub's default of 90 days when unset), so any workflow run on it has
-   * expired and taken its check results with it. Optional, so a fake without it finds none expired.
+   * TECH-6489: how many days GitHub keeps the repository's Actions runs, and their check results with
+   * them (`actionsRetentionDays`, GitHub's default of 90 when unset). Read from configuration, no request.
+   * Optional, so a fake without it finds no head older than the retention.
    */
-  outlivedActionsRetention?(repo: RepoSlug, sha: Sha): Promise<boolean>;
+  actionsRetentionDays?(repo: RepoSlug): number;
   /**
    * TECH-6489: fires CI again on an open, ready PR's same head, never through a commit: converts it to
    * draft and marks it ready for review again, which sends `ready_for_review`. Rejects when the PR is

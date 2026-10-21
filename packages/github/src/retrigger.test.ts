@@ -10,12 +10,11 @@ const req = { repo, number: 7, expectedHeadSha: head };
 const json = (value: unknown) => Response.json(value);
 const livePr = (over: object = {}) => ({ node_id: "PR_1", state: "open", draft: false, user: { login: "sergeant-worker[bot]" }, head: { sha: head }, ...over });
 
-function port(answer: (path: string, body: { query?: string } | undefined) => Response, config: GitHubRepositoryConfig = { mergeMethod: "squash" }, now?: number) {
+function port(answer: (path: string, body: { query?: string } | undefined) => Response, config: GitHubRepositoryConfig = { mergeMethod: "squash" }) {
   const calls: { path: string; method: string; query?: string | undefined }[] = [];
   const github = createGitHubPort({
     token: async () => "test",
     repositories: { [repo]: config },
-    ...(now !== undefined && { now: () => now }),
     fetch: async (input, init) => {
       const path = String(input).replace("https://api.github.com", "");
       const body = init?.body ? (JSON.parse(String(init.body)) as { query?: string }) : undefined;
@@ -53,11 +52,7 @@ test("a ready step GitHub refuses says the PR may be left a draft", async () => 
   await expect(github.retriggerChecks?.(req)).rejects.toThrow(/may be left a draft: Something went wrong/);
 });
 
-test("a head outlives the configured Actions retention, or GitHub's default of 90 days without one", async () => {
-  const now = Date.parse("2026-10-21T00:00:00Z");
-  const committed = (days: number) => () => json({ committer: { date: new Date(now - days * 86_400_000).toISOString() } });
-  expect(await port(committed(8), { mergeMethod: "squash", actionsRetentionDays: 7 }, now).github.outlivedActionsRetention?.(repo, head)).toBe(true);
-  expect(await port(committed(6), { mergeMethod: "squash", actionsRetentionDays: 7 }, now).github.outlivedActionsRetention?.(repo, head)).toBe(false);
-  expect(await port(committed(30), { mergeMethod: "squash" }, now).github.outlivedActionsRetention?.(repo, head)).toBe(false);
-  expect(await port(committed(91), { mergeMethod: "squash" }, now).github.outlivedActionsRetention?.(repo, head)).toBe(true);
+test("the Actions retention is the configured days, or GitHub's default of 90 without one", () => {
+  expect(port(() => json({}), { mergeMethod: "squash", actionsRetentionDays: 7 }).github.actionsRetentionDays?.(repo)).toBe(7);
+  expect(port(() => json({})).github.actionsRetentionDays?.(repo)).toBe(90);
 });

@@ -20,7 +20,7 @@ const pr = (state: "passed" | "missing" | "pending", over: Partial<PullRequestFa
   ...over,
 });
 
-function harness(opts: { retrigger?: Error; outlived?: boolean } = {}) {
+function harness(opts: { retrigger?: Error; retentionDays?: number } = {}) {
   const state: Pick<TaskState, "passedChecks" | "checkRecoveries"> = { passedChecks: [], checkRecoveries: [] };
   const retriggered: { repo: string; number: number; expectedHeadSha: string }[] = [];
   const posted: { body: string; key: string }[] = [];
@@ -30,7 +30,7 @@ function harness(opts: { retrigger?: Error; outlived?: boolean } = {}) {
       retriggered.push(req);
       if (opts.retrigger) throw opts.retrigger;
     },
-    outlivedActionsRetention: async () => opts.outlived ?? false,
+    actionsRetentionDays: () => opts.retentionDays ?? 90,
   } as unknown as GitHubPort;
   const linear = { postComment: async (req: { body: string; key: string }) => void posted.push(req) } as unknown as LinearPort;
   const pass = (prs: PullRequestFacts[], agentComments: AgentComment[] = []) =>
@@ -55,10 +55,32 @@ test("a required check that passed and then went missing on the same head re-run
   expect(h.posted).toEqual([]);
 });
 
-test("a head older than the repository's Actions retention counts as expired with no earlier pass on record", async () => {
-  const h = harness({ outlived: true });
-  expect(await h.pass([pr("missing")])).toBe(1);
-  expect(h.state.checkRecoveries[0]).toMatchObject({ why: expect.stringMatching(/longer ago than the repository keeps its Actions runs/) });
+const DAY_MS = 86_400_000;
+const reviewOn = (commitId: string, createdAt: string): NonNullable<PullRequestFacts["botFeedback"]>[number] => ({
+  id: "review:1", kind: "review", author: "sergeant-reviewer[bot]", state: "APPROVED", body: "", path: null, line: null, commitId, createdAt, updatedAt: createdAt, url: `https://github.com/${repo}/pull/7#pullrequestreview-1`,
+});
+
+test("a head reviewed longer ago than the repository's Actions retention counts as expired with no earlier pass on record", async () => {
+  // A task already waiting when Sergeant started recording, or whose state was lost: the review on this
+  // head proves how long it has been the head.
+  const h = harness({ retentionDays: 7 });
+  expect(await h.pass([pr("missing", { botFeedback: [reviewOn(head, "2026-09-20T10:00:00.000Z")] })])).toBe(1);
+  expect(h.state.checkRecoveries[0]).toMatchObject({ why: expect.stringMatching(/has been the PR's head for longer than the repository keeps its Actions runs/) });
+});
+
+test("a new head with an old commit date waits for its first checks until it has been the head for longer than the retention", async () => {
+  // A rebase, cherry-pick or push of an old commit: its commit date is weeks back, but it only just became
+  // the head, and the only review is on the previous head. Only how long it has been the head counts.
+  const h = harness({ retentionDays: 7 });
+  const fresh = (over: Partial<PullRequestFacts> = {}) => pr("missing", { botFeedback: [reviewOn("b".repeat(40), "2026-09-01T10:00:00.000Z")], ...over });
+  expect(await h.pass([fresh()])).toBe(0);
+  h.advance(7 * DAY_MS);
+  expect(await h.pass([fresh()])).toBe(0);
+  expect(h.retriggered).toEqual([]);
+  // Seen as the head, still missing every check, for longer than the retention: its runs expired.
+  h.advance(1);
+  expect(await h.pass([fresh()])).toBe(1);
+  expect(h.retriggered).toEqual([{ repo, number: 7, expectedHeadSha: head }]);
 });
 
 test("a new head whose checks have not reported waits as before, even after its PR's previous head passed", async () => {
@@ -68,7 +90,7 @@ test("a new head whose checks have not reported waits as before, even after its 
   expect(await h.pass([pr("missing")])).toBe(0);
   expect(h.retriggered).toEqual([]);
   expect(h.posted).toEqual([]);
-  expect(h.state.passedChecks).toEqual([{ repo, number: 7, headSha: head, checks: [] }]);
+  expect(h.state.passedChecks).toEqual([{ repo, number: 7, headSha: head, since: "2026-10-01T12:30:00.000Z", checks: [] }]);
 });
 
 test.each<[string, Partial<PullRequestFacts>]>([
@@ -76,7 +98,8 @@ test.each<[string, Partial<PullRequestFacts>]>([
   ["a draft", { draft: true }],
   ["a conflicted PR", { mergeableState: "dirty" }],
 ])("%s is never toggled", async (_, over) => {
-  const h = harness({ outlived: true });
+  const h = harness();
+  await h.pass([pr("passed", over)]);
   expect(await h.pass([pr("missing", over)])).toBe(0);
   expect(h.retriggered).toEqual([]);
 });
@@ -84,7 +107,8 @@ test.each<[string, Partial<PullRequestFacts>]>([
 test("a re-trigger that fails is told to the issue at once, once, and never tried again on that head", async () => {
   const h = harness({ retrigger: new Error("could not convert o/canary#7 to draft: Resource not accessible by integration") });
   await h.pass([pr("passed")]);
-  expect(await h.pass([pr("missing")])).toBe(0);
+  // Told: the caller rereads the issue before a turn, so the turn already sees the human wait.
+  expect(await h.pass([pr("missing")])).toBe(1);
   expect(h.posted).toHaveLength(1);
   const [comment] = h.posted;
   expect(comment?.key).toBe(expiredChecksKey(issueId, pr("missing")));
@@ -94,7 +118,7 @@ test("a re-trigger that fails is told to the issue at once, once, and never trie
   expect(comment?.body).toContain("convert the PR to draft and back to ready for review");
 
   const shown = [{ id: commentIdFor(comment?.key ?? ""), createdAt: "2026-10-01T10:00:00.000Z", body: comment?.body ?? "" }];
-  await h.pass([pr("missing")], shown);
+  expect(await h.pass([pr("missing")], shown)).toBe(0);
   expect(h.retriggered).toHaveLength(1);
   expect(h.posted).toHaveLength(1);
 });

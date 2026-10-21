@@ -325,12 +325,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       return Promise.all(own.map(async (b) => ({ ...b, committedAt: commit.parse(await request(`/repos/${repo}/git/commits/${b.sha}`)).committer.date })));
     },
 
-    async outlivedActionsRetention(repo, sha) {
-      const { config } = configFor(repo);
-      const commit = z.object({ committer: z.object({ date: z.string() }) }).parse(await request(`/repos/${repo}/git/commits/${Sha.parse(sha)}`));
-      const days = config.actionsRetentionDays ?? DEFAULT_ACTIONS_RETENTION_DAYS;
-      return now() - Date.parse(commit.committer.date) > days * 24 * 60 * 60_000;
-    },
+    actionsRetentionDays: (repo) => configFor(repo).config.actionsRetentionDays ?? DEFAULT_ACTIONS_RETENTION_DAYS,
 
     retriggerChecks: (req) => (configFor(req.repo), retriggerChecks(request, req)),
 
