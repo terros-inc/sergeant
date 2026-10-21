@@ -41,14 +41,54 @@ export async function adoptions(
   ].sort();
 }
 
-/** Posts the takeover notice, if any; a failed post is logged and never blocks the start. */
-export async function postAdoptions(issueId: string, items: string[], linear: Pick<LinearPort, "postComment">, log: (line: string) => void): Promise<void> {
+export type AdoptionNotice = { key: string; body: string };
+
+/**
+ * Posts the takeover notice, if any. A failed post never blocks the start: it is kept (`deferAdoption`)
+ * and the loop posts it again every poll until Linear confirms it (`retryAdoptions`).
+ */
+export async function postAdoptions(
+  issueId: string,
+  items: string[],
+  ports: { linear: Pick<LinearPort, "postComment">; deferAdoption?: (notice: AdoptionNotice) => Promise<void> },
+  log: (line: string) => void,
+): Promise<void> {
   if (items.length === 0) return;
-  const body =
-    `Sergeant took over ${items.join("; ")}, and its worker continues there. ` +
-    "Sergeant reviews and merges only PRs its own worker opened, so a human reviews and merges a PR taken over.";
-  await linear.postComment({ issueId, body, key: adoptedKey(issueId, items) }).then(
+  const notice = {
+    key: adoptedKey(issueId, items),
+    body:
+      `Sergeant took over ${items.join("; ")}, and its worker continues there. ` +
+      "Sergeant reviews and merges only PRs its own worker opened, so a human reviews and merges a PR taken over.",
+  };
+  await ports.linear.postComment({ issueId, ...notice }).then(
     () => log(`told the issue the worker takes over ${items.join("; ")}`),
-    (e: Error) => log(`takeover comment not posted: ${e.message}`),
+    async (e: Error) => {
+      log(`takeover comment not posted; the next poll tries again: ${e.message}`);
+      await ports.deferAdoption?.(notice);
+    },
   );
+}
+
+/**
+ * Posts each kept notice again, under its own key, so Linear shows it at most once however often it is
+ * tried, and drops each Linear confirms. The loop calls it every poll before anything that may comment,
+ * so a notice that failed at the start still comes before a later comment that does post.
+ */
+export async function retryAdoptions(
+  issueId: string,
+  state: { unpostedAdoptions: AdoptionNotice[] },
+  linear: Pick<LinearPort, "postComment">,
+  log: (line: string) => void,
+  save: () => Promise<void>,
+): Promise<void> {
+  for (const notice of [...state.unpostedAdoptions]) {
+    const posted = await linear.postComment({ issueId, ...notice }).then(
+      () => true,
+      (e: Error) => (log(`takeover comment still not posted: ${e.message}`), false),
+    );
+    if (!posted) continue;
+    state.unpostedAdoptions = state.unpostedAdoptions.filter((n) => n.key !== notice.key);
+    await save();
+    log(`posted the takeover comment ${notice.key}`);
+  }
 }

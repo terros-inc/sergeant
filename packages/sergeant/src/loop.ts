@@ -5,6 +5,7 @@ import { conversationRevision, SituationReport, type Conversation, type Proposed
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { driveMerged, exists, mergedOf, reopenReason } from "./after-merge.ts";
 import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
+import { retryAdoptions } from "./adopted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
 import { budgetStatus, clockActive, DEFAULT_BUDGET, openWindow, windowFor } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
@@ -120,6 +121,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       state.repositories = [...new Set([...state.repositories, ...repositories])];
       await save();
     },
+    async deferAdoption(notice) {
+      if (!state.unpostedAdoptions.some((n) => n.key === notice.key)) state.unpostedAdoptions.push(notice);
+      await save();
+    },
   };
   // A question whose post failed or was never confirmed (UNF-727). It is posted again under the same
   // key every poll until Linear shows it or a human changes the conversation, never left to an idle
@@ -228,6 +233,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     await resolveDue(conversation);
+    // TECH-6164: a takeover notice whose post failed at the worker's start, before this pass's question,
+    // progress or other comments, which would otherwise come first (adopted.ts).
+    await retryAdoptions(conversation.issue.id, state, deps.linear, log, save);
     const holds = await checkHolds({ conversation, live, unknown, budgetOf: () => budgetOf(runs, unknown.length) }, configured, ctx);
     if (holds.hold) {
       if (holds.hold === "question") unposted = undefined;

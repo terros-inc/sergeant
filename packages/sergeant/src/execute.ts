@@ -100,7 +100,7 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
           // now, before the run starts, so it is Sergeant's first comment on that work (adopted.ts).
           if (action.kind === "start_worker") {
             const items = await adoptions(issue, action.repositories, situation.pullRequests, { ...ports, log: (l) => ports.log?.(l) });
-            await postAdoptions(issue.id, items, ports.linear, (l) => ports.log?.(l));
+            await postAdoptions(issue.id, items, ports, (l) => ports.log?.(l));
           }
           const runId = `run_${randomUUID()}`;
           // Accepted: the deadline can pass during this milliseconds-long write, and the run still starts.

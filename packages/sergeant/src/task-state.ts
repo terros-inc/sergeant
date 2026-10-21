@@ -157,6 +157,11 @@ const TaskState = z.looseObject({
   ciReruns: z.array(CiRerun.loose()).default([]),
   /** TECH-6489: per PR of the task, its head, when Sergeant first saw it there, and the required checks seen passed on it (expired-checks.ts). */
   passedChecks: z.array(z.looseObject({ repo: RepoSlug, number: z.number().int(), headSha: Sha, since: z.iso.datetime(), checks: z.array(z.string()) })).default([]),
+  /**
+   * TECH-6164: takeover notices (adopted.ts) whose post at a worker's start failed, posted again every poll
+   * under the same key until Linear confirms one, then dropped.
+   */
+  unpostedAdoptions: z.array(z.looseObject({ key: z.string(), body: z.string() })).default([]),
   /** TECH-6489: once per PR head, Sergeant's re-trigger of required checks GitHub expired, and when it told the issue. */
   checkRecoveries: z
     .array(

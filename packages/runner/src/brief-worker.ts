@@ -41,7 +41,7 @@ ${files}${renderLinkedIssueBackground(spec.conversation)}${renderContext(spec.co
 
 - Repositories you may change, cloned at their default branch under \`/workspace/<owner>/<name>\`:
 ${spec.repositories.map((r) => `  - ${r}`).join("\n")}
-- Branches on origin whose name holds \`${id}\` exactly, any prefix (other issues' branches are left out):
+- Branches on origin whose name holds \`${id}\` exactly, any prefix (other issues' branches are not listed):
 ${existingBranches.length ? existingBranches.map((b) => `  - ${b}`).join("\n") : "  - (none: start a fresh branch)"}
 - Pull requests Linear links to this issue:
 ${linked.length ? linked.map((p) => `  - https://github.com/${p.repo}/pull/${p.number}`).join("\n") : "  - (none)"}

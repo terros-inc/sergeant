@@ -1,6 +1,7 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 import type { ProposedAction, PullRequestFacts } from "@terros/sergeant-contracts";
 import { execute } from "./execute.ts";
+import { cleanup, pr as loopPr, scenario, start as loopStart, stopAfter, turnOf, worker } from "./budget-scenario.ts";
 import { conversation, ports, pr, situation } from "./execute-fixtures.ts";
 
 // TECH-6164: the branch or PR a human or another agent started, that a worker takes over, is named on the
@@ -43,4 +44,30 @@ test("a worker start with nothing someone else started posts no takeover comment
   p.github.branches = async () => ["main", "sergeant/unf-1-own", "grok/unf-12"];
   expect(await execute(start, { ...situation, runs: [] }, p)).toMatchObject({ status: "done" });
   expect([posted, started.length]).toEqual([[], 1]);
+});
+
+afterEach(cleanup);
+
+test("a takeover notice whose post failed at the start is posted on a later poll, once, before the worker's question", async () => {
+  let failures = 1;
+  let turns = 0;
+  const { posted, live } = await scenario({
+    // The linked PR #7 another agent opened, which the worker takes over.
+    pullRequest: () => ({ ...loopPr, author: "grok[bot]" }),
+    beforePost: ({ key }) => {
+      if (key.startsWith("adopted:") && failures-- > 0) throw new Error("Linear is down");
+    },
+    // The worker ends at once, so the next turn asks a question.
+    runner: { start: async () => {}, status: async (runId) => ({ ...worker("succeeded"), runId }), cancel: async () => {} },
+    reasoner: async () => turnOf(++turns === 1 ? [loopStart] : [{ kind: "ask_human", question: "Which way?" }]),
+    onPoll: stopAfter(5),
+  });
+  expect(turns).toBeGreaterThan(1);
+  const notices = live.agentComments.filter((c) => c.body.startsWith("Sergeant took over "));
+  expect(notices).toHaveLength(1);
+  expect(notices[0]?.body).toContain("o/canary#7](https://github.com/o/canary/pull/7), which grok[bot] opened");
+  // Posted first among Sergeant's comments on the work, though the start's attempt failed.
+  expect(posted[0]).toBe(notices[0]?.body);
+  expect(posted.filter((b) => b.startsWith("Sergeant took over "))).toHaveLength(1);
+  expect(posted.some((b) => b.includes("Which way?"))).toBe(true);
 });
