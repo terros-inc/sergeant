@@ -85,7 +85,7 @@ describe("taskDefinition", () => {
 
   it("carries credentials only as secret references, never values, and has no task role", () => {
     const [worker] = taskDefinition({ ...input, attachments: false }).containerDefinitions;
-    expect(worker?.secrets.map((s) => s.name)).toEqual(["SERGEANT_BRIEF", "GH_TOKEN", "GH_READ_TOKEN", "CODEX_CREDENTIAL"]);
+    expect(worker?.secrets.map((s) => s.name)).toEqual(["SERGEANT_BRIEF_GZ", "GH_TOKEN", "GH_READ_TOKEN", "CODEX_CREDENTIAL"]);
     expect(worker?.secrets.every((s) => s.valueFrom === `arn:aws:secretsmanager:r:1:secret:s-AbC:${s.name}::`)).toBe(true);
     expect(worker?.environment.map((e) => e.name)).not.toEqual(expect.arrayContaining(["GH_TOKEN", "GH_READ_TOKEN", "CODEX_CREDENTIAL", "CLAUDE_CODE_OAUTH_TOKEN"]));
     expect(taskDefinition({ ...input, attachments: false })).not.toHaveProperty("taskRoleArn");
@@ -98,6 +98,6 @@ describe("taskDefinition", () => {
 
   it("references the public-data denylist only when the installation has one, for the same reason", () => {
     const [worker] = taskDefinition({ ...input, attachments: false, denylist: true }).containerDefinitions;
-    expect(worker?.secrets.map((s) => s.name)).toEqual(["SERGEANT_BRIEF", "PUBLIC_DATA_DENYLIST", "GH_TOKEN", "GH_READ_TOKEN", "CODEX_CREDENTIAL"]);
+    expect(worker?.secrets.map((s) => s.name)).toEqual(["SERGEANT_BRIEF_GZ", "PUBLIC_DATA_DENYLIST", "GH_TOKEN", "GH_READ_TOKEN", "CODEX_CREDENTIAL"]);
   });
 });
