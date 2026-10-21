@@ -147,6 +147,25 @@ const TaskState = z.looseObject({
   reportRecoveries: z.record(z.string(), z.looseObject({ retryRunId: RunId.optional() })).default({}),
   /** TECH-5839: each CI rerun a worker's report asked for, once handled, with its outcome (ci-reruns.ts). */
   ciReruns: z.array(CiRerun.loose()).default([]),
+  /** TECH-6489: per PR of the task, its head and the required checks seen passed on it (expired-checks.ts). */
+  passedChecks: z.array(z.looseObject({ repo: RepoSlug, number: z.number().int(), headSha: Sha, checks: z.array(z.string()) })).default([]),
+  /** TECH-6489: once per PR head, Sergeant's re-trigger of required checks GitHub expired, and when it told the issue. */
+  checkRecoveries: z
+    .array(
+      z.looseObject({
+        repo: RepoSlug,
+        number: z.number().int(),
+        headSha: Sha,
+        checks: z.array(z.string()),
+        /** Why the checks count as expired rather than not yet reported. */
+        why: z.string(),
+        at: z.iso.datetime(),
+        outcome: z.enum(["retriggered", "failed"]),
+        reason: z.string(),
+        reportedAt: z.iso.datetime().optional(),
+      }),
+    )
+    .default([]),
 });
 export type TaskState = z.infer<typeof TaskState>;
 type State = TaskState;

@@ -101,7 +101,7 @@ FactReader reads, for each linked PR's head SHA:
 - the required checks for the PR's base branch (from rulesets and branch protection);
 - check runs and commit statuses for that exact SHA;
 - an `overall` summary: `passed` (every required check succeeded), `failed` (any required check
-  failed or was cancelled), `pending`, `missing` (a required check has not reported at all yet), or
+  failed or was cancelled), `pending`, `missing` (a required check has no result on that SHA: not reported yet, or deleted with an expired run, below), or
   `not_run_conflict` (the PR conflicts with its base, so GitHub does not run `pull_request` CI).
 
 `missing` and `not_run_conflict` are never reported as failures (S1 retro F1: "no CI" read as "CI
@@ -118,7 +118,22 @@ privileged workflow), and completed with conclusion `failure`; and it must have 
 twice, by GitHub's `run_attempt` or this task's records, whichever is more. Sergeant then calls GitHub's
 `rerun-failed-jobs` with the rerun App. Every request is recorded in the task's `state.json`
 (`ciReruns`: the requesting run, PR, head, workflow run, workflow, attempt, outcome, reason) and shown
-by `sgt task show` and in the Situation Report. Sergeant never decides on its own to rerun CI.
+by `sgt task show` and in the Situation Report. Sergeant never decides on its own to rerun failed CI.
+
+A required check can also go `missing` after it passed: GitHub deletes a workflow run, and its check
+results with it, once the repository's Actions retention passes, and an expired run cannot be rerun
+(TECH-6489). Sergeant's core (`packages/sergeant/src/expired-checks.ts`) records the required checks it
+sees pass on each of the task's PR heads (`passedChecks` in `state.json`). A required check `missing` on an
+open, ready, unconflicted PR the worker App opened counts as expired when Sergeant saw it pass on that
+same head, or when the head was committed longer ago than the repository's `actionsRetentionDays`
+(GitHub's default of 90 when unset; reading the setting needs `administration: read`, which the
+control-plane App does not hold). Sergeant then re-triggers CI on that head once, by converting the PR to
+draft and back to ready for review (`ready_for_review`), never by a commit, so the head and its approvals
+stay valid; GitHub's check-suite re-request is not used, since an expired run has nothing left to
+re-request. If the toggle fails, or the checks have not reported again within 15 minutes, Sergeant posts
+one "Required checks missing" comment on the issue (the checks, what it tried, what a human can do) and
+waits on a human for that head, like a handoff. Every attempt is recorded in `checkRecoveries`. A new
+head whose checks have not reported, and that Sergeant never saw pass, waits as before.
 
 ## 7. Merging
 

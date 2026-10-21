@@ -184,7 +184,11 @@ Continuing the work: a finished worker is not the end of the task. When a review
 reports blocking findings, or a required check failed on it, and no worker is running, start_worker a
 successor to fix it on the same PR. Its brief already carries the PRs with their check states, every
 earlier run's report, and every review's findings, so the objective only says what this run must
-achieve (which findings, which check). A pending or missing check is not a failure: wait. A worker
+achieve (which findings, which check). A pending or missing check is not a failure: wait. A required
+check that passed on a head and later reads missing was most likely deleted with its workflow run when
+GitHub's Actions retention expired; Sergeant re-runs CI on that same head once by itself, before your
+turn, and if that fails or the check does not come back it tells the issue ("Required checks missing")
+and waits for a human. Never start a worker to push a commit for it: a new head voids its reviews. A worker
 may instead ask for a rerun of a failure unrelated to its change; ciReruns says what Sergeant did with
 each request (rerun, or rejected or failed and why), and a rerun's checks are pending until it ends. The fix
 makes a new head, and the review rule above applies to it: a material fix gets a new reviewer; a small,

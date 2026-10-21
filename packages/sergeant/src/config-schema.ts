@@ -84,6 +84,8 @@ export const InstallationConfig = z.strictObject({
       mergePolicy: MergePolicy.default("human"),
       /** See `GitHubRepositoryConfig.observedChecksFallback`. Off unless set. */
       observedChecksFallback: z.boolean().default(false),
+      /** See `GitHubRepositoryConfig.actionsRetentionDays`. Unset is GitHub's default, 90 days. */
+      actionsRetentionDays: z.number().int().min(1).max(400).optional(),
       /**
        * TECH-5219: this repository's budget window, for a repository whose builds, tests, and CI need
        * more (or less) than the installation's `budget`. Each field unset keeps the installation's.

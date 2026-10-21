@@ -212,6 +212,19 @@ export interface GitHubPort {
    * Safe to repeat. Optional, so a fake without it assigns nobody.
    */
   assignPullRequest?(req: { repo: RepoSlug; number: number; assignee: string }): Promise<{ assigned: boolean }>;
+  /**
+   * TECH-6489: whether `sha` was committed longer ago than the repository's Actions retention
+   * (`actionsRetentionDays`, GitHub's default of 90 days when unset), so any workflow run on it has
+   * expired and taken its check results with it. Optional, so a fake without it finds none expired.
+   */
+  outlivedActionsRetention?(repo: RepoSlug, sha: Sha): Promise<boolean>;
+  /**
+   * TECH-6489: fires CI again on an open, ready PR's same head, never through a commit: converts it to
+   * draft and marks it ready for review again, which sends `ready_for_review`. Rejects when the PR is
+   * not open and ready at `expectedHeadSha`, or a step fails; a failure after the draft step says the
+   * PR may be left a draft. Optional, so a fake without it re-triggers nothing.
+   */
+  retriggerChecks?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<void>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**
