@@ -24,6 +24,7 @@ test("a task with many runs keeps the newest reports whole and only a heading li
   const text = brief(runs);
   const earlier = text.slice(text.indexOf("### Earlier runs"), text.indexOf("\n## Environment"));
 
+  // The bound covers the reports kept whole; each run left out adds its heading line on top.
   expect(earlier.length).toBeLessThan(EARLIER_RUNS_BOUND + 40 * 100);
   // The last review's blocking finding and the last worker's report reach the successor whole.
   expect(earlier).toContain("- [blocking] f39: Finding of review 39.");
@@ -45,4 +46,16 @@ test("the newest report stays whole even when it alone is over the bound", () =>
   const text = brief([worker(0), big]);
   expect(text).toContain("x".repeat(EARLIER_RUNS_BOUND + 1));
   expect(text).toContain("- run_w0 (worker, succeeded): outcome completed");
+});
+
+test("the newest review's findings stay whole when a later worker report is over the bound", () => {
+  // A review followed by an oversized worker report used to cut the review to its heading line, so
+  // the successor never saw the blocking findings it had to answer.
+  const big = RunRecord.parse({ ...worker(3), report: { ...worker(3).report, summary: "x".repeat(EARLIER_RUNS_BOUND + 1) } });
+  const text = brief([worker(0), review(1), worker(2), big]);
+  expect(text).toContain("x".repeat(EARLIER_RUNS_BOUND + 1));
+  expect(text).toContain("#### run_r1 (reviewer, succeeded)\n\n");
+  expect(text).toContain("- [blocking] f1: Finding of review 1.");
+  expect(text).toMatch(/left out[^\n]*\n\n- run_w0 \(worker, succeeded\): outcome completed\n- run_w2 \(worker, succeeded\): outcome completed\n\n#### run_r1/);
+  expect(text).not.toContain("Pushed fix 2.");
 });

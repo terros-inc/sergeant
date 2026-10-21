@@ -103,9 +103,11 @@ successor's Context carries the predecessor's report summary, known gaps, and `h
 open PRs with their branches. The successor starts from what was pushed.
 
 **Earlier runs** (a worker brief's record of every earlier run on the task, TECH-6462) have their own
-bound of 16 KB (16,384 characters). Under it every report is whole. Over it the newest reports stay
-whole, the newest always, and every older run keeps one heading line (run id, role, status, and its
-outcome or verdict). On Fargate the brief travels gzipped in the run's 64 KiB secret, beside its
+bound of 16 KB (16,384 characters) on the reports carried whole. Under it every report is whole. The
+newest worker report and the newest review are always whole, whatever their order and size, so the
+newest blocking findings always reach the successor; other reports stay whole, newest first, while
+they fit, and every run left out keeps one heading line (run id, role, status, and its outcome or
+verdict) outside the bound. On Fargate the brief travels gzipped in the run's 64 KiB secret, beside its
 credentials ([`packages/runner/README.md`](../../packages/runner/README.md#fargate-fargaterunner-tech-5237)); a brief that
 still does not fit fails the start, before anything is created, with its size.
 
