@@ -323,7 +323,9 @@ on the issue after the merge, an edit to its title or description no turn has re
 and it works on as before the merge, so the next turn can start a worker for what is left; a later
 closing merge is its landing then. Each landing is reopened once. Once the issue is Done, nothing
 reopens it: a reopened landing is the task's landing again, with its comments already posted, work the
-reopen started and still running is canceled, and the task is seen through. Comments that come after
+reopen started and still running is canceled, and the task is seen through. A task reopened after more
+than one closing merge keeps every one: the audit any of them started is waited on before the task is
+seen through, and canceled with the task. Comments that come after
 that, and every comment on the task's merged PRs, go to the post-merge feedback sweep (§11), which
 leaves alone a comment the task's loop reads. A wake that cannot reopen the task (the issue Done,
 Canceled, in Backlog, or no longer delegated) answers `after_merge`, and `sgt task wake` says no turn

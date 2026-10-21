@@ -183,7 +183,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
 
     if (state.merged) {
-      const afterMerge = { runIds: state.runIds, stop: files.stop, opts, deps, log, save, resolveDue, recordReviews, budgetOf, reopen };
+      const afterMerge = { runIds: state.runIds, stop: files.stop, opts, deps, log, save, resolveDue, recordReviews, budgetOf, reopen, reopened: state.reopened };
       const finished = await driveMerged(state.merged, afterMerge);
       if (finished) return finished;
       if (!state.merged) continue;
@@ -253,7 +253,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // own PR reported closing: a human may link one merged elsewhere, and a merged `Part of` PR is only
     // a fact for the next turn. TECH-6477: a merge reopened is the task's landing again only once the
     // issue is Done, with the effects it made already, so it is seen through as it would have been; Done
-    // is the human's call, so work the reopen started and still running stops.
+    // is the human's call, so work the reopen started and still running stops. Reopened more than once,
+    // the others stay reopened and their audits are still waited on (task-state.ts `landings`).
     const reopenedAs = (p: PullRequestFacts) => state.reopened.find((m) => m.repo === p.repo && m.number === p.number && m.mergedSha === p.mergedSha);
     const done = conversation.issue.stateType === "completed";
     const landed = landedOf(pullRequests.filter((p) => done || !reopenedAs(p)), runs, deps.workerLogin);

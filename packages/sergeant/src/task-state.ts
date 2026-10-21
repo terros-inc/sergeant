@@ -116,7 +116,8 @@ const TaskState = z.looseObject({
   /**
    * TECH-6477: closing merges human direction reopened while their issue was still open (after-merge.ts
    * `reopenReason`), oldest first. The task works on from them as before its merge; one is the task's
-   * landing again only once the issue is Done (loop.ts).
+   * landing again only once the issue is Done (loop.ts). The rest stay here, their effects already made,
+   * so the audits they started are still waited on and canceled with the task (`landings`).
    */
   reopened: z.array(Merged).default([]),
   /**
@@ -175,6 +176,16 @@ const TaskState = z.looseObject({
     .default([]),
 });
 export type TaskState = z.infer<typeof TaskState>;
+
+/**
+ * TECH-6477: every closing merge the task recorded, its landing and each reopened one. A task reopened
+ * more than once before Done keeps one record per merge, and only one is its landing again on Done
+ * (loop.ts), so an audit any of them started is tracked through all of them until the task is seen through or stopped.
+ */
+export const landings = (state: Pick<TaskState, "merged" | "reopened">) => [...(state.merged ? [state.merged] : []), ...state.reopened];
+
+/** The audits the task's closing merges started (`landings`). */
+export const auditRunIds = (state: Pick<TaskState, "merged" | "reopened">) => landings(state).flatMap((m) => (m.audit ? [m.audit.runId] : []));
 type State = TaskState;
 
 /** What a turn changes in the task's state; `fingerprint` is the one to commit, if any. */

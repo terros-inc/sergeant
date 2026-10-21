@@ -9,6 +9,7 @@ import { costTotal, taskTurnCost } from "./cost.ts";
 import type { Ports } from "./execute.ts";
 import { feedbackComment, workerFeedback } from "./outcome.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
+import { auditRunIds } from "./task-state.ts";
 import type { ServiceDeps } from "./service.ts";
 
 // A task's stop (11 §2, TECH-4989), as commands the API, the loop, and intake only call. A task either
@@ -39,9 +40,8 @@ export class CancelConflict extends Error {}
 
 export const taskDir = (stateDir: string, ref: string) => join(stateDir, "tasks", ref);
 
-/** Every run the task recorded, its sampled audit included. */
-export const runIdsOf = (state: TaskState | undefined): RunId[] =>
-  state ? [...new Set([...state.runIds, ...(state.merged?.audit ? [state.merged.audit.runId] : [])])] : [];
+/** Every run the task recorded, the sampled audit of each of its closing merges included (TECH-6477). */
+export const runIdsOf = (state: TaskState | undefined): RunId[] => (state ? [...new Set([...state.runIds, ...auditRunIds(state)])] : []);
 
 /** Whether the task in `dir` has a stop recorded and not yet done. */
 export const cancelPending = (dir: string) => stat(intentFile(dir)).then(() => true, () => false);

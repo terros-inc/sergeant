@@ -32,7 +32,7 @@ const closer: RunRecord = {
 };
 const merged = { repo, number: 7, headSha: "a".repeat(40), mergedSha, at: ago(60), outcome: "Merged.", outcomePostedAt: ago(60), auditDrawnAt: ago(60) };
 
-async function mergedTask(o: { stateType: string; state: string; completedAt?: string; description?: string }) {
+async function mergedTask(o: { stateType: string; state: string; completedAt?: string; description?: string; audit?: string; auditSampleRate?: number }) {
   stateDir = await mkdtemp(join(tmpdir(), "sergeant-after-merge-reopen-test-"));
   const dir = join(stateDir, "tasks", "UNF-1");
   await mkdir(dir, { recursive: true });
@@ -42,14 +42,14 @@ async function mergedTask(o: { stateType: string; state: string; completedAt?: s
     issueId: "UNF-1", startedAt: ago(120), turns: 5, runIds: [closer.runId], recentTurns: [], seen,
     owner: { id: "user-ann", name: "Ann", admittedAt: ago(120) },
     budget: { window: { wallMinutes: 120, costUsd: 25 }, activeMs: 0 },
-    merged: { ...merged, ...(o.completedAt && { completedAt: o.completedAt }) },
+    merged: { ...merged, ...(o.completedAt && { completedAt: o.completedAt }), ...(o.audit && { audit: { runId: o.audit } }) },
   }));
   const f = fakes(live);
   const status = f.deps.runner.status;
   f.deps.runner.status = async (id) => (id === closer.runId ? closer : status(id));
   f.deps.github.readPullRequest = async (_repo, number) => ({ ...pr(number), state: "merged", mergedSha, mergedAt: merged.at });
   const lines: string[] = [];
-  service = await startService({ enrolledRepositories: [repo], stateDir, intakeSeconds: 0.01, pollSeconds: 0.01, slowPollMinutes: 0.0001, idleMinutes: 60, port: 0, trustLoopback: true, log: (l) => void lines.push(l) }, f.deps);
+  service = await startService({ enrolledRepositories: [repo], stateDir, intakeSeconds: 0.01, pollSeconds: 0.01, slowPollMinutes: 0.0001, idleMinutes: 60, port: 0, trustLoopback: true, ...(o.auditSampleRate !== undefined && { auditSampleRate: o.auditSampleRate }), log: (l) => void lines.push(l) }, f.deps);
   const state = async () => JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as TaskState;
   return { ...f, live, lines, state, port: service.port ?? 0 };
 }
@@ -95,4 +95,57 @@ test.each([
   await vi.waitFor(async () => expect((await t.state()).merged?.completedAt).toBeTypeOf("string"), { timeout: 10_000 });
   expect([t.seen.turns, t.seen.starts]).toEqual([0, 0]);
   expect((await t.state()).reopened ?? []).toEqual([]);
+}, 30_000);
+
+// Reopened twice before Done, the task keeps a record per closing merge but only one is its landing
+// again: the other's audit must still be waited on and canceled, or the task would be marked seen
+// through, or stopped, while that audit still runs untracked.
+test("a task reopened after two closing merges tracks and cancels both merges' audits", async () => {
+  const auditA = `run_audit-${"a".repeat(40)}`;
+  const headB = "d".repeat(40);
+  const auditB = `run_audit-${headB}`;
+  const t = await mergedTask({ stateType: "started", state: "In Progress", audit: auditA, auditSampleRate: 1 });
+  const runs = new Map<string, RunRecord>([[auditA, { runId: auditA, role: "reviewer", status: "running", provider: "p", model: "m", report: null }]]);
+  const workers: string[] = [];
+  const { start, status } = t.deps.runner;
+  t.deps.runner.start = async (spec) => {
+    await start(spec);
+    if (spec.role === "worker") workers.push(spec.runId);
+    // The fake runner records every start as a worker; an audit is a reviewer.
+    Object.assign(await status(spec.runId), { role: spec.role });
+  };
+  t.deps.runner.status = async (id) => runs.get(id) ?? status(id);
+  const cancel = t.deps.runner.cancel;
+  t.deps.runner.cancel = async (id) => (runs.has(id) ? void (t.seen.canceled.push(id), Object.assign(runs.get(id) ?? {}, { status: "canceled" })) : cancel(id));
+  let bMerged = false;
+  t.deps.github.readPullRequest = async (_repo, number) =>
+    number === 7 ? { ...pr(7), state: "merged", mergedSha, mergedAt: merged.at }
+    : { ...pr(number), headSha: headB, ...(bMerged ? { state: "merged", mergedSha: "c".repeat(40), mergedAt: ago(0) } : {}) };
+  const comment = (id: string) => t.live.conversation.humanComments.push({ id, author: { id: "user-ann", name: "Ann" }, createdAt: ago(0), updatedAt: ago(0), body: "There is more to do." });
+
+  // Cycle 1: #7 reopened by a comment; the reopen's worker reports #8 closing, and #8 merges.
+  comment("c1");
+  await vi.waitFor(() => expect(workers).toHaveLength(1), { timeout: 10_000 });
+  Object.assign(await t.deps.runner.status(workers[0] ?? ""), {
+    status: "succeeded",
+    report: { ...closer.report, pullRequests: [{ repo, number: 8, headSha: headB, url: pr(8).url, closesIssue: true, review: { required: false, reason: "docs" } }] },
+  });
+  bMerged = true;
+  await vi.waitFor(async () => expect((await t.state()).merged?.audit?.runId).toBe(auditB), { timeout: 10_000 });
+
+  // Cycle 2: #8 reopened by another comment, then the issue is Done.
+  await new Promise((r) => setTimeout(r, 5));
+  comment("c2");
+  await vi.waitFor(async () => expect((await t.state()).reopened.map((m) => m.number)).toEqual([7, 8]), { timeout: 10_000 });
+  Object.assign(t.live.conversation.issue, { state: "Done", stateType: "completed" });
+
+  // One merge is the landing again and the other stays reopened, yet both audits are waited on.
+  await vi.waitFor(() => expect(t.lines.some((l) => l.includes("waiting: review") && l.includes(auditA) && l.includes(auditB))).toBe(true), { timeout: 10_000 });
+  const now = await t.state();
+  expect(now.merged?.completedAt).toBeUndefined();
+  expect([now.merged?.number, ...now.reopened.map((m) => m.number)].sort()).toEqual([7, 8]);
+
+  // A cancel stops both audits, not only the landing's.
+  expect((await call(t.port, "POST", "/v1/tasks/UNF-1/cancel", { reason: "wrong approach" })).status).toBe(200);
+  expect(t.seen.canceled).toEqual(expect.arrayContaining([auditA, auditB]));
 }, 30_000);
