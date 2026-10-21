@@ -36,3 +36,16 @@ test.each([
   for (const run of rootOnly) expect({ user: run.user, command: run.command }).toEqual({ user: "root", command: run.command });
   expect(finalUser).toBe("node");
 });
+
+// install.sh builds the local Android image FROM a base it built just before. Only the default (docker
+// driver) builder reads images from the Docker Engine; an isolated docker-container builder would look for
+// that base in a registry and fail, so both builds must use the default builder (TECH-5840).
+test("install.sh builds the local Android image and its base with the builder that shares the engine's images", () => {
+  const script = readFileSync(join(DIR, "../../../deploy/host/install.sh"), "utf8").replace(/\\\n/g, " ");
+  const builds = script.split("\n").filter((line) => /^docker (buildx )?build\s/.test(line));
+  const builder = (line: string) => /--builder[ =](\S+)/.exec(line)?.[1] ?? "default";
+  const android = builds.find((line) => line.includes("Dockerfile.android"));
+  const base = /BASE_IMAGE=(\S+:local)\b/.exec(android ?? "")?.[1];
+  const baseBuild = builds.find((line) => base !== undefined && line.includes(`-t ${base} `));
+  expect({ android: android && builder(android), base: baseBuild && builder(baseBuild) }).toEqual({ android: "default", base: "default" });
+});

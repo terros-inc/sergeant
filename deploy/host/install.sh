@@ -68,12 +68,12 @@ systemctl enable --now docker
 docker build -q -t sergeant-runner:local "$repo/packages/runner/container"
 # Android workers are x86-64 even on this ARM64 host, because Android's Linux AAPT2 is x86-64-only.
 # Keep a separate amd64 base only as the parent of the local Android image; base-profile runs use the
-# small native `sergeant-runner:local` image above and never pull the Android toolchain.
-builder=sergeant-multiarch
-docker buildx inspect "$builder" >/dev/null 2>&1 || docker buildx create --name "$builder" --driver docker-container >/dev/null
-docker buildx build --builder "$builder" --quiet --platform linux/amd64 --load \
+# small native `sergeant-runner:local` image above and never pull the Android toolchain. Both builds use
+# the default (docker driver) builder, which reads the Docker Engine's own images: an isolated
+# docker-container builder cannot see the just-built base, so the Android `FROM` would fail (TECH-5840).
+docker buildx build --builder default --quiet --platform linux/amd64 --load \
   -t sergeant-runner-base-amd64:local "$repo/packages/runner/container" >/dev/null
-docker buildx build --builder "$builder" --quiet --platform linux/amd64 --load \
+docker buildx build --builder default --quiet --platform linux/amd64 --load \
   -t sergeant-runner-android:local --build-arg BASE_IMAGE=sergeant-runner-base-amd64:local \
   -f "$repo/packages/runner/container/Dockerfile.android" "$repo/packages/runner/container" >/dev/null
 (cd "$repo" && corepack pnpm install --frozen-lockfile --config.confirmModulesPurge=false)
