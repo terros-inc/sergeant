@@ -2,9 +2,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import type { Conversation, MergePr, PullRequestFacts, RunRecord, SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, conversationRevision, type Conversation, type MergePr, type PullRequestFacts, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
 import { agent, head, pr, repo, review, worker } from "./loop-fixtures.ts";
 import { runLoop } from "./loop.ts";
+import { questionKey } from "./question.ts";
 
 // Which merge ends the task (loop.ts): only the worker's closing PR, even one merged while
 // `state.json` did not record it, and its outcome is posted exactly once.
@@ -54,6 +55,41 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
   expect(comments[0]?.body).toContain("No live check yet");
   expect((await run()).outcome).toBe("done");
   expect(comments).toHaveLength(1);
+});
+
+// TECH-6470: the question hold came before the closing merge's end, so a task whose issue a human moved
+// to Done (or canceled) while Sergeant's question was open logged "waiting" every poll and stayed active.
+test.each([
+  ["Done", "completed", "done"],
+  ["Canceled", "canceled", "stopped"],
+])("a task waiting on an unanswered question ends once its issue is %s", async (state, stateType, outcome) => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-loop-test-"));
+  await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", startedAt: new Date().toISOString(), turns: 1, runIds: ["run_worker", "run_review"], recentTurns: [] }));
+  const asked: Conversation = {
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D", state, stateType, delegate: agent, assignee: { id: "user-ann", name: "Ann" }, linkedPullRequests: [{ repo, number: 7 }] },
+    humanComments: [],
+    agentComments: [],
+  };
+  const question = { id: commentIdFor(questionKey("i1", conversationRevision(asked))), createdAt: new Date().toISOString(), body: "**Question for you**\n\nWhich one?" };
+  const live: Conversation = { ...asked, agentComments: [question] };
+  const logs: string[] = [];
+  const result = await runLoop(
+    { issueId: "UNF-1", enrolledRepositories: [repo], dir, pollSeconds: 0, idleMinutes: 0, completionWaitMinutes: 0, log: (l) => logs.push(l) },
+    {
+      agentUserId: agent.id,
+      workerLogin: "sergeant-worker[bot]",
+      linear: { readConversation: async () => live, postComment: async () => {}, createFollowupIssue: async () => { throw new Error("unused"); }, moveIssueToStarted: async () => ({ moved: false as const }), readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }) },
+      github: {
+        readPullRequest: async () => ({ ...pr, state: "merged", mergedSha: "c".repeat(40) }),
+        closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => { throw new Error("already merged"); },
+      },
+      runner: { start: async () => {}, status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
+      reasoner: { turn: async () => { throw new Error("no turn on an ended issue"); } },
+    },
+  );
+
+  expect(result.outcome).toBe(outcome);
+  expect(logs.filter((l) => l.includes("has no human reply yet"))).toEqual([]);
 });
 
 // UNF-734: a task with a `Part of` PR and a closing `Fixes` PR. Only the closing PR's merge

@@ -181,17 +181,29 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   if (stillStopping.length > 0) return { stopping: stillStopping, closedPullRequests: intent.closed };
   // Every run is stopped, so nothing pushes to the task's PRs any more: close those still open, unless
   // this is a handoff, which keeps them for whoever continues the work.
-  const { issue } = await deps.linear.readConversation(ref);
-  const prs = await taskPullRequests(issue.linkedPullRequests, runs, enrolled, deps);
+  // TECH-6470: a Linear step refused with `Entity not found` gets the same answer every time, so it is
+  // logged once and skipped, and the stop finishes, rather than retrying at every intake for good. With
+  // the issue unreadable, the PRs its runs reported are still closed; nothing is said on Linear.
+  const linear = async <T>(step: string, effect: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await effect();
+    } catch (e) {
+      if (!/\bEntity not found\b/.test((e as Error).message)) throw e;
+      log(`${ref}: stopping: ${step} skipped, Linear refuses it for good: ${(e as Error).message}`);
+      return undefined;
+    }
+  };
+  const issue = (await linear("reading the issue", () => deps.linear.readConversation(ref)))?.issue;
+  const prs = await taskPullRequests(issue?.linkedPullRequests ?? [], runs, enrolled, deps);
   const open = prs.filter((p) => p.state === "open");
   // TECH-5227: the comment that ends the task ends with its total cost; `state.json` is set aside only after it.
   const state = await readTaskState(join(dir, "state.json")).catch(() => undefined);
   const turnCostUsd = state ? await taskTurnCost(join(dir, "turns.jsonl"), state.startedAt) : 0;
   const cost = costTotal({ runs, unknownRuns: unreadablePastGrace.length, turnCostUsd, startedAt: state?.startedAt });
-  if (intent.handoff) {
-    const done = await handOff(issue, intent.handoff, deps, log);
-    const body = `${handoffComment(intent.reason, issue, prs, done, unreadablePastGrace)}\n\n${cost}`;
-    await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body });
+  if (intent.handoff && issue) {
+    const done = await linear("the handoff's Linear changes", () => handOff(issue, intent.handoff!, deps, log));
+    const body = `${handoffComment(intent.reason, issue, prs, done ?? { completed: false, undelegated: false, newer: false, todo: false }, unreadablePastGrace)}\n\n${cost}`;
+    await linear("the stop's comment", () => deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body }));
   }
   for (const pr of intent.handoff ? [] : open.filter((p) => p.author === deps.workerLogin)) {
     const key = prCloseKey(pr);
@@ -205,12 +217,15 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
     log(`${ref}: closed ${pr.url}`);
     await deleteBranch(pr, deps, (line) => log(`${ref}: ${line}`));
   }
-  if (!intent.handoff) await deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body: `${stopComment(intent, unreadablePastGrace)}\n\n${cost}` });
+  if (!intent.handoff && issue) {
+    const body = `${stopComment(intent, unreadablePastGrace)}\n\n${cost}`;
+    await linear("the stop's comment", () => deps.linear.postComment({ issueId: issue.id, key: `cancel:${issue.id}:${intent.requestId}`, body }));
+  }
   // TECH-5186: an issue completed in Linear, still Sergeant's, without a recognized closing merge gets
   // its feedback like a merged one, once under the stop's key. A failed comment or label throws before
   // `state.json` is set aside and the intent removed, so the next drive retries it.
-  const feedback = issue.stateType === "completed" && checkDelegation(issue, deps.agentUserId).allowed ? feedbackComment(workerFeedback(runs)) : undefined;
-  if (feedback) await postFeedbackComment(issue, feedback, `feedback:${issue.id}:stop:${intent.requestId}`, deps, log);
+  const feedback = issue?.stateType === "completed" && checkDelegation(issue, deps.agentUserId).allowed ? feedbackComment(workerFeedback(runs)) : undefined;
+  if (issue && feedback) await linear("the feedback comment", () => postFeedbackComment(issue, feedback, `feedback:${issue.id}:stop:${intent.requestId}`, deps, log));
   await rename(join(dir, "state.json"), join(dir, setAsideStateFile("stopped", intent.at))).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "ENOENT") throw e;
   });

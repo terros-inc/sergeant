@@ -60,6 +60,42 @@ test("a Todo issue waits while a blocker is unfinished, then is admitted in its 
   await f.finish("BLOCKED-URGENT");
   await vi.waitFor(() => expect(f.turns).toEqual(["FREE-HIGH", "BLOCKED-URGENT", "LATER-NONE"]), { timeout: 5_000 });
 });
+// TECH-6470: a delegated issue already started, with no task, never starts (TECH-4989). It was skipped
+// silently, so its owner thought it queued; now it gets one comment per delegation and one log line.
+test("a started issue with no task is told once per delegation to move to Todo; Backlog and Triage stay silent", async () => {
+  const f = fakes([]);
+  let delegatedAt = "2026-10-20T01:00:00.000Z";
+  f.deps.linear.readTaskOwner = async () => ({ owner: { id: "user-ann", name: "Ann" }, delegatedAt });
+  const logs: string[] = [];
+  await start(f.deps, { maxTasks: 1 }, logs);
+  const started = issue("STARTED", "In Progress", 2, "2026-10-01T00:00:00.000Z");
+  f.delegated.push(
+    started,
+    { ...issue("PARKED", "Todo", 2, "2026-10-01T00:00:00.000Z"), state: { name: "Backlog", type: "backlog" } },
+    { ...issue("TRIAGED", "Todo", 2, "2026-10-01T00:00:00.000Z"), state: { name: "Triage", type: "triage" } },
+  );
+  const told = () => f.posted.filter((p) => p.includes("move it to Todo"));
+  await vi.waitFor(() => expect(told()).toHaveLength(1), { timeout: 5_000 });
+  // Many intakes later: still one comment, one line, and nothing started or said for the parked issues.
+  await sleep(100);
+  expect(told()).toEqual([expect.stringMatching(/^STARTED: .*it is in In Progress/)]);
+  expect(logs.filter((l) => l.includes("not started: delegated in"))).toEqual(["STARTED not started: delegated in In Progress, not the unstarted state"]);
+  expect(f.posted).toHaveLength(1);
+  expect(f.turns).toEqual([]);
+
+  // Undelegated, then delegated again: a new delegation is told again.
+  f.delegated.splice(0, 1);
+  await f.nextIntake();
+  delegatedAt = "2026-10-20T02:00:00.000Z";
+  f.delegated.unshift(started);
+  await vi.waitFor(() => expect(told()).toHaveLength(2), { timeout: 5_000 });
+
+  // Moved to Todo, it starts as usual.
+  f.delegated[0] = issue("STARTED", "Todo", 2, "2026-10-01T00:00:00.000Z");
+  await vi.waitFor(() => expect(f.turns).toEqual(["STARTED"]), { timeout: 5_000 });
+  expect(told()).toHaveLength(2);
+});
+
 test("a just-ended Todo task is not readmitted until the next periodic intake", async () => {
   const f = fakes([issue("TODO", "Todo", 1, "2026-10-03T00:00:00.000Z")]);
   await start(f.deps, { maxTasks: 1, intakeSeconds: 3_600 });

@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { LinearPort } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import { heldAcceptances } from "./accepted.ts";
 import { cancelPending, taskDir } from "./cancel.ts";
@@ -55,4 +56,50 @@ export async function newWork(
     }),
   );
   return issues.flat();
+}
+
+/**
+ * TECH-6470: a delegated issue in a started state (In Progress, say) with no task under way never starts
+ * (TECH-4989: only from the unstarted state), so whoever delegated it is told so once, rather than left to
+ * think it is queued. Like the owner refusals (owner.ts), the comment is keyed by the delegation Linear's
+ * history shows, so a restart repeats nothing and only a new delegation is told again. `noted` holds the
+ * issues told and logged in this process; one listed no more as started (undelegated, or moved to Todo
+ * and so started) is dropped, so its next delegation is read again. Backlog and Triage stay silent:
+ * parking an issue there is deliberate. A failed read or post is retried at the next intake.
+ */
+export async function noteStarted(
+  stateDir: string,
+  listed: DelegatedIssue[],
+  input: { noted: Set<string>; active: Map<string, Promise<void>> },
+  deps: { linear: Pick<LinearPort, "readTaskOwner" | "postComment">; agentUserId: string },
+  log: (line: string) => void,
+): Promise<void> {
+  const { noted, active } = input;
+  const started = listed.filter((issue) => issue.state.type === "started");
+  for (const id of noted) if (!started.some((issue) => issue.identifier === id)) noted.delete(id);
+  for (const issue of started) {
+    const ref = issue.identifier;
+    if (noted.has(ref) || active.has(ref) || (await underWay(taskDir(stateDir, ref)))) continue;
+    try {
+      const check = await deps.linear.readTaskOwner(ref, deps.agentUserId);
+      await deps.linear.postComment({
+        issueId: ref,
+        key: `not-unstarted:${ref}:${check.delegatedAt ?? "-"}`,
+        body: `Sergeant has not started this issue: it is in ${issue.state.name}, and Sergeant starts work only from the team's unstarted state (normally Todo). To have Sergeant work on it, move it to Todo.`,
+      });
+    } catch (e) {
+      log(`${ref}: could not say why it does not start, retrying next intake: ${(e as Error).message}`);
+      continue;
+    }
+    noted.add(ref);
+    log(`${ref} not started: delegated in ${issue.state.name}, not the unstarted state`);
+  }
+}
+
+/** Whether `dir` holds a task under way: a stop not yet done, or a `state.json` not seen through after its merge. */
+async function underWay(dir: string): Promise<boolean> {
+  if (await cancelPending(dir)) return true;
+  // An unreadable one is taken as under way: intake's resume reports it (resumableTasks).
+  const task = await readTaskState(join(dir, "state.json")).catch(() => "unreadable" as const);
+  return task === "unreadable" || (task !== undefined && !task.merged?.completedAt);
 }

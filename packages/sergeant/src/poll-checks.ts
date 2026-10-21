@@ -203,7 +203,9 @@ export async function checkHolds(
   // runaway guard ends the wait for the human (UNF-727). Any human change ends it: see question.ts.
   // TECH-6165: PR feedback is not an answer to it, so the question stays open. The loop also drops any
   // question it still has to post.
-  const question = openQuestion(conversation);
+  // TECH-6470: past checkStop, an issue in Done is the task's normal end, its closing PR merged
+  // (`finished`): no question holds it, or it would wait on a reply forever. The loop takes the end next.
+  const question = conversation.issue.stateType === "completed" ? undefined : openQuestion(conversation);
   if (question) {
     if (live.length === 0) opts.slot?.waiting(Date.parse(question.createdAt));
     log(`waiting: the question posted at ${question.createdAt} has no human reply yet`);

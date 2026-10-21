@@ -127,8 +127,9 @@ test.each([
   await vi.waitFor(async () => expect(await exists(join(task, "cancel.json"))).toBe(false), { timeout: 5_000 });
   expect(f.canceled.sort()).toEqual(["run_lost", "run_w1"]);
   // Said once the runs are stopped, under the cancel's key: a cancel recorded before the restart
-  // that had already said it posts nothing new.
-  expect(f.comments.map((c) => c.key)).toEqual(["cancel:i-UNF-1:req-1"]);
+  // that had already said it posts nothing new. (Still delegated and In Progress with no task, the issue
+  // is also told once to move to Todo, TECH-6470.)
+  expect(f.comments.map((c) => c.key).filter((k) => !k.startsWith("not-unstarted:"))).toEqual(["cancel:i-UNF-1:req-1"]);
   expect(f.turns()).toBe(0);
 }, 30_000);
 

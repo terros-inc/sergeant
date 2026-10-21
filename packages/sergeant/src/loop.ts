@@ -253,6 +253,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
     unposted = undefined;
+    // TECH-6470: checkStop just read the closing merge that let an issue in Done through, so it is read fresh.
+    if (conversation.issue.stateType === "completed") prPolls.forget();
     const pullRequests = await prPolls.read(runs, conversation.issue.linkedPullRequests, opts.enrolledRepositories, deps);
     watch(pullRequests);
     await assignOwner(pullRequests, conversation.issue);
