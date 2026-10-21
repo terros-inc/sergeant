@@ -225,6 +225,11 @@ export interface GitHubPort {
    * PR may be left a draft. Optional, so a fake without it re-triggers nothing.
    */
   retriggerChecks?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha }): Promise<void>;
+  /**
+   * TECH-6164: every branch name on `repo`, whoever pushed it, so a worker's start can name on the issue the
+   * branch it takes over. Optional, so a fake without it lists none.
+   */
+  branches?(repo: RepoSlug): Promise<string[]>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**

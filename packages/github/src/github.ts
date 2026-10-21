@@ -329,6 +329,17 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
 
     retriggerChecks: (req) => (configFor(req.repo), retriggerChecks(request, req)),
 
+    async branches(repo) {
+      configFor(repo);
+      const names: string[] = [];
+      for (let page = 1; ; page += 1) {
+        const batch = z.array(z.object({ name: z.string() })).parse(await request(`/repos/${repo}/branches?per_page=100&page=${page}`));
+        names.push(...batch.map((b) => b.name));
+        if (batch.length < 100) return names;
+        if (page === 30) throw new Error("GitHub branch list exceeds 3000 branches");
+      }
+    },
+
     async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);
       // TECH-5244, defense in depth: whatever decided to merge, the repository's live policy is read

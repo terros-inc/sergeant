@@ -12,6 +12,7 @@ import type {
   RunnerPort,
   RunRecord,
 } from "@terros/sergeant-contracts";
+import type { AdoptionNotice } from "./adopted.ts";
 import type { TaskOwner } from "./owner.ts";
 
 // The ports one proposed action is performed through, and what came of it (execute.ts).
@@ -36,6 +37,8 @@ export type Ports = {
    * the repositories the run is given, whose budget overrides then apply to the task (TECH-5219).
    */
   recordRun?: (runId: RunId, repositories: RepoSlug[]) => Promise<void>;
+  /** TECH-6164: keeps a takeover notice whose post failed, for the loop to post again (adopted.ts). No-op when absent. */
+  deferAdoption?: (notice: AdoptionNotice) => Promise<void>;
   /**
    * The task's start/cancel lock, held from a start's live delegation check until the runner is asked
    * to start it. A task cancel lists the runs to stop under the same lock, so a start either sees the

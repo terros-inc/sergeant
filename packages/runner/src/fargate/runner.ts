@@ -158,10 +158,11 @@ export function fargateRunner(opts: FargateRunnerOptions): RunnerPort {
         // TECH-6194: read-only, for every enrolled repository, so the run can follow a reference to one.
         const enrolled = opts.enrolledRepositories();
         const readToken = await opts.githubTokens({ repositories: enrolled, access: "read" });
-        // The brief lists each repository's `sergeant/*` branches, here with `ls-remote`: the task clones.
+        // The brief lists each repository's branches for this issue (`issueBranches`), read here with
+        // `ls-remote`: the task clones.
         const existing: string[] = [];
         for (const repo of spec.repositories) {
-          const out = await execOk("git", [...TOKEN_CREDENTIAL, "ls-remote", "--heads", `https://github.com/${repo}.git`, "refs/heads/sergeant/*"], {
+          const out = await execOk("git", [...TOKEN_CREDENTIAL, "ls-remote", "--heads", `https://github.com/${repo}.git`], {
             env: { ...process.env, SERGEANT_RUN_GITHUB_TOKEN: githubToken },
           });
           existing.push(...out.split("\n").filter(Boolean).map((line) => `${repo}: ${line.split("refs/heads/")[1]}`));
