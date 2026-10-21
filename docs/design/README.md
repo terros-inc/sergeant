@@ -62,6 +62,7 @@ Then the reference contracts as needed.
 | `12-scenarios.md` | Fifteen end-to-end scenarios |
 | `13-s1-supersession.md` | Every S1 concept classified (keep / simplify / move to reasoning / move to runner / delete); ADRs kept and abandoned; what we give up; the 7-step transition plan; implementation slices |
 | `14-open-questions.md` | The decision register, including the independent review's findings and changes |
+| `15-outbound-notifications.md` | Proposal (TECH-6005, pending approval): signed outbound webhooks to people's agent harnesses when a task needs a human, per-person `sgt` subscriptions, the Slack-reply path |
 
 ## Section 15 — independent review
 
