@@ -40,6 +40,9 @@ can through the API):
    through.)
 3. Required checks run the repository's full automated suite (CI is the test gate, S1 ADR-0041).
    A repository with no required checks cannot be merged by Sergeant (M5).
+   GitHub Actions must be allowed to run there: an organization's Actions policy can limit Actions
+   to selected repositories, and a repository left off that list never starts a workflow, so its
+   required checks never report.
 4. **No production secret is reachable by workflows that run for pull requests or non-default
    branches.** Worker-authored code runs in CI. Production deploy credentials belong in protected
    environments that only default-branch workflows with approval can use (09 §5).
