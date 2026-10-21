@@ -45,9 +45,10 @@ key without a digit passes too, so still read your diff.
   (`@terros/sergeant`) wires them, and nothing depends on it. Packages export their TypeScript source
   directly (`.ts` imports, no build step).
 - Each enrolled repository has a `mergePolicy`, absent meaning `human`
-  ([`docs/design/08-github-contract.md` §7](docs/design/08-github-contract.md#7-merging)). Keep every
-  new path that approves or merges behind the adapter's live-policy check, and never default a policy
-  to `sergeant`.
+  ([`docs/design/08-github-contract.md` §7](docs/design/08-github-contract.md#7-merging)), and each PR
+  head a review tier ([`docs/design/06-review.md` §6a](docs/design/06-review.md#6a-review-tiers-tech-6553)).
+  Keep every new path that approves or merges behind the adapter's live-policy and tier checks, and
+  never default a policy to `sergeant`.
 - Tests live next to the source they test as `*.test.ts`, never in a separate `test/` folder.
 - Keep files small: a source or test file over 300 lines is a refactor target, and over 600 lines
   fails CI (`pnpm check-file-size`, run by `turbo run lint`). Split along a natural seam; no allowlist.

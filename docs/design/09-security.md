@@ -156,8 +156,9 @@ deliberately misbehaving run from using a sibling's token.
   environments usable only from the default branch with required approval. This is an enrollment
   precondition (08 §2).
 - **Merge as a production action**: where merging to the default branch automatically deploys to
-  production, Sergeant's merge is effectively a production change. Such repositories use
-  `mergePolicy: human` (settled, `14` §A). Sergeant still prepares the PR fully.
+  production, Sergeant's merge is effectively a production change. Who merges there is decided per
+  review tier (`14` §A, 06 §6a): Sergeant never merges a T3 or T4 head, and merges T0–T2 only where
+  the repository opts in. Sergeant still prepares the PR fully.
 
 ## 6. Sergeant's reasoning reads untrusted text
 
@@ -170,7 +171,8 @@ carry instructions aimed at Sergeant. A worker with a compromised context could 
 - Merging needs objective evidence: required checks green on the exact head, and a disposition the
   Gate verifies against recorded reports. A worker can say review is unnecessary when it was needed
   (honestly or not); that is the accepted cost of the review-need policy (06 §1), measured by the audit
-  sample, narrowed by optional `alwaysReviewPaths`, and removed entirely where `mergePolicy: human`.
+  sample, narrowed by review tiers (only a T0 head may skip, 06 §6a), and removed entirely where
+  `mergePolicy: human`.
 - Review waivers need an approver's comment. A fresh budget window needs human direction or
   the task's last Linear blocker going (07 §6); reasoning cannot open one itself.
 
@@ -204,7 +206,7 @@ misled:
 
 Accepted explicitly: everything in the runner zone's "can" column, including a copied model credential (§3a); spend beyond the model budget through
 dev/stage resources, CI, and tools; and an occasional unreviewed merge where a worker's skip was wrong and
-the audit sample missed it, in `mergePolicy: sergeant` repositories. The hard boundary is the "cannot"
+the audit sample missed it, for a T0 head in a `mergePolicy: sergeant` repository. The hard boundary is the "cannot"
 column.
 
 ## 10. Kill switches and incident response

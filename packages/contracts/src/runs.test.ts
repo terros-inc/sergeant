@@ -17,6 +17,19 @@ test("a review skip without a reason, or an unparseable recommendation, fails to
   expect(justified.ok && justified.report.pullRequests[0]?.review.required).toBe(false);
 });
 
+// TECH-6553: a raise its author got wrong still meant "more sensitive than the map", so it never
+// silently drops to the map's tier.
+test("a worker's malformed tier raise reads as T3, never as no raise", () => {
+  const raised = (raiseTier: unknown) => {
+    const parsed = parseReport(report({ ...worker(undefined), pullRequests: [{ ...pr, review: undefined, raiseTier }] }), WorkerReport);
+    return parsed.ok ? parsed.report.pullRequests[0]?.raiseTier : "unparsed";
+  };
+  expect(raised({ tier: "T4", reason: "edits the ruleset sync script" })).toEqual({ tier: "T4", reason: "edits the ruleset sync script" });
+  expect(raised({ tier: "high", reason: "x" })).toMatchObject({ tier: "T3" });
+  expect(raised({ tier: "T4" })).toEqual({ tier: "T4", reason: "no reason given" });
+  expect(raised(undefined)).toBeUndefined();
+});
+
 test("addressed findings are read by review run and finding id, and a malformed list reads as absent", () => {
   const answered = [{ reviewRunId: "run_r1", findingId: "f1", resolution: "fixed", reason: "guarded" }];
   const parsed = parseReport(report({ ...worker(undefined), addressedFindings: answered }), WorkerReport);
@@ -101,7 +114,10 @@ test("TECH-5259: a review report's unambiguous slips are read, never toward a me
 test("the Codex reviewer schema is in step with ReviewReport", () => {
   const structured = {
     reportVersion: "s2-review-report/1",
-    reviewed: [{ repo: "o/r", number: 7, headSha: "a".repeat(40) }],
+    reviewed: [
+      { repo: "o/r", number: 7, headSha: "a".repeat(40), raiseTier: { tier: "T3", reason: "edits an IAM trust policy" } },
+      { repo: "o/r", number: 8, headSha: "a".repeat(40), raiseTier: null },
+    ],
     verdict: "changes_requested",
     findings: [
       { id: "f1", severity: "blocking", category: "acceptance", description: "d", location: "x.ts:1" },
@@ -120,8 +136,10 @@ test("the Codex reviewer schema is in step with ReviewReport", () => {
   expect(parsed.report.findings[1]?.category).toBeUndefined();
   expect(parsed.report.findings[1]?.location).toBeUndefined();
   expect(parsed.report.unreadableInputs).toEqual(structured.unreadableInputs);
+  expect(parsed.report.reviewed.map((r) => r.raiseTier)).toEqual([{ tier: "T3", reason: "edits an IAM trust policy" }, undefined]);
 
   const props = REVIEW_REPORT_SCHEMA.properties;
+  expect(props.reviewed.items.properties.raiseTier.anyOf[0].properties.tier.enum).toEqual(["T0", "T1", "T2", "T3", "T4"]);
   expect(props.reportVersion.enum).toEqual(["s2-review-report/1"]);
   expect(props.verdict.enum).toEqual(["approve", "changes_requested", "needs_human"]);
   expect(props.findings.items.properties.severity.enum).toEqual(["blocking", "non_blocking", "nit"]);

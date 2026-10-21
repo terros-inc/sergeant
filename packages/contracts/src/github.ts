@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RepoSlug, Sha } from "./conversation.ts";
+import { ReviewTierFacts } from "./review-tiers.ts";
 
 /**
  * Who merges in an enrolled repository (08 §2, TECH-5244): `sergeant` approves and merges a gated
@@ -82,6 +83,11 @@ export const PullRequestFacts = z.object({
   body: z.string(),
   /** Every path changed by this head, used by the deterministic protected-CI merge override. */
   changedFiles: z.array(z.string().min(1)).optional(),
+  /**
+   * TECH-6553: this head's review tier from the repository's tier map at the head and its changed files,
+   * before any run raised it. Absent where a source does not read it, which the Gate reads as T3.
+   */
+  reviewTier: ReviewTierFacts.optional(),
   /** null while GitHub has not computed mergeability yet. */
   mergeable: z.boolean().nullable(),
   /** Why GitHub would or would not merge it now; M7 reads it. */

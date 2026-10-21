@@ -25,7 +25,7 @@ const pr: PullRequestFacts = {
   mergedSha: null,
   baseRef: "main",
   body: "Fixes UNF-1",
-  changedFiles: [], mergeable: true, mergeableState: "clean",
+  changedFiles: [], reviewTier: { tier: "T0", rule: "a test map's T0 rule" }, mergeable: true, mergeableState: "clean",
   checks: { sha: head, required: [{ name: "validate", state: "passed" }] },
   humanFeedback: [],
 };

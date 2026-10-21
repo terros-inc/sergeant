@@ -3,6 +3,7 @@ import { BudgetStatus } from "./budget.ts";
 import { CiRerun } from "./ci-rerun.ts";
 import { Conversation, ConversationRevision, conversationRevision, RepoSlug, Sha } from "./conversation.ts";
 import { PullRequestFacts } from "./github.ts";
+import { ReviewTierFacts } from "./review-tiers.ts";
 import { RunRecord } from "./runs.ts";
 
 /** A follow-up issue this task filed, under reasoning's key. */
@@ -32,9 +33,18 @@ export const RefusedMerge = z.object({
    * handed to a human instead, with review requested from these GitHub logins or teams (none when
    * nobody could be asked) and the review summary posted on the PR, and posted on the issue with it.
    * TECH-5797: `protectedFiles` lists the CI configuration files that forced the handoff whatever the
-   * repository's policy; absent, the repository's policy did.
+   * repository's policy; absent, the repository's policy or a T3 or T4 tier did.
    */
-  human: z.object({ requested: z.array(z.string()), summary: z.string(), protectedFiles: z.array(z.string()).optional() }).optional(),
+  human: z
+    .object({
+      requested: z.array(z.string()),
+      summary: z.string(),
+      protectedFiles: z.array(z.string()).optional(),
+      /** TECH-6553: the head's review tier and the reviews of it on record, posted as audit evidence. */
+      tier: ReviewTierFacts.optional(),
+      reviews: z.array(z.string()).optional(),
+    })
+    .optional(),
   /** A `human` repository's handoff failed at this step, rather than a merge being attempted. */
   humanFailure: z.enum(["read pull request", "mark ready", "re-read pull request", "request reviewers", "post review summary", "complete handoff"]).optional(),
   at: z.iso.datetime({ offset: true }),

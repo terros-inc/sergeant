@@ -1,4 +1,5 @@
-import { protectedCiFiles, PullRequestFacts, RepoSlug, Sha, type GitHubPort, type MergePolicy } from "@terros/sergeant-contracts";
+import { classifyTier, GitHubRateLimitedError, protectedCiFiles, PullRequestFacts, RepoSlug, Sha, TIER_MAP_PATH, tierAtLeast, type GitHubPort, type MergePolicy, type TierMapRead } from "@terros/sergeant-contracts";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { hasComment, readFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, issueAssignees, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
@@ -153,6 +154,21 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     }
   };
 
+  // TECH-6553: the tier map at the PR head. Absent is a 404; anything else that stops it being read or
+  // parsed is `unreadable`, which classifies as T3, except a rate-limit pause, which fails the read as
+  // every other call does.
+  const readTierMap = async (repo: string, sha: string): Promise<TierMapRead> => {
+    try {
+      const body = await request(`/repos/${repo}/contents/${TIER_MAP_PATH}?ref=${sha}`, {}, { allowStatuses: [404] });
+      if (body === null) return { kind: "absent" };
+      const file = z.object({ type: z.literal("file"), encoding: z.literal("base64"), content: z.string() }).parse(body);
+      return { kind: "parsed", document: parseYaml(Buffer.from(file.content, "base64").toString("utf8")) };
+    } catch (e) {
+      if (e instanceof GitHubRateLimitedError) throw e;
+      return { kind: "unreadable", reason: (e as Error).message.replace(/\s+/g, " ").slice(0, 300) };
+    }
+  };
+
   const readObservedChecks = async (repo: string, sha: string): Promise<ObservedCheck[]> => {
     const [runsPayload, statusesPayload] = await Promise.all([
       request(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`),
@@ -254,11 +270,12 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const memo = feedbackMemo.get(key);
       const fresh = memo && live.updated_at && memo.headSha === headSha && memo.updatedAt === live.updated_at && now() - memo.at < FEEDBACK_MEMO_MS;
       const cleared = feedbackCleared.get(key);
-      const [observed, declared, feedback, changedFiles] = await Promise.all([
+      const [observed, declared, feedback, changedFiles, tierMap] = await Promise.all([
         readObservedChecks(repo, headSha),
         readRequiredChecks(repo, live.base.ref),
         fresh ? memo.feedback : readFeedback((path) => request(path), repo, number),
         readChangedFiles(repo, number),
+        readTierMap(repo, headSha),
       ]);
       if (!fresh && live.updated_at && feedbackCleared.get(key) === cleared) feedbackMemo.set(key, { headSha, updatedAt: live.updated_at, at: now(), feedback });
       // Only the base branch's declared required checks count; one that never reported is
@@ -290,6 +307,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         baseSha: live.base.sha,
         body: live.body ?? "",
         changedFiles,
+        reviewTier: classifyTier(changedFiles, tierMap),
         mergeable: live.mergeable,
         mergeableState: live.mergeable_state,
         checks: { sha: headSha, required },
@@ -340,7 +358,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       }
     },
 
-    async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
+    async mergePullRequest({ repo, number, expectedHeadSha, squash, evidence }) {
       const { config } = configFor(repo);
       // TECH-5244, defense in depth: whatever decided to merge, the repository's live policy is read
       // here, before the approval or the merge call, and a `human` repository gets neither.
@@ -349,9 +367,16 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       }
       // TECH-5797, the same defense for a PR that changes CI configuration: its changed files are read
       // again here, and a failed read throws, so neither an approval nor a merge call follows.
-      const protectedFiles = protectedCiFiles({ changedFiles: await readChangedFiles(repo, number) });
+      const changedFiles = await readChangedFiles(repo, number);
+      const protectedFiles = protectedCiFiles({ changedFiles });
       if (protectedFiles.length > 0) {
         throw new Error(`${repo}#${number} changes protected CI configuration (${protectedFiles.join(", ")}): only a human approves and merges it`);
+      }
+      // TECH-6553, the same defense for the head's review tier, from the map at that head: Sergeant never
+      // approves or merges a T3 or T4 head. A run's raise is not visible here; the Gate applies it.
+      const tier = classifyTier(changedFiles, await readTierMap(repo, expectedHeadSha));
+      if (tierAtLeast(tier.tier, "T3")) {
+        throw new Error(`${repo}#${number} is review tier ${tier.tier} (${tier.rule}): only a human approves and merges it`);
       }
       // The ruleset requires one approving review, which the worker App cannot give its own PR, so
       // only this approval (after every Gate check) lets the merge through. A failed approval must
@@ -363,7 +388,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
           body: JSON.stringify({
             commit_id: expectedHeadSha,
             event: "APPROVE",
-            body: "Sergeant's merge gate passed on this exact head: required checks green and a fresh approving review or the worker's waiver.",
+            body: ["Sergeant's merge gate passed on this exact head: required checks green and the reviews its review tier requires.", ...(evidence ? ["", evidence] : [])].join("\n"),
           }),
         });
       } catch (error) {

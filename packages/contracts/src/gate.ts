@@ -4,6 +4,7 @@ import type { MergePr, ReviewStanding } from "./actions.ts";
 import type { RunRecord } from "./runs.ts";
 import { checkBudget, type BudgetStatus } from "./budget.ts";
 import { protectedCiFiles } from "./protected-ci.ts";
+import { effectiveTier, tierRefusal } from "./tier-gate.ts";
 import type { RefusedMerge } from "./situation.ts";
 import { checkLive, isOwned, type GateVerdict, type Ownership } from "./action-gate.ts";
 
@@ -138,8 +139,9 @@ export function unaskedInputs(runs: RunRecord[], agentComments: AgentComment[]):
  * L1 (no unreviewed, red, or unmergeable merge), M2 (only this task's PRs), M9 (no early or missing completion),
  * L4 (no merge that overtakes unseen human input or a human's requested changes), M12 (no retry
  * after a bounded merge handoff while nothing changed), M13 (no review standing given against an
- * earlier title or description), M14 (no merge past an input a run could not read, unasked), and M15
- * (no protected CI change without an independent review of its exact head).
+ * earlier title or description), M14 (no merge past an input a run could not read, unasked), M15
+ * (no protected CI change without an independent review of its exact head), and M16 (what the head's
+ * review tier requires; Sergeant never merges a T3 or T4 head).
  * `conversationRevision` is the one the proposing turn saw, attached by the core, not by reasoning.
  */
 export function checkMerge(
@@ -174,6 +176,10 @@ export function checkMerge(
   if (protectedFiles.length > 0 && action.reviewStanding.kind !== "reviewed") {
     return deny("M15", `${repo}#${number} changes protected CI configuration (${protectedFiles.join(", ")}); a reviewer run must approve head ${sha} first`);
   }
+  // M16 (TECH-6553): what the head's review tier requires. T3 and T4 always go to a human; execute
+  // hands them over whatever the repository's mergePolicy, so only a handoff passes here.
+  const tierDenied = tierRefusal(effectiveTier(pr, facts.runs), action.reviewStanding, pr, facts.runs, { handToHuman: facts.handToHuman === true, issueRevision: facts.liveIssueRevision });
+  if (tierDenied) return deny("M16", tierDenied);
 
   // M13: the standing must judge the work against the current acceptance criteria. A run that started
   // before the title or description changed checked it against the old text (07 §10). A record made

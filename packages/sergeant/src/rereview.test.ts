@@ -15,7 +15,7 @@ const repo = "o/sales";
 const url = `https://github.com/${repo}/pull/7`;
 const at = "2026-10-03T02:00:00.000Z";
 const prAt = (head: string): PullRequestFacts => ({
-  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha: head, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", changedFiles: [], mergeable: true, mergeableState: "clean",
+  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha: head, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", changedFiles: [], reviewTier: { tier: "T0", rule: "a test map's T0 rule" }, mergeable: true, mergeableState: "clean",
   checks: { sha: head, required: [{ name: "validate", state: "passed" }] },
   humanFeedback: [captain],
 });

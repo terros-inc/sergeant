@@ -198,7 +198,7 @@ thresholds as written there, applied in order, the first match deciding:
   ready for review; or a run reporting what it cannot get (unreadable inputs, a decision, a human's
   call), recommended as "stop, or answer this".
 - **Rule 2, recommend extend.** Below 80% of the cap, the only thing left is a merge Sergeant may do
-  (approved at the head, required CI green, `mergePolicy: sergeant`), a conflict-free rebase of an
+  (approved at the head as its tier requires, required CI green, `mergePolicy: sergeant`), a conflict-free rebase of an
   approved PR, or a first review of a finished worker's PR. Automatic extension is not built: these
   still ask, "Sergeant recommends extend", so there is never an automatic extension in a row to limit.
 - **Rule 3, ask.** Everything else. It recommends extend for a first fix cycle after a reviewer's change

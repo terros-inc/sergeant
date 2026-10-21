@@ -671,7 +671,9 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 ```
 
 - **`repositories.<owner/name>.mergePolicy`** says who merges in it, `sergeant` or `human`, and a
-  repository without one is `human`; the human handoff is in
+  repository without one is `human`. `sergeant` is the opt-in to Sergeant merging T0–T2 heads by the
+  repository's tier map; a T3 or T4 head, and every head of a repository with no map, still goes to a
+  human ([`docs/design/06-review.md` §6a](../docs/design/06-review.md#6a-review-tiers-tech-6553)); the human handoff is in
   [`docs/design/08-github-contract.md` §7](../docs/design/08-github-contract.md#7-merging). A repository's
   `"observedChecksFallback": true` treats every check observed on the exact head as required (GitHub
   Apps and rulesets below).

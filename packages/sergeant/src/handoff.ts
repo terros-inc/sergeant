@@ -1,4 +1,5 @@
-import type { LinearPort, RefusedMerge } from "@terros/sergeant-contracts";
+import { tierAtLeast, type LinearPort, type RefusedMerge } from "@terros/sergeant-contracts";
+import { evidenceLines } from "./human-merge.ts";
 
 // TECH-4987: a merge GitHub refuses by repository policy (a code-owner review Sergeant cannot give,
 // say) is not retried while nothing changes (M12). Sergeant says once, on the issue, that the PR is
@@ -14,14 +15,19 @@ export function handoffComment(r: RefusedMerge): string {
   if (r.human) {
     const asked = r.human.requested.length > 0 ? `Review is requested from ${r.human.requested.join(", ")}.` : "GitHub shows nobody's review requested on it.";
     // TECH-5797: a PR changing CI configuration goes to a human whatever the repository's policy.
+    // TECH-6553: so does a T3 or T4 head, and the tier and the reviews behind it are the audit evidence.
+    const { tier } = r.human;
     const why = r.human.protectedFiles?.length
       ? `This PR changes workflow/CI configuration (${r.human.protectedFiles.join(", ")}), so it needs human review and human merge whatever the repository's merge policy; Sergeant did not approve or merge it and never enables auto-merge.`
-      : "This repository's merge policy is `human`, so Sergeant did not approve or merge it.";
+      : tier && tierAtLeast(tier.tier, "T3")
+        ? `This PR is review tier ${tier.tier}, so it needs human review and human merge whatever the repository's merge policy; Sergeant did not approve or merge it.`
+        : "This repository's merge policy is `human`, so Sergeant did not approve or merge it.";
     return [
       "**Ready for a human to merge**",
       "",
       `${ready}. ${why} ${asked}`,
       "",
+      ...(tier ? [...evidenceLines({ tier, reviews: r.human.reviews ?? [] }), ""] : []),
       r.human.summary,
       "",
       "A human merges it. Sergeant acts on a review requesting changes or a comment on the PR, and finishes the task once it is merged.",

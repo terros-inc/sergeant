@@ -50,12 +50,14 @@ can through the API):
    branch can run with development CI authority, but cannot reach production credentials.
 5. The Linear GitHub integration is connected, so a merged PR with `Fixes <IDENTIFIER>` closes the
    issue (07 §7).
-6. `mergePolicy` is set deliberately: `sergeant` or `human`. **If merging to the default branch
-   deploys to production, merging is a production action** and the policy is `human` (09 §5; settled,
-   `14` §A). Built (TECH-5244): a repository enrolled or configured without one is `human`, so a
-   forgotten choice fails safe; only an explicit `sergeant` lets Sergeant approve and merge.
-7. Optionally, `alwaysReviewPaths` for paths where a skip should never be accepted (CI config,
-   infrastructure, auth).
+6. `mergePolicy` is set deliberately: `sergeant` or `human`. Built (TECH-5244): a repository enrolled
+   or configured without one is `human`, so a forgotten choice fails safe; only an explicit `sergeant`
+   lets Sergeant approve and merge, and then only T0 to T2 heads (TECH-6553, 06 §6a). **If merging to
+   the default branch deploys to production, merging is a production action**: such a repository is
+   `human` unless its owner opts it in to bot merging of T0 to T2 once it has a tier map and a GitHub
+   required-reviewer rule for its T3 and T4 paths (09 §5; `14` §A).
+7. A tier map, `.github/review-tiers.yml`, before any bot merge (06 §6a). Without one every PR is T3,
+   handed to a human. It replaces the designed `alwaysReviewPaths`.
 
 ## 3. Branches
 
@@ -145,7 +147,7 @@ live GitHub and Linear facts at execution time:
 
 | Rule | Check |
 |---|---|
-| M1 | the repository is in the task's set, enrolled, enabled, and its `mergePolicy` is `sergeant`. Built (TECH-5244): in a `human` repository a `merge_pr` that passes every other rule is the human handoff below, never an approval or a merge |
+| M1 | the repository is in the task's set, enrolled, enabled, and its `mergePolicy` is `sergeant`. Built (TECH-5244): in a `human` repository a `merge_pr` that passes every other rule is the human handoff below, never an approval or a merge; so is a T3 or T4 head in any repository (M16) |
 | M2 | the PR is linked to the task's issue |
 | M3 | the PR is open and not a draft |
 | M4 | the PR's live head SHA equals `expectedHeadSha` |
@@ -160,6 +162,7 @@ live GitHub and Linear facts at execution time:
 | M13 | the run whose review or skip gives the head its standing started from the issue's current title and description (its recorded `issueRevision` equals the live one), so the work is judged against the current acceptance criteria, not the text the worker started from (TECH-5034). A record without one, from before runs recorded it, is not judged |
 | M14 | every input a run reported it could not read (`unreadableInputs`: an auth-gated link, a missing file or attachment, an issue file not downloaded, a repository not enrolled; each with the reason it could not be read, TECH-6356) is named in a Sergeant question on the issue (a comment starting with "**Question for you**"; other bot comments do not count): reasoning asked a human about it. Q1 then holds the task only until a human next changes the conversation, which need not be an answer; M14 checks that the question was asked, and the turn that follows judges whether the change answers it (TECH-5034) |
 | M15 | if the PR changes `.github/workflows/**` or another protected CI definition (`.github/actions/**`, `.circleci/**`, `.buildkite/**`, `.gitlab-ci.yml`, or a `Jenkinsfile`), or its changed-file list is unknown (fails closed), the standing must be an independent reviewer's approval of this exact head, never the worker's `not_required`; and whatever the `mergePolicy`, Sergeant never approves, merges, or enables auto-merge and uses the human handoff below. One matcher (`protectedCiFiles` in contracts) serves the Gate, `execute`, and the adapter, each reading the live changed files |
+| M16 | the head's review tier (06 §6a, TECH-6553: from the tier map at the head and the live changed files, raised by any run) is met: only T0 accepts the worker's `not_required`; a T2 head Sergeant merges needs two separate reviewer runs approving it or a human's GitHub approval of it; and a T3 or T4 head is never Sergeant's to approve or merge, so whatever the `mergePolicy` it takes the human handoff below after an independent review. One classifier (`classifyTier` in contracts) serves the adapter's PR read and its merge call; the Gate and `execute` apply `effectiveTier` to it |
 
 Plus G1–G3 (not paused, task open, PR belongs to the task) and B1: an exhausted budget window holds
 the merge until a fresh one opens (07 §6).
@@ -167,7 +170,8 @@ the merge until a fresh one opens (07 §6).
 Each M rule exists for a material risk: M1, M3–M7 and M9 for an unreviewed, red, or wrong-head merge
 (L1, and L2 where a merge deploys); M2 so only this task's PRs are merged; M8 and M10 so a human's hold,
 requested changes, edit, or comment that no turn has seen is never overtaken (L4); M11 so a merged
-task leaves no live worker, reviewer, or follow-up started after it (L3).
+task leaves no live worker, reviewer, or follow-up started after it (L3); M15 and M16 so a sensitive
+change never merges without the human review its tier requires.
 
 Execution: once M1–M11 and G1–G3 pass, the control-plane App submits an `APPROVE` review with
 `commit_id = expectedHeadSha`, then immediately calls GitHub's merge endpoint with
@@ -198,7 +202,7 @@ actions, and a free-text summary that describes actions is recorded as a normal 
 detected; detection remains structural and does not interpret summary text. The Linear issue's Done state follows from automation, not from Sergeant
 (07 §7).
 
-Where `mergePolicy` is `human`, or M15 finds protected CI configuration, Sergeant gets the PR ready (green, reviewed, disposition recorded),
+Where `mergePolicy` is `human`, M15 finds protected CI configuration, or the head is T3 or T4 (M16), Sergeant gets the PR ready (green, reviewed, disposition recorded),
 and waits. A human merge triggers automation as usual. Built (TECH-5244, after Sergeant approved and
 merged a production change in a repository whose ruleset its own approval satisfied):
 
@@ -225,12 +229,16 @@ merged a production change in a repository whose ruleset its own approval satisf
   comment, the audit draw, and the wait for Done that releases its slot.
 - For protected CI, the handoff on the PR and on the issue says plainly that the workflow or CI change
   requires human review and human merge, whatever the repository's policy. Sergeant has no auto-merge
-  action and does not enable it.
+  action and does not enable it. For a T3 or T4 head it says the tier requires it, and review is also
+  requested from the map's `humanTeam` when nobody's is requested yet.
+- Every handoff, on the PR and on the issue, and every merge (Sergeant's approval on the PR and the
+  Linear merge comment) names the head's review tier, the rule that set it, and the reviews of the
+  head that satisfied the Gate (TECH-6553).
 - Defense in depth: the GitHub adapter rereads the live policy as the first step of every merge, before
   the approval and the merge calls, and refuses with no GitHub call unless it is `sergeant`, whatever
   asked it to merge. It then rereads the PR's changed files and refuses, again before any approval or
-  merge call, if one is protected CI configuration (M15) or the list cannot be read. The approval
-  exists only inside that merge.
+  merge call, if one is protected CI configuration (M15) or the list cannot be read, and reads the tier
+  map at the head and refuses a T3 or T4 head (M16). The approval exists only inside that merge.
 
 ## 8. Moved bases and conflicts
 

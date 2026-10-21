@@ -95,7 +95,8 @@ The primary worker recommends, per PR head (05 §5); if in doubt, it asks for re
 | Situation | Usual decision |
 |---|---|
 | Recommendation `required` (or missing, unparseable, empty reason: fail-safe) | Start a reviewer for that head now, in parallel with CI |
-| `not_required`, reason plausible, no `alwaysReviewPaths` touched | Record `not_required`; a guardrail may sample it for an audit review (§8) |
+| `not_required`, reason plausible, the head is T0 (§6a) | Record `not_required`; a guardrail may sample it for an audit review (§8) |
+| The head is T2 and one reviewer approved it | Start a second reviewer for the same head, or wait for a human's approval on GitHub (§6a) |
 | `not_required` but reasoning disagrees | Start a reviewer anyway. Reasoning may review more than recommended, never less than the Gate requires |
 | Review found blocking issues; the worker made a small, mechanical fix and says `not_required` with `sinceReviewedSha` | Record `not_required` for the new head; no second review |
 | Review found blocking issues; the fix is material, or the worker says `required` | A **new** reviewer run on the new head, with the previous findings in its brief |
@@ -154,7 +155,7 @@ Before reasoning can merge a head, it records that head's disposition (01 `Revie
 | D1 | all | the PR is linked to this task, its repository is in the task's set, and `prHeadSha` equals the PR's live head |
 | D2 | `reviewed` | `reviewRunId` is a succeeded **separate reviewer run** of this task whose final report lists this PR at `prHeadSha` |
 | D3 | `reviewed` | every blocking finding of that report has a `FindingResolution` in `acceptedFindings`: `disputed` (with reason and evidence) or, for findings not in category `acceptance`, `accepted_nonblocking` |
-| D4 | `not_required` | a worker run of this task reported this PR at exactly `prHeadSha` in its final report with `review.required = false` and a non-empty reason, and the PR's changed files match none of the repository's `alwaysReviewPaths`. Built today: a PR changing protected CI configuration, or whose changed files are unknown, never gets it (08 §7, M15) |
+| D4 | `not_required` | a worker run of this task reported this PR at exactly `prHeadSha` in its final report with `review.required = false` and a non-empty reason, and the head's review tier is T0 (§6a, M16). A PR changing protected CI configuration, or whose changed files are unknown, never gets it (08 §7, M15) |
 | D5 | `not_required` after a review | if any reviewer run of this task reviewed this PR at an earlier head and reported blocking findings, `sinceReviewedSha` names the latest such head, and each of that review's blocking findings is either `fixed` in the worker's `addressedFindings` or resolved in `acceptedFindings` under D3's kinds. No ancestry check: rebases rewrite history; materiality is judgment |
 | D6 | `waived` | the cited comment is on this task's issue, its author is an approver, and it was posted after the head was pushed |
 
@@ -165,6 +166,85 @@ only check that recorded evidence names the exact code being merged and that eve
 an explicit, recorded answer. Reasoning may overrule an erroneous reviewer only by disputing it on the
 record; an unmet requirement cannot be quietly accepted as non-blocking (D3). Narrowing what a human asked
 for is a question for the human (03 §12).
+
+## 6a. Review tiers (TECH-6553)
+
+The code review policy sorts changes into sensitivity tiers. Sergeant computes each PR head's tier and
+gates review and merge by it, so it never self-merges a sensitive change. The tier map replaces the
+designed but unbuilt `alwaysReviewPaths` setting: a path that must always be reviewed is listed at T1
+or higher.
+
+**The map.** One file per repository, `.github/review-tiers.yml`, read at the PR's head through the
+contents API on every PR read (`packages/github/src/github.ts`), so a PR is judged by the map it would
+merge with:
+
+```yaml
+humanTeam: reviewers        # GitHub team asked to review a T3 or T4 handoff (optional)
+tiers:
+  T0: ["**/*.md", "docs/**"]
+  T1: ["apps/web/**", "**/AGENTS.md"]
+  T2: ["package.json", "pnpm-lock.yaml"]
+  T3: ["apps/infra/**", "migration/**"]
+  T4: [".github/CODEOWNERS"]
+```
+
+A pattern is matched against the whole repository-relative path: `**` spans directories (`**/` may
+match none, so `**/*.md` covers a root `README.md`), `*` and `?` stay within one. Brace sets,
+character classes, negation, a leading `/`, and any key the format does not define make the map
+invalid rather than being read literally or ignored, since a T3 pattern that silently matched nothing
+would lower a tier.
+
+**Classification** (`classifyTier`, `packages/contracts/src/review-tiers.ts`), from the live changed
+files and the map at the head:
+
+- The PR's tier is the highest tier of any changed file; a file matching several patterns takes the
+  highest, so pattern order never matters. A file the map does not list is T2.
+- A repository with no map at the head is T3 throughout. An unreadable changed-file list, or a map that
+  cannot be read, parsed, or validated, is T3: fail closed.
+- A PR that changes the map itself is T4.
+- Protected CI configuration (08 §7, M15) is at least T3, whatever the map says.
+
+**Raise, never lower.** A worker (its report's `pullRequests[].raiseTier`) or a reviewer
+(`reviewed[].raiseTier`) may raise a PR's tier with a reason, for example for an IAM trust-policy edit
+inside an infrastructure file. A raise names the PR, not a head, so it sticks for later heads. Only a
+change to the map lowers a tier (`effectiveTier`, `packages/contracts/src/tier-gate.ts`). A raise with
+a tier Sergeant does not know reads as T3. The Situation Report shows each PR's tier with any raise
+applied, and the rule that set it.
+
+**The gate** (M16, 08 §7):
+
+| Tier | What the head needs | Who merges |
+|---|---|---|
+| T0 | the worker's `not_required` (D4) or an approving review | Sergeant, where the repository opts in |
+| T1 | one separate reviewer run approving the exact head (D2) | Sergeant, where the repository opts in |
+| T2 | two separate reviewer runs approving the exact head, or one human's approval of it on GitHub | Sergeant, where the repository opts in |
+| T3, T4 | one separate reviewer run approving the exact head | always a human, whatever the repository's `mergePolicy` |
+
+- Only T0 accepts the worker's `not_required`, including one after a review (D5): every other tier
+  needs a reviewer's approval of the exact head.
+- Two reviews are two succeeded reviewer runs of this task, each approving that exact head with no
+  blocking finding and each started from the issue's current text (M13). Different model vendors are
+  preferred (§5) but not required.
+- A human approval is a GitHub `APPROVED` review on the exact head by someone other than the PR's
+  author whose association with the repository is owner, member, or collaborator, so an outsider's
+  review on a public repository never counts. Membership of `humanTeam` is not checked: the
+  control-plane App holds no `members: read`, and GitHub's required-reviewer rule is the backstop.
+- A T3 or T4 head is handed to a human (08 §7) once a reviewer approved it, and Sergeant never approves
+  or merges it. The GitHub adapter rereads the changed files and the map at the head before any
+  approval or merge call and refuses a T3 or T4 head itself. The handoff also requests review from the
+  map's `humanTeam` when nobody's review is requested yet. The rest of what T3 and T4 require (one
+  human, or two, one of them the policy owner) is GitHub's to enforce through the ruleset's
+  required-reviewer rule.
+
+**Opt-in.** A repository's `mergePolicy` (08 §2) is the per-repository opt-in to Sergeant merging:
+`sergeant` lets Sergeant merge T0 to T2 heads, and `human` (or none) keeps every tier a human's merge,
+as before tiers existed. Tiers only ever add requirements, so shipping them lets Sergeant merge nothing
+it could not merge before: a `sergeant` repository with no map is T3 throughout and hands every PR to a
+human until it has a map.
+
+**Evidence.** The tier, the rule that set it, and the reviews of the head that satisfied the gate are
+in Sergeant's approval on the PR and its Linear merge comment, or in its handoff comment on the PR
+and on the issue.
 
 ## 7. Parallelism and moving heads
 

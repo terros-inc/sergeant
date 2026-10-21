@@ -134,11 +134,12 @@ RepositoryEnrollment {
   slug: RepoSlug
   purpose                       // one or two sentences; reasoning uses it to choose the repo set
   enabled                       // disabled: never added to a new repo set, dropped from credentials
-  mergePolicy: sergeant | human // who performs the merge (08 §7); unset is human (TECH-5244)
+  mergePolicy: sergeant | human // who performs the merge (08 §7); unset is human (TECH-5244); `sergeant` merges only T0–T2 (06 §6a)
   mergeMethod: squash | merge | rebase
   budget?: { wallMinutes?, costUsd? } // replaces the installation's window fields for tasks with a run here (TECH-5219)
-  alwaysReviewPaths: Glob[]     // optional; a "not required" disposition is refused if the PR touches these
 }
+// Which paths need review, and how much, is the repository's own tier map, `.github/review-tiers.yml`
+// at the PR head (06 §6a), not enrollment config; it replaces the designed `alwaysReviewPaths`.
 ```
 
 ## RunnerProfile and RunnerCapabilities
@@ -383,7 +384,6 @@ WorkerBrief {
   environment: EnvironmentNote
   limits: { maxWallSeconds, maxCostUsd, deadlineAt }
   rulesVersion
-  reviewPolicy: { alwaysReviewPaths: map<RepoSlug, Glob[]> }
   reportContract: "s2-worker-report/1"
 }
 

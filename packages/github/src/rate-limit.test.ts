@@ -110,7 +110,7 @@ test("an unchanged PR is reread conditionally: a 304 answers with the earlier fa
 
   expect(after).toEqual(before);
   const second = calls.slice(firstPass);
-  expect(second.map((c) => c.path)).toEqual([`/repos/${repo}/pulls/7`, `/repos/${repo}/commits/${head}/check-runs?per_page=100`, `/repos/${repo}/commits/${head}/status?per_page=100`, `/repos/${repo}/rules/branches/main?per_page=100`, `/repos/${repo}/pulls/7/files?per_page=100&page=1`]);
+  expect(second.map((c) => c.path)).toEqual([`/repos/${repo}/pulls/7`, `/repos/${repo}/commits/${head}/check-runs?per_page=100`, `/repos/${repo}/commits/${head}/status?per_page=100`, `/repos/${repo}/rules/branches/main?per_page=100`, `/repos/${repo}/pulls/7/files?per_page=100&page=1`, `/repos/${repo}/contents/.github/review-tiers.yml?ref=${head}`]);
   expect([...second.slice(0, 3), second[4]!].map((c) => c.headers.get("if-none-match"))).toEqual([...second.slice(0, 3), second[4]!].map((c) => `"${c.path}"`));
   expect(port.rateLimit?.()).toMatchObject({ limit: 5000, remaining: 4321, pausedUntil: null });
 });

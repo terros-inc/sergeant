@@ -79,7 +79,7 @@ const facts = (over: Over = {}): MergePreflightFacts => ({
     mergedSha: null,
     baseRef: "main",
     body: "Fixes UNF-1",
-    changedFiles: [], mergeable: true,
+    changedFiles: [], reviewTier: { tier: "T0", rule: "`README.md` matches T0 pattern `**/*.md`" }, mergeable: true,
     // What every PR waiting for Sergeant reads: only the merge's own approval satisfies the ruleset.
     mergeableState: "blocked",
     checks: { sha: head, required: [{ name: "ci", state: "passed" }] },
@@ -288,6 +288,8 @@ test("a protected CI change needs a reviewer's approval of its exact head; an un
   const workflow = { changedFiles: ["src/a.ts", ".github/workflows/deploy.yml"] };
   expect(checkMerge(skip, facts({ pr: workflow, runs: [worker(false)] }))).toMatchObject({ allowed: false, rule: "M15", reason: expect.stringContaining(".github/workflows/deploy.yml") });
   expect(checkMerge(skip, facts({ pr: { changedFiles: undefined }, runs: [worker(false)] }))).toMatchObject({ allowed: false, rule: "M15", reason: expect.stringContaining("changed files unknown") });
-  expect(checkMerge(merge, facts({ pr: workflow }))).toEqual({ allowed: true });
+  // TECH-6553: whatever tier the source read, protected CI is at least T3, so only a handoff passes.
+  expect(checkMerge(merge, facts({ pr: workflow }))).toMatchObject({ allowed: false, rule: "M16" });
+  expect(checkMerge(merge, { ...facts({ pr: workflow }), handToHuman: true })).toEqual({ allowed: true });
   expect(checkMerge(merge, facts({ pr: workflow, runs: [reviewer({ reviewed: [{ ...pr, headSha: moved }] }), worker(true)] }))).toMatchObject({ allowed: false, rule: "M6" });
 });

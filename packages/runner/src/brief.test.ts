@@ -179,7 +179,7 @@ test("the worker brief lists only branches naming the issue exactly, any prefix,
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/18)");
+  expect(brief).toContain("## Rules (s2-reviewer-rules/19)");
   const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
@@ -191,7 +191,7 @@ test("reviewer rule 12 counts a trade-off as settled only on the base branch or 
 test("worker and reviewer briefs carry the rebase rule and ask for dependencies in the report", () => {
   const base = spec([]);
   const worker = workerBrief({ ...base, role: "worker", objective: "o", context: { pullRequests: [], runs: [] } }, []);
-  expect(worker).toContain("## Rules (s2-worker-rules/23)");
+  expect(worker).toContain("## Rules (s2-worker-rules/24)");
   const rebase = worker.slice(worker.indexOf("14. Rebase early and often."), worker.indexOf("\n15. "));
   expect(rebase).toMatch(/before its first push, before you report a head for\s+review, and whenever the default branch has moved under its open PR/);
   expect(rebase).toMatch(/Resolve conflicts then, as\s+part of the task/);
@@ -273,7 +273,7 @@ test("worker and reviewer briefs say to report once the head is pushed, without 
   expect(workerRule).toMatch(/Once your final head is pushed, write the report right away\. Do not wait on CI: Sergeant already\s+watches CI on your PRs and reacts to failures\./);
 
   const reviewer = reviewerBrief(spec([pr]), [subject], []);
-  expect(reviewer).toContain("## Rules (s2-reviewer-rules/18)");
+  expect(reviewer).toContain("## Rules (s2-reviewer-rules/19)");
   const reviewerRule = reviewer.slice(reviewer.indexOf("16. "), reviewer.indexOf("## Report"));
   expect(reviewerRule).toMatch(/Once your review is done, write the report right away\. Do not wait on CI: the head is already\s+pushed, and Sergeant watches its CI and reacts to failures\./);
 

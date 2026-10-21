@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/18";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/19";
 
 /**
  * Each subject PR's human feedback (TECH-4990), or its bot feedback (TECH-6166), for the reviewer to
@@ -204,6 +204,12 @@ ${renderReadAccess(enrolled)}
     preference, is at most a \`nit\`. When the issue text itself asks for the extra pieces, say so and
     recommend a spec fix rather than blaming the worker. Judge concepts, not lines: fewer lines is not
     a simpler design, and use no line counts or size ratios.
+18. Sergeant gives each PR a review tier, T0 (trivial) to T4 (critical), from the repository's tier
+    map (\`.github/review-tiers.yml\` at the head; a path it does not list is T2, no map is T3), and the
+    tier decides how many reviews it needs and whether a human must merge it. When the change is more
+    sensitive than its paths suggest (an IAM trust-policy edit inside an infrastructure file, a
+    migration that deletes data), raise its tier: set \`raiseTier\` on that PR's \`reviewed\` entry to
+    \`{ "tier": "T3", "reason": "<why>" }\` (or T4). You can never lower a tier; only the map does.
 
 ## Report
 
@@ -226,7 +232,8 @@ This is the reviewer report, \`s2-review-report/1\`. Every field below is requir
 
 - \`reportVersion\`: exactly \`"s2-review-report/1"\`.
 - \`reviewed\`: a non-empty array naming each head you reviewed as \`{ "repo", "number", "headSha" }\`
-  (\`owner/name\`, the positive PR number, and the full 40-character SHA), as listed above.
+  (\`owner/name\`, the positive PR number, and the full 40-character SHA), as listed above, each
+  with \`raiseTier\`: \`null\` unless you raise its tier (rule 18).
 - \`verdict\`: exactly one of \`"approve"\`, \`"changes_requested"\`, \`"needs_human"\`.
 - \`findings\`: an array, \`[]\` when there are none; each finding has a non-empty \`id\`, a
   \`severity\`, and a \`description\`, with \`category\` and \`location\` as above.

@@ -22,9 +22,18 @@ const merge = { repo, number: 7, expectedHeadSha: head, squash: { issueIdentifie
 
 const json = (value: unknown, status = 200, headers?: HeadersInit) =>
   Response.json(value, { status, ...(headers && { headers }) });
-/** A PR's human-feedback, commit, and changed-file lists are empty unless a test's `fetch` answers them. */
+/** The tier map at a head: every path T1, so Sergeant may merge it (TECH-6553). */
+const t1Map = () => json({ type: "file", encoding: "base64", content: Buffer.from('tiers:\n  T1: ["**"]\n').toString("base64") });
+/**
+ * A PR's human-feedback, commit, and changed-file lists are empty, and its tier map makes it T1, unless a
+ * test's `fetch` answers them.
+ */
 const noFeedback = (fetch: typeof globalThis.fetch): typeof globalThis.fetch => async (input, init) =>
-  /\/(reviews|comments|commits|files)\?per_page=100&page=1$/.test(String(input)) && !init?.method ? fetch(input, init).catch(() => json([])) : fetch(input, init);
+  /\/(reviews|comments|commits|files)\?per_page=100&page=1$/.test(String(input)) && !init?.method
+    ? fetch(input, init).catch(() => json([]))
+    : String(input).includes("/contents/.github/review-tiers.yml?ref=")
+      ? fetch(input, init).catch(t1Map)
+      : fetch(input, init);
 const adapter = (fetch: typeof globalThis.fetch, observedChecksFallback = false) =>
   createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash", mergePolicy: "sergeant", observedChecksFallback } }, fetch: noFeedback(fetch) });
 
@@ -163,10 +172,17 @@ test("approves the exact head, then merges with GitHub's expected-head guard", a
   };
 
   expect(await adapter(fetch).mergePullRequest(merge)).toEqual({ mergedSha: "b".repeat(40) });
-  expect(calls.map((call) => call.path.replace(/^.*\/pulls\/7/, ""))).toEqual(["/files?per_page=100&page=1", "/reviews", "", "/commits?per_page=100&page=1", "/merge"]);
-  expect(calls[1]?.body).toMatchObject({ commit_id: head, event: "APPROVE" });
+  expect(calls.map((call) => call.path.replace(/^.*\/pulls\/7/, "").replace(/^.*\/contents\//, "contents/"))).toEqual([
+    "/files?per_page=100&page=1",
+    `contents/.github/review-tiers.yml?ref=${head}`,
+    "/reviews",
+    "",
+    "/commits?per_page=100&page=1",
+    "/merge",
+  ]);
+  expect(calls[2]?.body).toMatchObject({ commit_id: head, event: "APPROVE" });
   const message = "Does the thing.\n\nFixes TECH-1\n\nBuilt by Sergeant (worker: Claude, review: Codex)\n";
-  expect(calls[4]?.body).toEqual({ sha: head, merge_method: "squash", commit_title: "Fix the thing (#7)", commit_message: message });
+  expect(calls[5]?.body).toEqual({ sha: head, merge_method: "squash", commit_title: "Fix the thing (#7)", commit_message: message });
 });
 
 test("a failed approval prevents the merge", async () => {

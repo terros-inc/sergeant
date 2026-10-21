@@ -180,6 +180,8 @@ export interface GitHubPort {
     number: number;
     expectedHeadSha: Sha;
     squash: { issueIdentifier: string; closesIssue: boolean; builtBy: string };
+    /** TECH-6553: the head's tier and the reviews that satisfied the Gate, added to Sergeant's approval on the PR. */
+    evidence?: string;
   }): Promise<{ mergedSha: Sha } | { refused: string }>;
   /**
    * The repository's live `mergePolicy` (TECH-5244). Absent, as in a fake that never merges, every
@@ -190,11 +192,12 @@ export interface GitHubPort {
   /**
    * A `human` repository's gated head, handed to a human (TECH-5244), never approved or merged: the PR
    * marked ready for review if it is a draft; review requested from `reviewers` only when GitHub shows
-   * nobody requested (no code owner, say) and the PR is not the reviewer's own; and `comment` posted on
-   * it unless it already has it. Rejects when the head is no longer `expectedHeadSha`. Resolves with the
-   * logins and `org/team`s whose review is now requested. Safe to repeat.
+   * nobody requested (no code owner, say) and the PR is not the reviewer's own, and from the
+   * `teamReviewers` (team slugs, TECH-6553) under the same condition; and `comment` posted on it unless
+   * it already has it. Rejects when the head is no longer `expectedHeadSha`. Resolves with the logins
+   * and `org/team`s whose review is now requested. Safe to repeat.
    */
-  handToHuman?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha; reviewers: string[]; comment: string }): Promise<{ requested: string[] }>;
+  handToHuman?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha; reviewers: string[]; teamReviewers?: string[]; comment: string }): Promise<{ requested: string[] }>;
   /**
    * The repository's default branch and its head commit now (TECH-5258): a filed follow-up records the
    * commit it was written against, so its staleness is visible. Optional, so a fake without it records none.

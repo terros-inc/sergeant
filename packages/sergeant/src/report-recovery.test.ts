@@ -19,7 +19,7 @@ const repo = "o/canary";
 const url = `https://github.com/${repo}/pull/7`;
 const agent = { id: "agent-v2", name: "Sergeant" };
 const pr: PullRequestFacts = {
-  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha: H, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", changedFiles: [], mergeable: true, mergeableState: "clean",
+  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha: H, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", changedFiles: [], reviewTier: { tier: "T0", rule: "a test map's T0 rule" }, mergeable: true, mergeableState: "clean",
   checks: { sha: H, required: [{ name: "validate", state: "passed" }] },
   humanFeedback: [],
 };

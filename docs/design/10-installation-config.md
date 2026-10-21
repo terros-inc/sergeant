@@ -29,7 +29,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 |---|---|---|
 | Linear | workspace, agent user, allowed teams, ops team, OAuth client ref, webhook secret ref | intake admits only allowed teams |
 | GitHub | control-plane App (id, installation ids, key ref), worker App (same), webhook secret ref | two Apps per installation (08 §1); never shared across installations (ADR-0017's rule) |
-| Repositories | slug, purpose, enabled, merge policy, merge method, always-review paths | `sgt config repo add\|set\|enable\|disable\|remove` |
+| Repositories | slug, purpose, enabled, merge policy (`sergeant` is the opt-in to bot merging of T0–T2 heads, 06 §6a), merge method | `sgt config repo add\|set\|enable\|disable\|remove` |
 | Runner profiles | name, adapter, provider, model, roles, max concurrent, settings, pricing | worker credentials (subscription tokens) go through `sgt config claude-profile` and its siblings, stdin-only, into Secrets Manager (ADR-0042, kept) |
 | Defaults | budget (about 2 h active wall time, hard; about $25 per task, best-effort; soft 0.8, grace 10 min, reasoning reserve $2, 2 concurrent reviewers, 6 starts/hour); profile per role (worker, reviewer, audit reviewer) | both budget numbers configurable per installation |
 | Limits | max open tasks, max concurrent runs, max concurrent turns | |

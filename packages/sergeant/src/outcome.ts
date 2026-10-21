@@ -1,11 +1,12 @@
-import { FEEDBACK_MARKER, issueRevision, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { FEEDBACK_MARKER, issueRevision, tierEvidence, tierLine, type Conversation, type FiledFollowup, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { approvedHead } from "./review-quality.ts";
 
 /**
  * The one concise outcome comment Sergeant posts after a merge (07 §3): the PR, the reviewed head,
  * the validation observed on it, the merge result, known gaps, and follow-ups filed. Built from live PR facts and the
  * run records: the ones the merge was allowed on, or, for a merge `state.json` never recorded, the
- * ones re-read after it. No run ids or other internals; Done is left to the GitHub integration.
+ * ones re-read after it. Run ids appear only as the review evidence for the head's tier (TECH-6553);
+ * Done is left to the GitHub integration.
  * Known gaps are judged against the issue's current title and description (TECH-5034), so a human
  * merge of work checked against older text, or over a review's unmet requirements, says so.
  * A follow-up reasoning filed for an after-deploy check (key `after-deploy-…`, TECH-6146) is listed
@@ -27,11 +28,15 @@ export function outcomeComment(
   const worker = runs.findLast((r) => r.role === "worker" && r.report?.pullRequests.some(covers));
   const report = worker?.role === "worker" ? worker.report : null;
   const waiver = report?.pullRequests.find((r) => covers(r) && r.headSha === head)?.review;
-  const review = approvedHead(runs, pr)
-    ? "a fresh review approved this exact head"
-    : waiver && !waiver.required
-      ? `not required for this head (${waiver.reason})`
-      : "no fresh review of this head on record";
+  // TECH-6553: the tier and the reviews that satisfied the Gate are the merge's audit evidence.
+  const evidence = tierEvidence(pr, runs);
+  const review = evidence.reviews.length > 0
+    ? evidence.reviews.join("; ")
+    : approvedHead(runs, pr)
+      ? "a fresh review approved this exact head"
+      : waiver && !waiver.required
+        ? `not required for this head (${waiver.reason})`
+        : "no fresh review of this head on record";
 
   const checks = pr.checks.required;
   const validation = checks.every((c) => c.state === "passed")
@@ -43,6 +48,7 @@ export function outcomeComment(
 
   return [
     `**Merged** [${pr.repo}#${pr.number}](${pr.url}): head \`${head.slice(0, 12)}\` merged as \`${mergedSha.slice(0, 12)}\`.`,
+    `- ${tierLine(evidence.tier)}`,
     `- Review: ${review}.`,
     `- Validation: ${validation}.`,
     `- Known gaps: ${gaps.length > 0 ? gaps.join("; ") : "none reported"}.`,

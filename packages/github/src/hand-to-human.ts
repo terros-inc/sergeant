@@ -29,7 +29,7 @@ async function atStep<T>(step: HumanHandoffError["step"], operation: () => Promi
 
 export async function handToHuman(
   request: Request,
-  { repo, number, expectedHeadSha, reviewers, comment }: Parameters<HandToHuman>[0],
+  { repo, number, expectedHeadSha, reviewers, teamReviewers = [], comment }: Parameters<HandToHuman>[0],
   { appId, log }: HandoffContext,
 ): ReturnType<HandToHuman> {
   const path = `/repos/${repo}/pulls/${number}`;
@@ -51,10 +51,17 @@ export async function handToHuman(
   const owner = repo.split("/")[0];
   const requested = [...live.requested_reviewers.map((u) => u.login), ...live.requested_teams.map((t) => `${owner}/${t.slug}`)];
   // Only when nobody is asked yet: the code owners GitHub requested come first.
-  const asked = requested.length > 0 ? [] : reviewers.filter((r) => r.toLowerCase() !== live.user.login.toLowerCase());
+  const nobodyAsked = requested.length === 0;
+  const asked = !nobodyAsked ? [] : reviewers.filter((r) => r.toLowerCase() !== live.user.login.toLowerCase());
   // 422: GitHub cannot request this login (not a collaborator, say); then nobody is named as asked.
   if (asked.length > 0) {
     if (await atStep("request reviewers", () => request(`${path}/requested_reviewers`, { ...json, body: JSON.stringify({ reviewers: asked }) }, { allowStatuses: [422] }))) requested.push(...asked);
+  }
+  // TECH-6553: a T3 or T4 head's map names the team whose approvals count. Asked separately, so a team
+  // GitHub cannot request (422: no access to the repository, say) does not lose the person asked above.
+  const teams = nobodyAsked ? teamReviewers : [];
+  if (teams.length > 0) {
+    if (await atStep("request reviewers", () => request(`${path}/requested_reviewers`, { ...json, body: JSON.stringify({ team_reviewers: teams }) }, { allowStatuses: [422] }))) requested.push(...teams.map((t) => `${owner}/${t}`));
   }
   const { comments, latest } = await atStep("post review summary", async () => {
     const all = await readAll((p) => request(p), `/repos/${repo}/issues/${number}/comments`, issueComment);

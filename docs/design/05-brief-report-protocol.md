@@ -63,7 +63,7 @@ stored beside it so it can be replayed.
 <the standard rules, §3>
 
 ## Review
-<review policy: decide per PR head; always-review paths; a subagent review you run yourself is extra evidence, never the required review>
+<review policy: decide per PR head; review tiers (06 §6a): only a T0 head skips review, and the worker may raise a tier; a subagent review you run yourself is extra evidence, never the required review>
 
 ## Report
 <the report contract, §4, and where to write it>
@@ -199,8 +199,8 @@ change it actually made, per PR head:
 `required: true` whenever it is unsure, and skips only when it is confident.
 
 **Fail toward review** mechanically: a missing recommendation, one that does not parse, or
-`required: false` with an empty `reason` is read as `required: true`. A PR touching a repository's
-optional `alwaysReviewPaths` is reviewed regardless (06 §6, D4).
+`required: false` with an empty `reason` is read as `required: true`. A skip stands only for a T0 head
+(06 §6a, D4); a worker or reviewer may raise a PR's tier with `raiseTier`, never lower it.
 
 ## 6. Parsing and validation
 

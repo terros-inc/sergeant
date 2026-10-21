@@ -11,6 +11,10 @@ Legend: **[S]** Sergeant's reasoning (a turn) · **[G]** deterministic core (gua
 Each scenario ends with a summary: **durable state**, **reasoning decides**, **deterministic checks**,
 **external effects**, **restart**.
 
+Review tiers (TECH-6553, 06 §6a) came later: a `not_required` standing, including one after a review
+(D5), now stands only for a T0 head, so a scenario's skip assumes a T0 change, and its merges assume a
+`sergeant` repository whose map puts the change at T0–T2.
+
 ---
 
 ## 1. Tiny one-repo fix, no review

@@ -18,7 +18,7 @@ const repo = "o/canary";
 const url = `https://github.com/${repo}/pull/7`;
 const agent = { id: "agent-v2", name: "Sergeant" };
 const prAt = (headSha: string, validate: "passed" | "failed"): PullRequestFacts => ({
-  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", changedFiles: [], mergeable: true, mergeableState: "clean",
+  repo, number: 7, url, state: "open", draft: false, author: "sergeant-worker[bot]", headSha, mergedSha: null, baseRef: "main", body: "Fixes UNF-1", changedFiles: [], reviewTier: { tier: "T0", rule: "a test map's T0 rule" }, mergeable: true, mergeableState: "clean",
   checks: { sha: headSha, required: [{ name: "validate", state: validate }] },
   humanFeedback: [],
 });
@@ -143,5 +143,5 @@ test("a blocking finding and then a red check each get a pushed fix on the same 
   // The H1 review could not carry H3; only the fresh review of H3 did.
   expect(outcomes[2]).toEqual([expect.stringMatching(/denied by M6 .*did not review head/), expect.stringMatching(/^start_reviewer: done/)]);
   expect(reviewer).toMatchObject({ role: "reviewer", subject: [{ repo, number: 7, headSha: H3 }] });
-  expect(merged).toEqual([{ kind: "merge_pr", repo, number: 7, expectedHeadSha: H3, reviewStanding: { kind: "reviewed", reviewRunId: reviewer?.runId }, squash: { issueIdentifier: "UNF-1", closesIssue: true, builtBy: "Built by Sergeant (worker: p, review: p)" } }]);
+  expect(merged).toEqual([{ kind: "merge_pr", repo, number: 7, expectedHeadSha: H3, reviewStanding: { kind: "reviewed", reviewRunId: reviewer?.runId }, squash: { issueIdentifier: "UNF-1", closesIssue: true, builtBy: "Built by Sergeant (worker: p, review: p)" }, evidence: expect.stringContaining("Review tier: **T0**") }]);
 });

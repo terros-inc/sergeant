@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CiRerunRequest } from "./ci-rerun.ts";
 import { RepoSlug } from "./conversation.ts";
+import { ReviewTier } from "./review-tiers.ts";
 
 export const RunId = z.string().regex(/^run_[\w-]+$/);
 export type RunId = z.infer<typeof RunId>;
@@ -44,6 +45,19 @@ export const ReviewRecommendation = z
   .transform((r) => (!r.required && r.reason.trim() === "" ? { required: true, reason: FAIL_SAFE } : r))
   .catch({ required: true, reason: FAIL_SAFE });
 export type ReviewRecommendation = z.infer<typeof ReviewRecommendation>;
+
+/**
+ * TECH-6553: a run's call to raise a PR's review tier above its map's, with why (an IAM trust-policy
+ * edit inside an infrastructure file, say). It sticks for the PR's later heads; nothing but the map
+ * lowers a tier. A raise without a reason keeps its tier, and one with no tier Sergeant knows reads as
+ * T3 rather than being dropped, since its author meant the change to be more sensitive than the map says.
+ */
+const RaiseTier = z
+  .object({ tier: ReviewTier, reason: z.string().default("").transform((r) => r.trim() || "no reason given") })
+  .nullable()
+  .catch({ tier: "T3", reason: "a malformed tier raise, read as T3" })
+  .transform((r) => r ?? undefined)
+  .optional();
 
 /** A PR head as a report names it. SHAs are kept as written; the Gate compares them exactly. */
 const ReportedPr = { repo: RepoSlug, number: z.number().int().positive(), headSha: z.string() };
@@ -90,6 +104,7 @@ export const WorkerReport = z.object({
          */
         closesIssue: z.boolean(),
         review: ReviewRecommendation,
+        raiseTier: RaiseTier,
       }),
     )
     .default([]),
@@ -152,7 +167,7 @@ export type Finding = z.infer<typeof Finding>;
 
 export const ReviewReport = z.object({
   reportVersion: z.literal("s2-review-report/1").catch("s2-review-report/1"),
-  reviewed: z.array(z.object({ ...ReportedPr, number: z.coerce.number().int().positive() })).min(1),
+  reviewed: z.array(z.object({ ...ReportedPr, number: z.coerce.number().int().positive(), raiseTier: RaiseTier })).min(1),
   verdict: z.preprocess((v) => VERDICTS[token(v) as string] ?? token(v), z.enum(["approve", "changes_requested", "needs_human"])),
   /** A finding without an id gets its place in the list (`f1`, `f2`, …), or the next one no other finding has. */
   findings: z
@@ -200,11 +215,22 @@ export const REVIEW_REPORT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["repo", "number", "headSha"],
+        required: ["repo", "number", "headSha", "raiseTier"],
         properties: {
           repo: { type: "string", pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
           number: { type: "integer", minimum: 1 },
           headSha: { type: "string" },
+          raiseTier: {
+            anyOf: [
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["tier", "reason"],
+                properties: { tier: { type: "string", enum: ["T0", "T1", "T2", "T3", "T4"] }, reason: { type: "string", pattern: "\\S" } },
+              },
+              { type: "null" },
+            ],
+          },
         },
       },
       minItems: 1,

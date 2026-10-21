@@ -8,9 +8,13 @@ import {
   checkStart,
   NoModelAccount,
   conversationRevision,
+  effectiveTier,
   issueRevision,
   protectedCiFiles,
   reportedClosing,
+  tierAtLeast,
+  tierEvidence,
+  tierLine,
   type FollowupCategory,
   type ProposedAction,
   type RunRecord,
@@ -179,8 +183,13 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
         const liveRevision = conversationRevision(live, situation.pullRequests.map((p) => (p.repo === pr.repo && p.number === pr.number ? pr : p)));
         // TECH-5244: the repository's live merge policy. In a `human` one the same preflight decides
         // whether the head is ready, and a ready head is handed to a human, never approved or merged.
+        // TECH-6553: a T3 or T4 head (a protected CI change among them) is always a human's to approve
+        // and merge, whatever the policy; a `sergeant` policy is the repository's opt-in to Sergeant
+        // merging T0 to T2.
         const protectedFiles = protectedCiFiles(pr);
-        const policy = protectedFiles.length > 0 ? "human" : enrolledRepositories.includes(action.repo) ? (ports.github.mergePolicy?.(action.repo) ?? "human") : "human";
+        const tier = effectiveTier(pr, runs);
+        const forced = protectedFiles.length > 0 || tierAtLeast(tier.tier, "T3");
+        const policy = forced ? "human" : enrolledRepositories.includes(action.repo) ? (ports.github.mergePolicy?.(action.repo) ?? "human") : "human";
         // The shared "may merge now?" preflight (TECH-5065): A1/A2 on the live issue, the merge gate, and
         // B1 again as of now, the same one a re-review request is asked against (rereview.ts).
         const verdict = checkMayMerge(
@@ -213,11 +222,12 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
           await ports.handoff?.(moved);
           return denied({ rule: "O1", reason: moved });
         }
-        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports, protectedFiles });
+        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports, protectedFiles, tierForced: forced });
         // Whether the squash commit may close the issue is the worker's report, the one M9 just checked
         // the body against, never a re-reading of the body (TECH-5085).
         const squash = { issueIdentifier: live.issue.identifier, closesIssue: reportedClosing(runs, pr) === true, builtBy: builtByLine(runs) };
-        const result = await ports.github.mergePullRequest({ ...action, squash });
+        const evidence = tierEvidence(pr, runs, action.reviewStanding);
+        const result = await ports.github.mergePullRequest({ ...action, squash, evidence: [tierLine(evidence.tier), `Reviews: ${evidence.reviews.join("; ")}.`].join("\n") });
         if ("refused" in result) {
           // Repository policy, not a fault. The loop gives it the same one bounded re-check as a
           // failed merge call, then hands it to a human if nothing changed (TECH-5077).

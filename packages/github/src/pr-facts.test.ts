@@ -103,3 +103,32 @@ test("a webhook's review or comment is read though updated_at did not move, and 
   expect(await ids()).toEqual(["review:41", "review:42"]);
   expect(reviewReads).toBe(4);
 });
+
+// TECH-6553: the tier comes from the map at the PR's own head, so a PR that edits the map, or a base
+// that has one the head lacks, is judged by what would merge; a map GitHub fails to return is T3.
+test("the PR's review tier is read from the tier map at its head", async () => {
+  const tierAt = async (contents: (ref: string) => Response) => {
+    const fetch = async (input: string | URL | Request) => {
+      const path = String(input);
+      const ref = /\/contents\/\.github\/review-tiers\.yml\?ref=(\w+)$/.exec(path)?.[1];
+      if (ref) return contents(ref);
+      if (path.endsWith("/pulls/7")) return Response.json(pr);
+      if (path.includes("/check-runs")) return Response.json({ total_count: 0, check_runs: [] });
+      if (path.endsWith("/status?per_page=100")) return Response.json({ state: "success", total_count: 0, statuses: [] });
+      if (path.includes("/protection/")) return Response.json({ message: "Not Found" }, { status: 404 });
+      if (path.includes("/files?")) return Response.json([{ filename: "docs/a.md" }]);
+      if (/\/rules\/branches\/main\?|\/(reviews|comments)\?per_page=100&page=1$/.test(path)) return Response.json([]);
+      throw new Error(`unexpected request: ${path}`);
+    };
+    return (await createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash" } }, fetch }).readPullRequest(repo, 7)).reviewTier;
+  };
+  const yaml = (text: string) => Response.json({ type: "file", encoding: "base64", content: Buffer.from(text).toString("base64") });
+  const map = "humanTeam: reviewers\ntiers:\n  T0:\n    - docs/**\n";
+  expect(await tierAt((ref) => (ref === head ? yaml(map) : Response.json({ message: "Not Found" }, { status: 404 })))).toEqual({
+    tier: "T0",
+    rule: "`docs/a.md` matches T0 pattern `docs/**`",
+    humanTeam: "reviewers",
+  });
+  expect(await tierAt(() => Response.json({ message: "Not Found" }, { status: 404 }))).toMatchObject({ tier: "T3", rule: expect.stringContaining("no tier map") });
+  expect(await tierAt(() => Response.json({ message: "Server Error" }, { status: 500 }))).toMatchObject({ tier: "T3", rule: expect.stringContaining("could not be read") });
+});

@@ -3,7 +3,7 @@ import { renderBoundedBotFeedback, renderBoundedHumanFeedback, renderReadAccess,
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/23";
+export const WORKER_RULES_VERSION = "s2-worker-rules/24";
 
 /**
  * TECH-6164: of origin's branches (`<repo>: <branch>`), the ones that are this issue's: their name holds
@@ -108,7 +108,12 @@ ${renderReadAccess(enrolled)}
 8. Validation you cannot perform here (missing access, a live environment): say so in knownGaps with
    what would be needed. Never seek broader credentials.
 9. For each PR, decide whether its head needs a fresh review by a separate reviewer. If in
-   doubt, say it does. Skip only when you are confident, and give the reason.
+   doubt, say it does. Skip only when you are confident, and give the reason. Sergeant also gives
+   each PR a review tier, T0 (trivial) to T4 (critical), from the repository's tier map
+   (\`.github/review-tiers.yml\` at your head; a path it does not list is T2, no map is T3, a change
+   to the map is T4), and only a T0 head can skip review. When your change is more sensitive than
+   its paths suggest (an IAM trust-policy edit inside an infrastructure file, a migration that deletes
+   data), raise its tier with \`raiseTier\` and say why; you can never lower it.
 10. When you need a human decision, end with outcome \`needs_decision\` and put the question, options,
     and your recommendation in the report prose.
     When your verification shows nothing to change (the default branch already covers the whole
@@ -212,7 +217,8 @@ what changed, validation, known gaps, decisions, a short Feedback section), endi
   "pullRequests": [{ "repo": "<owner/name>", "number": <PR number>, "url": "<PR URL>",
                      "headSha": "<full 40-char SHA of the PR head you pushed last>",
                      "closesIssue": true | false,
-                     "review": { "required": true | false, "reason": "<why>" } }],
+                     "review": { "required": true | false, "reason": "<why>" },
+                     "raiseTier": { "tier": "T3" | "T4" | ..., "reason": "<why>" } (omit unless you raise it) }],
   "knownGaps": ["..."],
   "unreadableInputs": [{ "input": "<as the issue gives it>", "reason": "<why you could not read it>" }],
   "dependencies": [{ "issue": "<Linear identifier>", "relation": "blocked_by" | "blocks", "why": "<evidence>" }],

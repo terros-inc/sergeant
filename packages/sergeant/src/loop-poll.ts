@@ -1,5 +1,6 @@
 import {
   conversationRevision,
+  effectiveTier,
   linearUploads,
   issueRevision,
   SituationReport,
@@ -54,7 +55,8 @@ export function situationOf(
     uploads: linearUploads(conversation),
     issueRevision: issueRevision(conversation.issue),
     enrolledRepositories: opts.enrolledRepositories,
-    pullRequests,
+    // TECH-6553: each PR's tier as the Gate will judge it, with any run's raise applied (idempotent).
+    pullRequests: pullRequests.map((p) => ({ ...p, reviewTier: effectiveTier(p, runs) })),
     runs,
     followups: state.followups,
     refusedMerges: state.refusedMerges,
