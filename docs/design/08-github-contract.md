@@ -193,7 +193,9 @@ kind of action its summary describes) or wait (naming what on), and a turn whose
 all among its actions, or with no actions and no `wait`, is taken again once on the same facts. The
 count is kept in `state.json`, so a restart does not reset it. The next hollow turn posts a Linear
 comment that the task is stuck, and only once that comment is posted is the fingerprint committed;
-until then each poll posts it again, taking no turn. The Linear issue's Done state follows from automation, not from Sergeant
+until then each poll posts it again, taking no turn. Accepted gap: a turn with a `wait` intent, no
+actions, and a free-text summary that describes actions is recorded as a normal wait and is not
+detected; detection remains structural and does not interpret summary text. The Linear issue's Done state follows from automation, not from Sergeant
 (07 §7).
 
 Where `mergePolicy` is `human`, or M15 finds protected CI configuration, Sergeant gets the PR ready (green, reviewed, disposition recorded),
