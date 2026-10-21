@@ -51,6 +51,13 @@ there: someone with admin on it creates one from the recipe in
 [`deploy/README.md`](../deploy/README.md), "GitHub Apps and rulesets", and `live-check --repo` confirms
 it. From then on every PR there, not only Sergeant's, needs an approving review or an admin's bypass.
 
+Before relying on its required checks, confirm the repository may run GitHub Actions. An
+organization's Actions policy can allow only selected repositories (Organization settings → Actions →
+General → Policies, `https://github.com/organizations/<org>/settings/actions`). A repository left off
+that list never starts a workflow, so its required checks never report and Sergeant never merges
+there. Sergeant cannot see why: its Apps hold no administration permission, so they cannot read that
+setting. An organization owner adds the repository to the list.
+
 ## 3. Other settings
 
 - **Reviewer profile.** Add the user to `linear.reviewerProfiles`
