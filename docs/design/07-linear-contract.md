@@ -313,6 +313,22 @@ a follow-up PR, and the probe issues were archived. No compensating completion m
 Whether Linear moves an issue with several closing PRs only after all of them merge does not matter
 to this design, because non-final PRs never carry the closing reference.
 
+**After the closing merge (TECH-6477).** The worker's PR reported closing (`closesIssue`) merged is
+the task's landing: Sergeant posts the outcome and feedback comments once, draws the audit sample (06
+§8), and watches Linear for Done, waiting up to `completionWaitMinutes` before the loop ends
+`merged_not_done`; intake resumes it until the issue is Done or Canceled (§9). While the issue is open,
+not in Backlog, and still delegated to Sergeant, the landing does not end the work: a human's comment
+on the issue after the merge, an edit to its title or description no turn has read, or `sgt task wake`
+**reopens** it. The landing is set aside (`state.json` `reopened`), the task gets a fresh window (§6),
+and it works on as before the merge, so the next turn can start a worker for what is left; a later
+closing merge is its landing then. Each landing is reopened once. Once the issue is Done, nothing
+reopens it: a reopened landing is the task's landing again, with its comments already posted, work the
+reopen started and still running is canceled, and the task is seen through. Comments that come after
+that, and every comment on the task's merged PRs, go to the post-merge feedback sweep (§11), which
+leaves alone a comment the task's loop reads. A wake that cannot reopen the task (the issue Done,
+Canceled, in Backlog, or no longer delegated) answers `after_merge`, and `sgt task wake` says no turn
+comes.
+
 ## 8. Cancellation and undelegation
 
 Handled by guardrails, even while paused, as one closing action whose steps run in order (03 §10):
@@ -435,10 +451,11 @@ A failed retro is retried a day later, or at the next `sgt retro`.
   (02 §6).
 - After-deploy checks get one such follow-up each (03 §12); nothing else about them differs.
 
-**Feedback after the work landed (TECH-4985).** Once the completing PR (`Fixes`) merged or the issue
-is Done, the task loop takes no more turns, so a human comment on the issue, or a comment, review
-comment, or review on its merged worker-App PRs from the repository's owners, members, and
-collaborators, would otherwise be lost. A sweep every 30 minutes reads issues delegated to Sergeant
+**Feedback after the work landed (TECH-4985).** Once the completing PR (`Fixes`) merged, the task
+loop reads no PR feedback, and once the issue is Done it takes no more turns (§7: until then a comment
+on the issue reopens the task, and the sweep leaves it alone), so a human comment on the issue, or a
+comment, review comment, or review on its merged worker-App PRs from the repository's owners, members,
+and collaborators, would otherwise be lost. A sweep every 30 minutes reads issues delegated to Sergeant
 and completed in the last 14 days, open and delegated, or merged by this host in that time; reasoning
 judges each new piece of feedback, and an acknowledgement or discussion files nothing. Actionable
 feedback becomes one ordinary follow-up under the rule above (Backlog, assigned to the origin's

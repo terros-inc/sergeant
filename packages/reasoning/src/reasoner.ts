@@ -70,7 +70,14 @@ export function claudeCliReasoner(
 
 /** The CLI's arguments for one isolated answer in `schema`'s shape: no tools, MCP servers, customizations, or session. */
 function cliArgs(schema: z.ZodType, systemPrompt: string, model: string, maxCostUsd: number): string[] {
-  const jsonSchema = JSON.stringify(z.toJSONSchema(schema, { target: "draft-7", io: "input" }));
+  const json = z.toJSONSchema(schema, { target: "draft-7", io: "input" });
+  // TECH-6477: the CLI sends the schema as a tool's input schema, which the API accepts only as a plain
+  // object at the root. A union there (a discriminated union's `oneOf`) failed every call before the
+  // model saw it: `claude exited 1` with no tokens. Refused here, so such a schema fails its first test.
+  if (json.type !== "object" || "oneOf" in json || "anyOf" in json || "allOf" in json) {
+    throw new Error("the CLI's --json-schema must be a plain object at its root, not a union");
+  }
+  const jsonSchema = JSON.stringify(json);
   return [
     "-p", "--output-format", "json", "--json-schema", jsonSchema,
     "--model", model, "--max-budget-usd", String(maxCostUsd),

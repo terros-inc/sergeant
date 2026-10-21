@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  checkLive,
   hasClosingReference,
   isRateLimited,
   type Conversation,
@@ -19,8 +20,9 @@ import { pause } from "./wake.ts";
 import { writtenAgainst } from "./written-against.ts";
 
 // Post-merge feedback (TECH-4985). While a task is active, a human's comment is part of its
-// conversation and its own loop handles it (loop.ts). Once the completing PR merged or the issue is
-// Done, the loop takes no more turns, so this sweep reads what humans said afterwards: comments on the
+// conversation and its own loop handles it (loop.ts), and so is one on an issue whose completing PR
+// merged while the issue still takes work, not Done: it reopens the task (TECH-6477, after-merge.ts
+// `reopenReason`). Once the issue is Done, or the loop is gone, this sweep reads what humans said afterwards: comments on the
 // issue, and comments and reviews on Sergeant's merged PRs from people with a role in the repository.
 // Reasoning judges each one; actionable feedback becomes one ordinary follow-up issue, filed by the
 // Linear adapter's follow-up rule (TECH-4998): Backlog, assigned to the origin's owner, not delegated.
@@ -111,9 +113,10 @@ export async function sweepFeedback(opts: FeedbackOptions, deps: FeedbackDeps): 
   const landedBefore = new Set(tasks.filter((t) => t.merged !== undefined && t.merged <= lookback).map((t) => t.issueId));
   const open = (await deps.openIssues()).filter((id) => !landedBefore.has(id));
   const candidates = new Set([...(await deps.completedIssues(lookback)), ...open, ...recent]);
+  const underWay = new Set(tasks.filter((t) => t.underWay).map((t) => t.issueId));
   for (const issueId of candidates) {
     if (opts.signal?.aborted) return;
-    await sweepIssue(issueId, Date.parse(lookback), record, save, opts, deps).catch((e: Error) => {
+    await sweepIssue(issueId, Date.parse(lookback), underWay.has(issueId), record, save, opts, deps).catch((e: Error) => {
       // TECH-5923: a rate limit ends the pass; reading on would only spend the budget it waits for.
       if (isRateLimited(e)) throw e;
       opts.log(`feedback on ${issueId}: not swept, retrying next pass: ${e.message}`);
@@ -121,7 +124,7 @@ export async function sweepFeedback(opts: FeedbackOptions, deps: FeedbackDeps): 
   }
 }
 
-async function sweepIssue(issueId: string, lookback: number, record: FeedbackRecord, save: () => Promise<void>, opts: FeedbackOptions, deps: FeedbackDeps): Promise<void> {
+async function sweepIssue(issueId: string, lookback: number, underWay: boolean, record: FeedbackRecord, save: () => Promise<void>, opts: FeedbackOptions, deps: FeedbackDeps): Promise<void> {
   const progress = await deps.issueProgress(issueId);
   if (progress.stateType === "canceled") return;
   const done = progress.stateType === "completed";
@@ -150,10 +153,13 @@ async function sweepIssue(issueId: string, lookback: number, record: FeedbackRec
     return marks.length === 0 ? undefined : Math.max(Math.min(...marks), since);
   };
   const landed = currentLanding();
+  // TECH-6477: a comment on an issue that still takes work, whose task this host has under way, is that
+  // task's direction: its loop reopens the work on it, so a follow-up filed here would duplicate it.
+  const loopReads = underWay && checkLive(origin.issue, deps.agentUserId).allowed;
 
   const feedback: Feedback[] = [
     ...origin.humanComments
-      .filter((c) => landed !== undefined && Date.parse(c.createdAt) > landed && c.body.trim())
+      .filter((c) => !loopReads && landed !== undefined && Date.parse(c.createdAt) > landed && c.body.trim())
       .map((c) => ({ key: `linear:${c.id}`, source: "linear_comment" as const, author: c.author.name, createdAt: c.createdAt, body: c.body, url: origin.issue.url })),
     ...merged.flatMap((p) => {
       const episode = episodeOf(p);
@@ -281,14 +287,17 @@ const fromPullRequest = (p: PullRequestFacts, f: HumanPullRequestFeedback): Feed
 const NOUNS = { linear_comment: "a comment", pr_comment: "a PR comment", pr_review_comment: "a review comment", pr_review: "a review" };
 const where = (item: Feedback) => `[${NOUNS[item.source]}](${item.url})`;
 
-/** When each task this host ran merged: its current episode (`state.json`'s `merged`), and its set-aside episodes. */
-async function localMerges(stateDir: string): Promise<{ issueId: string; merged?: string; episodes: string[] }[]> {
+/**
+ * When each task this host ran merged: its current episode (`state.json`'s `merged`), and its set-aside
+ * episodes; `underWay` while it has a `state.json` not seen through, which its loop resumes from.
+ */
+async function localMerges(stateDir: string): Promise<{ issueId: string; merged?: string; episodes: string[]; underWay: boolean }[]> {
   const dirs = await readdir(join(stateDir, "tasks")).catch(() => []);
   return Promise.all(
     dirs.map(async (id) => {
       const state = await readTaskState(join(stateDir, "tasks", id, "state.json")).catch(() => undefined);
       const episodes = (await completedEpisodes(join(stateDir, "tasks", id))).map((e) => e.mergedAt);
-      return { issueId: state?.issueId ?? id, ...(state?.merged && { merged: state.merged.at }), episodes };
+      return { issueId: state?.issueId ?? id, ...(state?.merged && { merged: state.merged.at }), episodes, underWay: state !== undefined && !state.merged?.completedAt };
     }),
   );
 }

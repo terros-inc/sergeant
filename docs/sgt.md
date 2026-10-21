@@ -139,8 +139,11 @@ are in [design 07 §6](design/07-linear-contract.md#6-budget-asks-and-fresh-wind
   how people replied (extend, stop, other), and how often the reply followed the recommendation.
   `--json` adds every stop.
 
-- **`sgt task wake` does not touch the budget.** It asks for a turn now, which still waits for
-  anything that holds it, an exhausted budget included.
+- **`sgt task wake` does not touch the budget** of a task at work. It asks for a turn now, which still
+  waits for anything that holds it, an exhausted budget included. A task whose closing PR merged is
+  different: while its issue is open and delegated, a wake reopens its work in a fresh window, and
+  otherwise the wake says no turn comes (`after_merge`), as
+  [design 07 §7](design/07-linear-contract.md#7-completion-prs-automation-and-done) sets out.
 - **There is no command to reset a budget**, not even for approvers. Changing the installation's
   `budget` affects only new tasks and later fresh windows.
 - **`sgt task show <ID>`** shows the current window: spend of its limit, when its time would run out if

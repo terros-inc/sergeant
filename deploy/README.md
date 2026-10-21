@@ -939,8 +939,9 @@ A merged head that no fresh review approved skipped review; a stable hash of the
 merged head, started only after the merge so it can never hold one up. After observing Done the loop
 waits for any review still running, the audit included, and records it; an audit's must-fix findings on
 merged code also go to `<dir>/audit-followups.jsonl` and an `AUDIT FOLLOW-UP` log line for a human to
-act on (nothing is reopened or reverted, and no turn runs after the merge to propose a
-`create_followup`). To compare review modes across runs:
+act on (nothing is reopened or reverted, and an audit finding gives the task no turn to propose a
+`create_followup`; what does reopen a merged task is in
+[design 07 §7](../docs/design/07-linear-contract.md#7-completion-prs-automation-and-done)). To compare review modes across runs:
 
 ```sh
 cat <state dirs>/reviews.jsonl | jq -s 'reduce .[] as $f ({}; .[$f.runId] = $f) | [.[]] | group_by([.trigger, .vendor])
