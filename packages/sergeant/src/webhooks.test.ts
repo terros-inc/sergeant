@@ -91,7 +91,7 @@ async function start() {
     reasoner: {
       async turn(situation) {
         counts.turns.push(situation.conversation.issue.identifier);
-        return { output: { summary: "nothing to do yet", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" };
+        return { output: { summary: "nothing to do yet", actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
       },
     },
   };

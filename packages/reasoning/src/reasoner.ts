@@ -17,6 +17,9 @@ export interface Reasoner {
 /** Runs the CLI with `args`, writes `stdin`, and resolves with stdout. Injected in tests. */
 export type RunCli = (args: string[], stdin: string, opts: { cwd: string; timeoutMs: number }) => Promise<string>;
 
+// TECH-6490: reasoning must say whether it acts or waits (TurnOutput `intent`); one without is a malformed turn.
+const ReasonedTurn = TurnOutput.required({ intent: true });
+
 const CliResult = z.object({
   is_error: z.boolean(),
   /** "success", or why the CLI stopped short ("error_max_budget_usd", say), which may come with `is_error` false. */
@@ -45,7 +48,7 @@ export function claudeCliReasoner(
   const runCli = opts.runCli ?? spawnClaude;
   return {
     async turn(situation) {
-      const args = cliArgs(TurnOutput, SYSTEM_PROMPT, model, opts.maxTurnCostUsd ?? 1.5);
+      const args = cliArgs(ReasonedTurn, SYSTEM_PROMPT, model, opts.maxTurnCostUsd ?? 1.5);
       const report = `Situation Report:\n\n${JSON.stringify(SituationReport.parse(situation), null, 2)}`;
       const files = opts.files
         ? await opts.files(situation).catch((e: Error) => ({ files: [], skipped: [{ url: "(all)", title: "", reason: `fetch failed: ${e.message}` }] }))
@@ -62,7 +65,7 @@ export function claudeCliReasoner(
         const cli = CliResult.parse(blocks.length ? streamResult(stdout) : JSON.parse(stdout));
         // TECH-6490: a run cut short fails the turn rather than passing for one that decided nothing.
         if (cli.is_error || stoppedShort(cli)) throw new Error(`reasoning turn failed: ${cli.subtype ?? ""} ${cli.result ?? "unknown error"}`.trim());
-        const output = TurnOutput.parse(cli.structured_output ?? JSON.parse(cli.result ?? ""));
+        const output = ReasonedTurn.parse(cli.structured_output ?? JSON.parse(cli.result ?? ""));
         return { output, model, promptVersion: PROMPT_VERSION, ...(cli.total_cost_usd !== undefined && { costUsd: cli.total_cost_usd }) };
       } finally {
         await rm(cwd, { recursive: true, force: true });

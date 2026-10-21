@@ -106,7 +106,7 @@ async function round(verdict: "approve" | "changes_requested", findings: Finding
             turns += 1;
             // Ends the loop once the turn's effects are done, except a merge's, which ends by itself.
             if (!actions.some((a) => a.kind === "merge_pr")) abort.abort();
-            return { output: { summary: "s", actions, waitingOn: "the next change" }, model: "m", promptVersion: "p", costUsd: 0.1 };
+            return { output: { summary: "s", actions, intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p", costUsd: 0.1 };
           },
         },
       },

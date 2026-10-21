@@ -188,9 +188,12 @@ poll already saw M7 refuse (`behind`, say) is recorded as it was, so the same fa
 mergeability again then differs and wakes exactly one turn. `baseSha` is also part of the fingerprint,
 so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` or
 `close_issue` leaves the fingerprint uncommitted, so it can be retried after the next poll or a
-restart. So does a turn that proposes no action and names nothing it waits on (TurnOutput
-`waitingOn`), which may have described actions it never proposed: it is taken again once on the same
-facts, then committed with a Linear comment that the task is stuck (TECH-6490). The Linear issue's Done state follows from automation, not from Sergeant
+restart. So does a hollow turn (TECH-6490): every turn's `intent` is one choice, act (naming each
+kind of action its summary describes) or wait (naming what on), and a turn whose `act` kinds are not
+all among its actions, or with no actions and no `wait`, is taken again once on the same facts. The
+count is kept in `state.json`, so a restart does not reset it. The next hollow turn posts a Linear
+comment that the task is stuck, and only once that comment is posted is the fingerprint committed;
+until then each poll posts it again, taking no turn. The Linear issue's Done state follows from automation, not from Sergeant
 (07 §7).
 
 Where `mergePolicy` is `human`, or M15 finds protected CI configuration, Sergeant gets the PR ready (green, reviewed, disposition recorded),

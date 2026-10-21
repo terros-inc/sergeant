@@ -94,7 +94,7 @@ test("a run with no usable report is retried at once and says why; a failed retr
       reasoner: {
         async turn(situation) {
           turns.push(situation);
-          return { output: { summary: "decided", actions: decide(situation), waitingOn: "the next change" }, model: "m", promptVersion: "p" };
+          return { output: { summary: "decided", actions: decide(situation), intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
         },
       },
     },
@@ -270,7 +270,7 @@ test("a released task waits for slot admission before starting one report recove
         status: async (runId) => runId === "run_w1" ? missing(runId) : reported(runId),
         cancel: async () => {},
       },
-      reasoner: { turn: async () => ({ output: { summary: "nothing else", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" }) },
+      reasoner: { turn: async () => ({ output: { summary: "nothing else", actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" }) },
     },
   );
 

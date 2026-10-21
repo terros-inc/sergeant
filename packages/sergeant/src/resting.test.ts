@@ -47,7 +47,7 @@ test("intake leaves an ended task resting until a webhook names it, whether or n
     },
     github: { readPullRequest: async () => Promise.reject(new Error("unused")), closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("unused")) },
     runner: { start: async () => {}, status: async () => Promise.reject(new Error("no runs")), cancel: async () => {} },
-    reasoner: { turn: async () => ({ output: { summary: "nothing to do yet", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" }) },
+    reasoner: { turn: async () => ({ output: { summary: "nothing to do yet", actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" }) },
   };
   // The loop ends idle right after its turn, and intake runs every 50 ms.
   service = await startService(

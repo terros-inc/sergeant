@@ -1,52 +1,65 @@
 import type { LinearPort, TurnOutput } from "@terros/sergeant-contracts";
+import type { TaskState } from "./task-state.ts";
 
 /**
- * TECH-6490: a turn that proposes no action and names nothing it waits on has not decided to wait,
- * whatever its summary says (it may describe actions it never proposed). Its fingerprint is left
- * uncommitted so a fresh turn runs on the same facts, at most `HOLLOW_TURN_RETRIES` more times; after
- * that the fingerprint is committed and the issue says the task is stuck, so a human can wake it.
- * The count lives only in memory: a restart allows another retry, which is bounded by restarts.
+ * TECH-6490: a turn whose intent names actions it did not propose, or that proposes none and does not
+ * say it waits, has not decided anything its summary may describe. Its fingerprint is left uncommitted
+ * so a fresh turn runs on the same facts, at most `HOLLOW_TURN_RETRIES` more times. After that the
+ * issue says the task is stuck, so a human can wake it, and only once that comment is posted is the
+ * fingerprint committed: until then each poll posts it again, with no paid turn. The count is in
+ * `state.json`, so a restart neither resets the bound nor loses the flag.
  */
 export const HOLLOW_TURN_RETRIES = 1;
 
-export const isHollow = (output: TurnOutput) => output.actions.length === 0 && output.waitingOn === undefined;
-
-/** What the next turn reads in recentTurns, so it does not take the summary for something done. */
-export const HOLLOW_TURN_NOTE = "proposed no action and named nothing it waits on, so nothing was done";
-
-/** Tracks hollow turns on one fingerprint; `next` says what to do with the latest. */
-export function hollowTurns() {
-  let last: { fingerprint: string; count: number } | undefined;
-  return {
-    next(fingerprint: string): "retry" | "flag" {
-      last = last?.fingerprint === fingerprint ? { fingerprint, count: last.count + 1 } : { fingerprint, count: 1 };
-      return last.count > HOLLOW_TURN_RETRIES ? "flag" : "retry";
-    },
-    clear() {
-      last = undefined;
-    },
-  };
+export function isHollow({ intent, actions }: TurnOutput): boolean {
+  if (intent?.kind === "wait") return false;
+  if (intent?.kind === "act") return intent.kinds.some((kind) => !actions.some((a) => a.kind === kind));
+  return actions.length === 0;
 }
 
-/** Once per fingerprint; Linear derives the comment id from the key across restarts. */
+/** What the next turn reads in recentTurns, so it does not take the summary for something done. */
+export const HOLLOW_TURN_NOTE = "did not propose the actions it described, or said neither what it does nor what it waits on, so none of that was done";
+
+type Hollow = NonNullable<TaskState["hollow"]>;
+
+/** `state.hollow` after a hollow turn on `fingerprint`, which would otherwise have committed `commit`. */
+export function countHollow(state: TaskState, fingerprint: string, commit: string, summary: string): Hollow {
+  const count = state.hollow?.fingerprint === fingerprint ? state.hollow.count + 1 : 1;
+  return { fingerprint, count, commit, summary };
+}
+
+export const flagDue = (hollow: Hollow | undefined, fingerprint: string): hollow is Hollow =>
+  hollow?.fingerprint === fingerprint && hollow.count > HOLLOW_TURN_RETRIES;
+
+/**
+ * Posts that the task is stuck, once per fingerprint (Linear derives the comment id from the key across
+ * restarts). Posted, the turn's fingerprint is committed and the count cleared; true when it was.
+ */
 export async function flagHollowTurn(
   issueId: string,
-  fingerprint: string,
-  summary: string,
+  state: TaskState,
   linear: Pick<LinearPort, "postComment">,
   log: (line: string) => void,
-): Promise<void> {
+): Promise<boolean> {
+  const hollow = state.hollow;
+  if (!hollow) return false;
   const body = [
     "**Sergeant is stuck on this task**",
     "",
-    `Sergeant's last ${HOLLOW_TURN_RETRIES + 1} turns on the same facts proposed no action and named nothing the task waits on. The latest said:`,
+    `Sergeant's last ${hollow.count} turns on the same facts did not propose the actions they described, or said neither what they do nor what the task waits on. The latest said:`,
     "",
-    ...summary.split("\n").map((line) => `> ${line}`),
+    ...hollow.summary.split("\n").map((line) => `> ${line}`),
     "",
     "None of that was done. Sergeant takes no more turns until something changes: a reply here, an edit to the issue, or a change to its PRs or runs wakes a fresh turn.",
   ].join("\n");
-  await linear.postComment({ issueId, key: `hollow-turn:${issueId}:${fingerprint}`, body }).then(
-    () => log("posted that the task is stuck: its turns proposed nothing"),
-    (e: Error) => log(`could not post that the task is stuck: ${e.message}`),
-  );
+  try {
+    await linear.postComment({ issueId, key: `hollow-turn:${issueId}:${hollow.fingerprint}`, body });
+  } catch (e) {
+    log(`could not post that the task is stuck, trying again next poll: ${(e as Error).message}`);
+    return false;
+  }
+  log("posted that the task is stuck: its turns did not propose what they described");
+  state.lastFingerprint = hollow.commit;
+  state.hollow = undefined;
+  return true;
 }

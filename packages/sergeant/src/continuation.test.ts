@@ -120,7 +120,7 @@ test("a blocking finding and then a red check each get a pushed fix on the same 
         async turn(situation) {
           if (outcomes.length > 0) outcomes[outcomes.length - 1] = situation.recentTurns.at(-1)?.outcomes ?? [];
           outcomes.push([]);
-          return { output: { summary: "decided", actions: decide(situation), waitingOn: "the next change" }, model: "m", promptVersion: "p" };
+          return { output: { summary: "decided", actions: decide(situation), intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
         },
       },
     },

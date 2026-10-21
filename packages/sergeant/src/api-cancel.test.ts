@@ -143,7 +143,7 @@ test("a task cancel stops a run whose start had already passed the delegation ch
   f.deps.reasoner.turn = async () => {
     const actions = proposed ? [] : [{ kind: "start_worker" as const, objective: "Do UNF-1.", repositories: ["o/r"] }];
     proposed = true;
-    return { output: { summary: "start a worker", actions, waitingOn: "the next change" }, model: "m", promptVersion: "p" };
+    return { output: { summary: "start a worker", actions, intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
   };
   // The start's live read (by the issue's id) still sees the delegation, then is held until released.
   let release = () => {};

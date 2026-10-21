@@ -43,17 +43,19 @@ test("rejects model output that invents an action or merges without an exact hea
   const shell = { summary: "s", actions: [{ kind: "run_shell", command: "git push --force" }] };
   const noHead = { summary: "s", actions: [{ kind: "merge_pr", repo: "trevorallred/canary", number: 7, reviewStanding: { kind: "reviewed", reviewRunId: "run_r" } }] };
   const shortHead = { summary: "s", actions: [{ kind: "merge_pr", repo: "trevorallred/canary", number: 7, expectedHeadSha: "abc1234", reviewStanding: { kind: "reviewed", reviewRunId: "run_r" } }] };
-  for (const out of [shell, noHead, shortHead, { actions: [] }]) {
+  // TECH-6490: a turn that says neither whether it acts nor what it waits on is malformed, never a quiet turn.
+  const noIntent = { summary: "s", actions: [] };
+  for (const out of [shell, noHead, shortHead, { actions: [] }, noIntent]) {
     await expect(answering(out).turn(situation)).rejects.toThrow();
   }
-  const ok = await answering({ summary: "Start the worker.", actions: [{ kind: "start_worker", objective: "Do UNF-1.", repositories: ["trevorallred/canary"] }] }).turn(situation);
+  const ok = await answering({ summary: "Start the worker.", actions: [{ kind: "start_worker", objective: "Do UNF-1.", repositories: ["trevorallred/canary"] }], intent: { kind: "act", kinds: ["start_worker"] } }).turn(situation);
   expect(ok.output.actions[0]?.kind).toBe("start_worker");
 });
 // Acceptance (TECH-4994): a pasted screenshot and an attached log are visible to reasoning as an
 // image and readable text, marked as untrusted data; that needs the CLI's stream-json input.
 test("shows the issue's files to reasoning as an image and text, marked as untrusted", async () => {
   let seen: { args: string[]; stdin: string } | undefined;
-  const result = { type: "result", is_error: false, structured_output: { summary: "s", actions: [] } };
+  const result = { type: "result", is_error: false, structured_output: { summary: "s", actions: [], intent: { kind: "wait", on: "CI" } } };
   const reasoner = claudeCliReasoner({
     runCli: async (args, stdin) => ((seen = { args, stdin }), `{"type":"system"}\n${JSON.stringify(result)}\n`),
     files: async () => ({
@@ -76,7 +78,7 @@ test("shows the issue's files to reasoning as an image and text, marked as untru
 // TECH-6490: a CLI run cut short (its budget, say) can end with `is_error` false. It fails the turn,
 // never passes for a turn that decided to do nothing.
 test("a CLI run that stopped short fails the turn, even with is_error false", async () => {
-  const cut = { is_error: false, subtype: "error_max_budget_usd", structured_output: { summary: "s", actions: [] } };
+  const cut = { is_error: false, subtype: "error_max_budget_usd", structured_output: { summary: "s", actions: [], intent: { kind: "wait", on: "CI" } } };
   const reasoner = claudeCliReasoner({ runCli: async () => JSON.stringify(cut) });
   await expect(reasoner.turn(situation)).rejects.toThrow(/error_max_budget_usd/);
   const ok = claudeCliReasoner({ runCli: async () => JSON.stringify({ ...cut, subtype: "success" }) });

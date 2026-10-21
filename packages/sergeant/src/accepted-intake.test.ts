@@ -52,7 +52,7 @@ test("a task accepted while its issue is in Todo is not started again until a hu
     reasoner: {
       async turn() {
         turns.push(turns.length === 0 ? "accept" : "fresh");
-        return { output: { summary: "s", actions: turns.length === 1 ? [{ kind: "accept_as_is" }] : [], waitingOn: "the next change" }, model: "m", promptVersion: "p" };
+        return { output: { summary: "s", actions: turns.length === 1 ? [{ kind: "accept_as_is" }] : [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
       },
     },
   };

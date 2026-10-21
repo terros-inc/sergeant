@@ -70,7 +70,7 @@ test("GET /v1/runs/:id through serve's containerRunner and the typed client keep
     },
     github: { readPullRequest: async () => Promise.reject(new Error("no PRs")), closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => Promise.reject(new Error("no PRs")) },
     runner,
-    reasoner: { turn: async () => ({ output: { summary: "nothing to do yet", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" }) },
+    reasoner: { turn: async () => ({ output: { summary: "nothing to do yet", actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" }) },
   };
   service = await startService({ enrolledRepositories: ["o/r"], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, port: 0, trustLoopback: true, log: () => {} }, deps);
   const client = apiClient({ api: `http://127.0.0.1:${service.port}`, version: MIN_CLI_VERSION });
