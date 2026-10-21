@@ -13,6 +13,9 @@ ENV JAVA_HOME=/opt/java/openjdk \
 
 ARG ANDROID_COMMAND_LINE_TOOLS_VERSION=15859902
 
+# The base image ends as USER node, which cannot write /opt; install as root, then hand the SDK and the
+# Gradle home to node so a build can accept licenses, add a missing SDK package and fill the cache.
+USER root
 RUN test "$(dpkg --print-architecture)" = amd64 \
   && install -d /opt/android-sdk/cmdline-tools \
   && curl -fsSLo /tmp/android-command-line-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_COMMAND_LINE_TOOLS_VERSION}_latest.zip" \
@@ -21,8 +24,12 @@ RUN test "$(dpkg --print-architecture)" = amd64 \
   && mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest \
   && yes | sdkmanager --licenses >/dev/null \
   && sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;36.0.0" \
+  && chown -R node:node /opt/android-sdk \
   && install -d -o node -g node "$GRADLE_USER_HOME" \
-  && rm -f /tmp/android-command-line-tools.zip \
+  && rm -f /tmp/android-command-line-tools.zip
+USER node
+# Smoke-check as the worker user, so the image fails to build if node cannot run the toolchain.
+RUN test -w /opt/android-sdk && test -w "$GRADLE_USER_HOME" \
   && java -version \
   && sdkmanager --version \
   && /opt/android-sdk/build-tools/36.0.0/aapt2 version
