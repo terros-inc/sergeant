@@ -19,6 +19,8 @@ export type RunCli = (args: string[], stdin: string, opts: { cwd: string; timeou
 
 const CliResult = z.object({
   is_error: z.boolean(),
+  /** "success", or why the CLI stopped short ("error_max_budget_usd", say), which may come with `is_error` false. */
+  subtype: z.string().optional(),
   result: z.string().optional(),
   structured_output: z.unknown().optional(),
   total_cost_usd: z.number().optional(),
@@ -58,7 +60,8 @@ export function claudeCliReasoner(
       try {
         const stdout = await runCli(args, input, { cwd, timeoutMs: opts.timeoutMs ?? 300_000 });
         const cli = CliResult.parse(blocks.length ? streamResult(stdout) : JSON.parse(stdout));
-        if (cli.is_error) throw new Error(`reasoning turn failed: ${cli.result ?? "unknown error"}`);
+        // TECH-6490: a run cut short fails the turn rather than passing for one that decided nothing.
+        if (cli.is_error || stoppedShort(cli)) throw new Error(`reasoning turn failed: ${cli.subtype ?? ""} ${cli.result ?? "unknown error"}`.trim());
         const output = TurnOutput.parse(cli.structured_output ?? JSON.parse(cli.result ?? ""));
         return { output, model, promptVersion: PROMPT_VERSION, ...(cli.total_cost_usd !== undefined && { costUsd: cli.total_cost_usd }) };
       } finally {
@@ -98,13 +101,15 @@ export async function answer<T>(
     const args = cliArgs(schema, systemPrompt, opts.model, opts.maxTurnCostUsd ?? 1.5);
     const stdout = await (opts.runCli ?? spawnClaude)(args, input, { cwd, timeoutMs: opts.timeoutMs ?? 300_000 });
     const cli = CliResult.parse(JSON.parse(stdout));
-    if (cli.is_error) throw new Error(`reasoning failed: ${cli.result ?? "unknown error"}`);
+    if (cli.is_error || stoppedShort(cli)) throw new Error(`reasoning failed: ${cli.subtype ?? ""} ${cli.result ?? "unknown error"}`.trim());
     const output = schema.parse(cli.structured_output ?? JSON.parse(cli.result ?? ""));
     return { output, ...(cli.total_cost_usd !== undefined && { costUsd: cli.total_cost_usd }) };
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 }
+
+const stoppedShort = (cli: z.infer<typeof CliResult>) => cli.subtype !== undefined && cli.subtype !== "success";
 
 /** The final `result` event of a stream-json run. */
 function streamResult(stdout: string): unknown {

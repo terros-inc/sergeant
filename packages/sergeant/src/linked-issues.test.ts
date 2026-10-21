@@ -53,7 +53,7 @@ test("a hostile linked-issue description never reaches the reasoning prompt or a
   const reasoner = claudeCliReasoner({
     runCli: async (args, stdin) => {
       prompt = [...args, stdin].join("\n");
-      return JSON.stringify({ is_error: false, structured_output: { summary: "Wait.", actions: [] } });
+      return JSON.stringify({ is_error: false, structured_output: { summary: "Wait.", actions: [], waitingOn: "the next change" } });
     },
   });
   await reasoner.turn({

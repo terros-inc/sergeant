@@ -156,6 +156,11 @@ export type ProposedAction = z.infer<typeof ProposedAction>;
 export const TurnOutput = z.object({
   summary: z.string().min(1).max(2_000),
   actions: z.array(ProposedAction).max(5),
+  /**
+   * What the task waits on, given with no actions: a run, CI, a human. A turn with neither is taken
+   * again rather than recorded as a decision to wait (TECH-6490, hollow-turn.ts).
+   */
+  waitingOn: z.string().min(1).max(500).optional(),
   nextWakeSeconds: z.number().int().min(60).max(14_400).optional(),
 });
 export type TurnOutput = z.infer<typeof TurnOutput>;

@@ -122,7 +122,7 @@ test("asks the human who requested changes to re-review once per addressed, revi
           if (turns === 3) livePr = prAt(third);
           // 4: the third head's request was posted on the poll before it; that is all this test needs.
           if (turns === 4) stop.abort();
-          return { output: { summary: "waiting on the captain", actions: [] }, model: "m", promptVersion: "p" };
+          return { output: { summary: "waiting on the captain", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" };
         },
       },
     },

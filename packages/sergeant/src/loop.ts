@@ -13,6 +13,7 @@ import { performCiReruns } from "./ci-reruns.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { recoverExpiredChecks } from "./expired-checks.ts";
 import { postHandoffs } from "./handoff.ts";
+import { flagHollowTurn, HOLLOW_TURN_NOTE, hollowTurns, isHollow } from "./hollow-turn.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
@@ -132,6 +133,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   let unposted: { action: ProposedAction; situation: SituationReport } | undefined;
   // TECH-5057: answered and acted-on question threads, re-derived on every pass (question.ts).
   const resolvedThreads = new Set<string>();
+  const hollowSeen = hollowTurns();
   const prPolls = pullRequestPolls(pullRequestPollMs(opts), opts.wake);
   // TECH-6428: each of the worker's PRs is assigned to the task's requestor once (assign-owner.ts).
   const assignOwner = ownerAssignments(ports, log);
@@ -366,7 +368,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const { turn, outcomes } = await takeTurn(situation, { ...ports, costOf });
     prPolls.forget();
     const at = new Date().toISOString();
-    const described = outcomes.map(describeOutcome);
+    // TECH-6490 (hollow-turn.ts): a turn that proposed nothing and named no wait is taken again, then flagged.
+    const hollow = isHollow(turn.output) ? hollowSeen.next(fingerprint) : (hollowSeen.clear(), undefined);
+    const described = [...outcomes.map(describeOutcome), ...(hollow ? [HOLLOW_TURN_NOTE] : [])];
     log(`turn ${state.turns + 1} (${turn.model}, $${turn.costUsd ?? "?"}): ${turn.output.summary}`);
     for (const line of described) log(`  ${line}`);
 
@@ -380,7 +384,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
-    const committed = failedAsk || failedClose ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled, own) : fingerprint;
+    const committed = failedAsk || failedClose || hollow === "retry" ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled, own) : fingerprint;
     const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above). A
@@ -395,6 +399,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     clockActive(state.budget, running.length > 0 || outcomes.some((o) => o.status === "done" && o.started !== undefined));
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
+    if (hollow === "flag") await flagHollowTurn(conversation.issue.id, fingerprint, turn.output.summary, deps.linear, log);
     // TECH-5227: each finished review round not yet told gets its own short comment (progress.ts), with
     // the cost recorded up to this turn. The one switch.
     if (opts.progressComments !== false) await postProgress(opts.issueId, situation, costSoFar(spent(earlierTurns)), outcomes, deps, log);

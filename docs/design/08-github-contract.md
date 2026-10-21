@@ -186,9 +186,11 @@ a merge for a PR that the turn's poll saw as mergeable, the committed fingerprin
 `mergeable: null` and `mergeableState: unknown`, matching the merge preflight's later read; a PR the
 poll already saw M7 refuse (`behind`, say) is recorded as it was, so the same facts wake no turn. The first poll that reports definite
 mergeability again then differs and wakes exactly one turn. `baseSha` is also part of the fingerprint,
-so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` is the
-only action outcome that leaves the fingerprint uncommitted, so the question can be retried after the
-next poll or a restart. The Linear issue's Done state follows from automation, not from Sergeant
+so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` or
+`close_issue` leaves the fingerprint uncommitted, so it can be retried after the next poll or a
+restart. So does a turn that proposes no action and names nothing it waits on (TurnOutput
+`waitingOn`), which may have described actions it never proposed: it is taken again once on the same
+facts, then committed with a Linear comment that the task is stuck (TECH-6490). The Linear issue's Done state follows from automation, not from Sergeant
 (07 §7).
 
 Where `mergePolicy` is `human`, or M15 finds protected CI configuration, Sergeant gets the PR ready (green, reviewed, disposition recorded),

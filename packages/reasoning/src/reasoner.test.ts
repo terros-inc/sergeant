@@ -73,3 +73,12 @@ test("shows the issue's files to reasoning as an image and text, marked as untru
   expect(content.find((b) => b.text?.includes("<<<FILE 02-app.log"))?.text).toContain("ERROR boom");
   expect(content.at(-1)!.text).toContain("over the 10 MB per-file cap");
 });
+// TECH-6490: a CLI run cut short (its budget, say) can end with `is_error` false. It fails the turn,
+// never passes for a turn that decided to do nothing.
+test("a CLI run that stopped short fails the turn, even with is_error false", async () => {
+  const cut = { is_error: false, subtype: "error_max_budget_usd", structured_output: { summary: "s", actions: [] } };
+  const reasoner = claudeCliReasoner({ runCli: async () => JSON.stringify(cut) });
+  await expect(reasoner.turn(situation)).rejects.toThrow(/error_max_budget_usd/);
+  const ok = claudeCliReasoner({ runCli: async () => JSON.stringify({ ...cut, subtype: "success" }) });
+  expect((await ok.turn(situation)).output.actions).toEqual([]);
+});

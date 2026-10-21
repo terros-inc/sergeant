@@ -70,7 +70,7 @@ test("a bot's review wakes a turn whose Situation Report lists its inline commen
           // After a first turn that waits on CI, the bot reviews; nothing else changes. After the second
           // turn the worker's reply lands in the nit's thread, and Sergeant comments on the PR.
           livePr = seen.length === 1 ? { ...livePr, botFeedback: review } : { ...livePr, botFeedback: [...review, reply, own] };
-          return { output: { summary: "waiting", actions: [] }, model: "m", promptVersion: "p" };
+          return { output: { summary: "waiting", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" };
         },
       },
     },

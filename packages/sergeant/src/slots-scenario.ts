@@ -76,7 +76,7 @@ export function fakes(issues: DelegatedIssue[], withPr?: string) {
           held.add(resolve);
         });
         const actions = asking.delete(id) ? [ask] : [];
-        return { output: { summary: "turn", actions }, model: "m", promptVersion: "p" };
+        return { output: { summary: "turn", actions, waitingOn: "the next change" }, model: "m", promptVersion: "p" };
       },
     },
   };

@@ -120,7 +120,7 @@ test("a question is posted once, holds every effect until a human replies, and s
           seen.push(situation);
           // A turn that asks and merges in one breath must not merge before the human answers.
           const actions = situation.conversation.humanComments.length === 0 ? [ask, merge] : [merge];
-          return { output: { summary: "s", actions }, model: "m", promptVersion: "p" };
+          return { output: { summary: "s", actions, waitingOn: "the next change" }, model: "m", promptVersion: "p" };
         },
       },
     },
@@ -184,7 +184,7 @@ test("a turn that asks does nothing else, whatever order reasoning proposed", as
       },
       github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => (effects.push("merge"), { mergedSha: head }) },
       runner: { start: async () => void effects.push("start"), status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
-      reasoner: { turn: async () => ({ output: { summary: "s", actions }, model: "m", promptVersion: "p" }) },
+      reasoner: { turn: async () => ({ output: { summary: "s", actions, waitingOn: "the next change" }, model: "m", promptVersion: "p" }) },
     });
     expect(effects).toEqual(["ask"]);
     expect(outcomes.map((o) => o.status)).toEqual(["denied", "done"]);
@@ -276,7 +276,7 @@ test("an open question clears its stale in-memory post retry", async () => {
         async turn() {
           turns += 1;
           if (turns === 2) await writeFile(join(dir, "STOP"), "");
-          return { output: { summary: "s", actions: turns === 1 ? [ask] : [] }, model: "m", promptVersion: "p" };
+          return { output: { summary: "s", actions: turns === 1 ? [ask] : [], waitingOn: "the next change" }, model: "m", promptVersion: "p" };
         },
       },
     },

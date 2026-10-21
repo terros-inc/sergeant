@@ -39,7 +39,7 @@ test("a merge state.json never recorded is read back from GitHub and still gets 
       reasoner: {
         async turn(situation) {
           turns.push(situation);
-          return { output: { summary: "already merged; nothing to do", actions: [] }, model: "m", promptVersion: "p" };
+          return { output: { summary: "already merged; nothing to do", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" };
         },
       },
     },

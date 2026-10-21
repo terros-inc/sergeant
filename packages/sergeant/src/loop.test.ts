@@ -139,7 +139,7 @@ test("a PR Linear links with no worker report is still polled, and its checks ch
         async turn(situation) {
           seen.push(situation);
           checks = { sha: head, required: [{ name: "validate", state: "passed" }] };
-          return { output: { summary: "waiting on CI", actions: [] }, model: "m", promptVersion: "p" };
+          return { output: { summary: "waiting on CI", actions: [], waitingOn: "the next change" }, model: "m", promptVersion: "p" };
         },
       },
     },
