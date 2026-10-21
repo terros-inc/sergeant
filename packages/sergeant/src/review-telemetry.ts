@@ -2,7 +2,7 @@ import { appendFile } from "node:fs/promises";
 import type { RunRecord } from "@terros/sergeant-contracts";
 import { logFollowUp, mergedHead } from "./audit.ts";
 import { type ReviewFacts, reviewFacts } from "./review-quality.ts";
-import type { TaskState } from "./task-state.ts";
+import { landings, type TaskState } from "./task-state.ts";
 
 // Review telemetry (UNF-730): every reviewer run that has finished, merged or not, gets a
 // `reviews.jsonl` line, and another only when a later-known fact (the merge, a resulting change)
@@ -17,8 +17,10 @@ export async function recordReviews(
   const facts: ReviewFacts[] = [];
   for (const run of runs) {
     if (run.role !== "reviewer" || run.status === "running") continue;
-    const trigger = run.runId === state.merged?.audit?.runId ? "audit" : "required";
-    const f = reviewFacts(run, { trigger, issue: ctx.issueId, runs, merged: state.merged ? mergedHead(state.merged) : null });
+    // TECH-6477: an audit of a merge reopened since is still that merge's audit.
+    const audited = landings(state).find((m) => m.audit?.runId === run.runId);
+    const merged = audited ?? state.merged;
+    const f = reviewFacts(run, { trigger: audited ? "audit" : "required", issue: ctx.issueId, runs, merged: merged ? mergedHead(merged) : null });
     const known = JSON.stringify([f.status, f.merged, f.resultingMutation]);
     if (state.reviewsRecorded[run.runId] === known) continue;
     if (f.followUp && state.reviewsRecorded[run.runId] === undefined) await logFollowUp(f, run, ctx.auditFollowups, log);

@@ -103,7 +103,8 @@ export type RunDetail = z.infer<typeof RunDetail>;
 
 export const WakeRequest = z.strictObject({ reason: z.string().optional() });
 /** `active`: its running loop polls now. `admitted`: its loop started. `queued`: it starts at the next free slot. */
-export const WakeResponse = z.object({ ref: TaskRef, woke: z.enum(["active", "admitted", "queued"]) });
+/** `after_merge` (TECH-6477): the task's closing PR merged and its issue takes no more work, so no turn comes. */
+export const WakeResponse = z.object({ ref: TaskRef, woke: z.enum(["active", "admitted", "queued", "after_merge"]) });
 export type WakeResponse = z.infer<typeof WakeResponse>;
 
 export const CancelTaskRequest = z.strictObject({

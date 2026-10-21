@@ -29,6 +29,7 @@ export const taskCommands: Record<string, Command> = {
         active: "its loop polls now and takes a turn once nothing holds it (a running run, an open question, an exhausted budget)",
         admitted: "its loop started and takes a turn",
         queued: "every task slot is busy; it starts and takes a turn at the next free slot",
+        after_merge: "no turn: its closing PR merged and its issue takes no more work (Done, Canceled, Backlog, or not delegated), so it only finishes the after-merge steps, and later comments go to the feedback sweep",
       }[res.woke];
       print(ctx, answer, () => `${res.ref} woken: ${said}`);
     },

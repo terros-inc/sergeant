@@ -1,4 +1,5 @@
 import { FeedbackCase, FeedbackJudgment } from "@terros/sergeant-contracts";
+import { z } from "zod";
 import { answer, type RunCli } from "./reasoner.ts";
 
 // Post-merge feedback (TECH-4985): one human comment or review that arrived after the task's work
@@ -29,19 +30,29 @@ export type FeedbackJudge = {
   judge(input: FeedbackCase): Promise<{ judgment: FeedbackJudgment; model: string; costUsd?: number }>;
 };
 
+// What the model answers: FeedbackJudgment flattened into one object, the only root the CLI's
+// --json-schema accepts (reasoner.ts `cliArgs`); the answer is then held to FeedbackJudgment itself.
+const FeedbackAnswer = z.object({
+  actionable: z.boolean(),
+  reason: z.string().optional().describe("When not actionable: why nothing is filed."),
+  title: z.string().optional().describe("When actionable: the change now needed."),
+  delta: z.string().optional().describe("When actionable: what now needs to change."),
+});
+
 /** Judges feedback through the local `claude` CLI, with the same isolation as a reasoning turn. */
 export function claudeCliFeedbackJudge(opts: { model?: string; maxCostUsd?: number; timeoutMs?: number; runCli?: RunCli } = {}): FeedbackJudge {
   const model = opts.model ?? "opus";
   return {
     async judge(input) {
       const text = `Feedback case:\n\n${JSON.stringify(FeedbackCase.parse(input), null, 2)}`;
-      const { output, costUsd } = await answer(FeedbackJudgment, FEEDBACK_PROMPT, text, {
+      const { output, costUsd } = await answer(FeedbackAnswer, FEEDBACK_PROMPT, text, {
         model,
         maxTurnCostUsd: opts.maxCostUsd ?? 0.5,
         ...(opts.timeoutMs !== undefined && { timeoutMs: opts.timeoutMs }),
         ...(opts.runCli && { runCli: opts.runCli }),
       });
-      return { judgment: output, model, ...(costUsd !== undefined && { costUsd }) };
+      const judgment = FeedbackJudgment.parse(output.actionable ? { actionable: true, title: output.title, delta: output.delta } : { actionable: false, reason: output.reason });
+      return { judgment, model, ...(costUsd !== undefined && { costUsd }) };
     },
   };
 }

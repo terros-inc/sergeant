@@ -29,6 +29,27 @@ import { feedbackComment, outcomeComment } from "./outcome.ts";
 // moves forward. That holds at the top level and in every nested object below, including those built from
 // contracts schemas, which are loosened here; `reviewsRecorded` is a record and keeps every key anyway.
 
+/** A closing merge the task recorded (loop.ts), with the effects after it made once. */
+const Merged = z.looseObject({
+  repo: RepoSlug,
+  number: z.number().int(),
+  headSha: Sha,
+  mergedSha: Sha,
+  at: z.iso.datetime(),
+  /** The outcome comment, built from the facts the merge was allowed on; posted once. */
+  outcome: z.string().optional(),
+  outcomePostedAt: z.iso.datetime().optional(),
+  /** TECH-5186: the Sergeant feedback comment, absent when there was nothing worth keeping; posted once. */
+  feedback: z.string().optional(),
+  feedbackPostedAt: z.iso.datetime().optional(),
+  /** When the audit sample was drawn for the merged head; done once. */
+  auditDrawnAt: z.iso.datetime().optional(),
+  /** The sampled audit review of the merged head. */
+  audit: z.looseObject({ runId: RunId }).optional(),
+  /** When the loop saw the task through (Linear Done, reviews finished): intake no longer resumes it. */
+  completedAt: z.iso.datetime().optional(),
+});
+
 const TaskState = z.looseObject({
   issueId: z.string(),
   startedAt: z.iso.datetime(),
@@ -91,27 +112,14 @@ const TaskState = z.looseObject({
   legacyBudgetQuestion: z.string().optional(),
   /** TECH-5803: the issue's open blockers as the last poll read them; absent until a poll has. */
   blockedBy: z.array(z.string()).optional(),
-  merged: z
-    .looseObject({
-      repo: RepoSlug,
-      number: z.number().int(),
-      headSha: Sha,
-      mergedSha: Sha,
-      at: z.iso.datetime(),
-      /** The outcome comment, built from the facts the merge was allowed on; posted once. */
-      outcome: z.string().optional(),
-      outcomePostedAt: z.iso.datetime().optional(),
-      /** TECH-5186: the Sergeant feedback comment, absent when there was nothing worth keeping; posted once. */
-      feedback: z.string().optional(),
-      feedbackPostedAt: z.iso.datetime().optional(),
-      /** When the audit sample was drawn for the merged head; done once. */
-      auditDrawnAt: z.iso.datetime().optional(),
-      /** The sampled audit review of the merged head. */
-      audit: z.looseObject({ runId: RunId }).optional(),
-      /** When the loop saw the task through (Linear Done, reviews finished): intake no longer resumes it. */
-      completedAt: z.iso.datetime().optional(),
-    })
-    .optional(),
+  merged: Merged.optional(),
+  /**
+   * TECH-6477: closing merges human direction reopened while their issue was still open (after-merge.ts
+   * `reopenReason`), oldest first. The task works on from them as before its merge; one is the task's
+   * landing again only once the issue is Done (loop.ts). The rest stay here, their effects already made,
+   * so the audits they started are still waited on and canceled with the task (`landings`).
+   */
+  reopened: z.array(Merged).default([]),
   /**
    * TECH-5136: the turn that ended the task as accepted (TECH-5118), saved with that turn. From then on
    * the loop only replays the ending (loop.ts): no reasoning turn can deny it or fail to propose it again.
@@ -168,6 +176,16 @@ const TaskState = z.looseObject({
     .default([]),
 });
 export type TaskState = z.infer<typeof TaskState>;
+
+/**
+ * TECH-6477: every closing merge the task recorded, its landing and each reopened one. A task reopened
+ * more than once before Done keeps one record per merge, and only one is its landing again on Done
+ * (loop.ts), so an audit any of them started is tracked through all of them until the task is seen through or stopped.
+ */
+export const landings = (state: Pick<TaskState, "merged" | "reopened">) => [...(state.merged ? [state.merged] : []), ...state.reopened];
+
+/** The audits the task's closing merges started (`landings`). */
+export const auditRunIds = (state: Pick<TaskState, "merged" | "reopened">) => landings(state).flatMap((m) => (m.audit ? [m.audit.runId] : []));
 type State = TaskState;
 
 /** What a turn changes in the task's state; `fingerprint` is the one to commit, if any. */

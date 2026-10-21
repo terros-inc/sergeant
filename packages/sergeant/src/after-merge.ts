@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
-import { checkDelegation, FEEDBACK_LABEL, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunId, type RunRecord } from "@terros/sergeant-contracts";
+import { join } from "node:path";
+import { checkDelegation, checkLive, FEEDBACK_LABEL, issueRevision, type BudgetStatus, type Conversation, type FiledFollowup, type PullRequestFacts, type RunId, type RunRecord } from "@terros/sergeant-contracts";
 import { drawAudit, mergedHead } from "./audit.ts";
 import { alertAfterMerge } from "./auth-alert.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
@@ -9,10 +10,12 @@ import { reassigned } from "./owner.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions, LoopResult, TaskState } from "./loop.ts";
 import { reviewFacts } from "./review-quality.ts";
+import { auditRunIds, readTaskState } from "./task-state.ts";
 import { pause } from "./wake.ts";
 
 // The task loop after the closing PR's merge (loop.ts): the outcome comment, the audit draw, waiting
-// for reviews still running, and watching Linear for the issue reaching Done.
+// for reviews still running, and watching Linear for the issue reaching Done. TECH-6477: until it is
+// Done, human direction on the issue reopens the task's work (`reopenReason`).
 
 type Merged = NonNullable<TaskState["merged"]>;
 
@@ -52,12 +55,16 @@ export async function driveMerged(
     resolveDue: (conversation: Conversation) => Promise<boolean>;
     recordReviews: (runs: RunRecord[]) => Promise<void>;
     budgetOf: (runs: RunRecord[], unknownRuns: number) => BudgetStatus;
+    /** TECH-6477: reopens the task's work if the conversation calls for it (`reopenReason`); true when it did. */
+    reopen?: (conversation: Conversation) => Promise<boolean>;
+    /** TECH-6477: the task's other closing merges, reopened before (task-state.ts `landings`), whose audits it waits on too. */
+    reopened?: Merged[];
   },
 ): Promise<LoopResult | undefined> {
   const { opts, deps, log, save } = ctx;
   // TECH-5082: a run that fails model authentication after the merge (a review, the audit) is alerted
   // like one before it, on every pass whatever else waits; a run unreadable now is read next pass.
-  const read = await Promise.all(runIdsOf(merged, ctx.runIds).map((id) => deps.runner.status(id).catch(() => undefined)));
+  const read = await Promise.all(runIdsOf(merged, ctx.runIds, ctx.reopened).map((id) => deps.runner.status(id).catch(() => undefined)));
   await alertAfterMerge(opts.issueId, read.filter((r): r is RunRecord => r !== undefined), deps.linear, log);
   const effects = (merged.outcome && !merged.outcomePostedAt) || (merged.feedback && !merged.feedbackPostedAt) || !merged.auditDrawnAt;
   if (effects && opts.slot && !opts.slot.work()) {
@@ -80,9 +87,10 @@ export async function driveMerged(
   if (stopped) return stopped;
   // The audit sample is drawn after the merge, so it cannot hold it up.
   if (!(await drawAudit(merged, ctx.runIds, opts, deps, log, save, ctx.budgetOf))) return undefined;
-  const result = await observeCompletion(merged, opts, deps, log);
+  const result = await observeCompletion(merged, opts, deps, log, ctx.reopen);
+  if ("reopened" in result) return undefined;
   if ("moved" in result) return handOff(result.moved);
-  const finished = await finishReviews(merged, result, { runIds: ctx.runIds, recordReviews: ctx.recordReviews, stop: ctx.stop, opts, deps, log });
+  const finished = await finishReviews(merged, result, { runIds: ctx.runIds, reopened: ctx.reopened, recordReviews: ctx.recordReviews, stop: ctx.stop, opts, deps, log });
   if (await cancelPending(opts.dir)) return undefined;
   // Seen through: the issue is Done, or Canceled (TECH-5132), and every review finished, so intake
   // resumes it no more. Reopened and delegated again, it is a new task (TECH-5182, service-intake.ts).
@@ -173,9 +181,9 @@ export async function postFeedbackComment(
 export async function finishReviews(
   merged: Merged,
   result: LoopResult,
-  ctx: { runIds: RunId[]; recordReviews: (runs: RunRecord[]) => Promise<void>; stop: string; opts: LoopOptions; deps: Ports; log: (line: string) => void },
+  ctx: { runIds: RunId[]; reopened?: Merged[] | undefined; recordReviews: (runs: RunRecord[]) => Promise<void>; stop: string; opts: LoopOptions; deps: Ports; log: (line: string) => void },
 ): Promise<LoopResult> {
-  const ids = runIdsOf(merged, ctx.runIds);
+  const ids = runIdsOf(merged, ctx.runIds, ctx.reopened);
   for (;;) {
     const runs = await Promise.all(ids.map((id) => ctx.deps.runner.status(id)));
     await ctx.recordReviews(runs);
@@ -202,8 +210,8 @@ export async function finishReviews(
   }
 }
 
-/** The task's runs, the sampled audit included. */
-const runIdsOf = (merged: Merged, runIds: RunId[]) => (merged.audit ? [...runIds, merged.audit.runId] : runIds);
+/** The task's runs, the sampled audit of each of its closing merges included (TECH-6477). */
+const runIdsOf = (merged: Merged, runIds: RunId[], reopened: Merged[] = []) => [...new Set([...runIds, ...auditRunIds({ merged, reopened })])];
 
 /** Why the merged task's issue is no longer its owner's (owner.ts), read live; undefined while it is or unreadable. */
 async function movedFromOwner(opts: LoopOptions, deps: Ports, log: (line: string) => void): Promise<string | undefined> {
@@ -213,6 +221,40 @@ async function movedFromOwner(opts: LoopOptions, deps: Ports, log: (line: string
     (c) => reassigned(owner, c.issue),
     (e: Error) => (log(`could not read the conversation: ${e.message}`), undefined),
   );
+}
+
+/**
+ * TECH-6477: why a task whose closing PR merged takes up its issue's work again, if it does. Only while
+ * the issue still takes work, delegated to the V2 agent and not Done, Canceled, or in Backlog
+ * (`checkLive`): a task with several PRs may have called one closing before the issue's every binding
+ * item was covered, or a human may ask for more. Then any direction a human gave since the landing
+ * reopens it, as it would give a working task a turn (07 §6): a comment after the merge, an edit to the
+ * title or description no turn has read (`seen`), or a wake (`sgt task wake`). Once the issue is Done,
+ * nothing does: the task is seen through, and later feedback goes to the post-merge sweep (feedback.ts).
+ */
+export function reopenReason(
+  merged: Pick<Merged, "at">,
+  conversation: Conversation,
+  ctx: { agentUserId: string; seen?: TaskState["seen"]; woken: boolean },
+): string | undefined {
+  if (!checkLive(conversation.issue, ctx.agentUserId).allowed) return undefined;
+  const comment = conversation.humanComments.find((c) => Date.parse(c.createdAt) > Date.parse(merged.at));
+  if (comment) return `${comment.author.name} commented on the issue after the merge`;
+  if (ctx.seen && ctx.seen.issue !== issueRevision(conversation.issue)) return "the issue's title or description changed after the merge";
+  return ctx.woken ? "a human woke the task" : undefined;
+}
+
+/**
+ * TECH-6477: whether a wake of the task in `dir` gets no turn because its closing PR merged and its
+ * issue takes no more work (`reopenReason`): seen through, or no longer open and delegated. Undefined
+ * when it may take one, or Linear is unreadable now.
+ */
+export async function afterMergeOnly(dir: string, issueId: string, deps: Pick<Ports, "linear" | "agentUserId">): Promise<true | undefined> {
+  const merged = (await readTaskState(join(dir, "state.json")).catch(() => undefined))?.merged;
+  if (!merged) return undefined;
+  if (merged.completedAt) return true;
+  const conversation = await deps.linear.readConversation(issueId).catch(() => undefined);
+  return conversation && !checkLive(conversation.issue, deps.agentUserId).allowed ? true : undefined;
 }
 
 /**
@@ -227,7 +269,8 @@ export async function observeCompletion(
   opts: LoopOptions,
   deps: Ports,
   log: (line: string) => void,
-): Promise<(LoopResult & { canceled?: true }) | { moved: string }> {
+  reopen?: (conversation: Conversation) => Promise<boolean>,
+): Promise<(LoopResult & { canceled?: true }) | { moved: string } | { reopened: true }> {
   const deadline = Date.parse(merged.at) + (opts.completionWaitMinutes ?? 10) * 60_000;
   // A wait on no question (TECH-5015, TECH-5104): the slot is kept for the grace from the merge, then
   // quietly freed while the poll goes on, so a grace shorter than this wait still bounds it. Marked
@@ -235,9 +278,12 @@ export async function observeCompletion(
   opts.slot?.waiting(Date.parse(merged.at));
   let seen = "";
   for (;;) {
-    const { issue } = await deps.linear.readConversation(opts.issueId);
+    const conversation = await deps.linear.readConversation(opts.issueId);
+    const { issue } = conversation;
     const moved = deps.owner && reassigned(deps.owner, issue);
     if (moved) return { moved };
+    // Before the deadline: a task resumed after it is reopened by direction that came meanwhile.
+    if (await reopen?.(conversation)) return { reopened: true };
     if (issue.state !== seen) log(`after merge: ${issue.identifier} is ${(seen = issue.state)}`);
     const detail = `${merged.repo}#${merged.number} merged as ${merged.mergedSha} at ${merged.at}; ${issue.identifier} is ${issue.state}`;
     if (issue.state === "Done") return { outcome: "done", detail };

@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { conversationRevision, SituationReport, type Conversation, type ProposedAction, type RunRecord } from "@terros/sergeant-contracts";
+import { conversationRevision, SituationReport, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
-import { driveMerged, exists, mergedOf } from "./after-merge.ts";
+import { driveMerged, exists, mergedOf, reopenReason } from "./after-merge.ts";
 import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
-import { budgetStatus, clockActive, DEFAULT_BUDGET, windowFor } from "./budget.ts";
+import { budgetStatus, clockActive, DEFAULT_BUDGET, openWindow, windowFor } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import { performCiReruns } from "./ci-reruns.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
@@ -18,7 +18,7 @@ import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
 import { checkHolds, checkStop, holdForBudget, openDirectionWindow, reconcileDue, type PollContext } from "./poll-checks.ts";
-import { describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, unsettledMerges, waitMs } from "./poll.ts";
+import { cancelRuns, describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, unsettledMerges, waitMs } from "./poll.ts";
 import { awaitedHumanPrAction } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
@@ -39,7 +39,8 @@ export { readTaskState, type TaskState } from "./task-state.ts";
 // The walking skeleton's loop for one explicitly selected issue (UNF-706): poll, build a fresh
 // Situation Report, take a reasoning turn when something changed, execute through the Gate, and
 // after the closing PR's merge post one outcome comment and watch Linear for the issue reaching Done;
-// a `Part of` PR's merge leaves the task working on the rest (UNF-734). It runs only while the issue
+// a `Part of` PR's merge leaves the task working on the rest (UNF-734), as does human direction after the
+// closing merge while the issue is not yet Done (TECH-6477). It runs only while the issue
 // is delegated to Sergeant's V2 agent (UNF-724), not in Backlog, Canceled, or Done (TECH-4989), and
 // within its budget (UNF-728), and holds while a question it asked is unanswered (UNF-727). Every finished review is recorded as telemetry, and a
 // merged head that skipped fresh review may be sampled for a nonblocking audit review (UNF-730). A
@@ -135,6 +136,25 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     recordReviewFacts(runs, state, { issueId: opts.issueId, auditFollowups: files.auditFollowups, reviews: files.reviews, log, save });
 
 
+  // TECH-6477 (after-merge.ts `reopenReason`): direction a human gave since the closing merge, while the
+  // issue still takes work, sets the merge aside and resumes the task's work in a fresh window, so its
+  // next pass takes a turn that can start a worker. A wake that reopens nothing is answered: the task is
+  // after-merge only. Each landing is reopened at most once, so this opens no window over and over.
+  const reopen = async (conversation: Conversation) => {
+    const merged = state.merged;
+    const reason = merged && reopenReason(merged, conversation, { agentUserId: deps.agentUserId, seen: state.seen, woken: opts.wake?.pending === true });
+    if (!merged || !reason) {
+      if (opts.wake) opts.wake.pending = false;
+      return false;
+    }
+    state.reopened.push(merged);
+    state.merged = undefined;
+    openWindow(state, new Date().toISOString(), configured);
+    await save();
+    log(`reopened after ${merged.repo}#${merged.number} merged: ${reason}; the task works on in a fresh window of ${JSON.stringify(configured)}`);
+    return true;
+  };
+
   const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
     budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), startedAt: state.startedAt, legacyQuestion: state.legacyBudgetQuestion, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
 
@@ -163,9 +183,10 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
 
     if (state.merged) {
-      const afterMerge = { runIds: state.runIds, stop: files.stop, opts, deps, log, save, resolveDue, recordReviews, budgetOf };
+      const afterMerge = { runIds: state.runIds, stop: files.stop, opts, deps, log, save, resolveDue, recordReviews, budgetOf, reopen, reopened: state.reopened };
       const finished = await driveMerged(state.merged, afterMerge);
       if (finished) return finished;
+      if (!state.merged) continue;
       await wait(pollMs);
       continue;
     }
@@ -230,10 +251,18 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // save, say) is read back from GitHub, not left to reasoning: the outcome is built from the live
     // facts and posted under the same per-merge key, so it still lands exactly once. Only the worker's
     // own PR reported closing: a human may link one merged elsewhere, and a merged `Part of` PR is only
-    // a fact for the next turn.
-    const landed = landedOf(pullRequests, runs, deps.workerLogin);
+    // a fact for the next turn. TECH-6477: a merge reopened is the task's landing again only once the
+    // issue is Done, with the effects it made already, so it is seen through as it would have been; Done
+    // is the human's call, so work the reopen started and still running stops. Reopened more than once,
+    // the others stay reopened and their audits are still waited on (task-state.ts `landings`).
+    const reopenedAs = (p: PullRequestFacts) => state.reopened.find((m) => m.repo === p.repo && m.number === p.number && m.mergedSha === p.mergedSha);
+    const done = conversation.issue.stateType === "completed";
+    const landed = landedOf(pullRequests.filter((p) => done || !reopenedAs(p)), runs, deps.workerLogin);
     if (landed?.mergedSha) {
-      state.merged = mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue, costTotal(spent(await turnsSoFar())));
+      const before = reopenedAs(landed);
+      if (before && live.length > 0) await cancelRuns(live, ports, log);
+      state.reopened = state.reopened.filter((m) => m !== before);
+      state.merged = before ?? mergedOf(landed, landed.mergedSha, runs, state.followups, conversation.issue, costTotal(spent(await turnsSoFar())));
       await save();
       log(`${landed.repo}#${landed.number} is already merged as ${landed.mergedSha}`);
       continue;

@@ -5,6 +5,7 @@ import { withSource } from "./api-calls.ts";
 import { apiHandler } from "./api.ts";
 import { isLoopbackHost } from "./auth.ts";
 import { driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
+import { afterMergeOnly } from "./after-merge.ts";
 import { runLoop, type LoopResult } from "./loop.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { retroEvery } from "./retro.ts";
@@ -271,8 +272,16 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     known: () => [...new Set([...active.keys(), ...delegated, ...ended.keys()])],
     async wake(ref) {
       wakeOf(ref).request();
-      if (active.has(ref)) return "active";
-      await intake();
+      // TECH-6477: a merged task whose issue takes no more work takes no turn, and is told so; its loop
+      // still runs, or resumes, to finish the after-merge steps.
+      const afterMerge = await afterMergeOnly(taskDir(opts.stateDir, ref), ref, deps);
+      const running = active.has(ref);
+      if (!running) await intake();
+      if (afterMerge) {
+        wakeOf(ref).pending = false;
+        return "after_merge";
+      }
+      if (running) return "active";
       if (active.has(ref)) return "admitted";
       if (delegated.includes(ref)) return "queued";
       wakes.delete(ref);

@@ -180,9 +180,24 @@ test("an open issue whose closing PR merged before the lookback is no longer rea
   expect([unknown.reads(), unknown.judged]).toEqual([1, []]);
   await rm(dir, { recursive: true, force: true });
 
+  // A recent one is read; its comment is its task's own (TECH-6477, below).
   const recent = await world({ stateType: "started", comments, taskMergedAt: at(6) });
   await recent.sweep();
-  expect([...recent.issues.keys()]).toEqual(["feedback:linear:cap"]);
+  expect([recent.reads(), [...recent.issues.keys()]]).toEqual([1, []]);
+});
+
+test("a comment on an issue still open and delegated, whose merged task is under way here, is left to its loop", async () => {
+  // TECH-6477: the task's loop reopens the work on it (after-merge.ts `reopenReason`): a follow-up filed
+  // as well would do the same work twice. Once the issue is Done, the sweep files it as before.
+  const comments = [human("cap", 8, "Retries should be capped at 5.")];
+  const open = await world({ stateType: "started", comments, taskMergedAt: at(6) });
+  await open.sweep();
+  expect([open.judged, [...open.issues.keys()]]).toEqual([[], []]);
+  await rm(dir, { recursive: true, force: true });
+
+  const done = await world({ stateType: "completed", comments, taskMergedAt: at(6) });
+  await done.sweep();
+  expect([...done.issues.keys()]).toEqual(["feedback:linear:cap"]);
 });
 
 test("files nothing while the task is still active, for open work a human took back, or from before the first sweep", async () => {
