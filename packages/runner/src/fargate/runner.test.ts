@@ -1,6 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import type { RunSpec } from "@terros/sergeant-contracts";
 import type { Exec } from "../exec.ts";
@@ -52,7 +54,7 @@ describe("fargateRunner", () => {
     await run();
 
     const secret = JSON.parse(aws.secrets.get("sergeant/runs/run_t1") ?? "{}");
-    expect(Object.keys(secret)).toEqual(["SERGEANT_BRIEF", "GH_TOKEN", "GH_READ_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]);
+    expect(Object.keys(secret)).toEqual(["SERGEANT_BRIEF_GZ", "GH_TOKEN", "GH_READ_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]);
     expect(secret).toMatchObject({ GH_TOKEN: GH, GH_READ_TOKEN: READ, CLAUDE_CODE_OAUTH_TOKEN: TOKEN });
     // TECH-6194: write stays on the task's repositories; the enrolled ones get a read-only token.
     expect(minted).toEqual([
@@ -60,7 +62,7 @@ describe("fargateRunner", () => {
       { repositories: ["o/canary", "o/wiki"], access: "read" },
     ]);
     // The brief lists the branches the host read with ls-remote, the token only in git's environment.
-    expect(secret.SERGEANT_BRIEF).toContain("o/canary: sergeant/unf-1-old");
+    expect(gunzipSync(Buffer.from(secret.SERGEANT_BRIEF_GZ, "base64")).toString()).toContain("o/canary: sergeant/unf-1-old");
     expect(calls[0]?.[2]?.env?.SERGEANT_RUN_GITHUB_TOKEN).toBe(GH);
     expect(calls.flatMap((c) => c[1]).join(" ")).not.toContain(GH);
 
@@ -183,8 +185,9 @@ describe("fargateRunner", () => {
     await expect(launchOf(rootDir)).rejects.toThrow(/ENOENT/);
   });
 
-  it("fails clearly, creating nothing, when the brief does not fit in a 64 KiB secret", async () => {
-    const huge = { ...spec, objective: "x".repeat(70_000) } as RunSpec;
+  it("fails clearly, creating nothing, when the brief does not fit in a 64 KiB secret even gzipped", async () => {
+    // Random text barely compresses, so this brief stays over the limit gzipped.
+    const huge = { ...spec, objective: randomBytes(60_000).toString("base64") } as RunSpec;
     const { aws, run } = await setUp({ spec: huge });
     await expect(run()).rejects.toThrow(/over Secrets Manager's 65536-byte limit/);
     expect(aws.sent).toEqual([]);

@@ -22,14 +22,15 @@ export const CONTAINER = "worker";
  * too. Exits with the agent's code; 71 if the brief or a file cannot be written, 70 if a clone fails,
  * both before `WORKSPACE_READY` and with no frame.
  *
+ * `SERGEANT_BRIEF_GZ` is the brief gzipped, then base64 encoded (`secret.ts`).
  * `SERGEANT_ATTACHMENTS` is one `<name> <base64>` line per file; names are `fetchAttachments`'s, safe.
  * Args: `<wall> <model> <budget> <repo>...`.
  */
 export const TASK_SCRIPT = `
 set -u
 wall="$1"; model="$2"; budget="$3"; shift 3
-printf '%s' "$SERGEANT_BRIEF" > /workspace/sergeant-brief.md || exit 71
-unset SERGEANT_BRIEF
+printf '%s' "$SERGEANT_BRIEF_GZ" | base64 -d | gzip -d > /workspace/sergeant-brief.md || exit 71
+unset SERGEANT_BRIEF_GZ
 if [ -n "\${SERGEANT_ATTACHMENTS:-}" ]; then
   mkdir -p "${ATTACHMENTS_PATH}" || exit 71
   printf '%s\\n' "$SERGEANT_ATTACHMENTS" | while read -r name data; do
@@ -70,7 +71,7 @@ exit $code
 
 /** The keys of a run's secret, each one environment variable of its container. */
 export const secretKeys = (adapter: Adapter, attachments: boolean, denylist: boolean) => [
-  "SERGEANT_BRIEF",
+  "SERGEANT_BRIEF_GZ",
   ...(attachments ? ["SERGEANT_ATTACHMENTS"] : []),
   ...(denylist ? ["PUBLIC_DATA_DENYLIST"] : []),
   "GH_TOKEN",

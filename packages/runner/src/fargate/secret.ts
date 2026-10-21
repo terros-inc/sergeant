@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { renderAttachments, type Attachments } from "../attachments.ts";
 
 /** Secrets Manager's limit on a secret's value, in bytes. */
@@ -7,9 +8,11 @@ export const SECRET_LIMIT_BYTES = 65_536;
 
 /**
  * The run's one secret: its brief, the issue's files, and its two credentials, as JSON keys the task
- * definition references. The files ride in the secret only while it stays within Secrets Manager's
- * 64 KiB: the largest are left out, each named in the brief as not downloaded, until it fits. A brief
- * that does not fit even without them throws, and nothing is created (there is no S3 transport).
+ * definition references. The brief is gzipped, then base64 encoded (`SERGEANT_BRIEF_GZ`), which about
+ * halves it, so a long task's brief still fits (TECH-6462). The files ride in the secret only while it
+ * stays within Secrets Manager's 64 KiB: the largest are left out, each named in the brief as not
+ * downloaded, until it fits. A brief that does not fit even without them throws before anything is
+ * created (there is no S3 transport).
  */
 export async function runSecret(i: {
   attachments: Attachments;
@@ -23,14 +26,15 @@ export async function runSecret(i: {
   const skipped = [...i.attachments.skipped];
   for (;;) {
     const brief = i.brief(renderAttachments({ files, skipped }));
+    const gzipped = gzipSync(brief, { level: 9 }).toString("base64");
     const encoded = files.map((f) => `${f.name} ${data.get(f.name)}`).join("\n");
-    const secretString = JSON.stringify({ SERGEANT_BRIEF: brief, ...(files.length && { SERGEANT_ATTACHMENTS: encoded }), ...i.credentials });
+    const secretString = JSON.stringify({ SERGEANT_BRIEF_GZ: gzipped, ...(files.length && { SERGEANT_ATTACHMENTS: encoded }), ...i.credentials });
     const bytes = Buffer.byteLength(secretString);
     if (bytes <= SECRET_LIMIT_BYTES) return { secretString, attachments: files.length > 0 };
     const largest = files.reduce<(typeof files)[number] | undefined>((a, f) => (!a || f.bytes > a.bytes ? f : a), undefined);
     if (!largest) {
       throw new Error(
-        `the run's brief is ${Buffer.byteLength(brief)} bytes: with its credentials, its secret would be ${bytes} bytes, over Secrets Manager's ${SECRET_LIMIT_BYTES}-byte limit, so the worker cannot start on Fargate`,
+        `the run's brief is ${Buffer.byteLength(brief)} bytes (${gzipped.length} gzipped and base64 encoded): with its credentials, its secret would be ${bytes} bytes, over Secrets Manager's ${SECRET_LIMIT_BYTES}-byte limit, so the worker cannot start on Fargate: shorten the issue's description or the run's objective`,
       );
     }
     files.splice(files.indexOf(largest), 1);

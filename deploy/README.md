@@ -859,8 +859,8 @@ pnpm --filter @terros/sergeant serve --config <file> --state-dir <dir> [--port 8
   token scoped to their run's repositories; the merge is one control-plane action: fresh exact-head
   PR, check, and Linear reads, the Gate, and GitHub's SHA-guarded merge. A blocking review finding or
   a failed required check wakes a turn that may start a successor worker (one at a time, R1) on the
-  same PR; its brief carries the PRs with their check states and every earlier run's report and
-  findings. The fix is a new head, so the merge again needs a fresh approving review of it or the
+  same PR; its brief carries the PRs with their check states and the earlier runs' reports and
+  findings, the newest whole ([05 §2](../docs/design/05-brief-report-protocol.md#2-the-brief)). The fix is a new head, so the merge again needs a fresh approving review of it or the
   worker's waiver for it (M6). No turn count bounds the iterations: the budget window does. The runner
   cannot resume a worker's session, so every continuation is a successor.
 - **Outcome comment.** After the merge, the agent posts one outcome comment (PR, reviewed head,
