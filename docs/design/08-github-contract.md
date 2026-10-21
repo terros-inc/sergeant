@@ -186,9 +186,16 @@ a merge for a PR that the turn's poll saw as mergeable, the committed fingerprin
 `mergeable: null` and `mergeableState: unknown`, matching the merge preflight's later read; a PR the
 poll already saw M7 refuse (`behind`, say) is recorded as it was, so the same facts wake no turn. The first poll that reports definite
 mergeability again then differs and wakes exactly one turn. `baseSha` is also part of the fingerprint,
-so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` is the
-only action outcome that leaves the fingerprint uncommitted, so the question can be retried after the
-next poll or a restart. The Linear issue's Done state follows from automation, not from Sergeant
+so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` or
+`close_issue` leaves the fingerprint uncommitted, so it can be retried after the next poll or a
+restart. So does a hollow turn (TECH-6490): every turn's `intent` is one choice, act (naming each
+kind of action its summary describes) or wait (naming what on), and a turn whose `act` kinds are not
+all among its actions, or with no actions and no `wait`, is taken again once on the same facts. The
+count is kept in `state.json`, so a restart does not reset it. The next hollow turn posts a Linear
+comment that the task is stuck, and only once that comment is posted is the fingerprint committed;
+until then each poll posts it again, taking no turn. Accepted gap: a turn with a `wait` intent, no
+actions, and a free-text summary that describes actions is recorded as a normal wait and is not
+detected; detection remains structural and does not interpret summary text. The Linear issue's Done state follows from automation, not from Sergeant
 (07 §7).
 
 Where `mergePolicy` is `human`, or M15 finds protected CI configuration, Sergeant gets the PR ready (green, reviewed, disposition recorded),

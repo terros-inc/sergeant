@@ -67,7 +67,7 @@ test("a human's requested changes on the PR wake a turn, block the merge, and re
       reasoner: {
         async turn(situation) {
           // A third turn is past what this test asks: end the loop at its next poll.
-          if (seen.length === 2) return (stop.abort(), { output: { summary: "done", actions: [] }, model: "m", promptVersion: "p" });
+          if (seen.length === 2) return (stop.abort(), { output: { summary: "done", actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" });
           seen.push(situation);
           // After the first turn decided to wait, the captain requests changes; nothing else changes.
           if (seen.length === 1) livePr = { ...livePr, humanFeedback: captain };
@@ -76,7 +76,7 @@ test("a human's requested changes on the PR wake a turn, block the merge, and re
             { kind: "merge_pr", repo, number: 7, expectedHeadSha: head, reviewStanding: { kind: "reviewed", reviewRunId: "run_review" } },
             { kind: "start_worker", objective: "Address the captain's review on the same PR.", repositories: [repo] },
           ];
-          return { output: { summary: "decided", actions }, model: "m", promptVersion: "p" };
+          return { output: { summary: "decided", actions, intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
         },
       },
     },

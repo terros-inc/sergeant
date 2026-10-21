@@ -45,7 +45,7 @@ export function fakes(runs: RunRecord[] = []) {
     reasoner: {
       async turn() {
         turns++;
-        return { output: { summary: `turn ${turns}: nothing to do yet`, actions: [] }, model: "m", promptVersion: "p" };
+        return { output: { summary: `turn ${turns}: nothing to do yet`, actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
       },
     },
   };

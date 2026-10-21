@@ -69,6 +69,12 @@ const TaskState = z.looseObject({
   lastTurnAt: z.iso.datetime().optional(),
   /** What the last turn saw; an unchanged situation gets no new turn. */
   lastFingerprint: z.string().optional(),
+  /**
+   * TECH-6490: the hollow turns taken in a row on the same facts (`fingerprint`), with what to commit
+   * and the latest summary once the bound is reached (hollow-turn.ts). Persisted so a restart cannot
+   * reset the bound while the fingerprint stays uncommitted; cleared by any turn that is not hollow.
+   */
+  hollow: z.looseObject({ fingerprint: z.string(), count: z.number().int().positive(), commit: z.string(), summary: z.string() }).optional(),
   /** The Linear conversation the last turn saw, so an edit made while waiting on a reply is noticed (TECH-5034). */
   seen: z.looseObject({ revision: ConversationRevision, issue: z.string() }).optional(),
   /**

@@ -13,6 +13,7 @@ import { performCiReruns } from "./ci-reruns.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
 import { recoverExpiredChecks } from "./expired-checks.ts";
 import { postHandoffs } from "./handoff.ts";
+import { countHollow, flagDue, flagHollowTurn, HOLLOW_TURN_NOTE, isHollow } from "./hollow-turn.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
@@ -316,6 +317,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       continue;
     }
 
+    // TECH-6490 (hollow-turn.ts): the same facts after the last hollow turn the bound allows post that
+    // the task is stuck, again each poll until Linear takes it, and take no turn.
+    if (flagDue(state.hollow, fingerprint)) {
+      if (await flagHollowTurn(conversation.issue.id, state, deps.linear, log)) await save();
+      await wait(pollMs);
+      continue;
+    }
     const running = runs.filter((r) => r.status === "running").map((r) => `${r.role} ${r.runId}`);
     // TECH-5259: a run with no usable report is retried at once, before a turn, unless a human said
     // something no turn has read yet. A retry the owner was asked about instead is asked again.
@@ -366,7 +374,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const { turn, outcomes } = await takeTurn(situation, { ...ports, costOf });
     prPolls.forget();
     const at = new Date().toISOString();
-    const described = outcomes.map(describeOutcome);
+    const hollow = isHollow(turn.output);
+    const described = [...outcomes.map(describeOutcome), ...(hollow ? [HOLLOW_TURN_NOTE] : [])];
     log(`turn ${state.turns + 1} (${turn.model}, $${turn.costUsd ?? "?"}): ${turn.output.summary}`);
     for (const line of described) log(`  ${line}`);
 
@@ -380,7 +389,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // A merge that did not happen commits its fingerprint like any turn (TECH-5062): no paid turn every
     // poll, only when the facts change. One M7 found unsettled counts as GitHub still computing (poll.ts).
     const unsettled = unsettledMerges(outcomes, situation);
-    const committed = failedAsk || failedClose ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled, own) : fingerprint;
+    const settled = failedAsk || failedClose ? undefined : unsettled.length > 0 ? fingerprintOf(situation, unsettled, own) : fingerprint;
+    // TECH-6490 (hollow-turn.ts): a hollow turn that would commit is counted instead, and taken again on
+    // the same facts; past the bound, the flag posted after the save commits it.
+    state.hollow = hollow && settled !== undefined ? countHollow(state, fingerprint, settled, turn.output.summary) : undefined;
+    const committed = state.hollow ? undefined : settled;
     const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above). A
@@ -395,6 +408,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     clockActive(state.budget, running.length > 0 || outcomes.some((o) => o.status === "done" && o.started !== undefined));
     await appendFile(files.turns, `${JSON.stringify({ at, situation, turn, outcomes })}\n`);
     await save();
+    if (flagDue(state.hollow, fingerprint) && (await flagHollowTurn(conversation.issue.id, state, deps.linear, log))) await save();
     // TECH-5227: each finished review round not yet told gets its own short comment (progress.ts), with
     // the cost recorded up to this turn. The one switch.
     if (opts.progressComments !== false) await postProgress(opts.issueId, situation, costSoFar(spent(earlierTurns)), outcomes, deps, log);

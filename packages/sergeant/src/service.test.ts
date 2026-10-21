@@ -73,7 +73,7 @@ test("works every delegated issue unattended within the task limit, and resumes 
         await sleep(20);
         inTurn--;
         turns.push({ issue: situation.conversation.issue.identifier, comments: situation.conversation.humanComments.length });
-        return { output: { summary: "nothing to do yet", actions: [] }, model: "m", promptVersion: "p" };
+        return { output: { summary: "nothing to do yet", actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
       },
     },
   };
@@ -130,7 +130,7 @@ function oneIssue(ids: string[], turnMs: number) {
         counts.maxInTurn = Math.max(counts.maxInTurn, ++counts.inTurn);
         await sleep(turnMs);
         counts.inTurn--;
-        return { output: { summary: "nothing to do yet", actions: [] }, model: "m", promptVersion: "p" };
+        return { output: { summary: "nothing to do yet", actions: [], intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" };
       },
     },
   };

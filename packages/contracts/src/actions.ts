@@ -152,10 +152,26 @@ export const ProposedAction = z.discriminatedUnion("kind", [
 ]);
 export type ProposedAction = z.infer<typeof ProposedAction>;
 
+export const ActionKind = z.enum(ProposedAction.options.map((o) => o.shape.kind.value) as [ProposedAction["kind"], ...ProposedAction["kind"][]]);
+export type ActionKind = z.infer<typeof ActionKind>;
+
+export const TurnIntent = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("act"), kinds: z.array(ActionKind).min(1).max(5) }),
+  z.object({ kind: z.literal("wait"), on: z.string().min(1).max(500) }),
+]);
+export type TurnIntent = z.infer<typeof TurnIntent>;
+
 /** What one reasoning turn returns. No actions means "nothing until something changes". */
 export const TurnOutput = z.object({
   summary: z.string().min(1).max(2_000),
   actions: z.array(ProposedAction).max(5),
+  /**
+   * TECH-6490: what the turn says it does, as one choice: act, naming each kind of action its summary
+   * describes, or wait, naming what on. A turn cannot both, and one whose `act` kinds are not all in
+   * `actions`, or with no actions and no `wait`, is taken again rather than recorded (hollow-turn.ts).
+   * Reasoning always gives it (reasoner.ts); absent only from other producers.
+   */
+  intent: TurnIntent.optional(),
   nextWakeSeconds: z.number().int().min(60).max(14_400).optional(),
 });
 export type TurnOutput = z.infer<typeof TurnOutput>;
