@@ -227,7 +227,7 @@ test("a task whose stop the runner has not confirmed frees its slot: with maxTas
   let todo = false;
   deps.delegatedIssues = async () => [
     ...(await delegated()),
-    ...(todo ? [{ identifier: "UNF-2", priority: 0, createdAt: "2026-10-02T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] }] : []),
+    ...(todo ? [{ identifier: "UNF-2", priority: 0, createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] }] : []),
   ];
   const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 0.05, pollSeconds: 0.02, maxTasks: 1, log: () => {} }, deps);
   try {

@@ -62,36 +62,44 @@ export async function newWork(
  * TECH-6470: a delegated issue in a started state (In Progress, say) with no task under way never starts
  * (TECH-4989: only from the unstarted state), so whoever delegated it is told so once, rather than left to
  * think it is queued. Like the owner refusals (owner.ts), the comment is keyed by the delegation Linear's
- * history shows, so a restart repeats nothing and only a new delegation is told again. `noted` holds the
- * issues told and logged in this process; one listed no more as started (undelegated, or moved to Todo
- * and so started) is dropped, so its next delegation is read again. Backlog and Triage stay silent:
- * parking an issue there is deliberate. A failed read or post is retried at the next intake.
+ * history shows, so a restart repeats nothing and only a new delegation is told again. `noted` holds, per
+ * issue told and logged in this process, the delegation told of and the issue's `updatedAt` then: the
+ * history is reread only once the issue has changed since, so a delegation undone and redone between two
+ * intakes is still seen, without reading every started issue's history on every intake. One listed no
+ * more as started is dropped. Backlog and Triage stay silent: parking an issue there is deliberate. A
+ * failed read or post is retried at the next intake.
  */
 export async function noteStarted(
   stateDir: string,
   listed: DelegatedIssue[],
-  input: { noted: Set<string>; active: Map<string, Promise<void>> },
+  input: { noted: Map<string, { delegatedAt: string; updatedAt: string }>; active: Map<string, Promise<void>> },
   deps: { linear: Pick<LinearPort, "readTaskOwner" | "postComment">; agentUserId: string },
   log: (line: string) => void,
 ): Promise<void> {
   const { noted, active } = input;
   const started = listed.filter((issue) => issue.state.type === "started");
-  for (const id of noted) if (!started.some((issue) => issue.identifier === id)) noted.delete(id);
+  for (const id of noted.keys()) if (!started.some((issue) => issue.identifier === id)) noted.delete(id);
   for (const issue of started) {
     const ref = issue.identifier;
-    if (noted.has(ref) || active.has(ref) || (await underWay(taskDir(stateDir, ref)))) continue;
+    const told = noted.get(ref);
+    if (told?.updatedAt === issue.updatedAt || active.has(ref) || (await underWay(taskDir(stateDir, ref)))) continue;
+    let delegatedAt: string;
     try {
-      const check = await deps.linear.readTaskOwner(ref, deps.agentUserId);
+      delegatedAt = (await deps.linear.readTaskOwner(ref, deps.agentUserId)).delegatedAt ?? "-";
+      if (told?.delegatedAt === delegatedAt) {
+        noted.set(ref, { delegatedAt, updatedAt: issue.updatedAt });
+        continue;
+      }
       await deps.linear.postComment({
         issueId: ref,
-        key: `not-unstarted:${ref}:${check.delegatedAt ?? "-"}`,
+        key: `not-unstarted:${ref}:${delegatedAt}`,
         body: `Sergeant has not started this issue: it is in ${issue.state.name}, and Sergeant starts work only from the team's unstarted state (normally Todo). To have Sergeant work on it, move it to Todo.`,
       });
     } catch (e) {
       log(`${ref}: could not say why it does not start, retrying next intake: ${(e as Error).message}`);
       continue;
     }
-    noted.add(ref);
+    noted.set(ref, { delegatedAt, updatedAt: issue.updatedAt });
     log(`${ref} not started: delegated in ${issue.state.name}, not the unstarted state`);
   }
 }

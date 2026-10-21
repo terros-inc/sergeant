@@ -15,6 +15,7 @@ export const issue = (identifier: string, status: "In Review" | "In Progress" | 
   identifier,
   priority,
   createdAt,
+  updatedAt: createdAt,
   state: { name: status, type: status === "Todo" ? "unstarted" : "started" },
   blockedBy: [],
 });

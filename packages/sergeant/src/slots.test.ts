@@ -65,7 +65,8 @@ test("a Todo issue waits while a blocker is unfinished, then is admitted in its 
 test("a started issue with no task is told once per delegation to move to Todo; Backlog and Triage stay silent", async () => {
   const f = fakes([]);
   let delegatedAt = "2026-10-20T01:00:00.000Z";
-  f.deps.linear.readTaskOwner = async () => ({ owner: { id: "user-ann", name: "Ann" }, delegatedAt });
+  let historyReads = 0;
+  f.deps.linear.readTaskOwner = async () => (historyReads++, { owner: { id: "user-ann", name: "Ann" }, delegatedAt });
   const logs: string[] = [];
   await start(f.deps, { maxTasks: 1 }, logs);
   const started = issue("STARTED", "In Progress", 2, "2026-10-01T00:00:00.000Z");
@@ -75,25 +76,42 @@ test("a started issue with no task is told once per delegation to move to Todo; 
     { ...issue("TRIAGED", "Todo", 2, "2026-10-01T00:00:00.000Z"), state: { name: "Triage", type: "triage" } },
   );
   const told = () => f.posted.filter((p) => p.includes("move it to Todo"));
+  const lines = () => logs.filter((l) => l.includes("not started: delegated in"));
   await vi.waitFor(() => expect(told()).toHaveLength(1), { timeout: 5_000 });
-  // Many intakes later: still one comment, one line, and nothing started or said for the parked issues.
+  // Many intakes later: still one comment, one line, nothing started or said for the parked issues,
+  // and the unchanged issue's history not reread.
   await sleep(100);
   expect(told()).toEqual([expect.stringMatching(/^STARTED: .*it is in In Progress/)]);
-  expect(logs.filter((l) => l.includes("not started: delegated in"))).toEqual(["STARTED not started: delegated in In Progress, not the unstarted state"]);
+  expect(lines()).toEqual(["STARTED not started: delegated in In Progress, not the unstarted state"]);
   expect(f.posted).toHaveLength(1);
   expect(f.turns).toEqual([]);
+  expect(historyReads).toBe(1);
 
-  // Undelegated, then delegated again: a new delegation is told again.
+  // An edit that is no new delegation: the history is reread once, and nothing is said.
+  f.delegated[0] = { ...started, updatedAt: "2026-10-20T01:30:00.000Z" };
+  await f.nextIntake();
+  expect(historyReads).toBe(2);
+  expect(told()).toHaveLength(1);
+
+  // Undelegated, then delegated again, where an intake sees it undelegated: told again.
   f.delegated.splice(0, 1);
   await f.nextIntake();
   delegatedAt = "2026-10-20T02:00:00.000Z";
-  f.delegated.unshift(started);
+  f.delegated.unshift({ ...started, updatedAt: delegatedAt });
   await vi.waitFor(() => expect(told()).toHaveLength(2), { timeout: 5_000 });
+
+  // Undone and redone between two intakes, so no intake sees it undelegated: told again all the same.
+  delegatedAt = "2026-10-20T03:00:00.000Z";
+  f.delegated[0] = { ...started, updatedAt: delegatedAt };
+  await vi.waitFor(() => expect(told()).toHaveLength(3), { timeout: 5_000 });
+  await f.nextIntake();
+  expect(told()).toHaveLength(3);
+  expect(lines()).toHaveLength(3);
 
   // Moved to Todo, it starts as usual.
   f.delegated[0] = issue("STARTED", "Todo", 2, "2026-10-01T00:00:00.000Z");
   await vi.waitFor(() => expect(f.turns).toEqual(["STARTED"]), { timeout: 5_000 });
-  expect(told()).toHaveLength(2);
+  expect(told()).toHaveLength(3);
 });
 
 test("a just-ended Todo task is not readmitted until the next periodic intake", async () => {

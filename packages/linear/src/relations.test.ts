@@ -22,6 +22,7 @@ test("delegatedIssues reads every page of an issue's relations", async () => {
         identifier: "UNF-5",
         priority: 2,
         createdAt: "2026-10-01T00:00:00.000Z",
+        updatedAt: "2026-10-01T00:00:00.000Z",
         state: { name: "Todo", type: "unstarted" },
         inverseRelations: { nodes: related(20), pageInfo: { hasNextPage: true, endCursor: "c1" } },
       };

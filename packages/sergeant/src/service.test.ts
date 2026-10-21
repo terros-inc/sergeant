@@ -16,7 +16,7 @@ import { auditRunId } from "./review-quality.ts";
 const agent = { id: "agent-v2", name: "Sergeant" };
 const issues = ["UNF-1", "UNF-2", "UNF-3"];
 /** An open Todo issue with no priority, as intake lists it. */
-const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] });
+const todo = (identifier: string) => ({ identifier, priority: 0, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] });
 
 let dir = "";
 const children: ChildProcess[] = [];

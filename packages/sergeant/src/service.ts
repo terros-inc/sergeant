@@ -66,7 +66,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   // Each Todo issue a blocker held up at the last intake, and the line logged for it: logged again only when it changes.
   const blocked = new Map<string, string>();
   // TECH-6470: the started issues with no task told why they do not start (service-intake.ts `noteStarted`).
-  const noted = new Set<string>();
+  const noted = new Map<string, { delegatedAt: string; updatedAt: string }>();
   const byRank = (a: string, b: string) => (rank.get(a) ?? rank.size) - (rank.get(b) ?? rank.size);
   const wakes = new Map<string, Wake>();
   // TECH-5974: one pacer for all loops, so rechecks due on the same poll tick reread Linear spread out.
