@@ -4,6 +4,7 @@ import { hasComment, readFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, issueAssignees, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 import { handToHuman } from "./hand-to-human.ts";
 import { rateLimiter } from "./rate-limit.ts";
+import { retriggerChecks } from "./retrigger.ts";
 import { readSquashMessage } from "./squash-message.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
@@ -21,6 +22,12 @@ export type GitHubRepositoryConfig = {
    * repository Sergeant merges should declare its checks in a ruleset instead.
    */
   observedChecksFallback?: boolean;
+  /**
+   * TECH-6489: how many days GitHub keeps this repository's Actions runs (its "artifact and log
+   * retention" setting), absent meaning GitHub's default of 90. Reading the setting needs
+   * `administration: read`, which the control-plane App does not hold, so it is configured.
+   */
+  actionsRetentionDays?: number | undefined;
 };
 export type GitHubAdapterOptions = {
   /** The control-plane App's installation token, fetched per request so it can be refreshed. */
@@ -42,6 +49,9 @@ const MAX_CONDITIONAL = 2000;
 const PROTECTION_MEMO_MS = 60 * 60_000;
 /** How long a PR's human feedback is reused while its head and `updated_at` stay the same. */
 const FEEDBACK_MEMO_MS = 10 * 60_000;
+
+/** GitHub's default Actions retention, in days (TECH-6489). */
+const DEFAULT_ACTIONS_RETENTION_DAYS = 90;
 
 /** The worker branch convention (08 §3): Sergeant deletes no branch outside it. */
 const BRANCH_PREFIX = "sergeant/";
@@ -314,6 +324,10 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const commit = z.object({ committer: z.object({ date: z.string() }) });
       return Promise.all(own.map(async (b) => ({ ...b, committedAt: commit.parse(await request(`/repos/${repo}/git/commits/${b.sha}`)).committer.date })));
     },
+
+    actionsRetentionDays: (repo) => configFor(repo).config.actionsRetentionDays ?? DEFAULT_ACTIONS_RETENTION_DAYS,
+
+    retriggerChecks: (req) => (configFor(req.repo), retriggerChecks(request, req)),
 
     async mergePullRequest({ repo, number, expectedHeadSha, squash }) {
       const { config } = configFor(repo);

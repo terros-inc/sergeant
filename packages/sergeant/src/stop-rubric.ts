@@ -1,4 +1,5 @@
-import { outstandingChangeRequests, type MergePolicy, type PullRequestFacts, type RepoSlug, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { commentIdFor, outstandingChangeRequests, type MergePolicy, type PullRequestFacts, type RepoSlug, type RunRecord, type SituationReport } from "@terros/sergeant-contracts";
+import { expiredChecksKey } from "./expired-checks.ts";
 
 // TECH-6021: the stop rubric of docs/findings/tech-5922-wall-time-windows.md §6, applied in order to
 // an exhausted window, the first rule that matches deciding. Rule 0 (only waiting on a human: park,
@@ -118,7 +119,10 @@ export function stepsLeft(w: WindowFacts, pr: PullRequestFacts): RemainingStep[]
   else if (pr.mergeableState === "behind") steps.push({ label: "rebase onto the base branch", kind: "mechanical" });
   if (pr.draft) steps.push({ label: "mark the PR ready for review", kind: "mechanical" });
   if (!review || steps.length) steps.push({ label: review ? "a re-review" : "a review", kind: "reviewer" });
-  if (pr.checks.required.some((c) => c.state === "pending" || c.state === "missing")) steps.push({ label: "CI to finish", kind: "ci" });
+  const awaited = pr.checks.required.some((c) => c.state === "missing") && w.situation.conversation.agentComments.some((c) => c.id === commentIdFor(expiredChecksKey(w.situation.conversation.issue.id, pr)));
+  // TECH-6489: a missing check Sergeant's own re-trigger did not bring back waits on a human, not on CI.
+  if (awaited) steps.push({ label: "a human to re-trigger the missing required checks", kind: "ci" });
+  else if (pr.checks.required.some((c) => c.state === "pending" || c.state === "missing")) steps.push({ label: "CI to finish", kind: "ci" });
   steps.push({ label: w.mergePolicy(pr.repo) === "sergeant" ? "Sergeant's merge" : "a human's merge (mergePolicy human)", kind: "merge" });
   return steps;
 }

@@ -10,6 +10,7 @@ import { budgetStatus, clockActive, DEFAULT_BUDGET, windowFor } from "./budget.t
 import { cancelPending, recordStop } from "./cancel.ts";
 import { performCiReruns } from "./ci-reruns.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
+import { recoverExpiredChecks } from "./expired-checks.ts";
 import { postHandoffs } from "./handoff.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
@@ -240,6 +241,13 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // TECH-5839: CI reruns an ended worker asked for are checked and made before a turn (ci-reruns.ts);
     // one GitHub accepted changes the PR's checks, so the next pass rereads them first.
     if (await performCiReruns(runs, pullRequests, state, deps, log, save)) {
+      prPolls.forget();
+      continue;
+    }
+    // TECH-6489: required checks GitHub expired on a PR's head are re-triggered on that head once, and the
+    // issue told if that does not bring them back (expired-checks.ts); either rereads the PRs and the issue
+    // first, so the turn sees the new checks or the human wait that comment starts.
+    if (await recoverExpiredChecks(pullRequests, state, deps, { issueId: conversation.issue.id, agentComments: conversation.agentComments, log, save })) {
       prPolls.forget();
       continue;
     }

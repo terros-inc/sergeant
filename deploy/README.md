@@ -683,6 +683,11 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
 - **`repositories.<owner/name>.ciRerunWorkflows`** (optional, default none) lists the workflow files,
   such as `.github/workflows/ci.yml`, whose failed runs on a task's PR may be rerun. List only ordinary
   CI, never a deployment or other privileged workflow.
+- **`repositories.<owner/name>.actionsRetentionDays`** (optional, default 90, GitHub's default) is
+  the repository's Actions "artifact and log retention" in days. GitHub deletes a workflow run's check
+  results with the run, so a required check missing on a commit that has been the PR's head for longer
+  than this counts as expired, and Sergeant re-runs CI on that same head (`docs/design/08-github-contract.md` §6). Set it for a
+  repository that keeps runs for less than 90 days.
 - **`repositories.<owner/name>.budget`** (optional) replaces the installation's `budget` for tasks
   working in that repository, field by field: `"budget": { "wallMinutes": 180, "costUsd": 40 }`
   (positive numbers, each optional; a field unset keeps the installation's; Budget below).

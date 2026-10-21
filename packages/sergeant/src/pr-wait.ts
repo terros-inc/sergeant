@@ -1,4 +1,5 @@
 import { commentIdFor, outstandingChangeRequests, type HumanComment, type HumanPullRequestFeedback, type SituationReport } from "@terros/sergeant-contracts";
+import { expiredChecksKey } from "./expired-checks.ts";
 import { handoffKey } from "./handoff.ts";
 import { rereviewKey } from "./rereview.ts";
 
@@ -35,14 +36,17 @@ export function endedHandoff(situation: Pick<SituationReport, "conversation" | "
 /**
  * The human PR action Sergeant is waiting on, if that is all it waits on: an open PR at the head it told
  * the issue is ready for a human to merge (a required review it cannot give, such as a code owner's,
- * TECH-4987), or at the head it asked a human who requested changes to re-review or dismiss (TECH-4992).
- * Both are read from Sergeant's own comments on the issue, keyed by the PR's head.
+ * TECH-4987), or at the head it asked a human who requested changes to re-review or dismiss (TECH-4992),
+ * or at a head still missing required checks Sergeant told the issue it could not bring back (TECH-6489).
+ * Each is read from Sergeant's own comments on the issue, keyed by the PR's head.
  */
 export function awaitedHumanPrAction(situation: SituationReport): string | undefined {
   const { issue, agentComments } = situation.conversation;
   const posted = (key: string) => agentComments.some((c) => c.id === commentIdFor(key));
   for (const pr of situation.pullRequests.filter((p) => p.state === "open")) {
     if (posted(handoffKey(issue.id, pr))) return `a human to merge ${pr.repo}#${pr.number}`;
+    // TECH-6489: Sergeant told the issue its re-trigger did not bring back checks GitHub expired.
+    if (pr.checks.required.some((c) => c.state === "missing") && posted(expiredChecksKey(issue.id, pr))) return `a human to re-trigger ${pr.repo}#${pr.number}'s missing required checks`;
     const reviewers = outstandingChangeRequests(pr.humanFeedback);
     if (reviewers.length > 0 && posted(rereviewKey(issue.id, pr))) return `${reviewers.join(", ")} to re-review ${pr.repo}#${pr.number}`;
   }

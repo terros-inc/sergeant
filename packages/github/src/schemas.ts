@@ -74,4 +74,5 @@ export const repositoryConfig = z.object({
   /** Absent is `human` (TECH-5244): Sergeant approves and merges only where `sergeant` is set. */
   mergePolicy: MergePolicy.default("human"),
   observedChecksFallback: z.boolean().default(false),
+  actionsRetentionDays: z.number().int().positive().optional(),
 });

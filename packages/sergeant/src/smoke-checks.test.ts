@@ -161,9 +161,9 @@ test("every check passes over the real adapters, and nothing is written", async 
   expect(results.find((r) => r.name.includes("issue branches"))?.detail).toEqual([{ branch: "sergeant/tech-9-thing", sha: head, committedAt: "2026-10-15T02:00:00Z" }]);
   // Every GitHub port method is a read a check calls, a write whose reads a probe covers, a write that
   // reads nothing, or local: a new port method fails here until it gets a check or is classified.
-  const readByProbe = { mergePullRequest: "squash message", handToHuman: "handoff read", closePullRequest: "handoff read", deletePullRequestBranch: "branch-delete read" };
+  const readByProbe = { mergePullRequest: "squash message", handToHuman: "handoff read", closePullRequest: "handoff read", deletePullRequestBranch: "branch-delete read", retriggerChecks: "handoff read" };
   const writeOnly = ["assignPullRequest"];
-  const local = ["mergePolicy", "rateLimit", "forgetFeedback"];
+  const local = ["mergePolicy", "rateLimit", "forgetFeedback", "actionsRetentionDays"];
   expect(Object.keys(f.githubPort).filter((m) => !f.called.has(m) && !(m in readByProbe) && !writeOnly.includes(m) && !local.includes(m))).toEqual([]);
   expect([...f.called].sort()).toEqual(["defaultBranchHead", "issueBranches", "readPullRequest"]);
   const { text, exitCode } = report(results, "header");
