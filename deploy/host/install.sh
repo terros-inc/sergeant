@@ -68,6 +68,7 @@ systemctl enable --now docker
 docker build -q -t sergeant-runner:local "$repo/packages/runner/container"
 (cd "$repo" && corepack pnpm install --frozen-lockfile --config.confirmModulesPurge=false)
 # Sergeant's version from git; a fallback (no tag, shallow clone) is logged, never fatal.
+# shellcheck disable=SC2016 # The dollar expressions below are JavaScript template literals.
 version=$(cd "$repo/packages/contracts" && node --input-type=module -e \
   'const v = (await import("./src/version.ts")).sergeantVersion(); console.log(v.version + (v.fallback ? ` (fallback: ${v.fallback})` : ""))') ||
   version="unknown (the version check failed)"

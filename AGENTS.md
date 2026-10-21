@@ -129,4 +129,9 @@ Admission is in `docs/design/07-linear-contract.md` (§5, §12), and ordering un
 pnpm install
 pnpm exec turbo boundaries && pnpm exec turbo run lint typecheck test   # what CI runs
 pnpm exec turbo run test --filter=@terros/sergeant-contracts             # one package
+shellcheck deploy/host/*.sh deploy/terraform/*.sh
+terraform -chdir=deploy/terraform fmt -check -recursive
+terraform -chdir=deploy/terraform init -backend=false -input=false
+terraform -chdir=deploy/terraform validate
+terraform -chdir=deploy/terraform test
 ```
