@@ -14,7 +14,7 @@ type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
   "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
 > & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "validateTarget" | "lastRetro" | "feedbackTasks" | "filedIssues"> };
-type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches">;
+type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
 
 const DAY_MS = 86_400_000;
@@ -156,6 +156,7 @@ export function githubChecks(
   const squash = { name: `github ${repo} squash message from PR text and commits`, covers: ["TECH-5085"] };
   const handoff = { name: `github ${repo} handoff read (draft, requested reviewers, posted comments)`, covers: ["TECH-5244"] };
   const branch = { name: `github ${repo} branch-delete read (head, open PRs on the branch, branch tip)`, covers: ["TECH-5230"] };
+  const readiness = { name: `github ${repo} readiness reread (PR outcome, reviews, timeline, declaration comment)`, covers: ["TECH-6613"] };
   const defaultHead: SmokeCheck = {
     name: `github ${repo} default branch head (follow-up "Written against")`,
     covers: ["TECH-5258"],
@@ -184,7 +185,7 @@ export function githubChecks(
           },
         }),
   };
-  if (pr === undefined) return [defaultHead, branches, issueBranches, ...[facts, squash, handoff, branch].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
+  if (pr === undefined) return [defaultHead, branches, issueBranches, ...[facts, squash, handoff, branch, readiness].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
   return [
     defaultHead,
     branches,
@@ -216,6 +217,15 @@ export function githubChecks(
     },
     { ...handoff, run: () => probes.handoffRead(repo, pr) },
     { ...branch, run: () => probes.branchDeleteRead(repo, pr) },
+    {
+      ...readiness,
+      run: async () => {
+        if (!github.readReadiness) throw new Error("the GitHub adapter has no readReadiness");
+        // Comment 1 is no declaration on this PR: its read must answer "none", not fail.
+        const { declaration, facts } = await github.readReadiness({ repo, number: pr, commentId: 1 });
+        return { state: facts.state, headSha: facts.headSha, reviews: facts.reviews.length, declaration };
+      },
+    },
   ];
 }
 

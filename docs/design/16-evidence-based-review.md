@@ -494,18 +494,23 @@ Stage 1 keeps no index. Sergeant's declarations are already listed in its task r
 the PR from GitHub (the PR, its reviews, issue and review comments, timeline and commits), joins
 Sergeant's reviewer runs from `reviews.jsonl` by run id, and classifies the declaration (§5.1). The
 reads are the conditional, rate-limited reads every GitHub read already uses (08 §9), a handful per
-declared PR. What if we lose it? Nothing: there is no derived state, only the task records Sergeant
+declared PR. Like every `sgt` command (`sgt stops` reads `GET /v1/stops`), the command reads one
+read-only route, `GET /v1/review-readiness?since=&repo=`, which any signed-in person (approver or
+team member) may call: `serve` does the scan and the GitHub reads, and `--json` prints its answer as
+sent. What if we lose it? Nothing: there is no derived state, only the task records Sergeant
 already keeps and GitHub. If rereading becomes slow, a cache of closed PRs' facts can be added; it
 would be disposable.
 
 Following the existing `sgt` patterns (`--since`, `--json`, read-only):
 
 ```
-sgt review readiness [--since 90d] [--repo <slug>] [--list]
+sgt review readiness [--since 90d] [--repo <slug>] [--list] [--json]
 ```
 
-`--list` prints each declaration with its PR link, head, class and reason, so every number links back
-to evidence a person can read on GitHub. Stage 1 adds no API route. Example
+`--list` prints each declaration with its PR link, head, class (and UNKNOWN reason) and the
+declaration's reason, so every number links back to evidence a person can read on GitHub. With
+nothing evaluated, the line keeps the fraction and counts and prints no percentage. Stage 1 adds no
+other route, no MCP tool and no dashboard. Example
 (`sgt review readiness --repo example-org/example-app --since 90d`):
 
 ```
@@ -614,7 +619,7 @@ Gate already enforce under every policy.
 2. Record `readinessCommentId` on the `refusedMerges` and `merged` records, and `readinessReason` on
    `merge_pr`.
 3. Build the read-only `sgt review readiness` command, classifying by rereading GitHub and linking to
-   the existing evidence of §2. It adds no API and derives no new review measure.
+   the existing evidence of §2. It reads one read-only route (§7.1) and derives no new review measure.
 
 Nothing is asked of humans or external assistants: no convention, no template line.
 
@@ -737,8 +742,9 @@ design.
   absent; in stage 2, the core's audit-comment filter, which posts verdict lines only when it is
   absent.
 - Background loops (stage 2): "merged-PR audit draw (daily)".
-- CLI: `sgt review readiness` (stage 1). Any API route, `sgt review audits`, `/v1/review-audits`, or
-  MCP `review_report` tool is later work requiring separate approval.
+- CLI: `sgt review readiness` (stage 1), reading the one read-only route `GET /v1/review-readiness`
+  the way `sgt stops` reads `GET /v1/stops` (§7.1). Any other route, `sgt review audits`,
+  `/v1/review-audits`, or MCP `review_report` tool is later work requiring separate approval.
 
 ### 10.5 `09-security.md`
 

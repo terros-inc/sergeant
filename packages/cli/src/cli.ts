@@ -6,6 +6,7 @@ import { accountCommands } from "./cli-accounts.ts";
 import { adminCommands } from "./cli-admin.ts";
 import { type Command, type Context, call, callAnswer, caller, Failure, fail, type Flags, type Io, print, Usage } from "./cli-call.ts";
 import { repoCommands } from "./cli-repos.ts";
+import { reviewCommands } from "./cli-review.ts";
 import { runCommands } from "./cli-runs.ts";
 import { stopCommands } from "./cli-stops.ts";
 import { taskCommands } from "./cli-tasks.ts";
@@ -42,6 +43,10 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      budget window a task working there gets
   stops                              budget stops per stop-rubric rule: how humans replied, and how
                                      often they followed Sergeant's recommendation
+  review readiness [--since 90d] [--repo <owner/name>] [--list]
+                                     how often a human merged exactly the head Sergeant declared
+                                     ready: AGREED / evaluated, every class and UNKNOWN reason, and
+                                     mergers; --list adds each declaration's PR, head, class and reason
   retro                              ask Sergeant for a retro across tasks now (after a big change, say);
                                      it is posted as a document in the Sergeant project
   account list                       model accounts runs may use: name, provider, whose, what each paid for
@@ -86,7 +91,7 @@ Markdown) for run report, {"api","signedOut"} for logout, {"version"} for update
 -v/--version prints Sergeant's version (from git) and exits without an API call.`;
 
 // Each command group has its own module (cli-tasks.ts, cli-runs.ts, cli-accounts.ts, cli-admin.ts,
-// cli-repos.ts, cli-stops.ts) over the shared API-call plumbing in cli-call.ts; signing in, out, updating, and retro are here.
+// cli-repos.ts, cli-stops.ts, cli-review.ts) over the shared API-call plumbing in cli-call.ts; signing in, out, updating, and retro are here.
 const commands: Record<string, Command> = {
   ...taskCommands,
   ...runCommands,
@@ -94,6 +99,7 @@ const commands: Record<string, Command> = {
   ...adminCommands,
   ...repoCommands,
   ...stopCommands,
+  ...reviewCommands,
   login: {
     args: 0,
     flags: ["paste"],
@@ -184,6 +190,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
         "cost-usd": { type: "string" },
         hours: { type: "string" },
         paste: { type: "boolean" },
+        since: { type: "string" },
+        repo: { type: "string" },
+        list: { type: "boolean" },
         version: { type: "boolean", short: "v" },
         help: { type: "boolean", short: "h" },
       },
@@ -209,7 +218,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], "wall-minutes": values["wall-minutes"], "cost-usd": values["cost-usd"], hours: values.hours, paste: values.paste || undefined };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], "wall-minutes": values["wall-minutes"], "cost-usd": values["cost-usd"], hours: values.hours, paste: values.paste || undefined, since: values.since, repo: values.repo, list: values.list || undefined };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

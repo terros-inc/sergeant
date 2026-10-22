@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import type { GitHubPort } from "@terros/sergeant-contracts";
+import { type GitHubAccount, type GitHubPort, type ReadinessReview, Sha } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { issueComment, readAll } from "./pr-feedback.ts";
 import { graphqlErrors, pullRequestReviewers } from "./schemas.ts";
@@ -47,4 +47,56 @@ export async function declareReadiness(
     }
   }
   return { id: created.id, url: created.html_url, comment: body };
+}
+
+type ReadReadiness = NonNullable<GitHubPort["readReadiness"]>;
+const account = z.object({ login: z.string().min(1), type: z.string() }).nullable();
+/** A deleted account (`null`) is GitHub's `ghost`, a person; only `Bot` is a bot. */
+const accountOf = (u: z.infer<typeof account>): GitHubAccount => (u === null ? { login: "ghost", type: "User" } : { login: u.login, type: u.type === "Bot" ? "Bot" : "User" });
+const declaredPullRequest = z.object({
+  state: z.enum(["open", "closed"]),
+  merged_at: z.string().nullable(),
+  merged_by: account.optional(),
+  closed_at: z.string().nullish(),
+  head: z.object({ sha: Sha }),
+});
+const review = z.object({ user: account, state: z.string(), commit_id: z.string().nullable(), submitted_at: z.string().nullish() });
+const timelineEvent = z.looseObject({ event: z.string().optional(), actor: account.optional() });
+const REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"]);
+
+/** TECH-6613: the facts `classifyReadiness` needs for one declaration (design 16 §5.2), read, never kept. */
+export async function readReadiness(request: Request, req: Parameters<ReadReadiness>[0], appId: number | undefined): ReturnType<ReadReadiness> {
+  if (appId === undefined) throw new Error("no control-plane App id is configured, so Sergeant's own declarations cannot be told apart");
+  const get = (path: string) => request(path);
+  const [pr, reviews, comment] = await Promise.all([
+    request(`/repos/${req.repo}/pulls/${req.number}`).then((body) => declaredPullRequest.parse(body)),
+    readAll(get, `/repos/${req.repo}/pulls/${req.number}/reviews`, review),
+    request(`/repos/${req.repo}/issues/comments/${req.commentId}`, {}, { allowStatuses: [404] }).then((body) => (body === null ? null : issueComment.extend({ issue_url: z.string() }).parse(body))),
+  ]);
+  const merged = pr.merged_at !== null;
+  // Only a merge can have gone through a merge queue: the timeline says whether it did and who queued it.
+  const queue = merged
+    ? (await readAll(get, `/repos/${req.repo}/issues/${req.number}/timeline`, timelineEvent)).filter((e) => e.event === "added_to_merge_queue" || e.event === "removed_from_merge_queue").at(-1)
+    : undefined;
+  const onThisPr = comment !== null && comment.issue_url.endsWith(`/repos/${req.repo}/issues/${req.number}`);
+  return {
+    declaration: onThisPr
+      ? { id: String(comment.id), body: comment.body ?? "", author: accountOf(comment.user), performedViaGitHubAppId: comment.performed_via_github_app?.id ?? null, sergeantAppId: appId, createdAt: comment.created_at }
+      : null,
+    facts: {
+      state: merged ? "merged" : pr.state,
+      headSha: pr.head.sha,
+      mergedAt: pr.merged_at,
+      mergedBy: merged && pr.merged_by ? accountOf(pr.merged_by) : null,
+      closedAt: pr.closed_at ?? null,
+      reviews: reviews.flatMap((r) => {
+        const commitId = Sha.safeParse(r.commit_id);
+        return r.submitted_at && commitId.success && REVIEW_STATES.has(r.state)
+          ? [{ author: accountOf(r.user), state: r.state as ReadinessReview["state"], commitId: commitId.data, submittedAt: r.submitted_at }]
+          : [];
+      }),
+      mergedViaMergeQueue: queue?.event === "added_to_merge_queue",
+      addedToMergeQueueActor: queue?.event === "added_to_merge_queue" && queue.actor ? accountOf(queue.actor) : null,
+    },
+  };
 }

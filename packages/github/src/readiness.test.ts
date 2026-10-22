@@ -67,3 +67,42 @@ test.each([
   expect(comments[0]?.body).not.toContain("rejected");
   expect(comments[0]?.body).toBe(fallbackComment);
 });
+
+// TECH-6613: the reread a classification is made from. A merge queue's own bot must not hide the human
+// who queued the merge, and a missing comment, or one on another PR, must never pass as a declaration.
+test("readReadiness reads the pre-merge head, reviews, the queuing human and the declaration from GitHub", async () => {
+  const at = "2026-01-01T00:00:00Z";
+  let commentPr = 7;
+  let commentStatus = 200;
+  const timeline = [
+    { event: "added_to_merge_queue", actor: { login: "someone", type: "User" } },
+    { event: "removed_from_merge_queue", actor: { login: "github-merge-queue[bot]", type: "Bot" } },
+    { event: "commented", actor: { login: "example-dev", type: "User" } },
+    { event: "added_to_merge_queue", actor: { login: "example-owner", type: "User" } },
+    { event: "merged", actor: { login: "github-merge-queue[bot]", type: "Bot" } },
+  ];
+  const github = createGitHubPort({ token: async () => "test", appId: 42, repositories: { [repo]: { mergeMethod: "squash" } }, fetch: async (input) => {
+    const path = String(input).replace("https://api.github.com", "");
+    if (path === `/repos/${repo}/pulls/7`) return json({ state: "closed", merged_at: "2026-01-02T00:00:00Z", merged_by: { login: "github-merge-queue[bot]", type: "Bot" }, closed_at: "2026-01-02T00:00:00Z", head: { sha: h1 }, merge_commit_sha: h2 });
+    if (path.startsWith(`/repos/${repo}/pulls/7/reviews`)) return json([
+      { user: { login: "example-owner", type: "User" }, state: "APPROVED", commit_id: h1, submitted_at: "2026-01-01T12:00:00Z" },
+      { user: null, state: "PENDING", commit_id: h1, submitted_at: null },
+    ]);
+    if (path === `/repos/${repo}/issues/comments/5`) return json({ ...comment(5, `READY TO MERGE | SHA: ${h1}\n\nReason: ready`), created_at: at, issue_url: `https://api.github.com/repos/${repo}/issues/${commentPr}` }, commentStatus);
+    if (path.startsWith(`/repos/${repo}/issues/7/timeline`)) return json(timeline);
+    throw new Error(`unexpected ${path}`);
+  }});
+  const read = () => github.readReadiness?.({ repo, number: 7, commentId: 5 });
+  expect(await read()).toEqual({
+    declaration: { id: "5", body: `READY TO MERGE | SHA: ${h1}\n\nReason: ready`, author: { login: "sergeant[bot]", type: "Bot" }, performedViaGitHubAppId: 42, sergeantAppId: 42, createdAt: at },
+    facts: {
+      state: "merged", headSha: h1, mergedAt: "2026-01-02T00:00:00Z", mergedBy: { login: "github-merge-queue[bot]", type: "Bot" }, closedAt: "2026-01-02T00:00:00Z",
+      reviews: [{ author: { login: "example-owner", type: "User" }, state: "APPROVED", commitId: h1, submittedAt: "2026-01-01T12:00:00Z" }],
+      mergedViaMergeQueue: true, addedToMergeQueueActor: { login: "example-owner", type: "User" },
+    },
+  });
+  commentPr = 8;
+  expect((await read())?.declaration).toBeNull();
+  commentStatus = 404;
+  expect((await read())?.declaration).toBeNull();
+});

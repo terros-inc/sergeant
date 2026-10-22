@@ -34,7 +34,7 @@ export type Io = {
   sleep?: (ms: number) => Promise<void>;
 };
 
-export type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined; "merge-method"?: string | undefined; "merge-policy"?: string | undefined; "wall-minutes"?: string | undefined; "cost-usd"?: string | undefined; hours?: string | undefined; paste?: boolean | undefined };
+export type Flags = { name?: string | undefined; reason?: string | undefined; task?: string | undefined; "merge-method"?: string | undefined; "merge-policy"?: string | undefined; "wall-minutes"?: string | undefined; "cost-usd"?: string | undefined; hours?: string | undefined; paste?: boolean | undefined; since?: string | undefined; repo?: string | undefined; list?: boolean | undefined };
 /**
  * `token`: the Linear access token sent as the caller's bearer, when signed in. `warned`: whether this
  * invocation has said its server is older than it, shared by every copy of the context.
