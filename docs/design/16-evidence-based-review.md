@@ -41,18 +41,17 @@ GitHub enforces. It starts small, and adds data only when a question needs it.
   the verdict line and code-only findings that pass a deterministic public-data filter. The full
   details stay in Sergeant's records and Linear (§6.4).
 - **Autonomy has to be earned and granted** (§8, stage 3). The target is about 90% AGREED out of the
-  evaluated decisions, over a meaningful sample (suggested: 50 per repository), read together with the
-  audit yield on the heads humans agreed to. Meeting it only invites a human to set the repository's
+  evaluated decisions, over a meaningful sample (suggested: 50 per repository). Meeting it only
+  invites a human to set the repository's
   existing `mergePolicy` to `sergeant`. Nothing escalates automatically. Once a repository has
   auto-merge, a small random shadow sample of its ready heads still goes to a human instead (§8). §8.1
   records a **provisional** definition of a "significant" change for the
   organization's change-management control, pending the auditor's review.
 - **Queryable reporting, no dashboard** (§7). `sgt review readiness` in stage 1 and `sgt review audits`
   in stage 2 print counts and rates with their numerators and denominators.
-- **Later, only on demand: a company-wide review line** (§15). A one-line
-  `Review: PASS | Found: YES | SHA: <full SHA>` convention for every reviewer is sketched but **not
-  part of stages 1–3**. It, and its parser and reviewer positions, get their own design when a
-  specific question needs that data, for example "do added AI reviewers find anything new?".
+- **Later, only on demand: richer review evidence** (§15). A company-wide review convention is **not
+  part of stages 1–3**. It gets its own design only when a specific question justifies the added
+  metadata and machinery.
 
 The economical core of stage 1: **one parsed line on Sergeant's own comment, the agreement rate
 computed by rereading GitHub, and one `sgt` command.** No new database, service, policy engine, Gate
@@ -141,7 +140,7 @@ Which calculation uses which:
 - AI reviews are relatively cheap and each reviewer brings a different perspective. So the bar for
   adding one is "would a new reader plausibly see something different?", not a count. No numeric rule
   is encoded. Data to tune this guidance comes from audits from stage 2 (§6) and, if it is ever
-  adopted, the review line (§15).
+  adopted, the richer evidence extension (§15).
 
 ### 3.2 The few hard boundaries
 
@@ -528,15 +527,13 @@ line (§15); stages 1–3 do not collect that data.
 ## 8. Earned autonomous merge (stage 3)
 
 - **The objective, per repository.** The agreement rate of Sergeant's readiness declarations, at or
-  above about **90%** over at least **50 evaluated decisions**, read together with two checks on it:
-  the post-merge audit yield on AGREED heads (§7.3), and how many AGREED heads a human reviewed with
-  feedback rather than a plain approval (§2.1). Agreement alone is not enough. A human can agree
-  without looking closely, and the readiness line may encourage that (§11.9); an audit is a fresh
-  reviewer that has not seen the line as a verdict to confirm, so a high agreement rate with a
-  noticeable `Found: YES` yield on agreed heads is a reason not to grant autonomy. Per repository,
-  because stakes and conventions differ. `sgt review readiness` and `sgt review audits` print all
-  three. With 50 decisions, 45 AGREED still allows a true rate somewhere in the high 70s to mid 90s at
-  95% confidence, so the number invites a decision; it does not make one.
+  above about **90%** over at least **50 evaluated decisions**. This is deliberately the simple
+  formula of §5.1, per repository because stakes and conventions differ. Reaching the threshold
+  invites a human authorization decision; it neither changes permission automatically nor acquires
+  extra terms. Audit results and the feedback breakdown remain visible context for that decision and
+  for monitoring, not weights or gates in the formula. With 50 decisions, 45 AGREED still allows a
+  true rate somewhere in the high 70s to mid 90s at 95% confidence, so the number invites a decision;
+  it does not make one. The anchoring risk in this evidence is explicit in §11.9.
 - **The authorization.** A person with operator rights deliberately sets that repository's existing
   `mergePolicy` to `sergeant` (`sgt admin repo …`). Sergeant never changes it, never asks for it
   automatically, and never escalates on a threshold. For a repository whose merge deploys to
@@ -569,25 +566,21 @@ The organization's SOC 2 change-management control requires significant changes 
 approved before they reach production. For the audit period of **1 December 2026 to 1 March 2027**,
 the working definition is:
 
-- **Until a repository reaches stage 3** (its `mergePolicy` is `sergeant`), every production merge in
-  that repository stays human-approved, as it is today. Nothing in stages 1 and 2 changes who
-  approves or merges.
-- **Once any repository has reached stage 3**, a "significant" change, organization-wide, is:
-  - any change, in any repository, that the hard-rule list of §3.2 sends to a human, which today
-    means protected CI configuration (M15) and the repository's ruleset required-reviewer paths
-    (boundary 5); and
-  - every change in a repository that has not yet been granted auto-merge.
-
-  So in a repository that has reached stage 3, only the hard-rule list is significant, and its other
-  changes are approved by the independent reviewer and the evidence of §7, under Sergeant's Gate. In
-  every repository that has not, every change is significant and keeps human approval, which is the
-  first rule restated.
+- **Before a repository is authorized for auto-merge** (`mergePolicy: human`), every production
+  merge in that repository is significant and remains human-approved, as it is today. Nothing in
+  stages 1 and 2 changes who approves or merges in that repository.
+- **After that repository is authorized for auto-merge** (`mergePolicy: sergeant`), the significant
+  changes in that repository are the narrow hard-rule changes of §3.2: protected CI configuration
+  (M15) and paths covered by the repository's ruleset required-reviewer rule (boundary 5). Those
+  changes still require human approval. Other changes may follow Sergeant's existing gated merge
+  path.
 
 **This definition is provisional. It is pending review with the auditor and is not final.** It may
 change before or during the audit period. It is recorded here so the design and the control describe
 the same boundary; the adopted wording belongs in the organization's review policy (§12, TECH-6510).
-Deterministically, this needs nothing new: the first part is `mergePolicy: human` (boundary 2), and
-the second is boundaries 3 and 5, which GitHub and the Gate already enforce under every policy.
+Deterministically, this needs nothing new: the before-authorization phase is `mergePolicy: human`
+(boundary 2), and the after-authorization exceptions are boundaries 3 and 5, which GitHub and the
+Gate already enforce under every policy.
 
 ## 9. Staged rollout
 
@@ -621,15 +614,15 @@ every `Found: YES` is in `sgt review audits --found`; and a public repository's 
 verdict line and filtered findings.
 
 **Stage 3 — earned autonomous merge, later and per repository.** Once a repository has ≥ 50
-evaluated decisions at about 90% agreement and an acceptable audit yield, the captain and the policy
-owner decide whether to set `mergePolicy: sergeant` there (§8), under the change-management
+evaluated decisions at about 90% agreement, the captain and the policy owner decide whether to set
+`mergePolicy: sergeant` there (§8), under the change-management
 definition in force then (§8.1). No code change is needed for the switch itself. The shadow handoff
 sample (§8) is built before the first repository is switched, and runs in every `sergeant`-policy
 repository. Other repositories join the audits as the numbers earn trust (§6.2).
 
-**On demand — the company-wide review line (§15).** Not scheduled. It is adopted, as its own
-decision, only when a specific question needs per-reviewer `Found` data or reviewer positions, and it
-can come before or after stage 3. Until then nobody is asked to write it and nothing parses it.
+**On demand — richer review evidence (§15).** Not scheduled. It gets its own design only when a
+specific question justifies company-wide metadata. Until then nobody is asked to write it and
+nothing parses it.
 
 Nothing in any stage is built until this proposal is approved. Implementation issues are written
 then.
@@ -638,7 +631,8 @@ then.
 
 These are applied when the proposal is approved, each by the issue that implements its stage. Each
 owning section is edited in place, and other documents link to it (rule ownership per `AGENTS.md`).
-The review line (§15) changes nothing here; its contract changes belong to its own design.
+The deferred evidence extension (§15) changes nothing here; any contract changes belong to its own
+design.
 
 ### 10.1 `06-review.md`
 
@@ -759,8 +753,8 @@ to an account (a native review's account, state and `commit_id`) and Sergeant's 
   and can verify in its ledger). A third-party review App's approval is a verified identity with
   unverified quality. Whether such reviews may ever count toward a disposition is a later decision on
   data, like the subagent decision in 06 §5.
-- Crediting the tool behind a person's account needs typed attribution, which only the review line
-  offers (`By:`, §15), as attribution, never authority.
+- Crediting the tool behind a person's account would need additional typed attribution (§15), as
+  attribution, never authority.
 - Considered and rejected: signed review attestations or a reviewer registry. They are heavy, and the
   audit sample tests reviewer quality more directly than an identity proof could.
 
@@ -802,11 +796,10 @@ accrues slowly. A merge by a merge-queue bot with no human enqueuer is `uninterp
 Stage 1 counts external reviews only as GitHub records them: a native review by an account, with a
 verdict for one commit, or none for `COMMENTED`. Human reviewers and external assistants change
 nothing. The cost is what stage 1 cannot see: whether a review found something new, and which tool
-was behind a person's account. That is deliberate. The review line (§15) would answer both, but it
-asks every reviewer in the company to adopt a convention and needs a parser, positions and an index;
-it waits for a question that needs it. Audits record `Found` for their own reviews from stage 2, from
-the reviewer's report rather than from GitHub text. Author-side reviews are kept but never shown as
-independent.
+was behind a person's account. That is deliberate. Answering those questions would require the
+deferred extension of §15: company-wide metadata plus new parsing and reporting. It waits for a
+question that needs it. Audits record `Found` for their own reviews from stage 2, from the reviewer's
+report rather than from GitHub text. Author-side reviews are kept but never shown as independent.
 
 ### 11.6 Samples and denominators
 
@@ -859,22 +852,22 @@ that covers Sergeant's PRs and everyone else's, and data to tune it.
 ### 11.9 Anchoring on the readiness line
 
 In a `human`-policy repository the reviewer sees `READY TO MERGE` first, and may approve it with less
-scrutiny than a PR with no verdict. That would inflate the agreement rate stage 3 relies on. A softer
-label (for example "Sergeant's assessment") was considered and not adopted: the issue asks for an
-explicit ready-to-merge judgment, a fixed parsable line is what makes the declaration measurable, and
-a human weighing Sergeant's verdict is what the agreement rate is meant to test. Instead the design
-makes rubber-stamping visible and keeps agreement from being the only signal:
-- `sgt review readiness` splits AGREED by whether a human gave a valuable review, only a plain
-  approval, or no review (§2.1, §7.1), so a repository where agreement comes mostly from bare
-  approvals shows it.
-- Stage 3 reads agreement together with the 1-in-10 audit yield on AGREED heads (§8). The auditor is
-  a fresh reviewer judging the head as of merge; if humans agree with heads that audits then find
-  problems in, agreement is overstated and autonomy is not granted.
-- After stage 3, the shadow sample (§8) keeps humans reviewing a random share of heads, and the audits
-  keep running, so a later slide shows up in both.
+scrutiny than a PR with no verdict. That anchoring could inflate the agreement rate stage 3 uses.
+The design accepts the risk without hiding the recommendation: `READY TO MERGE` stays prominent,
+with its reason and evidence directly below it, and humans should preferably wait for Sergeant to
+declare readiness before beginning their review. That sequence preserves the signal the experiment
+is meant to test: whether a human ultimately merges the exact SHA Sergeant recommended, even if the
+human then seeks more opinions before deciding.
 
-The line itself stays plain text, not bold, with its reason and evidence directly below it, so the
-reader sees why Sergeant thinks so rather than only that it does.
+Anchoring is monitored, but it does not add a weight, exclusion or second gate to the initial
+agreement formula and does not delay stage 1. `sgt review readiness` shows whether AGREED heads had
+valuable feedback, only a plain approval, or no human review (§2.1, §7.1). Independent post-merge
+audits provide an unanchored check on sampled heads. We will explore occasional blind human reviews,
+where the reviewer does not see the readiness declaration until after recording an assessment, and
+compare them with ordinary reviews to estimate the effect. That experiment needs its own operating
+detail before use; it is not part of stages 1–3. After stage 3, the shadow sample and audits continue
+to show later quality changes. These signals inform the human authorization and any later restriction
+without changing **AGREED / evaluated**.
 
 ## 12. What this supersedes or redirects
 
@@ -885,8 +878,8 @@ This PR changes none of the following. It recommends:
   model instead: readiness, agreement, audits, and §3.2's short list of hard boundaries, keeping the
   policy's own authorization, required-CI and exception sections. The change-management definition of
   §8.1 is provisional; once the auditor has reviewed it, the adopted wording belongs in the policy,
-  which links here for the mechanism. The review line (§15) is not part of the policy until it is
-  adopted.
+  which links here for the mechanism. The richer evidence extension (§15) is not part of the policy
+  unless a later proposal adopts it.
 - **TECH-6553 (Sergeant tier classification and tier gating)** — superseded. Do not build reading a
   tier map, computing a PR's tier, or gating review counts and merge by tier. Stage 1 here replaces
   it. Its fail-closed protected-file intent is already built as M15.
@@ -921,21 +914,10 @@ only on the declared-ready SHA, with no separate class for Sergeant's own revisi
 The change-management definition (§8.1) is not a question for this review: it is provisional and
 pending review with the auditor.
 
-## 15. Later, on demand: the company-wide review line
+## 15. Later, on demand: richer review evidence
 
-**Not part of stages 1–3, and not specified here.** If a specific question ever needs per-reviewer
-data, for example "how often does an added AI reviewer find something new?" or "how much review
-coverage comes from assistants under people's accounts?", a separate design would propose a one-line
-convention any reviewer can add to a GitHub review or comment:
-
-```
-Review: PASS | Found: YES | SHA: 3f9c2a1b7e4d5c6f8a9b0c1d2e3f4a5b6c7d8e9f
-Review: FAIL | Found: YES | SHA: 3f9c2a1b7e4d5c6f8a9b0c1d2e3f4a5b6c7d8e9f | By: <tool name>
-```
-
-`PASS`/`FAIL` says whether this exact head is fit to merge, `Found` whether the reviewer raised an
-actionable observation nobody had raised on the PR, `SHA` is the full reviewed commit, and the
-optional `By:` attributes the tool behind a person's account: attribution only, never approval
-authority (§11.1). The reasons stay in ordinary comments. That design would own the parser, reviewer
-positions, any index, their metrics and their contract changes. Until then nobody is asked to write
-the line and Sergeant parses nothing but its own readiness line.
+**Not part of stages 1–3, and not specified here.** If a concrete question eventually needs
+company-wide metadata about external tools, new findings or reviewer position, a separate proposal
+will design the smallest convention and the parser, reporting and contract changes it requires.
+Until then nobody is asked to emit new review metadata, and Sergeant parses only its own readiness
+line.
