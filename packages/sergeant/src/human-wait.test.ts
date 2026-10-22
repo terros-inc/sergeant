@@ -21,16 +21,16 @@ const handoff = { id: commentIdFor(handoffKey(issue.id, pr)), createdAt: new Dat
  * The PR as GitHub shows it at `poll`, the base branch moving under it every poll: GitHub reports
  * mergeability unknown on the poll the base moved, and settles it by the next.
  */
-const busyBase = (poll: number, patch: Partial<PullRequestFacts>): PullRequestFacts => {
+const busyBase = (poll: number, patch: Partial<PullRequestFacts>, offset = 0): PullRequestFacts => {
   const moved = poll % 2 === 0;
-  return { ...pr, baseSha: sha(Math.ceil(poll / 2)), ...(moved && { mergeable: null, mergeableState: "unknown" as const }), ...patch };
+  return { ...pr, baseSha: sha(offset + Math.ceil(poll / 2)), ...(moved && { mergeable: null, mergeableState: "unknown" as const }), ...patch };
 };
 
 /**
  * A task waiting on a human merge, polled `polls` times under a busy base; `change` applies at
  * `changeAt`. Returns the turns taken and what was posted. With `keepDir`, it continues the last one.
  */
-async function waiting(opts: { polls: number; costUsd?: number; change?: { at: number; pr?: Partial<PullRequestFacts>; issue?: (live: Conversation) => Conversation }; wake?: Wake; keepDir?: boolean }) {
+async function waiting(opts: { polls: number; costUsd?: number; change?: { at: number; pr?: Partial<PullRequestFacts>; issue?: (live: Conversation) => Conversation }; wake?: Wake; keepDir?: boolean; baseOffset?: number }) {
   let turns = 0;
   let poll = 0;
   let patch: Partial<PullRequestFacts> = {};
@@ -40,7 +40,7 @@ async function waiting(opts: { polls: number; costUsd?: number; change?: { at: n
     conversation: { agentComments: [handoff] },
     runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
     reasoner: async () => (turns++, turnOf([], opts.costUsd ?? 0.25)),
-    pullRequest: () => busyBase(poll, patch),
+    pullRequest: () => busyBase(poll, patch, opts.baseOffset),
     mergePolicy: "human",
     onPoll: async (n, live) => {
       poll = n;
@@ -102,16 +102,21 @@ test("sgt task wake still takes a turn while the task waits on a human merge", a
   expect(turns).toBe(2);
 });
 
-test("a task already waiting on a merge with an exhausted window asks nothing while only its base moves", async () => {
+test.each([
+  ["it kept", false, 0],
+  // As code from before the wait facts saved it, read back from its last turn though the base has moved since.
+  ["code before them did not keep", true, 100],
+])("a task already waiting on a merge with an exhausted window, wait facts %s, asks nothing while only its base moves", async (_name, legacy, baseOffset) => {
   // The work before the handoff spent the whole window.
   const first = await waiting({ polls: 3, costUsd: 25 });
   expect(first.turns).toBe(1);
-  // As code from before the wait facts saved it: the first quiet poll records them.
   const file = join(dir, "state.json");
-  const { waitFacts: _, ...legacy } = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
-  await writeFile(file, JSON.stringify(legacy));
+  if (legacy) {
+    const { waitFacts: _, ...saved } = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    await writeFile(file, JSON.stringify(saved));
+  }
 
-  const { turns, posted } = await waiting({ polls: 20, keepDir: true });
+  const { turns, posted } = await waiting({ polls: 20, keepDir: true, baseOffset });
 
   expect(turns).toBe(0);
   expect(posted).toEqual([]);

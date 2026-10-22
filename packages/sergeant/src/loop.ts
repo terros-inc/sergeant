@@ -16,7 +16,7 @@ import { postHandoffs } from "./handoff.ts";
 import { countHollow, flagDue, flagHollowTurn, HOLLOW_TURN_NOTE, isHollow } from "./hollow-turn.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
-import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
+import { confirmStarts, lastTurnWaitFacts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
 import { checkHolds, checkStop, holdForBudget, openDirectionWindow, ownBudgets, reconcileDue, type PollContext } from "./poll-checks.ts";
@@ -113,6 +113,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     log(`ignoring the budget options: this task keeps its window of ${JSON.stringify(state.budget.window)} until a human answers one of its questions`);
   }
   const ctx: PollContext = { opts, deps, state, log, save };
+  // TECH-6669: saved with the task's next save; lost before it, they are read back again.
+  if (!state.waitFacts && state.lastFingerprint !== undefined && !state.hollow) state.waitFacts = await lastTurnWaitFacts(files.turns, { ownLogins: own, humanMerged });
   // A run's id is saved before the runner is asked to start it (UNF-728).
   const ports: Ports & { reasoner: Reasoner } = {
     ...deps,
@@ -315,7 +317,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // conflicted, or pushed) and work still in flight remain ordinary active work.
     // TECH-6669: with the last turn's wait facts kept, they decide whether anything changed since it
     // (poll.ts `waitFactsOf`): a moved base or GitHub recomputing mergeability alone wakes no turn, nor
-    // asks the budget question below. A task saved before them records them on its first quiet poll.
+    // asks the budget question below. A task saved before them took them from its last turn (above), or
+    // records them on its first quiet poll.
     const waitFacts = waitFactsOf(situation, { ownLogins: own, humanMerged }, state.waitFacts);
     if (!state.waitFacts && state.lastFingerprint !== undefined && fingerprint === state.lastFingerprint && !state.hollow) {
       state.waitFacts = waitFacts;

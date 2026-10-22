@@ -8,9 +8,10 @@ import {
   type PullRequestFacts,
   type RunRecord,
 } from "@terros/sergeant-contracts";
-import type { Ports } from "./execute.ts";
+import { readFile } from "node:fs/promises";
+import type { ActionOutcome, Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
-import { cancelRuns } from "./poll.ts";
+import { cancelRuns, unsettledMerges, waitFactsOf, type WaitFacts } from "./poll.ts";
 import type { TaskState } from "./task-state.ts";
 
 // What a pass of the task loop (loop.ts) reads before it decides anything: the runs it started, and
@@ -62,4 +63,20 @@ export function situationOf(
     budget,
     recentTurns: state.recentTurns,
   });
+}
+
+/**
+ * TECH-6669: the wait facts of the task's last turn, read back from its line in `turns.jsonl`, for a task
+ * saved before they were kept, so a base that moved since then does not wake one more turn (or, on an
+ * exhausted window, ask the budget question). Undefined when it cannot be read: the fingerprint then
+ * decides until a quiet poll or the next turn records them.
+ */
+export async function lastTurnWaitFacts(file: string, opts: Omit<Parameters<typeof waitFactsOf>[1], "unsettled">): Promise<WaitFacts | undefined> {
+  const line = (await readFile(file, "utf8").catch(() => "")).trimEnd().split("\n").at(-1);
+  try {
+    const { situation, outcomes } = JSON.parse(line ?? "") as { situation: SituationReport; outcomes: ActionOutcome[] };
+    return waitFactsOf(situation, { ...opts, unsettled: unsettledMerges(outcomes, situation) });
+  } catch {
+    return undefined;
+  }
 }
