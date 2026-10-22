@@ -257,7 +257,10 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     - **Public repository**, or one whose visibility cannot be read at posting time: the verdict line
       and only the findings that are structurally about code: category not `acceptance`; location
       `<path>` or `<path>:<line>` for one of the PR's changed files (an unreadable file list qualifies
-      none); description on one line, at most 500 characters, with no URL. Each candidate, and then
+      none); description on one line, at most 500 characters, with no URL. A URL is anything with a
+      scheme (`://`), `www.`, or a host-name-like token: letters, digits or hyphens, a dot, and a TLD
+      of two or more letters, as in `example.com/path`. Dotted code tokens such as `foo.ts` or
+      `obj.method` match too, and are dropped: dropping is the safe direction. Each candidate, and then
       the whole comment, must pass the canonical `check-public-data.mjs text` with the installation's
       denylist (`publicDataDenylistSecret`); a candidate it rejects is dropped. With no denylist, a
       check error, or a whole comment it rejects, the comment is the verdict line alone, with no count

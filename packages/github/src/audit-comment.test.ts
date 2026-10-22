@@ -42,10 +42,25 @@ test.each<[string, Partial<Finding>]>([
   ["a multi-line description", { description: "first line\nsecond line" }],
   ["a description over 500 characters", { description: "x".repeat(501) }],
   ["a URL in the description", { description: "see https://example.test/case" }],
+  ["a www. host in the description", { description: "see www.example.test for the case" }],
+  ["a bare host in the description", { description: "the client calls example.com on every retry" }],
+  ["a host with a path in the description", { description: "the case is at example.com/path/to/case" }],
+  ["a subdomain host in the description", { description: "uploads go to sub.example.io instead" }],
+  ["a dotted code token in the description", { description: "`obj.method` is called twice" }],
 ])("on a public repository, %s is dropped and counted", (_case, change) => {
   expect(auditComment(audit([code, { ...code, id: "f2", ...change }]), onPublic)).toBe(
     `${line}\n\n- src/sync.ts:88: ${code.description}\n\n1 finding is kept in Sergeant's records (\`sgt review audits\`), not on this public PR.`,
   );
+});
+
+test("host-like findings are counted, never quoted, and a finding with no host-like token still passes", () => {
+  const hosts = ["example.com", "example.com/path", "sub.example.io"].map((h, i) => ({ ...code, id: `h${i}`, description: `Requests go to ${h} first.` }));
+  const plain = { ...code, id: "f2", description: "The retry loop never stops, e.g. on a 429 response." };
+  const comment = auditComment(audit([code, ...hosts, plain]), onPublic);
+  expect(comment).toBe(
+    `${line}\n\n- src/sync.ts:88: ${code.description}\n- src/sync.ts:88: ${plain.description}\n\n3 findings are kept in Sergeant's records (\`sgt review audits\`), not on this public PR.`,
+  );
+  expect(comment).not.toMatch(/example\.(com|io)/);
 });
 
 test("a bare changed path and a 500-character description pass the structural rules", () => {
@@ -56,7 +71,8 @@ test("a bare changed path and a 500-character description pass the structural ru
 test("the denylist check drops only the finding it rejects, and counts it", () => {
   const check = publicDataCheck("Acme Solar", "audit comment");
   const named = { ...code, id: "f2", description: "Acme-Solar rows are skipped by the importer." };
-  const id = { ...code, id: "f3", description: `Logs ${["C", "Ab12"].join(".")} in the error.` };
+  // `C:` rather than `C.`: a dotted ID would already be dropped as host-like, before the check sees it.
+  const id = { ...code, id: "f3", description: `Logs ${["C", "Ab12"].join(":")} in the error.` };
   expect(auditComment(audit([code, named, id]), { ...onPublic, check })).toBe(
     `${line}\n\n- src/sync.ts:88: ${code.description}\n\n2 findings are kept in Sergeant's records (\`sgt review audits\`), not on this public PR.`,
   );
