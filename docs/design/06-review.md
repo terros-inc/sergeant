@@ -226,7 +226,8 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     random sample of merged PRs, never that review was skipped.
   - **Who pays.** These audits run outside any task, on the registered accounts of `review.auditOwner`
     (the Sergeant project's owner), at most `review.qualityBudgetUsdPerDay` (default $25) in any 24
-    hours, an audit whose cost is not known yet counting $5. With no `auditOwner`, none runs.
+    hours, an audit whose cost is not known yet counting $5; one starts only if its $5 fits under the cap
+    with what is already spent. With no `auditOwner`, none runs.
   - `merged-audits.json` keeps only when the last pass ran and the audits it started, for the cap.
     Recording results and posting audit comments are later work; an audit never blocks, reverts or
     reopens anything.

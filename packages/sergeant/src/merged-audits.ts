@@ -91,8 +91,9 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
       // A head a task's audit already took is audited once, under the id that task recorded.
       const runId = taskAudit.get(headKey(head)) ?? auditRunId(repo, m.number, m.headSha);
       if (known.has(runId)) continue;
-      if (spent >= cap) {
-        opts.log(`merged-PR audits: the daily cap of $${cap.toFixed(2)} is reached ($${spent.toFixed(2)}); ${repo}#${m.number} and the rest wait for the next day's pass`);
+      // The audit starts only if its own reservation fits too, so the cap is never overshot.
+      if (spent + UNKNOWN_AUDIT_USD > cap) {
+        opts.log(`merged-PR audits: another audit would exceed the daily cap of $${cap.toFixed(2)} ($${spent.toFixed(2)} spent); ${repo}#${m.number} and the rest wait for the next day's pass`);
         break scan;
       }
       const started = await startAudit(runId, { ...m, repo }, owner, deps).then(

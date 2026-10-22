@@ -90,14 +90,19 @@ test("each drawn PR's pre-merge head is audited once as of its merge, across re-
   expect(t.started).toHaveLength(5);
 });
 
-test("the daily cap stops starts once spent, counting each audit not finished yet", async () => {
+test("the daily cap starts an audit only if its reservation fits, counting each audit not finished yet", async () => {
   const t = await harness({ budgetUsdPerDay: 9 });
   await t.pass();
-  // Each new audit counts $5 until its cost is known: two fit under $9.
-  expect(t.started).toHaveLength(2);
-  // The next day the earlier ones cost $1 each and fall out of the last 24 hours: the rest start.
+  // Each new audit counts $5 until its cost is known: one fits under $9, a second would make $10.
+  expect(t.started).toHaveLength(1);
+  // The next day the earlier one cost $1 and falls out of the last 24 hours: one more starts.
   await t.pass({ now: () => new Date(now.getTime() + 25 * 3_600_000) });
-  expect(t.started).toHaveLength(4);
+  expect(t.started).toHaveLength(2);
+
+  // A reservation that exactly fills the cap still fits.
+  const exact = await harness({ budgetUsdPerDay: 10 });
+  await exact.pass();
+  expect(exact.started).toHaveLength(2);
 });
 
 test("the merged-PR draw is salted apart from the skipped-review draw", () => {
