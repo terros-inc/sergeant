@@ -5,6 +5,7 @@ import { expect, test, vi } from "vitest";
 import { NoModelAccount, RunId, type BudgetStatus, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
 import { finishReviews } from "./after-merge.ts";
 import { drawAudit } from "./audit.ts";
+import { auditRunId } from "./review-quality.ts";
 import type { Ports } from "./execute.ts";
 import type { TaskState } from "./task-state.ts";
 
@@ -14,7 +15,7 @@ import type { TaskState } from "./task-state.ts";
 const repo = "o/canary";
 const headSha = "a".repeat(40);
 const mergedSha = "b".repeat(40);
-const runId = `run_audit-${headSha}`;
+const runId = auditRunId(repo, 7, headSha);
 const conversation: Conversation = {
   issue: {
     id: "issue-1",
@@ -166,6 +167,17 @@ test("a sampled audit is recorded under the task's start/cancel lock before it s
   expect(stopped).not.toHaveBeenCalled();
   expect(none.audit).toBeUndefined();
   expect(why).toEqual([`audit review ${runId} not started: the task is stopping`]);
+});
+
+// TECH-6616: audits recorded before the id became per PR keep their `run_audit-<headSha>` id. One saved
+// just before a restart, whose draw was not yet marked done, must start under that id, or the
+// restart would start a second audit of the same head and lose track of the first.
+test("an audit id already on the merged record is read back, never recomputed", async () => {
+  const older = RunId.parse(`run_audit-${headSha}`);
+  const start = vi.fn<Ports["runner"]["start"]>(async () => {});
+  const { state } = await draw(async () => pr, start, "/unused", { ...merged(), audit: { runId: older } });
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ runId: older }));
+  expect(state.audit).toEqual({ runId: older });
 });
 
 test("a sampled audit starts nothing once the issue is reassigned, and records the handoff stop", async () => {

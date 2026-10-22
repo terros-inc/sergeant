@@ -243,6 +243,8 @@ afterReport(run, r)                        // guardrails, then wake Sergeant
   verdict or severity (`Approve`, `non-blocking`), a PR number as a string, a missing report version,
   summary, or finding id. Never toward a merge: an unknown severity reads as `blocking`, and an
   unknown verdict or a missing reviewed head still rejects the report.
+- Each `reviewed` entry of a review report may carry `found` (06 §8). It is optional, so older reports
+  still parse, and a missing or malformed value reads as unknown, never as no.
 - A run that ends with no usable report (none written, or one that does not parse) gets one retry at
   once, before the next reasoning turn (TECH-5259): a reviewer on the same heads, a worker on its
   objective with an instruction to finish and write its report, each told why. The retry goes through
