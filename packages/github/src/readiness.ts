@@ -27,7 +27,8 @@ export async function declareReadiness(
   let body = req.comment;
   const visibility = z.object({ visibility: z.enum(["public", "private", "internal"]) }).safeParse(await request(`/repos/${req.repo}`));
   if (!visibility.success || visibility.data.visibility === "public") {
-    if (publicDataCheck(context.publicDataDenylist, "readiness text")?.(req.modelText) !== "pass") body = req.fallbackComment;
+    if (!context.publicDataDenylist) context.log(`${req.repo}#${req.number}: public-data denylist is not configured; posting the fallback readiness reason`);
+    if (publicDataCheck(context.publicDataDenylist, "readiness text", context.log)?.(req.modelText) !== "pass") body = req.fallbackComment;
   }
   const created = issueComment.parse(await request(`/repos/${req.repo}/issues/${req.number}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }) }));
   const confirmed = context.appId !== undefined && created.user?.type === "Bot" && created.performed_via_github_app?.id === context.appId;
