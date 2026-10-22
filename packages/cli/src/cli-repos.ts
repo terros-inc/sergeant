@@ -1,15 +1,16 @@
-import { RepositoryBudgetChange, RepositoryChange, RepositoryList } from "@terros/sergeant-contracts";
+import { RepositoryAuditRateChange, RepositoryBudgetChange, RepositoryChange, RepositoryList } from "@terros/sergeant-contracts";
 import { type Command, callAnswer, print, Usage } from "./cli-call.ts";
 import { table } from "./format.ts";
 
-// `sgt repo list`, any signed-in user's, and an approver's `sgt admin repo add`, `remove`, and `budget` (TECH-6606).
+// `sgt repo list`, any signed-in user's, and an approver's `sgt admin repo add`, `remove`, `budget` (TECH-6606),
+// and `audit-rate` (TECH-6617).
 
 export const repoCommands: Record<string, Command> = {
   "repo list": {
     args: 0,
     run: async (ctx) => {
       const { value: { repositories }, answer } = await callAnswer(ctx, "GET", "/v1/repositories", RepositoryList);
-      print(ctx, answer, () => (repositories.length ? table(repositories.map((r) => [r.repo, r.mergeMethod, `merged by ${r.mergePolicy}`, budgetText(r)])) : "no enrolled repositories"));
+      print(ctx, answer, () => (repositories.length ? table(repositories.map((r) => [r.repo, r.mergeMethod, `merged by ${r.mergePolicy}`, budgetText(r), r.mergedAuditSampleRate ? `audits ${r.mergedAuditSampleRate} of merged PRs` : ""])) : "no enrolled repositories"));
     },
   },
   "admin repo add": {
@@ -35,6 +36,18 @@ export const repoCommands: Record<string, Command> = {
           `${res.changed ? "set" : "already set:"} ${res.repo}'s budget window: ${budgetText(res)}`,
           "serve uses it now, no restart needed. Only budget windows that open from now on get it: a task's current window keeps the budget it opened with until its next fresh one.",
         ].join("\n"),
+      );
+    },
+  },
+  "admin repo audit-rate": {
+    args: 2,
+    usage: "admin repo audit-rate <owner/name> <0..1>",
+    run: async (ctx, [repo, value]) => {
+      const rate = Number(value);
+      if (!/^(0|1|0?\.\d+|1\.0*)$/.test(value ?? "") || !(rate >= 0 && rate <= 1)) throw new Usage("admin repo audit-rate takes a rate from 0 (off) to 1, such as 0.1");
+      const { value: res, answer } = await callAnswer(ctx, "POST", "/v1/repositories/audit-rate", RepositoryAuditRateChange, { repo, mergedAuditSampleRate: rate });
+      print(ctx, answer, () =>
+        `${res.changed ? "set" : "already set:"} ${res.repo}'s merged-PR audit rate to ${res.mergedAuditSampleRate}${res.mergedAuditSampleRate === 0 ? " (off)" : ""}; the next daily pass uses it, no restart needed`,
       );
     },
   },

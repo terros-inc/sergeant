@@ -252,7 +252,15 @@ export type RepositoryBudget = z.infer<typeof RepositoryBudget>;
  */
 export const RepositoryList = z.object({
   repositories: z.array(
-    z.object({ repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy, budget: BudgetStatus.shape.window.optional(), ownBudget: RepositoryBudget.optional() }),
+    z.object({
+      repo: RepoSlug,
+      mergeMethod: MergeMethod,
+      mergePolicy: MergePolicy,
+      budget: BudgetStatus.shape.window.optional(),
+      ownBudget: RepositoryBudget.optional(),
+      /** TECH-6617: the merged-PR audit's sample rate, when above 0; absent from a serve older than it. */
+      mergedAuditSampleRate: z.number().optional(),
+    }),
   ),
 });
 export type RepositoryList = z.infer<typeof RepositoryList>;
@@ -285,3 +293,13 @@ export type RepositoryBudgetRequest = z.infer<typeof RepositoryBudgetRequest>;
 /** The repository's own budget after the change, the window it gives a task working only there, and whether this call wrote it. */
 export const RepositoryBudgetChange = z.object({ repo: RepoSlug, changed: z.boolean(), ownBudget: RepositoryBudget, budget: BudgetStatus.shape.window });
 export type RepositoryBudgetChange = z.infer<typeof RepositoryBudgetChange>;
+
+/**
+ * TECH-6617: an approver's change to the fraction of an enrolled repository's merged PRs the daily
+ * merged-PR audit draws (`mergedAuditSampleRate`, 06 §8); 0 turns it off. A number, never null, so a
+ * client's NaN or Infinity, which JSON sends as null, is refused rather than read as a rate.
+ */
+export const RepositoryAuditRateRequest = z.strictObject({ repo: RepoSlug, mergedAuditSampleRate: z.number().min(0).max(1) });
+export type RepositoryAuditRateRequest = z.infer<typeof RepositoryAuditRateRequest>;
+export const RepositoryAuditRateChange = z.object({ repo: RepoSlug, changed: z.boolean(), mergedAuditSampleRate: z.number() });
+export type RepositoryAuditRateChange = z.infer<typeof RepositoryAuditRateChange>;

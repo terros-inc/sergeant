@@ -66,3 +66,23 @@ test("a non-approver, an unenrolled repository, and an invalid value are refused
   expect(await call("POST", "/v1/repositories/budget", "grace", { repo: "terros-inc/two", costUsd: 5 })).toMatchObject({ json: { error: { message: expect.stringContaining("terros-inc/two is not enrolled") } } });
   expect([parameter.version, parameter.descriptions, JSON.parse(parameter.value), configs[repo]?.budget]).toEqual([1, [], CONFIG, undefined]);
 });
+
+// TECH-6617: `sgt admin repo audit-rate` turns the daily merged-PR audit on or off for one repository.
+// A stray `0` key left behind, a rate above 1 or a NaN sent as null, or a non-approver's change would
+// start (or silently stop) audits nobody chose.
+test("an approver sets a repository's merged-PR audit rate, 0 removes it, and anything else is refused", async () => {
+  const { call, parameter, configs } = await serve();
+  expect(await call("POST", "/v1/repositories/audit-rate", "grace", { repo, mergedAuditSampleRate: 0.1 })).toMatchObject({ status: 200, json: { repo, changed: true, mergedAuditSampleRate: 0.1 } });
+  expect(JSON.parse(parameter.value)).toEqual({ ...CONFIG, repositories: { [repo]: { mergeMethod: "squash", mergedAuditSampleRate: 0.1 } } });
+  expect(configs[repo]?.mergedAuditSampleRate).toBe(0.1);
+  expect(await call("GET", "/v1/repositories", "ada")).toMatchObject({ json: { repositories: [{ repo, mergedAuditSampleRate: 0.1 }] } });
+
+  for (const bad of [1.5, -0.1, null, "0.1"]) expect((await call("POST", "/v1/repositories/audit-rate", "grace", { repo, mergedAuditSampleRate: bad })).status).toBe(400);
+  expect((await call("POST", "/v1/repositories/audit-rate", "ada", { repo, mergedAuditSampleRate: 1 })).status).toBe(403);
+  expect((await call("POST", "/v1/repositories/audit-rate", "grace", { repo: "terros-inc/other", mergedAuditSampleRate: 1 })).status).toBe(400);
+  expect(configs[repo]?.mergedAuditSampleRate).toBe(0.1);
+
+  expect(await call("POST", "/v1/repositories/audit-rate", "grace", { repo, mergedAuditSampleRate: 0 })).toMatchObject({ status: 200, json: { changed: true, mergedAuditSampleRate: 0 } });
+  expect(JSON.parse(parameter.value)).toEqual(CONFIG);
+  expect(configs[repo]?.mergedAuditSampleRate).toBeUndefined();
+});

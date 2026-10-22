@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { AddRepositoryRequest, RemoveRepositoryRequest, RepositoryBudgetRequest, type RepositoryBudgetChange, type RepositoryChange, type RepositoryList } from "@terros/sergeant-contracts";
+import { AddRepositoryRequest, RemoveRepositoryRequest, RepositoryAuditRateRequest, type RepositoryAuditRateChange, RepositoryBudgetRequest, type RepositoryBudgetChange, type RepositoryChange, type RepositoryList } from "@terros/sergeant-contracts";
 import { body, notFound, ok, parse, Refusal, type Reply } from "./api-http.ts";
 import { callerName, type Caller } from "./auth.ts";
 import { EnrollmentRefused, type Enrollment } from "./enrollment.ts";
@@ -11,6 +11,7 @@ import { EnrollmentRefused, type Enrollment } from "./enrollment.ts";
 //   POST /v1/repositories/add      { "repo": "owner/name", "mergeMethod"?: "squash" | "merge" | "rebase", "mergePolicy"?: "sergeant" | "human" }
 //   POST /v1/repositories/remove   { "repo": "owner/name" }
 //   POST /v1/repositories/budget   { "repo": "owner/name", "wallMinutes"?: number | "default", "costUsd"?: number | "default" }   TECH-6606
+//   POST /v1/repositories/audit-rate   { "repo": "owner/name", "mergedAuditSampleRate": 0..1 }   TECH-6617
 
 export async function repositoriesRoute(
   enrollment: Enrollment | undefined,
@@ -20,12 +21,14 @@ export async function repositoriesRoute(
 ): Promise<Reply> {
   if (!enrollment) throw new Refusal(404, "not_found", "this Sergeant lists no enrolled repositories");
   if (at.id === undefined && req.method === "GET") return ok({ repositories: enrollment.list() } satisfies RepositoryList);
-  if (at.verb !== undefined || req.method !== "POST" || (at.id !== "add" && at.id !== "remove" && at.id !== "budget")) throw notFound(at.pathname);
-  if (!caller.approver) throw new Refusal(403, "forbidden", "only an approver, or an operator on the Sergeant host, enrolls or removes a repository or sets its budget");
+  if (at.verb !== undefined || req.method !== "POST" || !["add", "remove", "budget", "audit-rate"].includes(at.id ?? "")) throw notFound(at.pathname);
+  if (!caller.approver) throw new Refusal(403, "forbidden", "only an approver, or an operator on the Sergeant host, enrolls or removes a repository or sets its budget or audit rate");
   const by = callerName(caller);
   const request = await body(req);
-  let change: Promise<RepositoryChange | RepositoryBudgetChange>;
-  if (at.id === "budget") {
+  let change: Promise<RepositoryChange | RepositoryBudgetChange | RepositoryAuditRateChange>;
+  if (at.id === "audit-rate") {
+    change = enrollment.setAuditRate(parse(RepositoryAuditRateRequest, request), by);
+  } else if (at.id === "budget") {
     change = enrollment.setBudget(parse(RepositoryBudgetRequest, request), by);
   } else if (at.id === "add") {
     const { repo, mergeMethod, mergePolicy } = parse(AddRepositoryRequest, request);

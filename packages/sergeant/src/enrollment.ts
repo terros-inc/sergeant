@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { RepoSlug, safeJson, type MergePolicy, type RepositoryBudget, type RepositoryBudgetChange, type RepositoryBudgetRequest, type RepositoryChange, type RetroTarget, type RetroTargetChange } from "@terros/sergeant-contracts";
+import { RepoSlug, safeJson, type MergePolicy, type RepositoryAuditRateChange, type RepositoryAuditRateRequest, type RepositoryBudget, type RepositoryBudgetChange, type RepositoryBudgetRequest, type RepositoryChange, type RetroTarget, type RetroTargetChange } from "@terros/sergeant-contracts";
 import type { GitHubApp } from "@terros/sergeant-github";
 import { z } from "zod";
 import { DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
@@ -182,7 +182,14 @@ export function enrollment(opts: {
       return { loaded, current: await current.version };
     },
 
-    list: () => Object.entries(opts.configs).map(([repo, c]) => ({ repo, mergeMethod: c.mergeMethod, mergePolicy: c.mergePolicy, ...budgets(c) })),
+    list: () =>
+      Object.entries(opts.configs).map(([repo, c]) => ({
+        repo,
+        mergeMethod: c.mergeMethod,
+        mergePolicy: c.mergePolicy,
+        ...budgets(c),
+        ...(c.mergedAuditSampleRate && { mergedAuditSampleRate: c.mergedAuditSampleRate }),
+      })),
 
     retroTarget: () => retro.target,
 
@@ -255,6 +262,25 @@ export function enrollment(opts: {
       if (!settings) throw new EnrollmentRefused(`${own} is not enrolled`);
       const { budget, ownBudget } = budgets(settings);
       return { repo: own, changed, ownBudget, budget };
+    },
+
+    /**
+     * TECH-6617: sets the fraction of an enrolled repository's merged PRs the daily merged-PR audit draws;
+     * 0 removes the key, so absent stays the only "off". The merged-PR audit reads it live at its next pass.
+     */
+    async setAuditRate({ repo, mergedAuditSampleRate: rate }: RepositoryAuditRateRequest, by: string): Promise<RepositoryAuditRateChange> {
+      let own = repo;
+      const changed = await change(({ repositories: current }) => {
+        const enrolled = keyOf(current, repo);
+        if (!enrolled) throw new EnrollmentRefused(`${repo} is not enrolled: \`sgt repo list\` shows the enrolled repositories`);
+        own = enrolled;
+        const settings = current[enrolled] as { mergedAuditSampleRate?: number };
+        if ((settings.mergedAuditSampleRate ?? 0) === rate) return undefined;
+        if (rate === 0) delete settings.mergedAuditSampleRate;
+        else settings.mergedAuditSampleRate = rate;
+        return `${by} set ${enrolled}'s merged-PR audit rate to ${rate}`;
+      });
+      return { repo: own, changed, mergedAuditSampleRate: opts.configs[own]?.mergedAuditSampleRate ?? 0 };
     },
 
     /** Removes `repo` from the enrolled list; one not enrolled stays so. */

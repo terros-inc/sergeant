@@ -40,6 +40,7 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | `POST /v1/admin/update` | `ref?` → the request | as restart, to `ref` (a commit on `main` whose `v2` check passed) or, without one, what the release channel would choose; a failed install reinstalls the previous release | approvers | as restart |
 | `POST /v1/admin/retro/set` / `off` | `{projectId, teamId}` / `{}` → the live target | validates the ids in Linear, then writes or removes only installation config `retro`; serve takes it at once | approvers | TECH-5838 |
 | `POST /v1/repositories/budget` | `{repo, wallMinutes?, costUsd?}`, each a positive number or `"default"` to clear → the repository's own budget and the window it gives | writes only that enrolled repository's `budget` in installation config; serve takes it at once, for windows that open after it | approvers | TECH-6606 |
+| `POST /v1/repositories/audit-rate` | `{repo, mergedAuditSampleRate}`, a number from 0 to 1 → the rate now and whether it changed | writes only that enrolled repository's `mergedAuditSampleRate` (0 removes it); the next daily pass reads it | approvers | TECH-6617 |
 | `POST /v1/pause` / `POST /v1/resume` | `reason` → state | writes `system_state.pause`; audit action | approvers | resume of a pause is idempotent |
 | `POST /v1/drain`, `POST /v1/drain/cancel` | owned drain token (ADR-0040, kept) | stop starting turns and runs; ready when no start or turn is mid-flight | no | deploys quiesce in seconds; runs survive restarts |
 | `GET /v1/review-quality` | `since?, by?` → metrics (06 §9) | — | yes | |
@@ -119,6 +120,7 @@ Each is supervised and reported by `/health/loops` (S1 UNF-555, kept).
 | budget-meter | every 60 s | compute `BudgetStatus`; wake on soft/exhausted; `enforce_budget` (§6) |
 | scheduler | continuous | start due turns within concurrency (03 §2) |
 | review-quality export | daily | write metrics to S3 and CloudWatch (06 §9) |
+| merged-PR audit draw | daily (checked hourly; `merged-audits.json` keeps the last pass) | in each repository with a nonzero `mergedAuditSampleRate`, draw from the PRs merged in the last 72 hours and start each drawn PR's audit as of merge ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved), TECH-6617) |
 
 Startup runs the sequence in 02 §8 before the loops start.
 
@@ -163,6 +165,7 @@ sgt pause --reason "…" | sgt resume                  # approvers
 sgt admin restart | update [<ref>] | status          # approvers: restart or update the host, wait for the outcome
 sgt admin retro set <projectId> <teamId> | off       # approvers: change the live retro target
 sgt admin repo budget <owner/name> [--wall-minutes N|default] [--cost-usd N|default]   # approvers: a repository's own budget
+sgt admin repo audit-rate <owner/name> <0..1>        # approvers: the merged-PR audit's rate there (06 §8); 0 is off
 
 # installation administration (AWS credentials), unchanged mechanisms
 sgt init <installation> [--bootstrap | --check]

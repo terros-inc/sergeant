@@ -39,6 +39,7 @@ sgt admin repo add <owner/name> --merge-policy human      # Sergeant hands the r
 sgt admin repo add <owner/name> --merge-policy sergeant   # Sergeant approves and merges
 sgt admin repo remove <owner/name>
 sgt admin repo budget <owner/name> --wall-minutes 60   # its own budget window; --cost-usd too, default clears
+sgt admin repo audit-rate <owner/name> 0.1             # audit 1 in 10 merged PRs as of merge (design 06 §8); 0 is off
 ```
 
 Without `--merge-policy` a repository is `human`, and `--merge-method squash|merge|rebase` defaults to

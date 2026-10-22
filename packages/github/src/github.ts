@@ -4,6 +4,7 @@ import { hasComment, readFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, issueAssignees, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 import { handToHuman } from "./hand-to-human.ts";
 import { rateLimiter } from "./rate-limit.ts";
+import { firstParent, mergedPullRequests, reviewEdits } from "./merged-prs.ts";
 import { retriggerChecks } from "./retrigger.ts";
 import { declareReadiness, readReadiness } from "./readiness.ts";
 import { readSquashMessage } from "./squash-message.ts";
@@ -326,6 +327,21 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       const own = refs.map((r) => ({ branch: r.ref.replace(/^refs\/heads\//, ""), sha: Sha.parse(r.object.sha) })).filter((b) => b.branch === prefix || b.branch.startsWith(`${prefix}-`));
       const commit = z.object({ committer: z.object({ date: z.string() }) });
       return Promise.all(own.map(async (b) => ({ ...b, committedAt: commit.parse(await request(`/repos/${repo}/git/commits/${b.sha}`)).committer.date })));
+    },
+
+    async mergedPullRequests(repo, since) {
+      configFor(repo);
+      return mergedPullRequests(request, repo, since);
+    },
+
+    async firstParent(repo, sha) {
+      configFor(repo);
+      return firstParent(request, repo, sha);
+    },
+
+    async reviewEdits(repo, number) {
+      configFor(repo);
+      return reviewEdits(request, repo, number);
     },
 
     actionsRetentionDays: (repo) => configFor(repo).config.actionsRetentionDays ?? DEFAULT_ACTIONS_RETENTION_DAYS,

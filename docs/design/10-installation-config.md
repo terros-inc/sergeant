@@ -29,13 +29,13 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 |---|---|---|
 | Linear | workspace, agent user, allowed teams, ops team, OAuth client ref, webhook secret ref | intake admits only allowed teams |
 | GitHub | control-plane App (id, installation ids, key ref), worker App (same), webhook secret ref | two Apps per installation (08 §1); never shared across installations (ADR-0017's rule) |
-| Repositories | slug, purpose, enabled, merge policy, merge method, always-review paths | `sgt config repo add\|set\|enable\|disable\|remove` |
+| Repositories | slug, purpose, enabled, merge policy, merge method, always-review paths, merged-PR audit rate (`mergedAuditSampleRate`, 0–1, absent 0; [06 §8](06-review.md#8-calibration-sampling-unf-641-preserved)) | `sgt config repo add\|set\|enable\|disable\|remove`; approvers set the audit rate with `sgt admin repo audit-rate` |
 | Runner profiles | name, adapter, provider, model, roles, max concurrent, settings, pricing | worker credentials (subscription tokens) go through `sgt config claude-profile` and its siblings, stdin-only, into Secrets Manager (ADR-0042, kept) |
 | Defaults | budget (about 2 h active wall time, hard; about $25 per task, best-effort; soft 0.8, grace 10 min, reasoning reserve $2, 2 concurrent reviewers, 6 starts/hour); profile per role (worker, reviewer, audit reviewer) | both budget numbers configurable per installation |
 | Limits | max open tasks, max concurrent runs, max concurrent turns | |
 | Runners | reconcile interval (60 s), idle/unreachable wake (20 min) | 04 §6 |
 | Reasoning | model, max turn cost and seconds, max sleep, session mode, compaction threshold | |
-| Review | audit sample rate (default 0.2), progress comment after each review round (`progressComments`, default on, TECH-5227), review-quality budget per day | 06; subagent reviews never count until the captain decides (06 §5) |
+| Review | audit sample rate (default 0.2), progress comment after each review round (`progressComments`, default on, TECH-5227), audit owner (`auditOwner`, a Linear user id, no default: who pays for audits outside a task), review-quality budget per day (`qualityBudgetUsdPerDay`, default $25) | 06 §8; subagent reviews never count until the captain decides (06 §5) |
 | Follow-ups | max depth, auto-delegate | |
 | Retro | the Sergeant project and team its documents and issues go to; absent, no retro | approvers use `sgt admin retro set <projectId> <teamId>` or `off` (TECH-5838); serve takes it from the installation-config parameter at every start, so a restart keeps their change (TECH-5940) |
 | Human waits | remind after hours | |

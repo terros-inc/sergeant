@@ -94,6 +94,10 @@ const githubAnswer = (path: string): unknown => {
   if (path === `/repos/${repo}/branches?per_page=100&page=1`) return [{ name: "main" }, { name: "sergeant/tech-9-thing" }];
   if (path === `/repos/${repo}/git/matching-refs/heads/sergeant/tech-9`) return [{ ref: "refs/heads/sergeant/tech-9-thing", object: { sha: head, type: "commit" } }];
   if (path === `/repos/${repo}/git/commits/${head}`) return { committer: { date: "2026-10-15T02:00:00Z" } };
+  if (path === `/repos/${repo}/git/commits/${"e".repeat(40)}`) return { parents: [{ sha: "c".repeat(40) }] };
+  if (path.includes("/pulls?state=closed&base=main&sort=updated")) {
+    return [{ number: 6, title: "Earlier", updated_at: new Date().toISOString(), merged_at: new Date().toISOString(), merge_commit_sha: "e".repeat(40), head: { sha: "d".repeat(40) } }];
+  }
   if (path.endsWith("/pulls/7")) return pr;
   if (path.includes("/pulls/7/files?")) return [{ filename: "src/thing.ts" }];
   if (path.includes("/pulls?state=open")) return [{ number: 7 }];
@@ -124,6 +128,10 @@ function fakes(broken?: string) {
   };
   const githubFetch: typeof fetch = async (input, init) => {
     const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    // A GraphQL query is a read, like the merged-PR audit's review edit times; a mutation is a write.
+    if (path === "/graphql" && (JSON.parse(String(init?.body)) as { query: string }).query.trim().startsWith("query")) {
+      return Response.json({ data: { repository: { pullRequest: { reviews: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ databaseId: 1, lastEditedAt: "2026-10-21T00:00:00Z" }] } } } } });
+    }
     if ((init?.method ?? "GET") !== "GET") writes.push(`${init?.method} ${path}`);
     if (path.includes("/protection/")) return new Response(null, { status: 403 });
     const body = githubAnswer(path);
@@ -166,7 +174,8 @@ test("every check passes over the real adapters, and nothing is written", async 
   const writeOnly = ["assignPullRequest", "declareReadiness"];
   const local = ["mergePolicy", "rateLimit", "forgetFeedback", "actionsRetentionDays"];
   expect(Object.keys(f.githubPort).filter((m) => !f.called.has(m) && !(m in readByProbe) && !writeOnly.includes(m) && !local.includes(m))).toEqual([]);
-  expect([...f.called].sort()).toEqual(["branches", "defaultBranchHead", "issueBranches", "readPullRequest", "readReadiness"]);
+  expect([...f.called].sort()).toEqual(["branches", "defaultBranchHead", "firstParent", "issueBranches", "mergedPullRequests", "readPullRequest", "readReadiness", "reviewEdits"]);
+  expect(results.find((r) => r.name.includes("merged-PR audit"))?.detail).toEqual({ merged: 1, newest: 6, base: "c".repeat(40), editedReviews: 1 });
   expect(results.find((r) => r.name.includes("readiness reread"))?.detail).toEqual({ state: "open", headSha: head, reviews: 0, declaration: null });
   expect(results.find((r) => r.name.includes("branch list"))?.detail).toEqual({ branches: 2 });
   const { text, exitCode } = report(results, "header");
@@ -199,6 +208,7 @@ test("a failed read, or a host on another version, fails its own line and the re
     "SKIP linear follow-up and retro issue reads (origin, issue, team states, relation and document by id)",
     `PASS github ${repo} default branch head (follow-up "Written against")`,
     `PASS github ${repo} branch list (takeover notice)`,
+    `PASS github ${repo} PRs merged in the last 72 hours, and the newest one's base and review edits (merged-PR audit)`,
     `SKIP github ${repo} issue branches (report-only retry)`,
     `SKIP github ${repo} PR facts (mergeable state, human reviews, required checks)`,
     `SKIP github ${repo} squash message from PR text and commits`,
@@ -210,7 +220,7 @@ test("a failed read, or a host on another version, fails its own line and the re
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(1);
   expect(text).toContain("FAIL linear completed issues in the feedback lookback [TECH-5049]");
-  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 5 passed, 2 failed, 16 skipped");
+  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 6 passed, 2 failed, 16 skipped");
 });
 
 test("the API check reads the run list and a run's view with its provider choice and account, as sent", async () => {

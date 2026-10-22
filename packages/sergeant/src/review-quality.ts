@@ -19,10 +19,12 @@ export function approvedHead(runs: RunRecord[], head: PrHead): boolean {
 
 /**
  * The audit draw (06 §8): a stable hash of the head against the sample rate, so it is random across
- * heads, identical across restarts, and needs no stored state.
+ * heads, identical across restarts, and needs no stored state. `merged-audit` salts the merged-PR draw
+ * (TECH-6617) so it is independent of the skipped-review one: unsalted, every head drawn at 0.1 would
+ * also be drawn at 0.2.
  */
-export function auditDrawn(rate: number, head: PrHead): boolean {
-  const hash = createHash("sha256").update(JSON.stringify(["audit", head.repo, head.number, head.headSha])).digest();
+export function auditDrawn(rate: number, head: PrHead, salt: "audit" | "merged-audit" = "audit"): boolean {
+  const hash = createHash("sha256").update(JSON.stringify([salt, head.repo, head.number, head.headSha])).digest();
   return hash.readUInt32BE(0) / 2 ** 32 < rate;
 }
 

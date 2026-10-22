@@ -9,6 +9,7 @@ import type { BudgetWindow } from "./budget.ts";
 import type { Enrollment } from "./enrollment.ts";
 import type { Ports } from "./execute.ts";
 import type { FeedbackDeps } from "./feedback.ts";
+import type { MergedAuditOptions } from "./merged-audits.ts";
 import type { RetroDeps } from "./retro.ts";
 
 export type ServiceOptions = {
@@ -30,6 +31,11 @@ export type ServiceOptions = {
   repositoryBudget?: (repo: RepoSlug) => Partial<BudgetWindow> | undefined;
   /** Each task loop's audit sample rate (loop.ts); omitted, the loop's default. */
   auditSampleRate?: number;
+  /**
+   * TECH-6617: the daily merged-PR audit (merged-audits.ts): each repository's live sample rate, who
+   * pays for audits outside a task, and their daily cap. Omitted, no merged-PR audit runs.
+   */
+  mergedAudits?: Pick<MergedAuditOptions, "rateOf" | "auditOwner" | "budgetUsdPerDay">;
   /** Whether each task loop posts a progress comment after a review round (loop.ts); omitted, it does. */
   progressComments?: boolean;
   /** Minutes between post-merge feedback sweeps (feedback.ts), when `deps.feedback` is given; default twice `slowPollMinutes`. */

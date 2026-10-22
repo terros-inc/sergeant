@@ -14,7 +14,7 @@ type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
   "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
 > & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "validateTarget" | "lastRetro" | "feedbackTasks" | "filedIssues"> };
-type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness">;
+type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness" | "mergedPullRequests" | "firstParent" | "reviewEdits">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
 
 const DAY_MS = 86_400_000;
@@ -173,6 +173,18 @@ export function githubChecks(
       return { branches: (await github.branches(repo)).length };
     },
   };
+  const merged: SmokeCheck = {
+    name: `github ${repo} PRs merged in the last 72 hours, and the newest one's base and review edits (merged-PR audit)`,
+    covers: ["TECH-6617"],
+    run: async () => {
+      if (!github.mergedPullRequests || !github.firstParent || !github.reviewEdits) throw new Error("the GitHub adapter has no mergedPullRequests, firstParent or reviewEdits");
+      const prs = await github.mergedPullRequests(repo, new Date(Date.now() - 72 * 3_600_000));
+      const newest = prs[0];
+      if (!newest) return { merged: 0 };
+      const [base, edits] = await Promise.all([github.firstParent(repo, newest.mergedSha), github.reviewEdits(repo, newest.number)]);
+      return { merged: prs.length, newest: newest.number, base, editedReviews: Object.keys(edits).length };
+    },
+  };
   const issueBranches: SmokeCheck = {
     name: `github ${repo} issue branches (report-only retry)`,
     covers: ["TECH-6106"],
@@ -185,10 +197,11 @@ export function githubChecks(
           },
         }),
   };
-  if (pr === undefined) return [defaultHead, branches, issueBranches, ...[facts, squash, handoff, branch, readiness].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
+  if (pr === undefined) return [defaultHead, branches, merged, issueBranches, ...[facts, squash, handoff, branch, readiness].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
   return [
     defaultHead,
     branches,
+    merged,
     issueBranches,
     {
       ...facts,

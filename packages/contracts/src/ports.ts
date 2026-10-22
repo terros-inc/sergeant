@@ -238,6 +238,19 @@ export interface GitHubPort {
    * branch it takes over. Optional, so a fake without it lists none.
    */
   branches?(repo: RepoSlug): Promise<string[]>;
+  /**
+   * TECH-6617: the PRs merged into the repository's default branch at or after `since`, read newest
+   * updated first and paged until GitHub's `updated_at` is older than `since`. Optional, so a fake
+   * without it lists none.
+   */
+  mergedPullRequests?(repo: RepoSlug, since: Date): Promise<{ number: number; title: string; headSha: Sha; mergedSha: Sha; mergedAt: string }[]>;
+  /** TECH-6617: a commit's first parent: the default branch just before a merge commit. Optional, like the reads above. */
+  firstParent?(repo: RepoSlug, sha: Sha): Promise<Sha>;
+  /**
+   * TECH-6617: when each of a PR's edited reviews was last edited, by feedback id (`review:<id>`); a
+   * review never edited is absent. `readPullRequest` gives a review only its submission time.
+   */
+  reviewEdits?(repo: RepoSlug, number: number): Promise<Record<string, string>>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**
@@ -266,14 +279,14 @@ export type RunGitHubTokens = (req: { repositories: RepoSlug[]; access: "write" 
 
 export type RunSpec = {
   runId: RunId;
-  /** The task source, verbatim; never only a summary. */
-  conversation: Conversation;
   repositories: RepoSlug[];
   /** The task's owner (TECH-5179): the run uses only model accounts this person registered. */
   owner: LinearPerson;
 } & (
   | {
       role: "worker";
+      /** The task source, verbatim; never only a summary. */
+      conversation: Conversation;
       objective: string;
       /**
        * Where earlier work stands, copied by the core from the Situation Report so a successor's brief
@@ -285,13 +298,28 @@ export type RunSpec = {
     }
   | {
       role: "reviewer";
-      subject: { repo: RepoSlug; number: number; headSha: Sha }[];
+      /**
+       * The task source, verbatim. TECH-6617: absent for an audit of a merged PR outside a Sergeant task
+       * that references no Linear issue; the PR's own title and body are then its requirements.
+       */
+      conversation?: Conversation;
+      /**
+       * `baseSha` (TECH-6617): the commit the diff is taken from, `git diff <baseSha>...<headSha>`, for
+       * a merged PR whose base branch has moved on; absent, the PR's live base branch.
+       */
+      subject: { repo: RepoSlug; number: number; headSha: Sha; baseSha?: Sha }[];
       /**
        * The subject PRs, read live by the core as the reviewer starts, so the brief carries every human
        * review and comment on them for the reviewer to check was addressed (TECH-4990).
        */
       pullRequests: PullRequestFacts[];
       focus?: string;
+      /**
+       * TECH-6617: an audit as of merge, judged with what was known then. Only PR reviews and comments,
+       * and issue comments, made at or before this time are in the brief, the text of one edited after it
+       * withheld, and the reviewer rules for an audit as of merge apply.
+       */
+      feedbackCutoff?: string;
     }
 );
 

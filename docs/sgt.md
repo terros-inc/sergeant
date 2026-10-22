@@ -275,6 +275,16 @@ sgt admin repo budget <owner>/<repo> --cost-usd 10 --wall-minutes 90
 sgt admin repo budget <owner>/<repo> --wall-minutes default
 ```
 
+An approver also turns the daily merged-PR audit on in a repository (TECH-6617): the fraction of its
+merged PRs, whoever wrote them, that get a nonblocking audit as of their merge
+([design 06 §8](design/06-review.md#8-calibration-sampling-unf-641-preserved)). 0 turns it off; the
+next daily pass uses the change.
+
+```sh
+sgt admin repo audit-rate <owner>/<repo> 0.1                       # 1 in 10 merged PRs
+sgt admin repo audit-rate <owner>/<repo> 0                         # off
+```
+
 `sgt repo list` marks each field that is the repository's own with `(own)`. Only budget windows that
 open after the change get it: a task already working keeps its current window until its next fresh
 one (Budgets, §5). How it reaches the installation's config is in

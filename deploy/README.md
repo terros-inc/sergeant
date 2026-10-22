@@ -729,6 +729,11 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   and whose review a human-merge handoff requests; without it neither happens.
 - **`review.auditSampleRate`** (optional, 0 to 1, default 0.2) is the fraction of merged heads that
   skipped fresh review which get an audit review (Review telemetry below).
+- **`repositories.<owner/name>.mergedAuditSampleRate`** (optional, 0 to 1, absent 0),
+  **`review.auditOwner`** (optional, a Linear user id, no default) and **`review.qualityBudgetUsdPerDay`**
+  (optional, default 25): the daily merged-PR audit, who pays for it, and its cap
+  ([design 06 §8](../docs/design/06-review.md#8-calibration-sampling-unf-641-preserved)). Approvers set
+  a repository's rate with `sgt admin repo audit-rate <owner/name> <0..1>`.
 - **`budget`** (optional) is the budget window a task gets when it starts or a human answers one of its
   questions, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
   numbers, each optional; unset, 120 minutes and $25; Budget below).

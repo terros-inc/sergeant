@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { type HumanPullRequestFeedback, parseJsonReport, type PullRequestFacts, REVIEW_REPORT_SCHEMA, ReviewReport, type RunSpec } from "@terros/sergeant-contracts";
+import { type Conversation, type HumanPullRequestFeedback, parseJsonReport, type PullRequestFacts, REVIEW_REPORT_SCHEMA, ReviewReport, type RunSpec } from "@terros/sergeant-contracts";
 import { reviewerBrief, type ReviewSubject, workerBrief } from "./brief.ts";
 
 // TECH-4990: a fresh reviewer must see the humans' feedback on the PRs it reviews, or it can approve
@@ -48,7 +48,7 @@ const feedback = (f: Partial<HumanPullRequestFeedback> & Pick<HumanPullRequestFe
   ...f,
 });
 
-const spec = (pullRequests: PullRequestFacts[]): Extract<RunSpec, { role: "reviewer" }> => ({
+const spec = (pullRequests: PullRequestFacts[]): Extract<RunSpec, { role: "reviewer" }> & { conversation: Conversation } => ({
   runId: "run_r1",
   owner: { id: "ann", name: "Ann" },
   role: "reviewer",
@@ -179,7 +179,7 @@ test("the worker brief lists only branches naming the issue exactly, any prefix,
 // TECH-5167: a PR must not shield its own new design-doc entry from review by calling it settled.
 test("reviewer rule 12 counts a trade-off as settled only on the base branch or by a cited owner decision", () => {
   const brief = reviewerBrief(spec([pr]), [subject], []);
-  expect(brief).toContain("## Rules (s2-reviewer-rules/19)");
+  expect(brief).toContain("## Rules (s2-reviewer-rules/20)");
   const rule = brief.slice(brief.indexOf("12. "), brief.indexOf("\n13. "));
   expect(rule).toMatch(/Settled means recorded on the base branch or by an owner decision the issue cites\./);
   expect(rule).toMatch(/A settlement\s+the change itself introduces, such as a new entry under `docs\/design` in this diff, is under\s+review/);
@@ -273,7 +273,7 @@ test("worker and reviewer briefs say to report once the head is pushed, without 
   expect(workerRule).toMatch(/Once your final head is pushed, write the report right away\. Do not wait on CI: Sergeant already\s+watches CI on your PRs and reacts to failures\./);
 
   const reviewer = reviewerBrief(spec([pr]), [subject], []);
-  expect(reviewer).toContain("## Rules (s2-reviewer-rules/19)");
+  expect(reviewer).toContain("## Rules (s2-reviewer-rules/20)");
   const reviewerRule = reviewer.slice(reviewer.indexOf("16. "), reviewer.indexOf("## Report"));
   expect(reviewerRule).toMatch(/Once your review is done, write the report right away\. Do not wait on CI: the head is already\s+pushed, and Sergeant watches its CI and reacts to failures\./);
 
