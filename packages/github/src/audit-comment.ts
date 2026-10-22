@@ -15,10 +15,11 @@ export type PublicDataCheck = (text: string) => "pass" | "fail" | "error";
 
 const LINE = /^Post-merge audit \(nonblocking\): (?:PASS|FAIL) \| Found: (?:YES|NO) \| SHA: ([0-9a-f]{40}|[0-9a-f]{64})$/;
 const MAX_DESCRIPTION = 500;
-// A scheme, `www.`, or any host-name-like token (`example.com/path`, `sub.example.io`). Deliberately
-// broad: dotted code tokens such as `foo.ts` or `obj.method` match too, and dropping a finding is the
-// safe direction on a public PR. A TLD has at least two letters, so `e.g.` still passes.
-const URL_LIKE = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|[a-z0-9-]+\.[a-z]{2,}/i;
+// A scheme, `www.`, or a host name ending in one of a few web TLDs (`example.com`, `sub.example.io/path`).
+// The TLD list is deliberately short so file names and member access (`audit-comment.ts`, `obj.method`)
+// pass; dropping a finding is the safe direction, so `obj.co` going too is fine. The lookahead keeps
+// `foo.app.ts` and `x.com_y` out, and lets a sentence-ending `example.com.` match.
+const URL_LIKE = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|[a-z0-9-]\.(?:com|net|org|io|dev|app|ai|co|us|gov|edu)(?![\w-]|\.\w)/i;
 
 /** The fixed first line, from report fields only, never reviewer prose. */
 export const auditVerdictLine = (a: Pick<Audit, "verdict" | "found" | "headSha">) =>

@@ -46,21 +46,27 @@ test.each<[string, Partial<Finding>]>([
   ["a bare host in the description", { description: "the client calls example.com on every retry" }],
   ["a host with a path in the description", { description: "the case is at example.com/path/to/case" }],
   ["a subdomain host in the description", { description: "uploads go to sub.example.io instead" }],
-  ["a dotted code token in the description", { description: "`obj.method` is called twice" }],
+  ["a host at the end of a sentence", { description: "the client calls api.example.net." }],
+  ["an upper-case host in the description", { description: "the client calls EXAMPLE.ORG on retry" }],
 ])("on a public repository, %s is dropped and counted", (_case, change) => {
   expect(auditComment(audit([code, { ...code, id: "f2", ...change }]), onPublic)).toBe(
     `${line}\n\n- src/sync.ts:88: ${code.description}\n\n1 finding is kept in Sergeant's records (\`sgt review audits\`), not on this public PR.`,
   );
 });
 
-test("host-like findings are counted, never quoted, and a finding with no host-like token still passes", () => {
-  const hosts = ["example.com", "example.com/path", "sub.example.io"].map((h, i) => ({ ...code, id: `h${i}`, description: `Requests go to ${h} first.` }));
-  const plain = { ...code, id: "f2", description: "The retry loop never stops, e.g. on a 429 response." };
-  const comment = auditComment(audit([code, ...hosts, plain]), onPublic);
+test("hosts with a listed TLD are counted, never quoted; file names and member access still pass", () => {
+  const hosts = ["example.com", "example.com/path", "sub.example.io", "example.dev/a/b"].map((h, i) => ({ ...code, id: `h${i}`, description: `Requests go to ${h} first.` }));
+  const kept = [
+    "`audit-comment.ts` builds the body twice.",
+    "`foo.ts` imports `obj.method`, which throws on retry.",
+    "`config.app.ts` reads `res.code` before `res.status`.",
+    "The retry loop never stops, e.g. on a 429 response.",
+  ].map((description, i) => ({ ...code, id: `k${i}`, description }));
+  const comment = auditComment(audit([code, ...hosts, ...kept]), onPublic);
   expect(comment).toBe(
-    `${line}\n\n- src/sync.ts:88: ${code.description}\n- src/sync.ts:88: ${plain.description}\n\n3 findings are kept in Sergeant's records (\`sgt review audits\`), not on this public PR.`,
+    [line, "", ...[code, ...kept].map((f) => `- src/sync.ts:88: ${f.description}`), "", "4 findings are kept in Sergeant's records (`sgt review audits`), not on this public PR."].join("\n"),
   );
-  expect(comment).not.toMatch(/example\.(com|io)/);
+  expect(comment).not.toMatch(/example\.(com|io|dev)/);
 });
 
 test("a bare changed path and a 500-character description pass the structural rules", () => {
@@ -71,8 +77,7 @@ test("a bare changed path and a 500-character description pass the structural ru
 test("the denylist check drops only the finding it rejects, and counts it", () => {
   const check = publicDataCheck("Acme Solar", "audit comment");
   const named = { ...code, id: "f2", description: "Acme-Solar rows are skipped by the importer." };
-  // `C:` rather than `C.`: a dotted ID would already be dropped as host-like, before the check sees it.
-  const id = { ...code, id: "f3", description: `Logs ${["C", "Ab12"].join(":")} in the error.` };
+  const id = { ...code, id: "f3", description: `Logs ${["C", "Ab12"].join(".")} in the error.` };
   expect(auditComment(audit([code, named, id]), { ...onPublic, check })).toBe(
     `${line}\n\n- src/sync.ts:88: ${code.description}\n\n2 findings are kept in Sergeant's records (\`sgt review audits\`), not on this public PR.`,
   );
