@@ -24,8 +24,8 @@ export type AuditCounts = z.infer<typeof AuditCounts>;
 
 /**
  * `agreed`: Sergeant declared the audited head ready and a human merged it at that head (TECH-6611's
- * AGREED). `sergeant_merged`: Sergeant declared it and a bot, Sergeant itself, merged it (the
- * classifier's `not_human_merge`). `other`: every other audited PR.
+ * AGREED). `sergeant_merged`: Sergeant declared it and Sergeant's own GitHub App merged it (the
+ * classifier's `not_human_merge`). `other`: every other audited PR, including merges by other bots.
  */
 export const AuditGroup = z.enum(["agreed", "sergeant_merged", "other"]);
 export type AuditGroup = z.infer<typeof AuditGroup>;
