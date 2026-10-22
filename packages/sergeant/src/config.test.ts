@@ -48,6 +48,15 @@ test("reviewer profiles are validated and GitHub logins are matched case-insensi
   expect(InstallationConfig.safeParse({ ...config(1, 2), linear: { ...config(1, 2).linear, reviewerProfiles: { ada: "https://example.com/ada" } } }).success).toBe(false);
 });
 
+test("review defaults apply when the whole object or only auditOwner is configured", () => {
+  expect(InstallationConfig.parse(config(1, 2)).review).toEqual({ auditSampleRate: 0.2, progressComments: true });
+  expect(InstallationConfig.parse({ ...config(1, 2), review: { auditOwner: "owner" } }).review).toEqual({
+    auditSampleRate: 0.2,
+    progressComments: true,
+    auditOwner: "owner",
+  });
+});
+
 // TECH-4964: the config's budget is a task's stored window when it starts, the defaults without it,
 // and a config change never moves a task that already started.
 test("a task starts with the installation config's budget window, or the default without one, and keeps it", async () => {
