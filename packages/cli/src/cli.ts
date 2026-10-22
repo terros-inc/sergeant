@@ -38,7 +38,8 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
   run show <run>
   run report <run>                   the run's raw Markdown report
   run cancel <run> [--reason …]
-  repo list                          the enrolled repositories and how Sergeant merges in each
+  repo list                          the enrolled repositories, how Sergeant merges in each, and the
+                                     budget window a task working there gets
   stops                              budget stops per stop-rubric rule: how humans replied, and how
                                      often they followed Sergeant's recommendation
   retro                              ask Sergeant for a retro across tasks now (after a big change, say);
@@ -72,6 +73,10 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      repository Sergeant never approves or merges; a human merges.
                                      --merge-policy on an enrolled repository sets its policy
   admin repo remove <owner/name>     an approver's removal: Sergeant stops working in it at once
+  admin repo budget <owner/name> [--wall-minutes N|default] [--cost-usd N|default]
+                                     an approver's: set an enrolled repository's own budget window,
+                                     each flag alone; default clears it back to the installation's.
+                                     serve takes it at once; budget windows opening from now on get it
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host); the hosted API
 is the installation's HTTPS endpoint, https://<hostname> (docs/sgt.md). Each API URL has its own
@@ -175,6 +180,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         task: { type: "string" },
         "merge-method": { type: "string" },
         "merge-policy": { type: "string" },
+        "wall-minutes": { type: "string" },
+        "cost-usd": { type: "string" },
         hours: { type: "string" },
         paste: { type: "boolean" },
         version: { type: "boolean", short: "v" },
@@ -202,7 +209,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], hours: values.hours, paste: values.paste || undefined };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], "wall-minutes": values["wall-minutes"], "cost-usd": values["cost-usd"], hours: values.hours, paste: values.paste || undefined };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

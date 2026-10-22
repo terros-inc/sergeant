@@ -129,7 +129,8 @@ Approvers also have `sgt admin` (§7).
 ### Budgets
 
 A task works in a **budget window** of active time and money: by default 120 minutes and $25, or the
-installation's configured `budget` (a repository's own `budget` applies once the task has a run there).
+installation's configured `budget` (a repository's own `budget`, which approvers set with `sgt admin
+repo budget` (§8), applies once the task has a run there).
 Once either runs out, Sergeant cancels its runs and asks a **Question for you**: 1. Extend, 2. Accept
 as-is, with its recommendation. Your comment on the issue, or your review or comment on its PR, gives
 the task a fresh window. What the time counts, what opens a fresh window, and what the question says
@@ -144,8 +145,8 @@ are in [design 07 §6](design/07-linear-contract.md#6-budget-asks-and-fresh-wind
   different: while its issue is open and delegated, a wake reopens its work in a fresh window, and
   otherwise the wake says no turn comes (`after_merge`), as
   [design 07 §7](design/07-linear-contract.md#7-completion-prs-automation-and-done) sets out.
-- **There is no command to reset a budget**, not even for approvers. Changing the installation's
-  `budget` affects only new tasks and later fresh windows.
+- **There is no command to reset a task's budget**, not even for approvers. Changing the installation's
+  `budget`, or a repository's own, affects only new tasks and later fresh windows.
 - **`sgt task show <ID>`** shows the current window: spend of its limit, when its time would run out if
   the task worked without pause from now, and `EXHAUSTED` with why once it has run out (`--json` adds
   `windowStart`).
@@ -251,10 +252,25 @@ Sergeant works only in the repositories its installation enrolls (TECH-5193). An
 list them; an approver enrolls or removes one with their own Linear login, no AWS access needed:
 
 ```sh
-sgt repo list                                     # each repository and how Sergeant merges in it
+sgt repo list                                     # each repository, how Sergeant merges in it, and its budget window
 sgt admin repo add <owner>/<repo> --merge-method rebase   # squash unless you say otherwise
 sgt admin repo remove <owner>/<repo>
 ```
+
+An approver also sets an enrolled repository's own budget window (TECH-6606), for one whose builds and
+CI need more (or less) than the installation's. Each flag changes only its own field: a positive
+number, or `default` to clear it so the installation's applies again.
+
+```sh
+sgt admin repo budget <owner>/<repo> --wall-minutes 60            # its cost stays as it was
+sgt admin repo budget <owner>/<repo> --cost-usd 10 --wall-minutes 90
+sgt admin repo budget <owner>/<repo> --wall-minutes default
+```
+
+`sgt repo list` marks each field that is the repository's own with `(own)`. Only budget windows that
+open after the change get it: a task already working keeps its current window until its next fresh
+one (Budgets, §5). How it reaches the installation's config is in
+[`deploy/README.md`, Change the per-task budget](../deploy/README.md#change-the-per-task-budget).
 
 A repository is enrolled only once both of Sergeant's GitHub Apps can reach it. The change is written
 to the installation's configuration in AWS, naming who made it, and the running Sergeant takes it at

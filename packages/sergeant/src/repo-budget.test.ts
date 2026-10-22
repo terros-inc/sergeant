@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import type { BudgetStatus, RunRecord } from "@terros/sergeant-contracts";
-import { windowFor } from "./budget.ts";
+import { openWindow, repositoryBudgets, windowFor, windowOverride, type TaskBudget } from "./budget.ts";
 import { cleanup, repo, saved, scenario, start, stopAfter, turnOf, worker } from "./budget-scenario.ts";
 
 // TECH-5219: a repository's `budget` in the installation config replaces the installation's window for a
@@ -73,4 +73,19 @@ test("a task's first worker in a repository records it, and from then on the tas
   expect((await saved()).repositories).toEqual([repo]);
   expect(windows[0]).toEqual(installation);
   expect(windows.at(-1)).toEqual({ wallMinutes: 240, costUsd: 25 });
+});
+
+test("a window keeps the repository budgets it opened with: an approver's change reaches only windows that open after it", () => {
+  const live: Record<string, { wallMinutes?: number; costUsd?: number }> = { [repo]: { wallMinutes: 30 } };
+  const now = (r: string) => live[r];
+  const state = { turnCostUsd: 0, runIds: [] as string[], budget: { window: installation, priorRuns: [] } as TaskBudget };
+  const window = () => windowFor(state.budget.window, [repo], windowOverride(state.budget, now));
+
+  // A window opened before windows kept their repositories' budgets has each repository's now.
+  expect(window()).toEqual({ wallMinutes: 30, costUsd: 25 });
+  openWindow(state, new Date().toISOString(), installation, repositoryBudgets([repo, ios], now));
+  live[repo] = { wallMinutes: 60 };
+  expect(window()).toEqual({ wallMinutes: 30, costUsd: 25 });
+  openWindow(state, new Date().toISOString(), installation, repositoryBudgets([repo, ios], now));
+  expect(window()).toEqual({ wallMinutes: 60, costUsd: 25 });
 });

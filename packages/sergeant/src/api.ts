@@ -143,6 +143,7 @@ export const V1_ROUTES: readonly { method: "GET" | "POST"; path: string; public?
   { method: "GET", path: "/v1/repositories" },
   { method: "POST", path: "/v1/repositories/add" },
   { method: "POST", path: "/v1/repositories/remove" },
+  { method: "POST", path: "/v1/repositories/budget" },
   { method: "GET", path: "/v1/accounts" },
   { method: "POST", path: "/v1/accounts/register" },
   { method: "POST", path: "/v1/accounts/remove" },

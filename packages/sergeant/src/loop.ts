@@ -7,7 +7,7 @@ import { driveMerged, exists, mergedOf, reopenReason } from "./after-merge.ts";
 import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
 import { retryAdoptions } from "./adopted.ts";
 import { postAuthAlerts } from "./auth-alert.ts";
-import { budgetStatus, clockActive, DEFAULT_BUDGET, openWindow, windowFor } from "./budget.ts";
+import { budgetStatus, clockActive, DEFAULT_BUDGET, openWindow, windowFor, windowOverride } from "./budget.ts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import { performCiReruns } from "./ci-reruns.ts";
 import { describeOutcome, execute, type Ports } from "./execute.ts";
@@ -19,7 +19,7 @@ import type { LoopOptions, LoopResult } from "./loop-options.ts";
 import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
-import { checkHolds, checkStop, holdForBudget, openDirectionWindow, reconcileDue, type PollContext } from "./poll-checks.ts";
+import { checkHolds, checkStop, holdForBudget, openDirectionWindow, ownBudgets, reconcileDue, type PollContext } from "./poll-checks.ts";
 import { cancelRuns, describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, unsettledMerges, waitMs } from "./poll.ts";
 import { awaitedHumanPrAction } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
@@ -68,7 +68,7 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const own = deps.controlPlaneLogin ? [deps.controlPlaneLogin] : [];
   // Whether this resumes a task under way: read first, so a stop that sets it aside meanwhile is seen.
   const resumed = await exists(files.state);
-  const state = await loadState(files.state, opts.issueId, configured);
+  const state = await loadState(files.state, opts.issueId, configured, ownBudgets(opts));
   // Why this task is stopping: set once a stop (cancel.ts) is recorded for it, by this loop or anyone
   // else. From then on the loop takes no turn and makes no effect; it only drives that stop, and ends
   // once it is done, whatever the issue's delegation or state is by then.
@@ -155,14 +155,14 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     }
     state.reopened.push(merged);
     state.merged = undefined;
-    openWindow(state, new Date().toISOString(), configured);
+    openWindow(state, new Date().toISOString(), configured, ownBudgets(opts));
     await save();
     log(`reopened after ${merged.repo}#${merged.number} merged: ${reason}; the task works on in a fresh window of ${JSON.stringify(configured)}`);
     return true;
   };
 
   const budgetOf = (runs: RunRecord[], unknownRuns: number) =>
-    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, (r) => opts.repositoryBudget?.(r)), startedAt: state.startedAt, legacyQuestion: state.legacyBudgetQuestion, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
+    budgetStatus({ ...state.budget, window: windowFor(state.budget.window, state.repositories, windowOverride(state.budget, opts.repositoryBudget)), startedAt: state.startedAt, legacyQuestion: state.legacyBudgetQuestion, turnCostUsd: state.turnCostUsd, runs, unknownRuns });
 
   for (;;) {
     if (await exists(files.stop)) return { outcome: "stopped", detail: `${files.stop} exists` };

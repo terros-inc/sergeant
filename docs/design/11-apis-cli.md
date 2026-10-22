@@ -39,6 +39,7 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | `POST /v1/admin/restart` | → the request (`id`, `by`, `at`) | leaves one request file for the host (below); the host reruns `sergeant-update` on its current release, rereading the installation config, and restarts `serve` gracefully | approvers | one action at a time: `409` while a request waits or the latest outcome is running |
 | `POST /v1/admin/update` | `ref?` → the request | as restart, to `ref` (a commit on `main` whose `v2` check passed) or, without one, what the release channel would choose; a failed install reinstalls the previous release | approvers | as restart |
 | `POST /v1/admin/retro/set` / `off` | `{projectId, teamId}` / `{}` → the live target | validates the ids in Linear, then writes or removes only installation config `retro`; serve takes it at once | approvers | TECH-5838 |
+| `POST /v1/repositories/budget` | `{repo, wallMinutes?, costUsd?}`, each a positive number or `"default"` to clear → the repository's own budget and the window it gives | writes only that enrolled repository's `budget` in installation config; serve takes it at once, for windows that open after it | approvers | TECH-6606 |
 | `POST /v1/pause` / `POST /v1/resume` | `reason` → state | writes `system_state.pause`; audit action | approvers | resume of a pause is idempotent |
 | `POST /v1/drain`, `POST /v1/drain/cancel` | owned drain token (ADR-0040, kept) | stop starting turns and runs; ready when no start or turn is mid-flight | no | deploys quiesce in seconds; runs survive restarts |
 | `GET /v1/review-quality` | `since?, by?` → metrics (06 §9) | — | yes | |
@@ -159,6 +160,7 @@ sgt review quality [--since 30d] [--by category|provider|mode]
 sgt pause --reason "…" | sgt resume                  # approvers
 sgt admin restart | update [<ref>] | status          # approvers: restart or update the host, wait for the outcome
 sgt admin retro set <projectId> <teamId> | off       # approvers: change the live retro target
+sgt admin repo budget <owner/name> [--wall-minutes N|default] [--cost-usd N|default]   # approvers: a repository's own budget
 
 # installation administration (AWS credentials), unchanged mechanisms
 sgt init <installation> [--bootstrap | --check]

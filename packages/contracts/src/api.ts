@@ -241,8 +241,20 @@ export type RemovePersonAccountsResponse = z.infer<typeof RemovePersonAccountsRe
 
 export const MergeMethod = z.enum(["merge", "squash", "rebase"]);
 
-/** Every signed-in user may list them; `whoami` already names them. */
-export const RepositoryList = z.object({ repositories: z.array(z.object({ repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy })) });
+/** A repository's own budget (TECH-5219): each field set replaces the installation's `budget` for it. */
+export const RepositoryBudget = z.object({ wallMinutes: z.number().positive().optional(), costUsd: z.number().positive().optional() });
+export type RepositoryBudget = z.infer<typeof RepositoryBudget>;
+
+/**
+ * Every signed-in user may list them; `whoami` already names them. TECH-6606: `budget` is the window a
+ * task working only there gets, the installation's with `ownBudget`'s fields replacing its own; both
+ * are absent from a serve older than TECH-6606.
+ */
+export const RepositoryList = z.object({
+  repositories: z.array(
+    z.object({ repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy, budget: BudgetStatus.shape.window.optional(), ownBudget: RepositoryBudget.optional() }),
+  ),
+});
 export type RepositoryList = z.infer<typeof RepositoryList>;
 
 /**
@@ -258,3 +270,18 @@ export const RemoveRepositoryRequest = z.strictObject({ repo: RepoSlug });
  */
 export const RepositoryChange = z.object({ repo: RepoSlug, changed: z.boolean(), repositories: z.array(RepoSlug) });
 export type RepositoryChange = z.infer<typeof RepositoryChange>;
+
+/**
+ * TECH-6606: an approver's change to an enrolled repository's own budget. A field given as a positive
+ * number sets it, given as `"default"` clears it (the installation's applies again), and left out stays
+ * as it is; at least one is given. Clearing takes a word, never null: JSON.stringify turns NaN and
+ * Infinity into null, so a client's overflowed or malformed number must be refused, not read as a clear.
+ */
+const RepositoryBudgetField = z.union([z.number().positive(), z.literal("default")]).optional();
+export const RepositoryBudgetRequest = z
+  .strictObject({ repo: RepoSlug, wallMinutes: RepositoryBudgetField, costUsd: RepositoryBudgetField })
+  .refine((r) => r.wallMinutes !== undefined || r.costUsd !== undefined, "expected wallMinutes, costUsd, or both");
+export type RepositoryBudgetRequest = z.infer<typeof RepositoryBudgetRequest>;
+/** The repository's own budget after the change, the window it gives a task working only there, and whether this call wrote it. */
+export const RepositoryBudgetChange = z.object({ repo: RepoSlug, changed: z.boolean(), ownBudget: RepositoryBudget, budget: BudgetStatus.shape.window });
+export type RepositoryBudgetChange = z.infer<typeof RepositoryBudgetChange>;

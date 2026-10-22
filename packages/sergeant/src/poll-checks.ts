@@ -12,7 +12,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { join } from "node:path";
-import { budgetQuestion, budgetQuestionKey, legacyBudgetQuestionKey, openWindow, type BudgetWindow } from "./budget.ts";
+import { budgetQuestion, budgetQuestionKey, legacyBudgetQuestionKey, openWindow, repositoryBudgets, type BudgetWindow } from "./budget.ts";
 import { recordStop, stopReason } from "./cancel.ts";
 import { askHuman, describeOutcome, type Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
@@ -159,7 +159,7 @@ export async function checkHolds(
     // Record against the old window before save can fail after advancing it; measurement must not
     // lose a reply just because persisting the fresh window needs a retry.
     await recordReply(opts.dir, conversation).catch((e: Error) => log(`could not record the reply to the budget question: ${e.message}`));
-    openWindow(state, answer.createdAt, configured);
+    openWindow(state, answer.createdAt, configured, ownBudgets(opts));
     await save();
     log(`a human answered (${answer.id}): a fresh budget window of ${JSON.stringify(configured)} from ${answer.createdAt}`);
   }
@@ -219,18 +219,21 @@ export async function checkHolds(
  * the last poll read are kept in `state.json`. A blocker list
  * Linear did not give (absent) changes nothing; one still open, or unread past its page, keeps waiting.
  */
-async function openUnblockWindow(conversation: Conversation, configured: BudgetWindow, { state, log, save }: PollContext): Promise<void> {
+async function openUnblockWindow(conversation: Conversation, configured: BudgetWindow, { opts, state, log, save }: PollContext): Promise<void> {
   const blockedBy = conversation.issue.blockedBy;
   const before = state.blockedBy;
   if (!blockedBy || (before && before.join("\n") === blockedBy.join("\n"))) return;
   state.blockedBy = blockedBy;
   if (before?.length && blockedBy.length === 0) {
     const at = new Date().toISOString();
-    openWindow(state, at, configured);
+    openWindow(state, at, configured, ownBudgets(opts));
     log(`unblocked (was waiting on ${before.join(", ")}): a fresh budget window of ${JSON.stringify(configured)} from ${at}`);
   }
   await save();
 }
+
+/** TECH-6606: every enrolled repository's own budget now, which a window opening now keeps. */
+export const ownBudgets = (opts: LoopOptions) => repositoryBudgets(opts.enrolledRepositories, opts.repositoryBudget);
 
 /**
  * TECH-5218, TECH-5913, TECH-6165: any human direction on the issue or the task's PRs (pr-wait.ts
@@ -238,12 +241,12 @@ async function openUnblockWindow(conversation: Conversation, configured: BudgetW
  * replaces. Only input newer than the window's start does, so it opens one window once, across restarts
  * too. Returns whether it opened one.
  */
-export async function openDirectionWindow(situation: SituationReport, configured: BudgetWindow, { state, log, save }: PollContext): Promise<boolean> {
+export async function openDirectionWindow(situation: SituationReport, configured: BudgetWindow, { opts, state, log, save }: PollContext): Promise<boolean> {
   const direction = humanDirection(situation)
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
     .at(-1);
   if (!direction || Date.parse(direction.createdAt) <= Date.parse(state.budget.since ?? state.startedAt)) return false;
-  openWindow(state, direction.createdAt, configured);
+  openWindow(state, direction.createdAt, configured, ownBudgets(opts));
   await save();
   const source = "url" in direction ? `${direction.author} responded on the PR (${direction.url})` : `${direction.author.name} commented on the issue`;
   log(`${source}: a fresh budget window of ${JSON.stringify(configured)} from ${direction.createdAt}`);

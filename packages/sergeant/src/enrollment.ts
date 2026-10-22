@@ -2,13 +2,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { RepoSlug, safeJson, type MergePolicy, type RepositoryChange, type RetroTarget, type RetroTargetChange } from "@terros/sergeant-contracts";
+import { RepoSlug, safeJson, type MergePolicy, type RepositoryBudget, type RepositoryBudgetChange, type RepositoryBudgetRequest, type RepositoryChange, type RetroTarget, type RetroTargetChange } from "@terros/sergeant-contracts";
 import type { GitHubApp } from "@terros/sergeant-github";
 import { z } from "zod";
-import { InstallationConfig, run } from "./config.ts";
+import { DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
+import { InstallationConfig, repoBudget, run } from "./config.ts";
 
-// Enrolling and removing repositories (TECH-5193), and setting the retro target (TECH-5838), with an
-// approver's own Linear login, with no AWS
+// Enrolling and removing repositories (TECH-5193), setting the retro target (TECH-5838), and setting a
+// repository's own budget (TECH-6606), with an approver's own Linear login, with no AWS
 // session and no host update. The installation-config SSM parameter is the only record: each change
 // rewrites it, the one parameter the host's role may write (deploy/terraform), changing only its
 // `repositories` or `retro` and naming who made the change in the new version's description. `serve`
@@ -16,8 +17,9 @@ import { InstallationConfig, run } from "./config.ts";
 // older list or retro target (TECH-5940). The
 // running service takes a change in place: every loop, the API, webhooks, and the GitHub port read the
 // same live list and settings. A change the parameter already has (a retry after a write whose answer
-// was lost, say) writes nothing and brings the live list up to it. Budgets, secret references,
-// approvers, and the release channel stay AWS-only, and none of them is ever in an answer or a log.
+// was lost, say) writes nothing and brings the live list up to it. The installation's own `budget`,
+// secret references, approvers, and the release channel stay AWS-only. Of them only the budget is ever
+// in an answer (`sgt repo list` shows the window it and each repository's own give), never in a log.
 //
 // TECH-5205: serve keeps the parameter's version it has, the one it started with and then each version
 // its own change wrote directly over the one it had, so `sgt admin status` can say when someone changed the
@@ -108,6 +110,8 @@ export function enrollment(opts: {
   version?: number | undefined;
   /** The repository's own `owner/name` once both GitHub Apps reach it; throws `EnrollmentRefused` otherwise. */
   reach: (repo: RepoSlug) => Promise<RepoSlug>;
+  /** The installation's `budget` with its defaults: the window a repository's own budget changes field by field. */
+  budget?: BudgetWindow;
   /** Live retro target and validation in this installation's Linear workspace. */
   retro: { target: RetroTarget | undefined; validate: (target: RetroTarget) => Promise<"project" | "team" | undefined> };
   log: (line: string) => void;
@@ -153,6 +157,12 @@ export function enrollment(opts: {
     return done;
   }
 
+  /** A repository's own budget, and the window it gives a task working only there. */
+  const budgets = (settings: RepoConfig) => {
+    const ownBudget = repoBudget(settings) ?? {};
+    return { budget: { ...(opts.budget ?? DEFAULT_BUDGET), ...ownBudget }, ownBudget };
+  };
+
   return {
     /** The parameter's version serve has and its version now (contracts' AdminStatus `config`); null without the parameter. */
     async versions(): Promise<{ loaded: number; current: number | null } | null> {
@@ -172,7 +182,7 @@ export function enrollment(opts: {
       return { loaded, current: await current.version };
     },
 
-    list: () => Object.entries(opts.configs).map(([repo, c]) => ({ repo, mergeMethod: c.mergeMethod, mergePolicy: c.mergePolicy })),
+    list: () => Object.entries(opts.configs).map(([repo, c]) => ({ repo, mergeMethod: c.mergeMethod, mergePolicy: c.mergePolicy, ...budgets(c) })),
 
     retroTarget: () => retro.target,
 
@@ -215,6 +225,36 @@ export function enrollment(opts: {
         return `${by} enrolled ${own} (${mergeMethod}, merged by ${mergePolicy ?? "human"})`;
       });
       return { repo: own, changed, repositories: [...opts.repositories] };
+    },
+
+    /**
+     * TECH-6606: sets or clears (`"default"`) each field the request gives of an enrolled repository's own
+     * budget; a field left out stays as it is. Only that repository's `budget` changes, and with no
+     * field left it goes. The live settings, which task loops read when a window opens, take it at once.
+     */
+    async setBudget({ repo, ...fields }: RepositoryBudgetRequest, by: string): Promise<RepositoryBudgetChange> {
+      let own = repo;
+      const changed = await change(({ repositories: current }) => {
+        const enrolled = keyOf(current, repo);
+        if (!enrolled) throw new EnrollmentRefused(`${repo} is not enrolled: \`sgt repo list\` shows the enrolled repositories`);
+        own = enrolled;
+        const settings = current[enrolled] as { budget?: RepositoryBudget };
+        const before = settings.budget ?? {};
+        const after: RepositoryBudget = { ...before };
+        for (const field of ["wallMinutes", "costUsd"] as const) {
+          const value = fields[field];
+          if (value === "default") delete after[field];
+          else if (value !== undefined) after[field] = value;
+        }
+        if (isDeepStrictEqual(before, after)) return undefined;
+        if (Object.keys(after).length === 0) delete settings.budget;
+        else settings.budget = after;
+        return `${by} set ${enrolled}'s budget: ${budgetText(after)}`;
+      });
+      const settings = opts.configs[own];
+      if (!settings) throw new EnrollmentRefused(`${own} is not enrolled`);
+      const { budget, ownBudget } = budgets(settings);
+      return { repo: own, changed, ownBudget, budget };
     },
 
     /** Removes `repo` from the enrolled list; one not enrolled stays so. */
@@ -277,3 +317,6 @@ export function configParameter(config: InstallationConfig, name: string, readTi
 }
 
 const ParameterAnswer = z.object({ value: z.string(), version: z.number().int() });
+
+/** A repository's own budget as a parameter version's description says it. */
+const budgetText = (own: RepositoryBudget) => (["wallMinutes", "costUsd"] as const).map((f) => `${f} ${own[f] ?? "the installation's"}`).join(", ");
