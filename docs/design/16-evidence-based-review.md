@@ -86,7 +86,7 @@ implementation.
 | Handoff summary on the PR (08 §7, TECH-5244, TECH-6374) | One comment per head, posted by the control-plane App, older heads' copies minimized (minimized, not edited) | Stage 1: it starts with the readiness line and lists the evidence on that head. It is also posted in `sergeant`-policy repositories, just before the gated approval (§4) |
 | `mergePolicy` (08 §2, §7) | The only switch for who merges. It defaults to `human`, and only an operator sets it | Stage 3 defines the evidence a human looks at before setting it to `sergeant`, and adds a shadow sample of ready heads still handed to a human in `sergeant`-policy repositories (§8) |
 | Rulesets, required checks, M1–M15 | Unchanged. Sergeant never changes rulesets | A repository's hard human-review boundaries live in its ruleset's required-reviewer rule. They should stay a short list, not a tier map (§3.2) |
-| Public-data check (`check-public-data.mjs`, the installation's `publicDataDenylistSecret`) | The canonical check and its denylist, as the pre-push hook and CI use them | Stage 2: the core also runs it on every audit comment before posting it on a public repository's PR (§6.4) |
+| Public-data check (`check-public-data.mjs`, the installation's `publicDataDenylistSecret`) | The canonical check and its denylist, as the pre-push hook and CI use them | Stage 1: the core runs it on model-written readiness text before posting it on a public repository's PR (§4.1). Stage 2: the core also runs it on every audit comment (§6.4) |
 | `sgt review quality` (designed, 06 §9, not built) | Its metrics, unchanged and not scheduled by this proposal | Stage 1 adds only `sgt review readiness`; a later approval may add `sgt review audits` (§7) |
 
 ## 2. Review evidence in stage 1
@@ -226,10 +226,11 @@ else's comment can create a Sergeant readiness decision.
 
 In a public repository, before posting, the control plane passes the model-written `Reason:` and
 suggestion lines to the repository's existing `check-public-data.mjs` with its configured denylist.
-It accepts only text that passes; failure to run the check also rejects the text. Rejected text is
-replaced by the fixed line "Reason recorded in Sergeant's task record". This is the stage-1 owning
-rule for readiness text; stage 2 reuses it for audit comments (§6.4). The first line, the head SHA,
-the evidence list and the check counts are built from records, not prose, and are always posted.
+It accepts only text that passes. If no denylist is configured, or if the check cannot run, the text
+is rejected. Rejected text is replaced by the fixed line "Reason recorded in Sergeant's task
+record". This is the stage-1 owning rule for readiness text; stage 2 reuses it for audit comments
+(§6.4). The first line, the head SHA, the evidence list and the check counts are built from records,
+not prose, and are always posted.
 
 ### 4.2 Rules
 
@@ -353,7 +354,7 @@ merged heads no fresh review approved. A drawn head gets a nonblocking reviewer 
 (`run_audit-<headSha>` today, made unique per PR in §6.2) of exactly that head, and its must-fix
 findings are kept as follow-up work and told to the issue. 06 §8 still says the draw happens when a
 `not_required` disposition is recorded, before the merge. The proposal corrects it to the built
-behavior in stage 1 (§10.1).
+behavior as later cleanup (§10.1).
 
 ### 6.2 Widened to all merged PRs, first in the repositories working toward auto-merge
 
@@ -731,8 +732,10 @@ design.
   to 0.1 in the repositories working toward auto-merge, with `sgt admin repo`) and
   `review.auditOwner` (a person's id, no default; the project owner, whose budget pays for audits
   outside a task). Stage 3: `review.shadowHandoffSampleRate` (0–1, proposed 0.05; applies only in
-  `sergeant`-policy repositories). `publicDataDenylistSecret` gains a
-  second reader: the core's audit-comment filter, which posts verdict lines only when it is absent.
+  `sergeant`-policy repositories). `publicDataDenylistSecret` gains two readers: in stage 1, the
+  core's readiness-text filter, which substitutes the fixed fallback line when the denylist is
+  absent; in stage 2, the core's audit-comment filter, which posts verdict lines only when it is
+  absent.
 - Background loops (stage 2): "merged-PR audit draw (daily)".
 - CLI: `sgt review readiness` (stage 1). Any API route, `sgt review audits`, `/v1/review-audits`, or
   MCP `review_report` tool is later work requiring separate approval.
@@ -809,10 +812,11 @@ from GitHub at query time, so it is reproducible by anyone with read access. It 
 who caused a change or why. Accepted biases, all downward: a human pushing a fix counts as
 DIFFERENT_HEAD even if Sergeant would have made the same fix; a change Sergeant makes on its own after
 declaring a head ready counts too; and so does a pure rebase, though it is printed as its own
-sub-count (§5.1). The alternative, separate classes for "a human required it" and "Sergeant revised
-it", would need a window of human input and a rule for what counts as input, and it let a premature
-declaration drop out of the denominator. Accepted gaps: decisions on PRs that are still open are `pending`, so a slow-reviewing repository
-accrues slowly. A merge by a merge-queue bot with no human enqueuer is `uninterpretable`.
+sub-count in later-stage reporting. The alternative, separate classes for "a human required it" and
+"Sergeant revised it", would need a window of human input and a rule for what counts as input, and it
+let a premature declaration drop out of the denominator. Accepted gaps: decisions on PRs that are
+still open are `pending`, so a slow-reviewing repository accrues slowly. A merge by a merge-queue bot
+with no human enqueuer is `uninterpretable`.
 
 ### 11.5 External-review accounting
 
