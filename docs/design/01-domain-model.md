@@ -715,7 +715,7 @@ ActionKind =
   // proposed by reasoning
     start_worker | start_reviewer | send_run | cancel_run | set_repositories
   | comment_task | ask_human | withdraw_question | create_followup_task
-  | link_pr | unlink_pr | record_review_disposition | merge_pr
+  | link_pr | unlink_pr | record_review_disposition | merge_pr (`readinessReason`)
   | escalate | mark_complete | release_task
   // performed by guardrails (also link_pr for worker-reported PRs, 08 §4,
   // start_reviewer for sampled audits, 06 §8, and comment_task for fixed notices)
@@ -725,6 +725,10 @@ ActionKind =
 
 GateVerdict = { allowed: true, checkedAt } | { allowed: false, rule: RuleId, reason, checkedAt }
 ```
+
+`MergePr.readinessReason` is the model's non-empty explanation for declaring the exact head ready.
+The existing `RefusedMerge` and closing `merged` records each carry an optional
+`readinessCommentId`, the GitHub comment that records that declaration (08 §12).
 
 - **One action name per effect**: `cancel_run` is the same kind whether reasoning proposes it or a
   team member runs `sgt run cancel`; the actor differs.

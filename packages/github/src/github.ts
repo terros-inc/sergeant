@@ -5,6 +5,7 @@ import { branchRules, checkRun, checkRuns, commitStatus, gitRef, issueAssignees,
 import { handToHuman } from "./hand-to-human.ts";
 import { rateLimiter } from "./rate-limit.ts";
 import { retriggerChecks } from "./retrigger.ts";
+import { declareReadiness } from "./readiness.ts";
 import { readSquashMessage } from "./squash-message.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
@@ -38,6 +39,8 @@ export type GitHubAdapterOptions = {
   fetch?: typeof globalThis.fetch;
   /** The control-plane App's ID: a handoff minimizes the earlier PR comments this App posted (TECH-6374). */
   appId?: number;
+  /** Installation denylist used to fail closed on model-written public PR text. */
+  publicDataDenylist?: string;
   /** Where a rate-limit pause, or an outdated comment left visible, is logged. */
   log?: (line: string) => void;
   now?: () => number;
@@ -397,6 +400,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
       }
     },
 
+    declareReadiness: (req) => (configFor(req.repo), declareReadiness(request, req, { ...(options.appId !== undefined && { appId: options.appId }), ...(options.publicDataDenylist && { publicDataDenylist: options.publicDataDenylist }), log })),
     handToHuman: (req) => (configFor(req.repo), handToHuman(request, req, { ...(options.appId !== undefined && { appId: options.appId }), log })),
 
     async assignPullRequest({ repo, number, assignee }) {

@@ -23,26 +23,12 @@ export function reviewSummary(standing: MergePr["reviewStanding"], head: Pick<Pu
   return text.length > MAX_SUMMARY ? `${text.slice(0, MAX_SUMMARY)}…` : text;
 }
 
-/** The comment on the PR itself; GitHub posts it once per head, since the head is in it. */
-export function prHandoffComment(pr: Pick<PullRequestFacts, "headSha">, summary: string, protectedFiles: string[] = []): string {
-  const reason = protectedFiles.length
-    ? `This PR changes protected CI configuration (${protectedFiles.join(", ")}), so it requires human review and human merge; Sergeant never approves it, merges it, or enables auto-merge.`
-    : "This repository's merge policy is `human`, so Sergeant does not approve or merge it: a human reviews and merges it.";
-  return [
-    "**Ready for a human to merge**",
-    "",
-    `Sergeant's merge gate passed on head \`${pr.headSha}\`: its required checks are green and it has review standing. ${reason}`,
-    "",
-    summary,
-  ].join("\n");
-}
-
 /** Hands a gated head in a `human` repository to a human; never an approval or a merge. */
 export async function handToHuman(
   action: MergePr,
   pr: PullRequestFacts,
   issue: Conversation["issue"],
-  ctx: { runs: RunRecord[]; liveRevision: string; ports: Ports; protectedFiles?: string[] },
+  ctx: { runs: RunRecord[]; liveRevision: string; ports: Ports; protectedFiles?: string[]; readinessCommentId: number; readinessComment: string },
 ): Promise<ActionOutcome> {
   const { ports } = ctx;
   try {
@@ -55,7 +41,7 @@ export async function handToHuman(
       number: pr.number,
       expectedHeadSha: pr.headSha,
       reviewers: assignee ? [assignee] : [],
-      comment: prHandoffComment(pr, summary, ctx.protectedFiles),
+      comment: ctx.readinessComment,
     }));
     ports.log?.(`${pr.repo}#${pr.number}: handed to a human to merge; review requested from ${requested.join(", ") || "nobody"}`);
     const refused: RefusedMerge = {
@@ -63,6 +49,7 @@ export async function handToHuman(
       number: pr.number,
       url: pr.url,
       headSha: pr.headSha,
+      readinessCommentId: ctx.readinessCommentId,
       conversationRevision: ctx.liveRevision,
       reason: ctx.protectedFiles?.length ? `the PR changes protected CI configuration: ${ctx.protectedFiles.join(", ")}` : "the repository's merge policy is human",
       human: { requested, summary, ...(ctx.protectedFiles?.length && { protectedFiles: ctx.protectedFiles }) },

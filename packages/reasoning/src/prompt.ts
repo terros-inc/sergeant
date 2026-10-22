@@ -34,7 +34,8 @@ Actions you may propose:
 - merge_pr: merge a PR at an exact head when required CI is green on that head and the head has
   review standing: { kind: "reviewed", reviewRunId } for an approving review of that head with no
   blocking findings, or { kind: "not_required", workerRunId } when that worker's final report skipped
-  review for that exact head. A PR that changes .github/workflows or other protected CI configuration
+  review for that exact head. Include readinessReason: one or two sentences explaining why the exact
+  head is ready, grounded in the reviews, checks, and requested change. A PR that changes .github/workflows or other protected CI configuration
   needs a reviewer's approval of its exact head; the Gate refuses not_required for it (M15). Only the PR whose merge completes the issue should close it: with
   several PRs, merge the "Part of" ones first and the closing one last. Only the closing PR's merge
   ends the task. With the closing PR's merge, set feedback to at most three short lines worth keeping

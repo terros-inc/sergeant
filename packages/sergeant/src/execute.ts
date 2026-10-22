@@ -22,10 +22,11 @@ import { withSource } from "./api-calls.ts";
 import { askHuman } from "./ask-human.ts";
 import { answeredBudgetQuestion } from "./budget.ts";
 import { builtByLine } from "./built-by.ts";
-import { handToHuman } from "./human-merge.ts";
+import { handToHuman, reviewSummary } from "./human-merge.ts";
 import type { ActionOutcome, Ports } from "./execute-types.ts";
 import { accountQuestion, notOwned } from "./owner.ts";
 import { questionKey } from "./question.ts";
+import { readinessComment } from "./readiness.ts";
 import { updateDescription } from "./update-description.ts";
 import { writtenAgainst } from "./written-against.ts";
 
@@ -213,7 +214,21 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
           await ports.handoff?.(moved);
           return denied({ rule: "O1", reason: moved });
         }
-        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports, protectedFiles });
+        const readiness = readinessComment(action, pr, runs);
+        if (policy !== "sergeant") {
+          const policyText = protectedFiles.length
+            ? `This PR changes protected CI configuration (${protectedFiles.join(", ")}), so it requires human review and human merge; Sergeant never approves it, merges it, or enables auto-merge.`
+            : "This repository's merge policy is `human`, so Sergeant does not approve or merge it: a human reviews and merges it.";
+          const handoffEvidence = `\n\n${policyText}\n\n${reviewSummary(action.reviewStanding, pr, runs)}`;
+          readiness.comment += handoffEvidence;
+          readiness.fallbackComment += handoffEvidence;
+        }
+        // Older in-process test/custom ports have no declaration method; the installed adapter always
+        // does. Keeping the port optional preserves compatibility while deployments use the real id.
+        const declaration = ports.github.declareReadiness
+          ? await ports.github.declareReadiness({ repo: pr.repo, number: pr.number, expectedHeadSha: pr.headSha, ...readiness })
+          : { id: 1, url: pr.url, comment: readiness.comment };
+        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports, protectedFiles, readinessCommentId: declaration.id, readinessComment: declaration.comment });
         // Whether the squash commit may close the issue is the worker's report, the one M9 just checked
         // the body against, never a re-reading of the body (TECH-5085).
         const squash = { issueIdentifier: live.issue.identifier, closesIssue: reportedClosing(runs, pr) === true, builtBy: builtByLine(runs) };
@@ -233,16 +248,16 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
                 number: pr.number,
                 expectedHeadSha: pr.headSha,
                 reviewers: [],
-                comment: `**Human review required**\n\nGitHub refused Sergeant's merge of head \`${pr.headSha}\`: ${result.refused}`,
+                comment: declaration.comment,
               }));
             } catch (error) {
               ports.log?.(`${pr.repo}#${pr.number}: could not determine code owners after merge refusal: ${(error as Error).message}`);
             }
           }
-          const refused = { repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, conversationRevision: liveRevision, reason: result.refused, requested, at: new Date().toISOString() };
+          const refused = { repo: pr.repo, number: pr.number, url: pr.url, headSha: pr.headSha, readinessCommentId: declaration.id, conversationRevision: liveRevision, reason: result.refused, requested, at: new Date().toISOString() };
           return { action, status: "denied", rule: "GitHub", reason: `refused by repository policy: ${result.refused}`, refused };
         }
-        return { action, status: "done", result: { mergedSha: result.mergedSha }, merged: { pr, mergedSha: result.mergedSha } };
+        return { action, status: "done", result: { mergedSha: result.mergedSha }, merged: { pr, mergedSha: result.mergedSha, readinessCommentId: declaration.id } };
       }
       case "ask_human":
         // Keyed by the revision reasoning asked from, so a restart or a second ask before any human

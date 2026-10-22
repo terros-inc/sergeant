@@ -187,6 +187,8 @@ export interface GitHubPort {
    * merge call, unless the policy it reads then is `sergeant`.
    */
   mergePolicy?(repo: RepoSlug): MergePolicy;
+  /** Posts Sergeant's immutable, one-per-head readiness declaration and returns the existing or new comment. */
+  declareReadiness?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha; comment: string; fallbackComment: string; modelText: string }): Promise<{ id: number; url: string; comment: string }>;
   /**
    * A `human` repository's gated head, handed to a human (TECH-5244), never approved or merged: the PR
    * marked ready for review if it is a draft; review requested from `reviewers` only when GitHub shows
