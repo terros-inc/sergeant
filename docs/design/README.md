@@ -63,6 +63,7 @@ Then the reference contracts as needed.
 | `13-s1-supersession.md` | Every S1 concept classified (keep / simplify / move to reasoning / move to runner / delete); ADRs kept and abandoned; what we give up; the 7-step transition plan; implementation slices |
 | `14-open-questions.md` | The decision register, including the independent review's findings and changes |
 | `15-outbound-notifications.md` | Proposal (TECH-6005, pending approval): signed outbound webhooks to people's agent harnesses when a task needs a human, per-person `sgt` subscriptions, the Slack-reply path |
+| `16-evidence-based-review.md` | Proposal (TECH-6605, pending approval): authorized stage 1 is only one immutable SHA-bound readiness declaration per head in every repository plus reconciliation against human merges and explicit GitHub rejection evidence; expanded audits, separate review measures, earned autonomy, shadow samples and the provisional change-management definition are vision requiring later approval; richer company-wide review evidence is deferred until a concrete question needs it; supersedes the path tier-map approach |
 
 ## Section 15 — independent review
 
