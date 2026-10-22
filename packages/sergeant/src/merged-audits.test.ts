@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { Conversation, PullRequestFacts, RunRecord, RunSpec } from "@terros/sergeant-contracts";
-import { COMMENT_ATTEMPTS } from "./merged-audit-harvest.ts";
 import { mergedAuditPass, type MergedAuditDeps, type MergedAuditOptions } from "./merged-audits.ts";
 import { auditDrawn, auditRunId, type ReviewFacts } from "./review-quality.ts";
 
@@ -195,18 +194,20 @@ test("a comment that fails is retried before the audit is recorded, then recorde
   expect((await t.lines()).map((f) => [f.runId, f.subject[0]?.auditCommentId])).toEqual([[auditRunId(repo, 1, sha(1)), 9]]);
 });
 
-test("a comment that keeps failing is given up and the audit still recorded, once", async () => {
+test("a comment failing for over a week is still retried, and the audit recorded once with its id when it posts", async () => {
   const t = await auditing();
   await t.pass();
   t.state.finished = t.state.failing = true;
   // Only PR 1 stays in the window, so the daily draws, which prune the ledger, start nothing else.
   t.deps.github.mergedPullRequests = async () => merged.slice(0, 1);
-  // Hourly checks over eight days, past the seven days an unrecorded audit was once kept.
-  for (let h = 1; h <= COMMENT_ATTEMPTS + 24; h++) await t.pass(at(h));
-  expect(t.comments).toHaveLength(COMMENT_ATTEMPTS);
-  const recorded = await t.lines();
-  expect(recorded.map((f) => f.runId)).toEqual([auditRunId(repo, 1, sha(1))]);
-  expect(recorded[0]?.subject[0]).not.toHaveProperty("auditCommentId");
+  // Hourly checks over eight days of a GitHub outage: giving up would record the audit without its comment for good.
+  for (let h = 1; h <= 192; h++) await t.pass(at(h));
+  expect(t.comments).toHaveLength(192);
+  expect(await t.lines()).toEqual([]);
+  t.state.failing = false;
+  for (const h of [193, 194]) await t.pass(at(h));
+  expect(t.comments).toHaveLength(193);
+  expect((await t.lines()).map((f) => [f.runId, f.subject[0]?.auditCommentId])).toEqual([[auditRunId(repo, 1, sha(1)), 9]]);
 });
 
 test("an audit that finishes after a week is still recorded", async () => {

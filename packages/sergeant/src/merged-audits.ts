@@ -44,8 +44,6 @@ const Ledger = z.object({
         recorded: z.boolean().optional(),
         /** Its PR comment, once posted. */
         auditCommentId: z.number().int().optional(),
-        /** Failed attempts at posting that comment, given up at `COMMENT_ATTEMPTS`. */
-        commentFailures: z.number().int().optional(),
       }),
     )
     .default([]),

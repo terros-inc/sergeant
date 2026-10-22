@@ -237,9 +237,9 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     reads back each audit it started and, once the run has finished, posts the audit comment below and
     then writes the audit's `ReviewFacts` line (01) to `<stateDir>/reviews.jsonl`: `trigger: audit`,
     `issue` the Linear issue the PR names (else `owner/name#n`), and the PR's `found` and
-    `auditCommentId` on its `subject` entry. The line waits for the comment to settle: posted, nothing
-    to post, or given up after about a week of hourly attempts (then recorded without
-    `auditCommentId`). It is written exactly once per audit run id: an id that already has a line in
+    `auditCommentId` on its `subject` entry. The line waits for the comment to settle: posted or
+    nothing to post. A failed post is never given up: it is retried at every hourly check until it
+    posts, however long GitHub is unavailable (a rate limit ends the pass early). It is written exactly once per audit run id: an id that already has a line in
     `reviews.jsonl` is done, however often the window is re-scanned, a comment retried, or the ledger
     lost. An audit not recorded yet stays in the ledger however long its run takes. Must-fix findings
     also go to `<stateDir>/audit-followups.jsonl` and an `AUDIT FOLLOW-UP` log line, with the line. An audit never blocks, reverts, reopens, or files anything:

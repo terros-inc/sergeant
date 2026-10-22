@@ -9,12 +9,9 @@ import { reviewFacts } from "./review-quality.ts";
 // audit is recorded by its own after-merge loop; one this loop started has no task, so each pass reads
 // back every audit it started and, once the run has finished, posts its nonblocking PR comment and then
 // writes its `ReviewFacts` line to `<stateDir>/reviews.jsonl`. The line is written exactly once, after
-// the comment has settled (posted, nothing to post, or given up), so it never needs a second line to
+// the comment has settled (posted or nothing to post), so it never needs a second line to
 // carry the comment's id. `reviews.jsonl` itself is the record of what was written: an audit with a line
 // there is done, so a lost or stale ledger, a re-scan, or a retry never writes another.
-
-/** About a week of hourly checks: a comment that still fails then is given up, and the audit recorded without it. */
-export const COMMENT_ATTEMPTS = 168;
 
 /** Finished audits are harvested at every hourly check, not only on the daily pass, so a comment follows its audit within the hour. */
 export async function harvestAudits(ledger: Ledger, opts: MergedAuditOptions, deps: MergedAuditDeps, save: () => Promise<void>): Promise<void> {
@@ -43,16 +40,12 @@ export async function harvestAudits(ledger: Ledger, opts: MergedAuditOptions, de
         .postAuditComment({ repo: pr.repo, number: pr.number, headSha: pr.headSha, verdict: report.verdict, found: on.found, summary: report.summary, findings: report.findings })
         .catch((e: Error) => {
           if (isRateLimited(e)) throw e;
-          entry.commentFailures = (entry.commentFailures ?? 0) + 1;
-          const last = entry.commentFailures >= COMMENT_ATTEMPTS;
-          opts.log(`merged-PR audit ${entry.runId}: comment on ${pr.repo}#${pr.number} not posted, ${last ? "given up; recording the audit without it" : "retrying next pass"}: ${e.message}`);
+          // Never given up: the comment is required, so an outage of any length only delays it and the line.
+          opts.log(`merged-PR audit ${entry.runId}: comment on ${pr.repo}#${pr.number} not posted, retrying next pass: ${e.message}`);
           return undefined;
         });
-      if (comment) entry.auditCommentId = comment.id;
-      else if (entry.commentFailures! < COMMENT_ATTEMPTS) {
-        await save();
-        continue;
-      }
+      if (!comment) continue;
+      entry.auditCommentId = comment.id;
     }
     if (on && entry.auditCommentId !== undefined) on.auditCommentId = entry.auditCommentId;
     if (facts.followUp) await logFollowUp(facts, run, join(opts.stateDir, "audit-followups.jsonl"), opts.log);
