@@ -166,7 +166,8 @@ often post-merge audits found something new, `Found YES n / known m`, with audit
 unknown beside it (never in the rate), and how often they would have failed the head,
 `FAIL n / completed m`. `--by repo` splits both by repository; `--by sergeant` by AGREED heads,
 Sergeant-merged heads and other PRs. `--found` lists each `Found: YES` with its PR, head and every
-finding, including those a public PR does not show
+finding, including those a public PR does not show; a row whose reviewer report cannot be read says
+`findings unavailable`
 ([design 16 §7.2](design/16-evidence-based-review.md#72-stage-2-sgt-review-audits)).
 
 ## 6. Model accounts

@@ -26,14 +26,11 @@ export async function reviewAudits(
   for (const { line, head } of wanted) {
     const url = `https://github.com/${head.repo}/pull/${head.number}`;
     const row: AuditRow = { runId: line.runId, issue: line.issue, repo: head.repo, number: head.number, url, headSha: head.headSha, at: line.at, verdict: line.verdict, ...(head.found !== undefined && { found: head.found }), group: groups.get(headKey(head)) ?? "other" };
-    // A public PR shows only filtered findings (§6.4); the full ones are in the run's record. One that
-    // cannot be read fails the answer rather than leaving a Found: YES without its findings.
+    // A public PR shows only filtered findings (§6.4); the full ones are in the run's record. If that
+    // record is unavailable, leave both fields absent so the CLI can say so without losing the row.
     if (line.verdict !== null && head.found === true) {
-      const run = await deps.runner.status(line.runId as RunId).catch((e: Error) => {
-        throw new Error(`could not read audit run ${line.runId} for ${head.repo}#${head.number}: ${e.message}`);
-      });
-      if (run.role !== "reviewer" || !run.report) throw new Error(`audit run ${line.runId} for ${head.repo}#${head.number} has no readable reviewer report`);
-      Object.assign(row, { summary: run.report.summary, findings: run.report.findings });
+      const run = await deps.runner.status(line.runId as RunId).catch(() => undefined);
+      if (run?.role === "reviewer" && run.report) Object.assign(row, { summary: run.report.summary, findings: run.report.findings });
     }
     rows.push(row);
   }

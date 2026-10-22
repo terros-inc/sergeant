@@ -61,6 +61,7 @@ const failRate = (c: AuditCounts) => `FAIL ${fraction(c.fail, c.completed, "comp
 function foundRows(a: AuditRow): string[] {
   const indent = (text: string) => text.trim().replace(/\r?\n/g, "\n    ");
   const verdict = a.verdict === "approve" ? "PASS" : "FAIL";
+  if (a.findings === undefined) return [`${a.url}  ${a.headSha}  ${verdict}  ${a.issue}  ${a.runId}`, "  findings unavailable"];
   const findings = (a.findings ?? []).map((f) => `  - [${f.severity}${f.category ? `, ${f.category}` : ""}] ${f.location ? `${f.location}: ` : ""}${indent(f.description)}`);
   return [`${a.url}  ${a.headSha}  ${verdict}  ${a.issue}  ${a.runId}`, ...(a.summary?.trim() ? [`  ${indent(a.summary)}`] : []), ...(findings.length ? findings : ["  (no findings in the run's record)"])];
 }

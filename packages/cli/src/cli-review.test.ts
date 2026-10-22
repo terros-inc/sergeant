@@ -60,6 +60,7 @@ const audits = {
     { runId: "run_audit-1", issue: "UNF-1", repo: "example-org/example-app", number: 12, url: "https://github.com/example-org/example-app/pull/12", headSha: sha, at: "2026-10-01T00:00:00.000Z", verdict: "changes_requested", found: true, group: "other",
       summary: "One requirement is unmet.", findings: [{ id: "f1", severity: "blocking", category: "acceptance", location: "src/export.ts:12", description: "Archived rows are skipped." }, { id: "f2", severity: "nit", description: "Rename `tmp`." }] },
     { runId: "run_audit-2", issue: "UNF-2", repo: "example-org/example-app", number: 13, url: "https://github.com/example-org/example-app/pull/13", headSha: sha, at: "2026-10-02T00:00:00.000Z", verdict: "approve", found: false, group: "agreed" },
+    { runId: "run_audit-3", issue: "UNF-3", repo: "example-org/example-app", number: 14, url: "https://github.com/example-org/example-app/pull/14", headSha: sha, at: "2026-10-03T00:00:00.000Z", verdict: "changes_requested", found: true, group: "other" },
   ],
   newerField: "kept",
 };
@@ -84,6 +85,9 @@ test("review audits prints yield and FAIL fractions, --by sergeant's split, and 
       "  One requirement is unmet.",
       "  - [blocking, acceptance] src/export.ts:12: Archived rows are skipped.",
       "  - [nit] Rename `tmp`.",
+      "",
+      `https://github.com/example-org/example-app/pull/14  ${sha}  FAIL  UNF-3  run_audit-3`,
+      "  findings unavailable",
       "",
     ].join("\n"),
   );

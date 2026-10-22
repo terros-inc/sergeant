@@ -544,6 +544,7 @@ answer as sent. `serve` computes it on each call from the audits' `ReviewFacts` 
   merge. Every other audited PR is "other".
 - `--found` lists every `Found: YES` with its PR link, head, verdict, run id, and the reviewer's
   summary and full findings from the audit run's own record, which a public PR does not show (§6.4).
+  If the run has no readable reviewer report, that row says `findings unavailable` instead.
 
 This adds no MCP tool: the MCP client's fixed tool list (11 §1) is unchanged, and a read-only
 `review_report` tool over the two routes is later work.

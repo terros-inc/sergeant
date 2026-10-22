@@ -120,15 +120,22 @@ test("yield over known Found, FAIL over completed, each audit once; split by the
 }, 30_000);
 
 test.each([
+  ["an unreadable record", new Error("missing")],
   ["a non-reviewer record", { runId: "run_bad", role: "worker", status: "succeeded", provider: "p", model: "m", report: null } as RunRecord],
   ["a reviewer record without a report", { runId: "run_bad", role: "reviewer", status: "failed", provider: "p", model: "m", report: null } as RunRecord],
-])("Found: YES fails when its run has %s", async (_case, returned) => {
+])("Found: YES stays in the answer without findings when its run has %s", async (_case, returned) => {
   dir = await mkdtemp(join(tmpdir(), "sergeant-audits-"));
   const head = { repo: app, number: 1, headSha: h1 };
   const source = audit("run_bad", head, { verdict: "changes_requested", findings: [{ id: "f1", severity: "blocking", description: "Broken." }] });
   await writeFile(join(dir, "reviews.jsonl"), line(source, head));
 
-  await expect(reviewAudits(dir, { github: { readReadiness: async () => Promise.reject(new Error("unused")) }, runner: { status: async () => returned } }, {})).rejects.toThrow(
-    "audit run run_bad for example-org/example-app#1 has no readable reviewer report",
+  const answer = await reviewAudits(
+    dir,
+    { github: { readReadiness: async () => Promise.reject(new Error("unused")) }, runner: { status: async () => (returned instanceof Error ? Promise.reject(returned) : returned) } },
+    {},
   );
+  expect(answer.audits).toHaveLength(1);
+  expect(answer.audits[0]).toMatchObject({ runId: "run_bad", found: true });
+  expect(answer.audits[0]).not.toHaveProperty("summary");
+  expect(answer.audits[0]).not.toHaveProperty("findings");
 });

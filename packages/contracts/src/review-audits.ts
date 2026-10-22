@@ -30,7 +30,7 @@ export type AuditCounts = z.infer<typeof AuditCounts>;
 export const AuditGroup = z.enum(["agreed", "sergeant_merged", "other"]);
 export type AuditGroup = z.infer<typeof AuditGroup>;
 
-/** One audit, its result, and on a `Found: YES` the reviewer's summary and every finding from its run record. */
+/** One audit; a `Found: YES` has full report fields when its reviewer report is readable. */
 export const AuditRow = z.object({
   runId: z.string(),
   issue: z.string(),
