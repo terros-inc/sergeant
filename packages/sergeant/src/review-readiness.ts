@@ -10,6 +10,7 @@ import { isTaskStateFile, readTaskState } from "./task-state.ts";
 // index, cache or stored judgment: lose nothing, and a corrected rule reclassifies history.
 
 export type Declared = { task: string; repo: string; number: number; headSha: string; commentId: number; at: string };
+export type ClassifiedDeclaration = { row: ReadinessRow; mergedBySergeant: boolean };
 
 /** At most this many declared PRs are reread at once, so a long history does not burst the rate limit. */
 const CONCURRENT_READS = 4;
@@ -22,7 +23,8 @@ export async function reviewReadiness(
   const wanted = (await declarations(tasksDir)).filter(
     (d) => (!filter.repo || d.repo.toLowerCase() === filter.repo.toLowerCase()) && (!filter.since || Date.parse(d.at) >= filter.since.getTime()),
   );
-  const rows = await classifyDeclarations(wanted, github);
+  const classified = await classifyDeclarations(wanted, github);
+  const rows = classified.map((result) => result.row);
   const count = (c: ReadinessRow["class"]) => rows.filter((r) => r.class === c).length;
   const [agreed, differentHead, rejected] = [count("AGREED"), count("DIFFERENT_HEAD"), count("REJECTED")];
   const unknown = { pending: 0, closed_unmerged: 0, not_human_merge: 0, uninterpretable: 0 };
@@ -43,10 +45,10 @@ export async function reviewReadiness(
 }
 
 /** Each declaration classified from what GitHub says now (TECH-6611), in the order given. Also `sgt review audits --by sergeant`'s split. */
-export async function classifyDeclarations(wanted: Declared[], github: Pick<GitHubPort, "readReadiness">): Promise<ReadinessRow[]> {
+export async function classifyDeclarations(wanted: Declared[], github: Pick<GitHubPort, "readReadiness">): Promise<ClassifiedDeclaration[]> {
   const read = github.readReadiness;
   if (!read) throw new Error("this Sergeant's GitHub adapter cannot reread readiness declarations");
-  const rows: ReadinessRow[] = [];
+  const rows: ClassifiedDeclaration[] = [];
   let next = 0;
   const worker = async () => {
     for (let i = next++; i < wanted.length; i = next++) {
@@ -61,7 +63,15 @@ export async function classifyDeclarations(wanted: Declared[], github: Pick<GitH
       // A merge queue's own bot is never the merger: the human who queued it is (design 16 §5.2).
       const merger = facts.mergedBy?.type === "User" ? facts.mergedBy.login : facts.addedToMergeQueueActor?.login;
       const merged = result.class === "AGREED" || result.class === "DIFFERENT_HEAD";
-      rows[i] = { task: d.task, repo: d.repo, number: d.number, url, commentUrl: `${url}#issuecomment-${d.commentId}`, headSha: d.headSha, at: d.at, class: result.class, reason: result.reason, ...(declarationReason && { declarationReason }), ...(merged && merger && { merger }) };
+      // The authenticated declaration establishes Sergeant's App login. A non-human merge belongs
+      // to Sergeant only when GitHub attributes the merge to that same bot, not merely to any bot.
+      const mergedBySergeant =
+        result.reason === "not_human_merge" &&
+        declaration !== null &&
+        facts.mergedBy?.type === "Bot" &&
+        facts.mergedBy.login.toLowerCase() === declaration.author.login.toLowerCase();
+      const row: ReadinessRow = { task: d.task, repo: d.repo, number: d.number, url, commentUrl: `${url}#issuecomment-${d.commentId}`, headSha: d.headSha, at: d.at, class: result.class, reason: result.reason, ...(declarationReason && { declarationReason }), ...(merged && merger && { merger }) };
+      rows[i] = { row, mergedBySergeant };
     }
   };
   await Promise.all(Array.from({ length: CONCURRENT_READS }, worker));

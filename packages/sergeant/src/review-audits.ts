@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type AuditCounts, type AuditGroup, type AuditRow, type GitHubPort, type ReadinessRow, type ReviewAudits, type RunId, type RunnerPort, safeJson } from "@terros/sergeant-contracts";
+import { type AuditCounts, type AuditGroup, type AuditRow, type GitHubPort, type ReviewAudits, type RunId, type RunnerPort, safeJson } from "@terros/sergeant-contracts";
 import type { PrHead, ReviewFacts } from "./review-quality.ts";
 import { classifyDeclarations, declarations } from "./review-readiness.ts";
 
@@ -32,7 +32,8 @@ export async function reviewAudits(
       const run = await deps.runner.status(line.runId as RunId).catch((e: Error) => {
         throw new Error(`could not read audit run ${line.runId} for ${head.repo}#${head.number}: ${e.message}`);
       });
-      if (run.role === "reviewer" && run.report) Object.assign(row, { summary: run.report.summary, findings: run.report.findings });
+      if (run.role !== "reviewer" || !run.report) throw new Error(`audit run ${line.runId} for ${head.repo}#${head.number} has no readable reviewer report`);
+      Object.assign(row, { summary: run.report.summary, findings: run.report.findings });
     }
     rows.push(row);
   }
@@ -65,12 +66,13 @@ async function sergeantGroups(tasksDir: string, audits: Audit[], github: Pick<Gi
   const declared = (await declarations(tasksDir)).filter((d) => audited.has(headKey(d)));
   const groups = new Map<string, AuditGroup>();
   if (declared.length === 0) return groups;
-  const groupOf = (r: ReadinessRow): AuditGroup => (r.class === "AGREED" ? "agreed" : r.reason === "not_human_merge" ? "sergeant_merged" : "other");
+  const groupOf = (className: string, mergedBySergeant: boolean): AuditGroup => (className === "AGREED" ? "agreed" : mergedBySergeant ? "sergeant_merged" : "other");
   // A head declared more than once takes its strongest class: agreed, then sergeant_merged.
   const order: AuditGroup[] = ["other", "sergeant_merged", "agreed"];
-  for (const r of await classifyDeclarations(declared, github)) {
-    const key = headKey(r);
-    if (order.indexOf(groupOf(r)) > order.indexOf(groups.get(key) ?? "other")) groups.set(key, groupOf(r));
+  for (const { row, mergedBySergeant } of await classifyDeclarations(declared, github)) {
+    const key = headKey(row);
+    const group = groupOf(row.class, mergedBySergeant);
+    if (order.indexOf(group) > order.indexOf(groups.get(key) ?? "other")) groups.set(key, group);
   }
   return groups;
 }
