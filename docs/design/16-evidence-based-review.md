@@ -2,7 +2,7 @@
 
 **Status: proposal (TECH-6605), pending approval. Nothing here is built, and no other design document
 changes until it is approved.** §10 lists the exact changes the approval would make to 01, 05, 06, 08, 09,
-10, 11 and 14. Written against `main` at `8bf4690`. People, repositories and SHAs in the examples are
+10, 11 and 14. Written against `main` at `a84f38c`. People, repositories and SHAs in the examples are
 placeholders.
 
 ## 0. Summary
@@ -52,10 +52,10 @@ The economical core: **two parsed lines on GitHub, one derived index, one widene
 
 | Existing machinery | Stays | Changes |
 |---|---|---|
-| Fresh-context reviewer runs (06 §2–5) | The required review is still a separately launched reviewer run. The brief already carries human and bot PR feedback and earlier reviews | Its result is also posted on the PR as a review line (§2.3). Its report gains `found` and optional `moreEyes` (§10.3) |
+| Fresh-context reviewer runs (06 §2–5) | The required review is still a separately launched reviewer run. The brief already carries human and bot PR feedback and earlier reviews | Its result is also posted on the PR as a review line (§2.3). Each PR in its report's `reviewed` list gains its own `found`, and the report gains optional `moreEyes` (§10.3) |
 | Review dispositions and D1–D6 (06 §6) | Unchanged. Stage 1 and 2 change no Gate rule. External reviews are evidence and reasoning input, not disposition standing | D4 stops naming the unbuilt `alwaysReviewPaths`. The built protected-CI matcher (M15) stays the deterministic part (§3.2) |
-| Calibration sampling, 20% of skipped reviews (06 §8, `audit.ts`) | The stable-hash draw `auditDrawn(rate, head)`, the nonblocking audit reviewer, the after-merge follow-up | 06 §8 is corrected to what is built (the draw runs after the merge). A second, repository-wide draw over merged PRs reuses the same hash and brief (§6) |
-| Review telemetry, `reviews.jsonl` (06 §9) | Every finished review still writes its `ReviewFacts` line | `ReviewFacts` gains `found` and the PR comment id of its posted evidence. An evidence index joins it with GitHub (§7.1) |
+| Calibration sampling, 20% of skipped reviews (06 §8, `audit.ts`) | The stable-hash draw `auditDrawn(rate, head)`, the nonblocking audit reviewer, the after-merge follow-up | 06 §8 is corrected to what is built (the draw runs after the merge). The audit run id becomes unique per repository, PR and head instead of per head SHA. A second, repository-wide draw over merged PRs reuses the same hash, run id and brief (§6) |
+| Review telemetry, `reviews.jsonl` (06 §9) | Every finished review still writes its `ReviewFacts` line | Each reviewed PR in `ReviewFacts.subject` gains that PR's `found` and the id of the evidence comment posted on it. An evidence index joins it with GitHub (§7.1) |
 | Handoff summary on the PR (08 §7, TECH-5244, TECH-6374) | One comment per head, posted by the control-plane App, older heads' copies minimized (minimized, not edited) | It starts with the readiness line and lists the evidence on that head. It is also posted in `sergeant`-policy repositories, just before the gated approval (§4) |
 | `mergePolicy` (08 §2, §7) | The only switch for who merges. It defaults to `human`, and only an operator sets it | Stage 3 defines the evidence a human looks at before setting it to `sergeant` (§8) |
 | Rulesets, required checks, M1–M15 | Unchanged. Sergeant never changes rulesets | A repository's hard human-review boundaries live in its ruleset's required-reviewer rule. They should stay a short list, not a tier map (§3.2) |
@@ -132,9 +132,13 @@ When a reviewer run finishes, Sergeant's core posts one PR comment per reviewed 
 control-plane App: the line, then the reviewer's summary and its blocking findings. The comment is
 keyed `review-evidence:<runId>:<repo>#<n>`, and like the handoff comment it is found again by
 reading the PR's comments, so a retry posts nothing new. Verdict mapping: `approve` → `PASS`;
-`changes_requested` and `needs_human` → `FAIL`. `Found` comes from the report's new `found` field
-(§10.3). A report from before that field existed falls back to `YES` when it has any blocking or
-nonblocking finding, and `NO` otherwise. Example:
+`changes_requested` and `needs_human` → `FAIL`. `Found` is per PR: it comes from that PR's entry in
+the report's `reviewed` list, which gains a `found` field (§10.3). One reviewer run can review several
+PRs of a task and raise something new on one and nothing on another, so a single run-wide flag would
+credit, or blame, every PR alike and corrupt the per-PR Found rates of §7.3. A report from before
+that field existed, or an entry without it, falls back only when the report reviewed exactly one PR:
+`YES` when it has any blocking or nonblocking finding, `NO` otherwise. A multi-PR report without
+per-PR `found` leaves `Found` unknown on each PR, because its findings are not tied to a PR. Example:
 
 ```
 Review: FAIL | Found: YES | SHA: 3f9c2a1b7e4d5c6f8a9b0c1d2e3f4a5b6c7d8e9f
@@ -334,9 +338,9 @@ would need semantic judgment in code, which the charter avoids, or a person labe
 
 `audit.ts` already draws, once per Sergeant merge, `auditDrawn(rate, head)`: a stable SHA-256 hash of
 `["audit", repo, number, headSha]` against `review.auditSampleRate` (default 0.2). It applies only to
-merged heads no fresh review approved. A drawn head gets a nonblocking reviewer run (`run_audit-<headSha>`)
-of exactly that head, and its must-fix findings are kept as follow-up work and told to the issue. 06
-§8 still says the draw happens when a `not_required` disposition is recorded, before the merge. The
+merged heads no fresh review approved. A drawn head gets a nonblocking reviewer run
+(`run_audit-<headSha>` today, made unique per PR in §6.2) of exactly that head, and its must-fix
+findings are kept as follow-up work and told to the issue. 06 §8 still says the draw happens when a `not_required` disposition is recorded, before the merge. The
 proposal corrects it to the built behavior (§10.1).
 
 ### 6.2 Widened to all merged PRs in enrolled repositories
@@ -345,14 +349,28 @@ proposal corrects it to the built behavior (§10.1).
   default branch in the last 72 hours (`pulls?state=closed&base=<default>&sort=updated&direction=desc`,
   paged until `updated_at` is older than the window, keeping those with `merged_at` inside it). The overlap tolerates a missed day. A PR merged without a pull request (a direct push, an
   admin bypass) is not discoverable this way (§11.7).
-- **The draw.** The same stable-hash function on the pre-merge head, salted differently
-  (`["merged-audit", repo, number, headSha]`), against a separate `review.mergedAuditSampleRate`
+- **The draw.** The same stable-hash function on the PR's identity and pre-merge head, salted
+  differently (`["merged-audit", repo, number, headSha]`), so two PRs that share a head SHA are drawn
+  independently, against a separate `review.mergedAuditSampleRate`
   (proposed default 0.1). Unsalted, every head drawn at 0.1 would also be drawn at 0.2, so the two
   samples would be nested. Salted, they are independent. A Sergeant head that skipped review is still
   drawn at the 20% rate (§6.1). A PR drawn by both is audited once.
-- **Idempotence without state.** The run id stays `run_audit-<headSha>`. The runner's `start` is
-  already idempotent on the run id (it does nothing when that run exists), so a restart, a re-scan, or
-  both draws picking the same head starts one audit. Losing everything means re-scanning the last 72 hours, which starts nothing new.
+- **One audit identity per repository, PR and head.** Today's id, `run_audit-<headSha>`, names only
+  the commit. The same commit can be the head of PRs in two repositories (a fork, a mirror, a
+  vendored copy) or of two PRs in one repository (a PR closed and reopened under a new number, a
+  stacked PR whose base merged). A repository-wide scan meets those cases, and with a SHA-only id the
+  second PR's audit would be skipped as already started, or its result joined to the first PR. So
+  both draws use one key:
+  `auditRunId(repo, number, headSha) = "run_audit-" + hex(sha256(JSON.stringify(["audit-run", repo, number, headSha])))[0..40]`.
+  It is a hash because run ids allow only letters, digits, `_` and `-` (01 `RunId`), and repository
+  names hold `/` and `.`. 160 bits make an accidental collision negligible. The built task audit
+  (§6.1) switches to it. An audit already recorded keeps the run id stored on its `merged` record,
+  which is always read back and never recomputed, so nothing migrates.
+- **Idempotence without state.** The runner's `start` is already idempotent on the run id (it does
+  nothing when that run exists). Because the id is derived from the same repository, PR and head as
+  the draws, a restart, a re-scan, or both draws picking the same PR head starts one audit, and two
+  PRs that share a head start two. Losing everything means re-scanning the last 72 hours, which starts
+  nothing new.
 - **What is reviewed, as of merge.** The reviewer checks out the pre-merge head `head.sha`, and its
   diff is `git diff <merge_commit_sha>^1...<head.sha>`. The three-dot form diffs from the merge-base,
   so it gives exactly the PR's change for merge, squash and rebase merges alike, even though a
@@ -372,7 +390,8 @@ proposal corrects it to the built behavior (§10.1).
   never reverts, reopens, or files anything by itself.
 - **Finishing audits outside a task.** Today a Sergeant task's after-merge loop waits for its audit
   and records it (`after-merge.ts`, `logFollowUp`). A PR with no task has no loop, so the daily scan
-  also harvests finished `run_audit-*` runs it started. For each, it writes the `ReviewFacts` line
+  also harvests the audits it started: for each drawn PR in its window it recomputes
+  `auditRunId(repo, number, headSha)` and, when that run has finished, writes the `ReviewFacts` line
   and posts the evidence comment. The runner's start spec and the reviewer brief need small changes:
   an optional Linear conversation, an explicit base SHA, a merge-time cutoff for PR feedback, and an
   audit focus that does not assume a skipped review (§10.3).
@@ -391,7 +410,8 @@ repository to `<state dir>/evidence/<owner>__<repo>.jsonl`. Each line holds: PR 
 author kind, created/closed/merged times, pre-merge head, merge commit, merger and merger kind,
 closer, every parsed review line and native review (id, kind, account, `By:`, position, ordinal,
 verdict, `Found`, SHA, time, edited-after-posting flag), every readiness declaration (id, SHA, time,
-reason), the human-input times and patch ids needed by §5.1, and any audit's run id. A closed PR is
+reason), the human-input times and patch ids needed by §5.1, and the PR's audit run id
+(`auditRunId`, §6.2), if it was drawn. A closed PR is
 indexed once after it closes, and again when it is reopened and closed again or when its audit
 finishes. Later edits on GitHub do not otherwise rewrite the history it counted (§11.2). Open PRs are
 not indexed: a query counts Sergeant's open declarations as `pending` from `state.json`
@@ -432,13 +452,17 @@ Sergeant readiness, example-org/example-app, last 90 days
 
 ### 7.3 Metrics, with numerator and denominator
 
+The unit of every evidence metric is one piece of evidence on one PR head. A Sergeant reviewer run
+that reviewed three PRs posts three evidence comments (§2.3) and counts three times, each with that
+PR's own `found`, never a run-wide value.
+
 | Metric | Numerator | Denominator |
 |---|---|---|
 | Independent coverage, by position | merged PRs with ≥ 1 non-`author` piece of evidence of that position **on the merged head** | merged PRs |
 | Any-head coverage, by position | same, at any head | merged PRs |
 | Merged with no independent evidence | merged PRs with only `author` or no evidence | merged PRs |
 | Who approved | merged PRs with a `PASS` (line or native `APPROVED`) on the merged head, by reviewer identity and position | merged PRs |
-| Found rate, by reviewer, position, ordinal or provider | evidence with `Found: YES` | evidence with a known `Found` (lines only) |
+| Found rate, by reviewer, position, ordinal or provider | evidence with `Found: YES` | evidence with a known `Found` (lines only, per PR head) |
 | Added-reviewer contribution | evidence at ordinal ≥ 2 with `Found: YES` | evidence at ordinal ≥ 2 with a known `Found` |
 | FAIL rate, by reviewer | `FAIL` evidence | evidence with a verdict |
 | Readiness agreement, by repository and declarer | AGREED | AGREED + CHANGES_REQUIRED + SELF_REVISED + REJECTED (UNKNOWN printed separately, by reason) |
@@ -478,8 +502,8 @@ designed but not built) exists. A human sets the
 ## 9. Staged rollout
 
 **Stage 1 — external evidence and readiness instrumentation.** No merge rule changes.
-1. Parse review lines and native reviews (§2). Sergeant's reviewer posts its evidence (§2.3), and the
-   reviewer report gains `found` and `moreEyes`.
+1. Parse review lines and native reviews (§2). Sergeant's reviewer posts its evidence (§2.3), each
+   reviewed PR in the reviewer report gains its own `found`, and the report gains `moreEyes`.
 2. Post the readiness declaration as the first line of the per-head summary, in every policy (§4).
 3. Add the evidence index (§7.1), `sgt review quality` with the new splits, and `sgt review readiness`
    (§7.2).
@@ -526,8 +550,9 @@ section is edited in place, and other documents link to it (rule ownership per `
   its changed files are known (08 §7, M15)".
 - **§8**: rename it "Post-merge audits". Replace the `onNotRequiredRecorded` pseudocode and its first
   bullet with the built behavior: "Once per Sergeant merge, a merged head no fresh review approved is
-  drawn with `auditDrawn(review.auditSampleRate, head)`." Add the repository-wide draw from
-  proposal §6.2 as a second subsection. Keep: nonblocking, the stable hash, after-merge surfacing.
+  drawn with `auditDrawn(review.auditSampleRate, head)`." Its audit run id is
+  `auditRunId(repo, number, headSha)` (proposal §6.2), replacing `run_audit-<headSha>`. Add the
+  repository-wide draw from proposal §6.2 as a second subsection. Keep: nonblocking, the stable hash, after-merge surfacing.
 - **New §12 "Review evidence on GitHub"**: the review line, its grammar, native-review reading,
   positions and ordinal, and Sergeant's evidence comment (proposal §2), as the **owning section**
   for the convention.
@@ -560,9 +585,15 @@ section is edited in place, and other documents link to it (rule ownership per `
 
 ### 10.3 `01-domain-model.md` and `05-brief-report-protocol.md`
 
-- `ReviewFacts`: add `found?: boolean` and `evidenceCommentId?` (per reviewed PR).
-- The reviewer report (`s2-review-report`): add `found: boolean` ("you raised at least one actionable
-  finding not already raised on these PRs") and `moreEyes?: string`.
+- `ReviewFacts`: each `subject` entry (`{ repo, number, headSha }`) gains `found?: boolean` and
+  `evidenceCommentId?`. Both are per reviewed PR, never per run.
+- The reviewer report (`s2-review-report`): each entry of `reviewed` gains `found?: boolean` ("on
+  this PR head you raised at least one actionable finding not already raised on this PR"). The report
+  gains `moreEyes?: string`. Optional, so older reports still parse; a missing value falls back as in
+  proposal §2.3.
+- The audit run id (`audit.ts`, the `merged` record's `audit.runId`): new draws use
+  `auditRunId(repo, number, headSha)` from proposal §6.2 instead of `run_audit-<headSha>`. Stored ids
+  are read back unchanged.
 - The worker report's `pullRequests[].review`: add `moreEyes?: string`.
 - New derived type `EvidenceLine`, the index line of proposal §7.1, marked "derived cache: rebuilt from
   GitHub, never a source of truth".
@@ -597,7 +628,7 @@ section is edited in place, and other documents link to it (rule ownership per `
 ### 10.7 What stays exactly as it is
 
 The Gate's D1–D6 and M1–M15 checks, the fresh-context reviewer and its brief, the 20% skipped-review
-draw and its rate key, the two-App identity model, rulesets, the `mergePolicy` default, the worker's
+draw and its hash key (only its run id changes, §10.3), the two-App identity model, rulesets, the `mergePolicy` default, the worker's
 per-head review recommendation, and subagent reviews as measurement only.
 
 ## 11. Tradeoffs
