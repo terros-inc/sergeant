@@ -65,7 +65,7 @@ not authorize building them.
   auto-merge, a small random shadow sample of its ready heads still goes to a human instead (§8). §8.1
   records a **provisional** definition of a "significant" change for the
   organization's change-management control, pending the auditor's review.
-- **Queryable reporting, no dashboard** (§7). `sgt review readiness` in stage 1; the proposed `sgt review audits`
+- **Queryable reporting, no dashboard** (§7). `sgt review readiness` in stage 1 and `sgt review audits`
   in stage 2 print counts and rates with their numerators and denominators.
 - **Later, only on demand: richer review evidence** (§15). A company-wide review convention is **not
   part of stages 1–3**. It gets its own design only when a specific question justifies the added
@@ -524,15 +524,30 @@ Sergeant readiness, example-org/example-app, last 90 days
 ### 7.2 Stage 2: `sgt review audits`
 
 ```
-sgt review audits [--since 30d] [--repo <slug>] [--found] [--by repo|sergeant]
+sgt review audits [--since 30d] [--repo <slug>] [--found] [--by repo|sergeant] [--json]
 ```
 
-It reads the audits' `ReviewFacts` lines in `reviews.jsonl`. `--found` lists every `Found: YES` with
-its PR link and the full findings, which a public PR does not show (§6.4). `--by sergeant` splits
-AGREED heads (Sergeant-ready and merged by a human at that head), Sergeant-merged heads, and other
-PRs. `/v1/review-audits` serves
-the same data. The MCP client's fixed tool list (11 §1) gains one read-only `review_report` tool over
-the two routes.
+Like `sgt review readiness` (§7.1), the command reads one read-only route,
+`GET /v1/review-audits?since=&repo=`, which any signed-in person may call; `--json` prints its
+answer as sent. `serve` computes it on each call from the audits' `ReviewFacts` lines in
+`reviews.jsonl` (`trigger: audit`, the last line per run id), and stores nothing. `--since` and
+`--repo` match the line's `at` and the audited PR's repository.
+
+- **Audit yield** is `Found YES / known` over completed audits (a reviewer report with a verdict),
+  with `Found` unknown printed beside it and never in the denominator (§6.3). **Audit FAIL rate** is
+  `FAIL / completed`. Every rate is printed as its fraction; audits with no verdict are counted
+  separately.
+- `--by repo` splits both rates by repository. `--by sergeant` splits AGREED heads (Sergeant-ready
+  and merged by a human at that head), Sergeant-merged heads, and other PRs. It rereads from GitHub
+  only Sergeant's declarations on audited heads and classifies them with the readiness classifier
+  (§5.1): AGREED is an AGREED head, and `not_human_merge` on a head Sergeant declared is Sergeant's own
+  merge. Every other audited PR is "other".
+- `--found` lists every `Found: YES` with its PR link, head, verdict, run id, and the reviewer's
+  summary and full findings from the audit run's own record, which a public PR does not show (§6.4).
+  If the run has no readable reviewer report, that row says `findings unavailable` instead.
+
+This adds no MCP tool: the MCP client's fixed tool list (11 §1) is unchanged, and a read-only
+`review_report` tool over the two routes is later work.
 
 ### 7.3 Metrics, with numerator and denominator
 
@@ -744,8 +759,9 @@ design.
   absent.
 - Background loops (stage 2): "merged-PR audit draw (daily)".
 - CLI: `sgt review readiness` (stage 1), reading the one read-only route `GET /v1/review-readiness`
-  the way `sgt stops` reads `GET /v1/stops` (§7.1). Any other route, `sgt review audits`,
-  `/v1/review-audits`, or MCP `review_report` tool is later work requiring separate approval.
+  the way `sgt stops` reads `GET /v1/stops` (§7.1), and `sgt review audits` (stage 2), reading
+  `GET /v1/review-audits` the same way (§7.2). An MCP `review_report` tool is later work requiring
+  separate approval.
 
 ### 10.5 `09-security.md`
 

@@ -9,7 +9,8 @@ import { isTaskStateFile, readTaskState } from "./task-state.ts";
 // Each is classified on every call by rereading GitHub (contracts' classifyReadiness), so there is no
 // index, cache or stored judgment: lose nothing, and a corrected rule reclassifies history.
 
-type Declared = { task: string; repo: string; number: number; headSha: string; commentId: number; at: string };
+export type Declared = { task: string; repo: string; number: number; headSha: string; commentId: number; at: string };
+export type ClassifiedDeclaration = { row: ReadinessRow; mergedBySergeant: boolean };
 
 /** At most this many declared PRs are reread at once, so a long history does not burst the rate limit. */
 const CONCURRENT_READS = 4;
@@ -19,31 +20,11 @@ export async function reviewReadiness(
   github: Pick<GitHubPort, "readReadiness">,
   filter: { since?: Date; repo?: string },
 ): Promise<ReviewReadiness> {
-  const read = github.readReadiness;
-  if (!read) throw new Error("this Sergeant's GitHub adapter cannot reread readiness declarations");
   const wanted = (await declarations(tasksDir)).filter(
     (d) => (!filter.repo || d.repo.toLowerCase() === filter.repo.toLowerCase()) && (!filter.since || Date.parse(d.at) >= filter.since.getTime()),
   );
-  const rows: ReadinessRow[] = [];
-  let next = 0;
-  const worker = async () => {
-    for (let i = next++; i < wanted.length; i = next++) {
-      const d = wanted[i] as Declared;
-      // A PR that cannot be read fails the whole answer rather than vanishing from the denominator.
-      const { declaration, facts } = await read({ repo: d.repo, number: d.number, commentId: d.commentId }).catch((e: Error) => {
-        throw new Error(`could not reread ${d.repo}#${d.number} from GitHub (narrow with --repo to skip it): ${e.message}`);
-      });
-      const result = declaration ? classifyReadiness(declaration, facts) : { class: "UNKNOWN" as const, reason: "uninterpretable" as const };
-      const url = `https://github.com/${d.repo}/pull/${d.number}`;
-      const declarationReason = declaration?.body.split(/\r?\n/).find((line) => line.startsWith("Reason:"))?.slice("Reason:".length).trim();
-      // A merge queue's own bot is never the merger: the human who queued it is (design 16 §5.2).
-      const merger = facts.mergedBy?.type === "User" ? facts.mergedBy.login : facts.addedToMergeQueueActor?.login;
-      const merged = result.class === "AGREED" || result.class === "DIFFERENT_HEAD";
-      rows[i] = { task: d.task, repo: d.repo, number: d.number, url, commentUrl: `${url}#issuecomment-${d.commentId}`, headSha: d.headSha, at: d.at, class: result.class, reason: result.reason, ...(declarationReason && { declarationReason }), ...(merged && merger && { merger }) };
-    }
-  };
-  await Promise.all(Array.from({ length: CONCURRENT_READS }, worker));
-
+  const classified = await classifyDeclarations(wanted, github);
+  const rows = classified.map((result) => result.row);
   const count = (c: ReadinessRow["class"]) => rows.filter((r) => r.class === c).length;
   const [agreed, differentHead, rejected] = [count("AGREED"), count("DIFFERENT_HEAD"), count("REJECTED")];
   const unknown = { pending: 0, closed_unmerged: 0, not_human_merge: 0, uninterpretable: 0 };
@@ -63,11 +44,45 @@ export async function reviewReadiness(
   };
 }
 
+/** Each declaration classified from what GitHub says now (TECH-6611), in the order given. Also `sgt review audits --by sergeant`'s split. */
+export async function classifyDeclarations(wanted: Declared[], github: Pick<GitHubPort, "readReadiness">): Promise<ClassifiedDeclaration[]> {
+  const read = github.readReadiness;
+  if (!read) throw new Error("this Sergeant's GitHub adapter cannot reread readiness declarations");
+  const rows: ClassifiedDeclaration[] = [];
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < wanted.length; i = next++) {
+      const d = wanted[i] as Declared;
+      // A PR that cannot be read fails the whole answer rather than vanishing from the denominator.
+      const { declaration, facts } = await read({ repo: d.repo, number: d.number, commentId: d.commentId }).catch((e: Error) => {
+        throw new Error(`could not reread ${d.repo}#${d.number} from GitHub (narrow with --repo to skip it): ${e.message}`);
+      });
+      const result = declaration ? classifyReadiness(declaration, facts) : { class: "UNKNOWN" as const, reason: "uninterpretable" as const };
+      const url = `https://github.com/${d.repo}/pull/${d.number}`;
+      const declarationReason = declaration?.body.split(/\r?\n/).find((line) => line.startsWith("Reason:"))?.slice("Reason:".length).trim();
+      // A merge queue's own bot is never the merger: the human who queued it is (design 16 §5.2).
+      const merger = facts.mergedBy?.type === "User" ? facts.mergedBy.login : facts.addedToMergeQueueActor?.login;
+      const merged = result.class === "AGREED" || result.class === "DIFFERENT_HEAD";
+      // The authenticated declaration establishes Sergeant's App login. A non-human merge belongs
+      // to Sergeant only when GitHub attributes the merge to that same bot, not merely to any bot.
+      const mergedBySergeant =
+        result.reason === "not_human_merge" &&
+        declaration !== null &&
+        facts.mergedBy?.type === "Bot" &&
+        facts.mergedBy.login.toLowerCase() === declaration.author.login.toLowerCase();
+      const row: ReadinessRow = { task: d.task, repo: d.repo, number: d.number, url, commentUrl: `${url}#issuecomment-${d.commentId}`, headSha: d.headSha, at: d.at, class: result.class, reason: result.reason, ...(declarationReason && { declarationReason }), ...(merged && merger && { merger }) };
+      rows[i] = { row, mergedBySergeant };
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENT_READS }, worker));
+  return rows;
+}
+
 /**
  * Every declaration in the task records, oldest first. A merge after a refused merge of the same head
  * carries the same comment id, so each comment is counted once. A record that cannot be read is left out.
  */
-async function declarations(tasksDir: string): Promise<Declared[]> {
+export async function declarations(tasksDir: string): Promise<Declared[]> {
   const found = new Map<string, Declared>();
   for (const task of (await readdir(tasksDir).catch(() => [])).sort()) {
     const files = (await readdir(join(tasksDir, task)).catch(() => [])).filter(isTaskStateFile);
