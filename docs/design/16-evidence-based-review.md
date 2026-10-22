@@ -1,8 +1,8 @@
 # 16 — Evidence-based review and earned merge autonomy (proposal)
 
-**Status: proposal (TECH-6605), pending approval. Nothing here is built, and no other design document
-changes until it is approved.** §10 lists the exact changes the approval would make to 01, 05, 06, 08, 09,
-10, 11 and 14. Written against `main` at `a84f38c`. People, repositories and SHAs in the examples are
+**Status: proposal (TECH-6605), pending approval. Nothing here is built. Approval authorizes only
+stage 1; later stages remain vision requiring separate decisions.** §10 marks the exact stage-1
+contract changes and the possible later changes separately. Written against `main` at `a84f38c`. People, repositories and SHAs in the examples are
 placeholders.
 
 ## 0. Summary
@@ -12,6 +12,23 @@ production PR without a human. The alternative under way is a static map that so
 of a repository into review tiers, then gates review counts and merge rights by tier. This proposal
 replaces it with **evidence we can count**, plus a **small number of deterministic boundaries** that
 GitHub enforces. It starts small, and adds data only when a question needs it.
+
+### Authorization boundary
+
+This document separates the ambitious destination from what approval of its first implementation
+would authorize:
+
+| Authorized first implementation (stage 1) | Vision only; requires later approval |
+|---|---|
+| Add one immutable, full-SHA-bound readiness line to Sergeant's existing per-head PR summary, in every repository | Expanded post-merge audits, audit enrollment and public audit comments (stage 2) |
+| Keep the readiness comment id and reason in the existing task records | Earned autonomous merge, shadow human-review samples and the provisional change-management definition (stage 3) |
+| Reconcile declarations against human merge or explicit-rejection evidence already in GitHub, and report the simple agreement fraction through one read-only `sgt` command | New review measures, richer external-review metadata, reviewer-position analysis, APIs, a generalized review framework, or any other instrumentation |
+
+Stage 1 reuses the current review, task-record, handoff and GitHub adapter machinery. It adds **no
+new service, database, policy engine, trust score, dashboard, Gate rule, evidence index, API, audit
+behavior or generalized review framework**. Sections describing later stages explain the intended
+direction and tradeoffs; they are not implementation requirements and approving this proposal does
+not authorize building them.
 
 - **One readiness declaration per head** (§4). When Sergeant judges that the reviews and checks are
   enough, it posts `READY TO MERGE | SHA: <full head SHA>` with a short reason on the PR, before any
@@ -24,7 +41,7 @@ GitHub enforces. It starts small, and adds data only when a question needs it.
   (**DIFFERENT_HEAD**). Asking for more reviews and revising before the declaration is ordinary
   iteration and counts neither way. Everything uninterpretable is **UNKNOWN** and is left out of the
   rate. Squash and rebase merges compare the PR's frozen pre-merge head, never the merge commit.
-- **Two separate review measures** (§2.1). *Changes required (blocking)*: a review with at least one
+- **Later measurement vocabulary** (§2.1; not stage 1). *Changes required (blocking)*: a review with at least one
   blocking finding. *Review was valuable (feedback)*: a human review that says anything beyond a plain
   approval. Each report says which one it uses; the agreement rate uses neither.
 - **Stage 1 uses only the review evidence that already exists** (§2): Sergeant's own reviewer
@@ -47,15 +64,15 @@ GitHub enforces. It starts small, and adds data only when a question needs it.
   auto-merge, a small random shadow sample of its ready heads still goes to a human instead (§8). §8.1
   records a **provisional** definition of a "significant" change for the
   organization's change-management control, pending the auditor's review.
-- **Queryable reporting, no dashboard** (§7). `sgt review readiness` in stage 1 and `sgt review audits`
+- **Queryable reporting, no dashboard** (§7). `sgt review readiness` in stage 1; the proposed `sgt review audits`
   in stage 2 print counts and rates with their numerators and denominators.
 - **Later, only on demand: richer review evidence** (§15). A company-wide review convention is **not
   part of stages 1–3**. It gets its own design only when a specific question justifies the added
   metadata and machinery.
 
-The economical core of stage 1: **one parsed line on Sergeant's own comment, the agreement rate
-computed by rereading GitHub, and one `sgt` command.** No new database, service, policy engine, Gate
-rule, index or dashboard.
+The economical core of stage 1 is **one parsed line on Sergeant's own comment, the agreement rate
+computed by rereading GitHub, and one `sgt` command.** That is the complete authorized first
+implementation.
 
 ## 1. What changes and what stays
 
@@ -63,13 +80,13 @@ rule, index or dashboard.
 |---|---|---|
 | Fresh-context reviewer runs (06 §2–5) | The required review is still a separately launched reviewer run. The brief already carries human and bot PR feedback and earlier reviews | Stage 1: none; its verdict is read from the records that already hold it (§2). Stage 2: each PR in the report's `reviewed` list gains its own `found`, which the audit's YES/NO needs (§6.3) |
 | Review dispositions and D1–D6 (06 §6) | Unchanged. No stage changes a Gate rule. GitHub reviews are evidence and reasoning input, not disposition standing | D4 stops naming the unbuilt `alwaysReviewPaths`. The built protected-CI matcher (M15) stays the deterministic part (§3.2) |
-| Calibration sampling, 20% of skipped reviews (06 §8, `audit.ts`) | The stable-hash draw `auditDrawn(rate, head)`, the nonblocking audit reviewer, the after-merge follow-up | Stage 1: 06 §8 is corrected to what is built (the draw runs after the merge). Stage 2: the audit run id becomes unique per repository, PR and head instead of per head SHA, and a second draw over all merged PRs, in the repositories an operator turns it on for, reuses the same hash, run id and brief (§6) |
+| Calibration sampling, 20% of skipped reviews (06 §8, `audit.ts`) | The stable-hash draw `auditDrawn(rate, head)`, the nonblocking audit reviewer, the after-merge follow-up | Stage 1: none. A later stage may correct the prose to the built after-merge behavior and add the audit changes in §6 |
 | Review telemetry, `reviews.jsonl` (06 §9) | Every finished review still writes its `ReviewFacts` line | Stage 2: each reviewed PR in `ReviewFacts.subject` gains that PR's `found` and the id of the audit comment posted on it |
 | Handoff summary on the PR (08 §7, TECH-5244, TECH-6374) | One comment per head, posted by the control-plane App, older heads' copies minimized (minimized, not edited) | Stage 1: it starts with the readiness line and lists the evidence on that head. It is also posted in `sergeant`-policy repositories, just before the gated approval (§4) |
 | `mergePolicy` (08 §2, §7) | The only switch for who merges. It defaults to `human`, and only an operator sets it | Stage 3 defines the evidence a human looks at before setting it to `sergeant`, and adds a shadow sample of ready heads still handed to a human in `sergeant`-policy repositories (§8) |
 | Rulesets, required checks, M1–M15 | Unchanged. Sergeant never changes rulesets | A repository's hard human-review boundaries live in its ruleset's required-reviewer rule. They should stay a short list, not a tier map (§3.2) |
 | Public-data check (`check-public-data.mjs`, the installation's `publicDataDenylistSecret`) | The canonical check and its denylist, as the pre-push hook and CI use them | Stage 2: the core also runs it on every audit comment before posting it on a public repository's PR (§6.4) |
-| `sgt review quality` (designed, 06 §9, not built) | Its metrics, unchanged and not scheduled by this proposal | Stage 1 adds `sgt review readiness`; stage 2 adds `sgt review audits` (§7) |
+| `sgt review quality` (designed, 06 §9, not built) | Its metrics, unchanged and not scheduled by this proposal | Stage 1 adds only `sgt review readiness`; a later approval may add `sgt review audits` (§7) |
 
 ## 2. Review evidence in stage 1
 
@@ -96,7 +113,11 @@ different positions compare. GitHub's native reviews carry no such field, and as
 in the company to add one is the review-line extension of §15. It waits until a specific question
 needs that data. The post-merge audit (§6) records `Found` for its own reviews from stage 2.
 
-### 2.1 Two separate measures of a review
+### 2.1 Two separate measures of a review (later-stage vocabulary, not stage 1)
+
+These definitions keep two questions distinct in the longer-term vision. **Stage 1 does not add,
+record or report either measure.** It relies on the Gate's existing treatment of review verdicts
+before readiness and otherwise preserves existing review evidence without new instrumentation.
 
 Each review in §2 is recorded with two yes/no measures. They answer different questions, are
 computed separately, and are never combined into one score.
@@ -111,14 +132,14 @@ structural and errs towards yes: anything other than a bare approval counts, so 
 whether a comment was useful. Both are computed when a report runs, from GitHub and the run records,
 and stored nowhere.
 
-Which calculation uses which:
+If a later stage is approved, calculations use them as follows:
 
 - **The readiness declaration** (§4) is made only on a head with no outstanding changes-required
   review, which is what M8 and the D-rules already enforce. It uses the blocking measure, through the
   existing Gate, with no new rule.
 - **The agreement rate** (§5) uses **neither**. It compares the merged head with the declared head
   and nothing else.
-- **The breakdowns beside the agreement rate** (§7.1) use both: of AGREED declarations, how many had
+- **Possible later breakdowns beside the agreement rate** use both: of AGREED declarations, how many had
   a valuable human review before the merge (feedback); of DIFFERENT_HEAD declarations, how many had a
   changes-required review after the declaration (blocking).
 - **Audit FAIL** (§6.3) is the blocking measure applied to the audit's own report. `Found` is a
@@ -259,8 +280,8 @@ history without migration. Only closed PRs are evaluated.
 |---|---|---|
 | **AGREED** (success) | The PR was merged by a human account after *T* (`merged_at` > *T*), and its pre-merge head is exactly *H* | numerator and denominator |
 | **DIFFERENT_HEAD** (failure) | The PR was merged by a human account after *T*, and its pre-merge head is not *H*: changes were made after the declaration, typically because a human required them | denominator |
-| **REJECTED** (failure) | The PR was closed unmerged after *T* by a human (the timeline's `closed` actor is a `User`): the human explicitly declined it | denominator |
-| **UNKNOWN** | Anything else, with a reason: `pending` (still open), `abandoned` (closed unmerged by Sergeant or another bot, as when a task stops, TECH-5230), `not_human_merge` (merged by Sergeant or another bot, which includes all of stage 3's own merges), `uninterpretable` (merger unknown, merged before *T*, a malformed declaration) | excluded, reported |
+| **REJECTED** (failure) | The PR was closed unmerged after *T*, and a human submitted a native `CHANGES_REQUESTED` review after *T* against *H*. That existing GitHub event is explicit, attributable rejection of the declared head | denominator |
+| **UNKNOWN** | Anything else, with a reason: `pending` (still open), `closed_unmerged` (closed as duplicate, obsolete, superseded, abandoned, or for any reason without the explicit rejection evidence above), `not_human_merge` (merged by Sergeant or another bot, which includes all of stage 3's own merges), `uninterpretable` (merger unknown, merged before *T*, a malformed declaration) | excluded, reported |
 
 **Agreement rate = AGREED / (AGREED + DIFFERENT_HEAD + REJECTED)**, always printed as the fraction,
 with each class and the UNKNOWN count and its reasons beside it. It uses neither review measure of
@@ -269,8 +290,12 @@ with each class and the UNKNOWN count and its reasons beside it. It uses neither
 A declaration followed by a new head is DIFFERENT_HEAD whoever made the change and whatever it was,
 and the new head's own declaration, if Sergeant makes one, is classified on its own. So one PR can
 carry a failed D1 and an agreed D2. That is the intended reading: D1 said "ready" and was not.
-Nothing has to judge whether a human "really" required the change, so no human-input window, comment
-reading or commit authorship enters the classification.
+Nothing has to judge whether a human "really" required a merged change, so no human-input window,
+comment reading or commit authorship enters DIFFERENT_HEAD. REJECTED is intentionally narrower: a
+close event or closer identity alone proves nothing. Stage 1 recognizes only GitHub's structured,
+SHA-bound `CHANGES_REQUESTED` event from a human after the declaration. A prose comment may be clear
+to a reader, but stage 1 does not add semantic parsing; without the structured review, the result is
+UNKNOWN (`closed_unmerged`). UNKNOWN is preferable to manufacturing disagreement.
 
 Two sub-counts are printed with DIFFERENT_HEAD, as evidence and never as a reclassification:
 - **Rebase only.** The merged head has the same `git patch-id --stable` (of the diff from the
@@ -295,11 +320,11 @@ declaration counts as `pending` until then.
   a human enabled auto-merge reports that human as `merged_by`, and counts as theirs. A merge queue
   that reports its own bot is `uninterpretable` unless the timeline's `added_to_merge_queue` actor is a
   human, in which case it is that human's.
-- **Reviewing identities.** The stage 1 evidence of §2 on *H* and on any earlier head: the native
+- **Reviewing identities.** The existing evidence of §2 on *H* and on any earlier head: native
   reviews (account, type, state, `commit_id`) and Sergeant's reviewer runs (run id, provider,
-  verdict), each with its two measures (§2.1). They are read with the declaration's outcome, so a
-  query can ask "agreed after which reviews?".
-- **Closer identity.** The timeline's `closed` event actor, for REJECTED and `abandoned`.
+  verdict). Stage 1 preserves and can show those records without deriving new review measures.
+- **Closer identity.** The timeline's `closed` event actor is recorded for provenance, but never
+  establishes REJECTED. The human `CHANGES_REQUESTED` reviewer establishes the explicit rejection.
 
 ### 5.3 Worked examples
 
@@ -311,8 +336,9 @@ declaration counts as `pending` until then.
 | D1 at A. A third-party review bot then finds a real bug, and the worker fixes it as B before any human speaks. D2 at B. A human merges B | D1 DIFFERENT_HEAD, D2 AGREED |
 | D1 at A. Main moves, and the worker rebases as B with the same patch. D2 at B. A human merges B | D1 DIFFERENT_HEAD (rebase only), D2 AGREED |
 | D1 at A. A human pushes a commit C and merges C | D1 DIFFERENT_HEAD |
-| D1 at A. A human closes the PR | D1 REJECTED |
-| D1 at A. The issue is cancelled, and Sergeant closes its PR (TECH-5230) | D1 UNKNOWN (`abandoned`) |
+| D1 at A. A human leaves `CHANGES_REQUESTED` on A, then the PR is closed unmerged | D1 REJECTED |
+| D1 at A. A human closes the PR as duplicate, obsolete or abandoned, with no human `CHANGES_REQUESTED` review after D1 | D1 UNKNOWN (`closed_unmerged`) |
+| D1 at A. Sergeant closes its PR after the task stops | D1 UNKNOWN (`closed_unmerged`) |
 | D1 at A in a `sergeant`-policy repository. Sergeant merges A | D1 UNKNOWN (`not_human_merge`). Audits measure these (§6) |
 | D1 at A in a `sergeant`-policy repository, drawn for the shadow sample (§8). A human merges A | D1 AGREED |
 
@@ -470,24 +496,21 @@ declared PR. What if we lose it? Nothing: there is no derived state, only the ta
 already keeps and GitHub. If rereading becomes slow, a cache of closed PRs' facts can be added; it
 would be disposable.
 
-Following the existing `sgt` patterns (`--since`, `--json`, read-only, Linear-login bearer):
+Following the existing `sgt` patterns (`--since`, `--json`, read-only):
 
 ```
 sgt review readiness [--since 90d] [--repo <slug>] [--list]
 ```
 
 `--list` prints each declaration with its PR link, head, class and reason, so every number links back
-to evidence a person can read on GitHub. `/v1/review-readiness` serves the same data. Example
+to evidence a person can read on GitHub. Stage 1 adds no API route. Example
 (`sgt review readiness --repo example-org/example-app --since 90d`):
 
 ```
 Sergeant readiness, example-org/example-app, last 90 days
   AGREED 41 / evaluated 47 = 87.2%   (DIFFERENT_HEAD 5, REJECTED 1)
   DIFFERENT_HEAD 5: changes required after the declaration 3, rebase only 1
-  UNKNOWN 5: pending 3, abandoned 2
-  Of AGREED, human review before the merge: valuable 14, plain approval only 9, none 18
-  Of AGREED: Sergeant reviewer approve 38, no fresh review (not_required) 3
-  Of AGREED, audited 4: Found YES 0
+  UNKNOWN 5: pending 3, closed_unmerged 2
   Mergers: example-owner 30, example-dev 11
 ```
 
@@ -509,10 +532,10 @@ the two routes.
 | Metric | Stage | Numerator | Denominator |
 |---|---|---|---|
 | Readiness agreement, by repository (uses neither review measure) | 1 | AGREED | AGREED + DIFFERENT_HEAD + REJECTED (UNKNOWN printed separately, by reason) |
-| Failed declarations with changes required after them (blocking measure) | 1 | DIFFERENT_HEAD declarations with a changes-required review between the declaration and the merge | DIFFERENT_HEAD |
-| Agreed after a valuable human review (feedback measure) | 1 | AGREED declarations with a valuable human review before the merge / with only a plain approval / with no human review | AGREED |
-| Agreed after a Sergeant review | 1 | AGREED declarations whose head had a Sergeant reviewer `approve` / no fresh review | AGREED |
-| Human review was valuable | 1 | human native reviews on declared PRs that were valuable | human native reviews on declared PRs |
+| Failed declarations with changes required after them (blocking measure) | Later | DIFFERENT_HEAD declarations with a changes-required review between the declaration and the merge | DIFFERENT_HEAD |
+| Agreed after a valuable human review (feedback measure) | Later | AGREED declarations with a valuable human review before the merge / with only a plain approval / with no human review | AGREED |
+| Agreed after a Sergeant review | Later | AGREED declarations whose head had a Sergeant reviewer `approve` / no fresh review | AGREED |
+| Human review was valuable | Later | human native reviews on declared PRs that were valuable | human native reviews on declared PRs |
 | Merger identity | 1 | evaluated declarations on merged PRs, by `merged_by` login | evaluated declarations on merged PRs |
 | Post-merge audit yield | 2 | completed audits with `Found: YES` | completed audits with a known `Found`, split by: AGREED (Sergeant-ready, merged by a human at that head), Sergeant-merged, other PRs |
 | Audit FAIL rate (blocking measure) | 2 | completed audits with `FAIL` | completed audits |
@@ -589,10 +612,8 @@ Gate already enforce under every policy.
    one-per-head deduplication and narrowed minimizing (§4).
 2. Record `readinessCommentId` on the `refusedMerges` and `merged` records, and `readinessReason` on
    `merge_pr`.
-3. Build `sgt review readiness` and `/v1/review-readiness`, classifying by rereading GitHub, with the
-   evidence of §2 (Sergeant's reviewer runs and GitHub native reviews) and its two measures (§2.1,
-   §7.1).
-4. Correct 06 §8 to the built after-merge draw. Drop `alwaysReviewPaths` from the design.
+3. Build the read-only `sgt review readiness` command, classifying by rereading GitHub and linking to
+   the existing evidence of §2. It adds no API and derives no new review measure.
 
 Nothing is asked of humans or external assistants: no convention, no template line.
 
@@ -600,7 +621,7 @@ Exit: a readiness line appears on every Sergeant PR head that passes the preflig
 repository whatever its merge policy, and the readiness
 report matches a hand count on a sample of PRs.
 
-**Stage 2 — expanded post-merge audits.**
+**Stage 2 — expanded post-merge audits (vision; separately approved later).**
 1. The per-repository, per-PR, per-head audit run id, and per-PR `found` in the reviewer report and
    `ReviewFacts` (§6.2, §6.3).
 2. The merged-PR discovery and draw (§6.2), the per-repository `mergedAuditSampleRate`,
@@ -613,7 +634,7 @@ Exit: in each repository that is turned on, audits cover 1 in 10 merged PRs, Ser
 every `Found: YES` is in `sgt review audits --found`; and a public repository's PRs show only the
 verdict line and filtered findings.
 
-**Stage 3 — earned autonomous merge, later and per repository.** Once a repository has ≥ 50
+**Stage 3 — earned autonomous merge (vision; separately approved later and per repository).** Once a repository has ≥ 50
 evaluated decisions at about 90% agreement, the captain and the policy owner decide whether to set
 `mergePolicy: sergeant` there (§8), under the change-management
 definition in force then (§8.1). No code change is needed for the switch itself. The shadow handoff
@@ -624,25 +645,26 @@ repository. Other repositories join the audits as the numbers earn trust (§6.2)
 specific question justifies company-wide metadata. Until then nobody is asked to write it and
 nothing parses it.
 
-Nothing in any stage is built until this proposal is approved. Implementation issues are written
-then.
+Approval authorizes only stage 1. Later stages remain design vision until separately approved; their
+implementation issues are not created as part of this design task.
 
 ## 10. Exact proposed changes to existing contracts
 
-These are applied when the proposal is approved, each by the issue that implements its stage. Each
-owning section is edited in place, and other documents link to it (rule ownership per `AGENTS.md`).
+Only the items marked stage 1 are authorized by approval of this proposal. Every item marked later,
+stage 2 or stage 3 is vision that requires separate approval. Each owning section is edited in
+place, and other documents link to it (rule ownership per `AGENTS.md`).
 The deferred evidence extension (§15) changes nothing here; any contract changes belong to its own
 design.
 
 ### 10.1 `06-review.md`
 
-- **§3 table** (stage 1): in the `not_required` row, replace "no `alwaysReviewPaths` touched" with "no
+- **§3 table** (later cleanup): in the `not_required` row, replace "no `alwaysReviewPaths` touched" with "no
   protected CI configuration touched (08 M15)".
-- **§6 D4** (stage 1): replace "and the PR's changed files match none of the repository's
+- **§6 D4** (later cleanup): replace "and the PR's changed files match none of the repository's
   `alwaysReviewPaths`. Built today: a PR changing protected CI configuration, or whose changed files
   are unknown, never gets it (08 §7, M15)" with "and the PR changes no protected CI configuration and
   its changed files are known (08 §7, M15)".
-- **§8** (stage 1): rename it "Post-merge audits". Replace the `onNotRequiredRecorded` pseudocode and
+- **§8** (later cleanup): rename it "Post-merge audits". Replace the `onNotRequiredRecorded` pseudocode and
   its first bullet with the built behavior: "Once per Sergeant merge, a merged head no fresh review
   approved is drawn with `auditDrawn(review.auditSampleRate, head)`." Keep: nonblocking, the stable
   hash, after-merge surfacing.
@@ -653,16 +675,16 @@ design.
 - **§8, last bullet** (stage 2) ("charged to the installation's review-quality budget, not the
   task's"): replace with the built rule (the task owner's accounts, TECH-5179) and, for audits outside
   a task, the project owner's budget through `review.auditOwner`, under the daily cap (proposal §6.2).
-- **New §9.1 "Two review measures"** (stage 1): *changes required (blocking)* and *review was
+- **New §9.1 "Two review measures"** (later measurement work): *changes required (blocking)* and *review was
   valuable (feedback)*, defined and computed as in proposal §2.1, as their **owning section**.
 - **§9** (stage 2): add the audit metrics of proposal §7.3 and name `sgt review audits` as their
   report.
-- **§11 Not built** (stage 1): add "No path tier map, fixed reviewer counts, or sensitivity file list.
+- **§11 Not built** (later cleanup): add "No path tier map, fixed reviewer counts, or sensitivity file list.
   The few hard boundaries are in 08 §2 and M15."
 
 ### 10.2 `08-github-contract.md`
 
-- **§2 item 7** (`alwaysReviewPaths`, stage 1): replace it with "Optionally, a short ruleset
+- **§2 item 7** (`alwaysReviewPaths`, later cleanup): replace it with "Optionally, a short ruleset
   required-reviewer rule (about ten patterns at most) for changes a human must approve whatever the
   evidence. GitHub enforces it, and Sergeant hands off when GitHub refuses (M12)."
 - **§7 handoff** (stage 1): the PR summary starts with the readiness line (proposal §4), is posted
@@ -672,8 +694,8 @@ design.
 - **§7 handoff, minimizing** (stage 1): narrow TECH-6374's rule to readiness or summary comments for
   other heads (proposal §4.2).
 - **New §12 "Readiness and agreement"** (stage 1): the readiness line and rules (proposal §4), the
-  agreement classes and mechanics (proposal §5), and the stage-1 evidence they read (proposal §2), as
-  the **owning section**. It links to 06 §9.1 for the two review measures.
+  agreement classes and mechanics (proposal §5), and the existing evidence they read (proposal §2),
+  as the **owning section**.
 - **§7 merging** (stage 3): in a `sergeant`-policy repository, a head drawn for the shadow sample is
   handed to a human instead of approved and merged (proposal §8).
 - **§11** (stage 2): allow, besides the handoff summary and the stop comment, "Sergeant's post-merge
@@ -685,7 +707,7 @@ design.
 
 - Stage 1: the `RefusedMerge` and `merged` records gain `readinessCommentId?`. The `merge_pr` action
   (`MergePr`) gains `readinessReason`.
-- Stage 1: `alwaysReviewPaths` is removed from 01 (the repository config and `reviewPolicy`) and from
+- Later cleanup: `alwaysReviewPaths` is removed from 01 (the repository config and `reviewPolicy`) and from
   05 §5's last sentence, which then points to M15.
 - Stage 2: the reviewer report (`s2-review-report`): each entry of `reviewed` gains `found?: boolean`
   ("on this PR head you raised at least one actionable finding not already raised on this PR").
@@ -711,12 +733,12 @@ design.
   `sergeant`-policy repositories). `publicDataDenylistSecret` gains a
   second reader: the core's audit-comment filter, which posts verdict lines only when it is absent.
 - Background loops (stage 2): "merged-PR audit draw (daily)".
-- CLI and API: `sgt review readiness` and `/v1/review-readiness` (stage 1); `sgt review audits` and
-  `/v1/review-audits` (stage 2); the MCP `review_report` tool (proposal §7.2).
+- CLI: `sgt review readiness` (stage 1). Any API route, `sgt review audits`, `/v1/review-audits`, or
+  MCP `review_report` tool is later work requiring separate approval.
 
 ### 10.5 `09-security.md`
 
-- Stage 1: the skipped-review sentence ("narrowed by optional `alwaysReviewPaths`") becomes "narrowed
+- Later cleanup: the skipped-review sentence ("narrowed by optional `alwaysReviewPaths`") becomes "narrowed
   by the protected-CI matcher (08 M15) and any ruleset required-reviewer paths".
 - Stage 2: under public repositories, add "Sergeant's own PR comments on a public repository carry
   only fixed text and code-anchored findings that pass the public-data check; the full text stays in
@@ -860,8 +882,9 @@ is meant to test: whether a human ultimately merges the exact SHA Sergeant recom
 human then seeks more opinions before deciding.
 
 Anchoring is monitored, but it does not add a weight, exclusion or second gate to the initial
-agreement formula and does not delay stage 1. `sgt review readiness` shows whether AGREED heads had
-valuable feedback, only a plain approval, or no human review (§2.1, §7.1). Independent post-merge
+agreement formula and does not delay stage 1. If later measurement work is approved, it can show
+whether AGREED heads had valuable feedback, only a plain approval, or no human review (§2.1).
+Independent post-merge
 audits provide an unanchored check on sampled heads. We will explore occasional blind human reviews,
 where the reviewer does not see the readiness declaration until after recording an assessment, and
 compare them with ordinary reviews to estimate the effect. That experiment needs its own operating
@@ -904,12 +927,15 @@ Open:
 2. The shadow sample rate at stage 3 (§8): proposed 0.05 (1 in 20 heads in a `sergeant`-policy
    repository go to a human).
 
-Settled by the project owner and reflected above: stage 1 is only the readiness note, the agreement
-rate and existing evidence (§0, §2, §15); the public-repository audit filter (§6.4); the readiness
-note in every repository (§4.2); the 0.1 audit rate, with audits outside a task on the project
-owner's budget (§6.2); the two separate review measures (§2.1); the shadow sample (§8); audits only
-in the first repositories working toward auto-merge (§6.2, §11.7); and success or failure measured
-only on the declared-ready SHA, with no separate class for Sergeant's own revisions (§5.1).
+Settled by the project owner and reflected above: the **authorized stage 1** is only the readiness
+note in every repository, the agreement reconciliation and existing evidence (§0, §2, §4–5, §7.1).
+Its closed-unmerged cases are UNKNOWN unless a human explicitly rejected the declared head through
+the structured evidence in §5.1. The following are settled design direction but **not authorized
+stage-1 implementation**: the public-repository audit filter (§6.4); the 0.1 audit rate, with audits
+outside a task on the project owner's budget (§6.2); the two separate review measures (§2.1); the
+shadow sample (§8); and audits only in the first repositories working toward auto-merge (§6.2,
+§11.7). Success or failure is measured only on the declared-ready SHA, with no separate class for
+Sergeant's own revisions (§5.1).
 
 The change-management definition (§8.1) is not a question for this review: it is provisional and
 pending review with the auditor.
