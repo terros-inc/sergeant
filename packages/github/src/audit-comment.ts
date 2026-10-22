@@ -31,8 +31,8 @@ function codeLocation(location: string | undefined, changedFiles: ReadonlySet<st
  * The comment's body. On a private repository: the verdict line, the reviewer's summary and every
  * finding. Otherwise only findings structurally about code (not `acceptance`, a changed-file location,
  * a one-line description of at most 500 characters with no URL), each passing `check`, and then the
- * whole comment passing it too. No check (no denylist), or a check error, leaves the verdict line.
- * Dropped findings are counted, never quoted.
+ * whole comment passing it too. Dropped findings are counted, never quoted. No check (no denylist), a
+ * check error, or a whole comment it rejects leaves the verdict line alone, with no count or other text.
  */
 export function auditComment(a: Audit, visibility: { public: boolean; changedFiles: readonly string[]; check: PublicDataCheck | undefined }): string {
   const line = auditVerdictLine(a);
@@ -47,18 +47,18 @@ export function auditComment(a: Audit, visibility: { public: boolean; changedFil
     return [line, ...(shown.length ? ["", ...shown.map(item)] : []), ...note].join("\n");
   };
   const check = visibility.check;
-  if (!check) return kept([]);
+  if (!check) return line;
   const files = new Set(visibility.changedFiles);
   const shown: Finding[] = [];
   for (const f of a.findings) {
     if (f.category === "acceptance" || !codeLocation(f.location, files)) continue;
     if (/[\r\n]/.test(f.description) || f.description.length > MAX_DESCRIPTION || URL_LIKE.test(f.description)) continue;
     const verdict = check(item(f));
-    if (verdict === "error") return kept([]);
+    if (verdict === "error") return line;
     if (verdict === "pass") shown.push(f);
   }
   const body = kept(shown);
-  return shown.length === 0 || check(body) === "pass" ? body : kept([]);
+  return check(body) === "pass" ? body : line;
 }
 
 /** `check-public-data.mjs text` with the installation's denylist, the same check that guards pushes (TECH-5914). */

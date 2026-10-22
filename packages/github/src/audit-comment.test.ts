@@ -66,10 +66,11 @@ test.each<[string, Parameters<typeof auditComment>[1]["check"]]>([
   ["no denylist", undefined],
   ["a check error", () => "error"],
   ["a whole comment the check rejects", (text) => (text.includes("\n\n- ") ? "fail" : "pass")],
-])("with %s, a public PR gets the verdict line only", (_case, check) => {
-  expect(auditComment(audit([code, { ...code, id: "f2" }]), { ...onPublic, check })).toBe(
-    `${line}\n\n2 findings are kept in Sergeant's records (\`sgt review audits\`), not on this public PR.`,
-  );
+  ["a check error on the whole comment", (text) => (text.includes("\n\n- ") ? "error" : "pass")],
+  ["a check that rejects the whole comment for its count", (text) => (text.includes("kept in Sergeant's records") ? "fail" : "pass")],
+])("with %s, a public PR gets the verdict line only, with no count of what it dropped", (_case, check) => {
+  // The second finding fails the structural rules, so a working check would leave a count beside the line.
+  expect(auditComment(audit([code, { ...code, id: "f2", location: undefined }]), { ...onPublic, check })).toBe(line);
 });
 
 test("the adapter posts once per head, and an unreadable visibility counts as public", async () => {

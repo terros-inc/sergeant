@@ -18,7 +18,8 @@ import { pause } from "./wake.ts";
 // outside any task, on `review.auditOwner`'s registered accounts, within a daily cap, and are finished
 // by `harvestAudits` (TECH-6618). The only state is `merged-audits.json`: when the last pass ran and the
 // audits it started, with what was recorded of each, so the cap holds across a restart; losing it means
-// one more pass now and a cap that forgets the last day.
+// one more pass now, a cap that forgets the last day, and, for an audit whose PR has left the window, no
+// record (`reviews.jsonl` keeps any audit already recorded from being recorded twice).
 
 const WINDOW_MS = 72 * 3_600_000;
 const DAY_MS = 24 * 3_600_000;
@@ -30,9 +31,6 @@ export const DEFAULT_QUALITY_BUDGET_USD_PER_DAY = 25;
  */
 const UNKNOWN_AUDIT_USD = 5;
 
-/** How long an audit not yet harvested is still looked for: a week, then it is given up as lost. */
-const HARVEST_MS = 7 * DAY_MS;
-
 const Ledger = z.object({
   lastPassAt: z.iso.datetime().optional(),
   started: z
@@ -42,11 +40,12 @@ const Ledger = z.object({
         at: z.iso.datetime(),
         /** TECH-6618: the merged PR it audits, so it is harvested even after the PR leaves the 72-hour window. */
         subject: z.object({ repo: RepoSlug, number: z.number().int(), headSha: Sha, mergedSha: Sha, issue: z.string().optional() }).optional(),
-        /** Its `ReviewFacts` line is written. */
+        /** Its `ReviewFacts` line is written, the last step, after its comment settled. */
         recorded: z.boolean().optional(),
-        /** Its PR comment is posted (`auditCommentId`), or it has none to post. */
-        commented: z.boolean().optional(),
+        /** Its PR comment, once posted. */
         auditCommentId: z.number().int().optional(),
+        /** Failed attempts at posting that comment, given up at `COMMENT_ATTEMPTS`. */
+        commentFailures: z.number().int().optional(),
       }),
     )
     .default([]),
@@ -96,8 +95,9 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
     ledger.lastPassAt = now.toISOString();
     return save();
   }
-  const harvested = (s: Ledger["started"][number]) => !s.subject || (s.recorded && s.commented);
-  ledger.started = ledger.started.filter((s) => now.getTime() - Date.parse(s.at) < (harvested(s) ? WINDOW_MS + DAY_MS : HARVEST_MS));
+  // An audit not recorded yet is kept however long its run takes; a recorded one only while a re-scan
+  // could still meet its PR, so the draw knows it.
+  ledger.started = ledger.started.filter((s) => (s.subject && !s.recorded) || now.getTime() - Date.parse(s.at) < WINDOW_MS + DAY_MS);
   const taskAudit = await taskAudits(opts.stateDir);
   const known = new Set([...ledger.started.map((s) => s.runId), ...taskAudit.values()]);
   const cap = opts.budgetUsdPerDay ?? DEFAULT_QUALITY_BUDGET_USD_PER_DAY;
