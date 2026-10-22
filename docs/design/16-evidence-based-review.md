@@ -540,8 +540,9 @@ answer as sent. `serve` computes it on each call from the audits' `ReviewFacts` 
 - `--by repo` splits both rates by repository. `--by sergeant` splits AGREED heads (Sergeant-ready
   and merged by a human at that head), Sergeant-merged heads, and other PRs. It rereads from GitHub
   only Sergeant's declarations on audited heads and classifies them with the readiness classifier
-  (§5.1): AGREED is an AGREED head, and `not_human_merge` on a head Sergeant declared is Sergeant's own
-  merge. Every other audited PR is "other".
+  (§5.1): AGREED is an AGREED head, and `not_human_merge` on a head Sergeant declared is
+  Sergeant-merged only when Sergeant's own GitHub App merged it. Every other audited PR, including a
+  merge by any other bot, is "other".
 - `--found` lists every `Found: YES` with its PR link, head, verdict, run id, and the reviewer's
   summary and full findings from the audit run's own record, which a public PR does not show (§6.4).
   If the run has no readable reviewer report, that row says `findings unavailable` instead.
