@@ -122,7 +122,7 @@ Approvers also have `sgt admin` (§7).
   The API's JSON is printed as it was sent, so it keeps fields newer than your `sgt`; an answer outside
   the contract your `sgt` knows is an error.
 - `sgt --help` lists every command: `login`, `logout`, `whoami`, `task list | show | wake | cancel`,
-  `run list | show | report | cancel`, `account …`, `repo list`, `stops`, `review readiness`, `retro`,
+  `run list | show | report | cancel`, `account …`, `repo list`, `stops`, `review readiness`, `review audits`, `retro`,
   `admin …`, and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
 - MCP: `sgt-mcp` puts the read-only commands in your AI assistant (§9).
@@ -158,6 +158,16 @@ merged exactly the head Sergeant declared READY TO MERGE: `AGREED n / evaluated 
 DIFFERENT_HEAD and REJECTED beside it, the UNKNOWN declarations by reason (never in the rate), and
 who merged. `--list` adds each declaration's PR, head, class and reason
 ([design 16 §7.1](design/16-evidence-based-review.md#71-stage-1-sgt-review-readiness-computed-by-rereading-github)).
+
+### Post-merge audits
+
+`sgt review audits [--since 30d] [--repo <owner/name>] [--found] [--by repo|sergeant]` shows how
+often post-merge audits found something new, `Found YES n / known m`, with audits whose Found is
+unknown beside it (never in the rate), and how often they would have failed the head,
+`FAIL n / completed m`. `--by repo` splits both by repository; `--by sergeant` by AGREED heads,
+Sergeant-merged heads and other PRs. `--found` lists each `Found: YES` with its PR, head and every
+finding, including those a public PR does not show
+([design 16 §7.2](design/16-evidence-based-review.md#72-stage-2-sgt-review-audits)).
 
 ## 6. Model accounts
 

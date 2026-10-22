@@ -47,6 +47,11 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      how often a human merged exactly the head Sergeant declared
                                      ready: AGREED / evaluated, every class and UNKNOWN reason, and
                                      mergers; --list adds each declaration's PR, head, class and reason
+  review audits [--since 30d] [--repo <owner/name>] [--found] [--by repo|sergeant]
+                                     post-merge audit yield (Found YES / known Found, unknown beside it)
+                                     and FAIL / completed; --by splits them by repository or by AGREED,
+                                     Sergeant-merged and other heads; --found lists each Found YES with
+                                     its PR, head and every finding
   retro                              ask Sergeant for a retro across tasks now (after a big change, say);
                                      it is posted as a document in the Sergeant project
   account list                       model accounts runs may use: name, provider, whose, what each paid for
@@ -196,6 +201,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         since: { type: "string" },
         repo: { type: "string" },
         list: { type: "boolean" },
+        found: { type: "boolean" },
+        by: { type: "string" },
         version: { type: "boolean", short: "v" },
         help: { type: "boolean", short: "h" },
       },
@@ -221,7 +228,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const takes = most === command.args ? `${command.args || "no"}` : `${command.args} to ${most}`;
       throw new Usage(command.usage ?? `${name} takes ${takes} argument${most === 1 ? "" : "s"}`);
     }
-    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], "wall-minutes": values["wall-minutes"], "cost-usd": values["cost-usd"], hours: values.hours, paste: values.paste || undefined, since: values.since, repo: values.repo, list: values.list || undefined };
+    const flags: Flags = { name: values.name, reason: values.reason, task: values.task, "merge-method": values["merge-method"], "merge-policy": values["merge-policy"], "wall-minutes": values["wall-minutes"], "cost-usd": values["cost-usd"], hours: values.hours, paste: values.paste || undefined, since: values.since, repo: values.repo, list: values.list || undefined, found: values.found || undefined, by: values.by };
     const stray = (Object.keys(flags) as (keyof Flags)[]).find((f) => flags[f] !== undefined && !command.flags?.includes(f));
     if (stray) throw new Usage(`${name} takes no --${stray}`);
     const api = (values.api ?? io.env.SGT_API_URL ?? DEFAULT_API).replace(/\/+$/, "");

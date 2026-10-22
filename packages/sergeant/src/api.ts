@@ -29,6 +29,7 @@ import { repositoriesRoute } from "./api-repositories.ts";
 import { body, callerOf, notFound, ok, parse, Refusal, type Reply, send } from "./api-http.ts";
 import { allRuns, cancelRunOf, cancelTask, listRuns, listTasks, runReport, showRun, showTask, wakeTask } from "./api-tasks.ts";
 import { callerName, type Caller } from "./auth.ts";
+import { reviewAudits } from "./review-audits.ts";
 import { reviewReadiness } from "./review-readiness.ts";
 import { stopAgreement } from "./stop-ledger.ts";
 import type { BudgetWindow } from "./budget.ts";
@@ -136,6 +137,7 @@ export const V1_ROUTES: readonly { method: "GET" | "POST"; path: string; public?
   { method: "POST", path: "/v1/retro" },
   { method: "GET", path: "/v1/stops" },
   { method: "GET", path: "/v1/review-readiness" },
+  { method: "GET", path: "/v1/review-audits" },
   { method: "GET", path: "/v1/admin/status" },
   { method: "GET", path: "/v1/admin/api" },
   { method: "POST", path: "/v1/admin/restart" },
@@ -209,15 +211,20 @@ async function route(req: IncomingMessage, ctl: ApiControl): Promise<Reply> {
   // TECH-6021: how often humans follow the stop rubric, per rule (stop-ledger.ts).
   if (noun === "stops" && id === undefined && get) return ok(await stopAgreement(join(ctl.stateDir, "tasks")));
   // TECH-6613: how often a human merged exactly the head Sergeant declared ready (review-readiness.ts).
-  if (noun === "review-readiness" && id === undefined && get) {
-    const days = url.searchParams.get("since");
-    const repo = url.searchParams.get("repo");
-    if (days !== null && !/^[1-9]\d{0,4}d$/.test(days)) throw new Refusal(400, "bad_request", "since must be a number of days, like 90d");
-    const since = days === null ? undefined : new Date(Date.now() - Number.parseInt(days, 10) * 86_400_000);
-    return ok(await reviewReadiness(join(ctl.stateDir, "tasks"), ctl.deps.github, { ...(since && { since }), ...(repo !== null && { repo: parse(RepoSlug, repo) }) }));
-  }
+  if (noun === "review-readiness" && id === undefined && get) return ok(await reviewReadiness(join(ctl.stateDir, "tasks"), ctl.deps.github, reviewFilter(url.searchParams)));
+  // TECH-6619: post-merge audit yield and FAIL rate, every finding behind each Found: YES (review-audits.ts).
+  if (noun === "review-audits" && id === undefined && get) return ok(await reviewAudits(ctl.stateDir, ctl.deps, reviewFilter(url.searchParams)));
   if (noun === "admin") return adminRoute(ctl, caller, req, { id, verb, pathname: url.pathname, search: url.searchParams }, ctl.log);
   if (noun === "repositories") return repositoriesRoute(ctl.enrollment, caller, req, { id, verb, pathname: url.pathname });
   if (noun === "accounts") return accountsRoute(ctl.accounts, caller, req, { id, verb, pathname: url.pathname }, () => allRuns(ctl));
   throw notFound(url.pathname);
+}
+
+/** `?since=90d&repo=<owner/name>` of the review reports; both narrow before anything is reread. */
+function reviewFilter(search: URLSearchParams): { since?: Date; repo?: string } {
+  const days = search.get("since");
+  const repo = search.get("repo");
+  if (days !== null && !/^[1-9]\d{0,4}d$/.test(days)) throw new Refusal(400, "bad_request", "since must be a number of days, like 90d");
+  const since = days === null ? undefined : new Date(Date.now() - Number.parseInt(days, 10) * 86_400_000);
+  return { ...(since && { since }), ...(repo !== null && { repo: parse(RepoSlug, repo) }) };
 }

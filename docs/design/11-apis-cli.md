@@ -45,6 +45,7 @@ idempotency, and owner where it matters. All APIs are versioned under `/v1` (run
 | `POST /v1/drain`, `POST /v1/drain/cancel` | owned drain token (ADR-0040, kept) | stop starting turns and runs; ready when no start or turn is mid-flight | no | deploys quiesce in seconds; runs survive restarts |
 | `GET /v1/review-quality` | `since?, by?` → metrics (06 §9) | — | yes | |
 | `GET /v1/review-readiness` | `since?` (`90d`), `repo?` → AGREED, DIFFERENT_HEAD, REJECTED, the evaluated denominator, UNKNOWN by reason, mergers, and every declaration | rereads each declared PR from GitHub | team members | TECH-6613; computed on each call, nothing stored ([16 §7.1](16-evidence-based-review.md#71-stage-1-sgt-review-readiness-computed-by-rereading-github)) |
+| `GET /v1/review-audits` | `since?` (`30d`), `repo?` → completed audits, Found YES / known Found with unknown beside it, FAIL / completed, the same split by repository and by AGREED / Sergeant-merged / other heads, and every audit with the full findings of each Found YES | reads `reviews.jsonl` and each Found YES run's record; rereads Sergeant's declarations on audited heads from GitHub | team members | TECH-6619; computed on each call, nothing stored ([16 §7.2](16-evidence-based-review.md#72-stage-2-sgt-review-audits)) |
 
 Failures return a typed error (`not_found`, `forbidden`, `gate_denied{rule, reason}`, `unavailable`).
 Every call that changes durable state or an external system is one action through the Gate; closing
@@ -160,6 +161,7 @@ sgt retro                                            # a Sergeant retro across t
 
 sgt review quality [--since 30d] [--by category|provider|mode]
 sgt review readiness [--since 90d] [--repo <slug>] [--list]   # how often a human merged the head Sergeant declared ready (16 §7.1)
+sgt review audits [--since 30d] [--repo <slug>] [--found] [--by repo|sergeant]   # post-merge audit yield and FAIL rate, every Found YES in full (16 §7.2)
 
 sgt pause --reason "…" | sgt resume                  # approvers
 sgt admin restart | update [<ref>] | status          # approvers: restart or update the host, wait for the outcome
