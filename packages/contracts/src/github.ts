@@ -38,7 +38,10 @@ export const PullRequestFeedback = z.object({
   /** The head a review or inline comment was made on; null for a conversation comment. */
   commitId: Sha.nullable(),
   createdAt: z.iso.datetime({ offset: true }),
-  /** A review cannot be edited in place on GitHub's API, so its own is its submission time. */
+  /**
+   * GitHub's REST API gives a review no edit time, so its own is its submission time, unless the reader
+   * read its last edit (`GitHubPort.reviewEdits`, the merged-PR audit's, TECH-6617).
+   */
   updatedAt: z.iso.datetime({ offset: true }),
   url: z.url(),
   /**

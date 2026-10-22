@@ -60,3 +60,42 @@ test("an audit as of merge carries only feedback made by the merge, diffs from t
   expect(ordinary).toContain("Diff: `git diff origin/main...HEAD`");
   expect(ordinary).not.toMatch(/19\. Judge this head/);
 });
+
+test("an audit as of merge withholds the text of feedback made by the merge but edited after it", () => {
+  const edited = (f: PullRequestFeedback, body: string): PullRequestFeedback => ({ ...f, body, updatedAt: "2026-10-21T09:00:00.000Z" });
+  const review: PullRequestFeedback = { ...item("review:5", "2026-10-20T10:00:00.000Z", ""), kind: "review", state: "APPROVED", commitId: head };
+  const inline: PullRequestFeedback = { ...item("review_comment:6", "2026-10-20T10:30:00.000Z", ""), kind: "review_comment", path: "src/sync.ts", line: 12, commitId: head };
+  const prs: PullRequestFacts = {
+    ...pr,
+    humanFeedback: [
+      edited(review, "Looks good. Update: this caused the outage."),
+      edited(inline, "Off by one here, it turned out."),
+      edited(item("comment:1", "2026-10-20T11:00:00.000Z", ""), "Batch size was wrong after all."),
+      // Edited before the merge: shown as it read then, which is as it reads now.
+      { ...item("comment:2", "2026-10-20T11:10:00.000Z", "Typo fixed."), updatedAt: "2026-10-20T11:20:00.000Z" },
+    ],
+    botFeedback: [edited(item("comment:3", "2026-10-20T11:30:00.000Z", "", true), "Coverage dropped on the revert.")],
+  };
+  const conversation = {
+    issue: { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "Faster sync", description: "Make the sync faster.", state: "Done", stateType: "completed", delegate: null, linkedPullRequests: [] },
+    humanComments: [{ id: "c1", author: { id: "u1", name: "Ada" }, body: "Keep the batch small. Edit: it broke prod.", createdAt: "2026-10-19T00:00:00.000Z", updatedAt: "2026-10-21T00:00:00.000Z" }],
+    agentComments: [],
+  } as unknown as Conversation;
+
+  const brief = reviewerBrief({ ...audit, pullRequests: [prs], conversation }, [subject], []);
+
+  for (const later of ["caused the outage", "it turned out", "wrong after all", "Coverage dropped", "it broke prod"]) expect(brief).not.toContain(later);
+  // What is provably from before the merge stays: who, what kind, where and when, and that it was edited.
+  expect(brief).toMatch(/ada — review, APPROVED at `bbbbbbbbbbbb` — 2026-10-20T10:00:00.000Z — \S+\n {6}> \[Edited after the merge, at 2026-10-21T09:00:00.000Z: its text is withheld/);
+  expect(brief).toContain("inline comment on `src/sync.ts:12` — 2026-10-20T10:30:00.000Z");
+  expect(brief).toMatch(/\[comment:3\] lint-bot\[bot\] — comment — 2026-10-20T11:30:00.000Z — \S+\n {6}> \[Edited after the merge/);
+  expect(brief).toMatch(/### Ada — 2026-10-19T00:00:00.000Z\n\n\[Edited after the merge, at 2026-10-21T00:00:00.000Z/);
+  expect(brief).toContain("Typo fixed.");
+  expect(brief).toMatch(/one edited since shows no text/);
+
+  // An ordinary review shows each as it reads now.
+  const { feedbackCutoff: _, ...live } = audit;
+  const ordinary = reviewerBrief({ ...live, pullRequests: [prs], conversation }, [subject], []);
+  expect(ordinary).toContain("it broke prod");
+  expect(ordinary).toContain("caused the outage");
+});

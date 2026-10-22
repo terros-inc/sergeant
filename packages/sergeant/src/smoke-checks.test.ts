@@ -128,6 +128,10 @@ function fakes(broken?: string) {
   };
   const githubFetch: typeof fetch = async (input, init) => {
     const path = new URL(String(input)).pathname + new URL(String(input)).search;
+    // A GraphQL query is a read, like the merged-PR audit's review edit times; a mutation is a write.
+    if (path === "/graphql" && (JSON.parse(String(init?.body)) as { query: string }).query.trim().startsWith("query")) {
+      return Response.json({ data: { repository: { pullRequest: { reviews: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ databaseId: 1, lastEditedAt: "2026-10-21T00:00:00Z" }] } } } } });
+    }
     if ((init?.method ?? "GET") !== "GET") writes.push(`${init?.method} ${path}`);
     if (path.includes("/protection/")) return new Response(null, { status: 403 });
     const body = githubAnswer(path);
@@ -170,8 +174,8 @@ test("every check passes over the real adapters, and nothing is written", async 
   const writeOnly = ["assignPullRequest", "declareReadiness"];
   const local = ["mergePolicy", "rateLimit", "forgetFeedback", "actionsRetentionDays"];
   expect(Object.keys(f.githubPort).filter((m) => !f.called.has(m) && !(m in readByProbe) && !writeOnly.includes(m) && !local.includes(m))).toEqual([]);
-  expect([...f.called].sort()).toEqual(["branches", "defaultBranchHead", "firstParent", "issueBranches", "mergedPullRequests", "readPullRequest", "readReadiness"]);
-  expect(results.find((r) => r.name.includes("merged-PR audit"))?.detail).toEqual({ merged: 1, newest: 6, base: "c".repeat(40) });
+  expect([...f.called].sort()).toEqual(["branches", "defaultBranchHead", "firstParent", "issueBranches", "mergedPullRequests", "readPullRequest", "readReadiness", "reviewEdits"]);
+  expect(results.find((r) => r.name.includes("merged-PR audit"))?.detail).toEqual({ merged: 1, newest: 6, base: "c".repeat(40), editedReviews: 1 });
   expect(results.find((r) => r.name.includes("readiness reread"))?.detail).toEqual({ state: "open", headSha: head, reviews: 0, declaration: null });
   expect(results.find((r) => r.name.includes("branch list"))?.detail).toEqual({ branches: 2 });
   const { text, exitCode } = report(results, "header");
@@ -204,7 +208,7 @@ test("a failed read, or a host on another version, fails its own line and the re
     "SKIP linear follow-up and retro issue reads (origin, issue, team states, relation and document by id)",
     `PASS github ${repo} default branch head (follow-up "Written against")`,
     `PASS github ${repo} branch list (takeover notice)`,
-    `PASS github ${repo} PRs merged in the last 72 hours, and the newest one's base (merged-PR audit)`,
+    `PASS github ${repo} PRs merged in the last 72 hours, and the newest one's base and review edits (merged-PR audit)`,
     `SKIP github ${repo} issue branches (report-only retry)`,
     `SKIP github ${repo} PR facts (mergeable state, human reviews, required checks)`,
     `SKIP github ${repo} squash message from PR text and commits`,

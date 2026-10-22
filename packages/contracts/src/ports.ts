@@ -246,6 +246,11 @@ export interface GitHubPort {
   mergedPullRequests?(repo: RepoSlug, since: Date): Promise<{ number: number; title: string; headSha: Sha; mergedSha: Sha; mergedAt: string }[]>;
   /** TECH-6617: a commit's first parent: the default branch just before a merge commit. Optional, like the reads above. */
   firstParent?(repo: RepoSlug, sha: Sha): Promise<Sha>;
+  /**
+   * TECH-6617: when each of a PR's edited reviews was last edited, by feedback id (`review:<id>`); a
+   * review never edited is absent. `readPullRequest` gives a review only its submission time.
+   */
+  reviewEdits?(repo: RepoSlug, number: number): Promise<Record<string, string>>;
   /** Comments `comment` on an open PR, unless it already has that comment, then closes it: a canceled task's PR (TECH-4989). */
   closePullRequest(req: { repo: RepoSlug; number: number; comment: string }): Promise<void>;
   /**
@@ -310,8 +315,9 @@ export type RunSpec = {
       pullRequests: PullRequestFacts[];
       focus?: string;
       /**
-       * TECH-6617: an audit as of merge, judged with what was known then. Only PR reviews and comments
-       * made at or before this time are in the brief, and the reviewer rules for an audit as of merge apply.
+       * TECH-6617: an audit as of merge, judged with what was known then. Only PR reviews and comments,
+       * and issue comments, made at or before this time are in the brief, the text of one edited after it
+       * withheld, and the reviewer rules for an audit as of merge apply.
        */
       feedbackCutoff?: string;
     }

@@ -220,8 +220,12 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     <merge_commit_sha>^1...<head.sha>` (the start spec's explicit `baseSha`). Its brief is the PR's title
     and body, the Linear issue the PR names (a closing reference in its body, else an identifier leading
     its title; with none, or one that cannot be read, the PR's own text is the requirements), and only the
-    PR reviews and comments, and issue comments, made up to the merge (the spec's `feedbackCutoff`). Its
-    rules: judge as of the merge, report only what was actionable then, never infer a defect from a later
+    PR reviews and comments, and issue comments, made up to the merge (the spec's `feedbackCutoff`). One
+    made by then but edited after it (its `updatedAt` is later: a Linear comment's, a GitHub comment's,
+    or a review's last edit, which only GitHub's GraphQL gives, so with no way to read it the audit does
+    not start) is listed by its author, kind, place and creation time, its text withheld with a note
+    that it was edited after the merge: neither source keeps the earlier text, and a silent omission
+    would let the auditor count as unraised something raised then. Its rules: judge as of the merge, report only what was actionable then, never infer a defect from a later
     rewrite or rollback; on a public repository, word findings about the code only. Its focus says it is a
     random sample of merged PRs, never that review was skipped.
   - **Who pays.** These audits run outside any task, on the registered accounts of `review.auditOwner`

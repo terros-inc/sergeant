@@ -49,3 +49,24 @@ test("pages closed PRs into the default branch, newest updated first, until one 
   expect(requests.filter((r) => r.includes("/pulls?"))).toHaveLength(2);
   await expect(port.mergedPullRequests?.("someone/else", since)).rejects.toThrow("GitHub repository is not allowed");
 });
+
+test("reads every page of a PR's review edit times from GraphQL, and fails on a GraphQL error rather than reading none", async () => {
+  const bodies: { variables: { after: string | null } }[] = [];
+  let fail = false;
+  const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    expect(String(input)).toBe("https://api.github.com/graphql");
+    const body = JSON.parse(String(init?.body)) as { variables: { owner: string; name: string; number: number; after: string | null } };
+    expect(body.variables).toMatchObject({ owner: "o", name: "r", number: 7 });
+    bodies.push(body);
+    if (fail) return Response.json({ errors: [{ message: "rate limited" }] });
+    const first = body.variables.after === null;
+    const nodes = first ? [{ databaseId: 1, lastEditedAt: null }, { databaseId: 2, lastEditedAt: "2026-10-21T09:00:00Z" }] : [{ databaseId: 3, lastEditedAt: "2026-10-22T01:00:00Z" }];
+    return Response.json({ data: { repository: { pullRequest: { reviews: { pageInfo: { hasNextPage: first, endCursor: first ? "c1" : null }, nodes } } } } });
+  };
+  const port = createGitHubPort({ token: async () => "test", repositories: { [repo]: { mergeMethod: "squash" } }, fetch });
+
+  expect(await port.reviewEdits?.(repo, 7)).toEqual({ "review:2": "2026-10-21T09:00:00.000Z", "review:3": "2026-10-22T01:00:00.000Z" });
+  expect(bodies.map((b) => b.variables.after)).toEqual([null, "c1"]);
+  fail = true;
+  await expect(port.reviewEdits?.(repo, 7)).rejects.toThrow("rate limited");
+});

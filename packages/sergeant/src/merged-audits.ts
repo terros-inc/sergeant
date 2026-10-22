@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Conversation, isRateLimited, NoModelAccount, type RepoSlug, RunId, safeJson, type Sha } from "@terros/sergeant-contracts";
+import { type Conversation, isRateLimited, NoModelAccount, type PullRequestFeedback, type RepoSlug, RunId, safeJson, type Sha } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import type { Ports } from "./execute-types.ts";
 import { auditDrawn, auditRunId, type PrHead } from "./review-quality.ts";
@@ -120,7 +120,12 @@ type MergedPr = PrHead & { title: string; mergedSha: Sha; mergedAt: string };
 
 /** Starts the audit of the PR's pre-merge head, with the brief as of its merge. */
 async function startAudit(runId: RunId, m: MergedPr, owner: string, deps: MergedAuditDeps): Promise<void> {
-  const pr = await deps.github.readPullRequest(m.repo, m.number);
+  // A review's edit time comes only from its own read, and the brief needs it to withhold a review
+  // edited after the merge: without it, start nothing (retried next pass) rather than show hindsight.
+  if (!deps.github.reviewEdits) throw new Error("GitHub cannot say when its reviews were last edited");
+  const [read, edits] = await Promise.all([deps.github.readPullRequest(m.repo, m.number), deps.github.reviewEdits(m.repo, m.number)]);
+  const edited = (f: PullRequestFeedback): PullRequestFeedback => (edits[f.id] ? { ...f, updatedAt: edits[f.id]! } : f);
+  const pr = { ...read, humanFeedback: read.humanFeedback.map(edited), ...(read.botFeedback && { botFeedback: read.botFeedback.map(edited) }) };
   const baseSha = await deps.github.firstParent?.(m.repo, m.mergedSha);
   const issue = referencedIssue(m.title, pr.body);
   // An unreadable reference leaves the PR's own text as the requirements, as with none.

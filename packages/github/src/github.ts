@@ -4,7 +4,7 @@ import { hasComment, readFeedback } from "./pr-feedback.ts";
 import { branchRules, checkRun, checkRuns, commitStatus, gitRef, issueAssignees, mergeResponse, protection, pullRequest, pullRequestFiles, pullRequestHead, pullRequestList, repositoryConfig, requiredRule } from "./schemas.ts";
 import { handToHuman } from "./hand-to-human.ts";
 import { rateLimiter } from "./rate-limit.ts";
-import { firstParent, mergedPullRequests } from "./merged-prs.ts";
+import { firstParent, mergedPullRequests, reviewEdits } from "./merged-prs.ts";
 import { retriggerChecks } from "./retrigger.ts";
 import { declareReadiness, readReadiness } from "./readiness.ts";
 import { readSquashMessage } from "./squash-message.ts";
@@ -337,6 +337,11 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
     async firstParent(repo, sha) {
       configFor(repo);
       return firstParent(request, repo, sha);
+    },
+
+    async reviewEdits(repo, number) {
+      configFor(repo);
+      return reviewEdits(request, repo, number);
     },
 
     actionsRetentionDays: (repo) => configFor(repo).config.actionsRetentionDays ?? DEFAULT_ACTIONS_RETENTION_DAYS,

@@ -14,7 +14,7 @@ type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
   "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
 > & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "validateTarget" | "lastRetro" | "feedbackTasks" | "filedIssues"> };
-type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness" | "mergedPullRequests" | "firstParent">;
+type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness" | "mergedPullRequests" | "firstParent" | "reviewEdits">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
 
 const DAY_MS = 86_400_000;
@@ -174,12 +174,15 @@ export function githubChecks(
     },
   };
   const merged: SmokeCheck = {
-    name: `github ${repo} PRs merged in the last 72 hours, and the newest one's base (merged-PR audit)`,
+    name: `github ${repo} PRs merged in the last 72 hours, and the newest one's base and review edits (merged-PR audit)`,
     covers: ["TECH-6617"],
     run: async () => {
-      if (!github.mergedPullRequests || !github.firstParent) throw new Error("the GitHub adapter has no mergedPullRequests or firstParent");
+      if (!github.mergedPullRequests || !github.firstParent || !github.reviewEdits) throw new Error("the GitHub adapter has no mergedPullRequests, firstParent or reviewEdits");
       const prs = await github.mergedPullRequests(repo, new Date(Date.now() - 72 * 3_600_000));
-      return { merged: prs.length, ...(prs[0] && { newest: prs[0].number, base: await github.firstParent(repo, prs[0].mergedSha) }) };
+      const newest = prs[0];
+      if (!newest) return { merged: 0 };
+      const [base, edits] = await Promise.all([github.firstParent(repo, newest.mergedSha), github.reviewEdits(repo, newest.number)]);
+      return { merged: prs.length, newest: newest.number, base, editedReviews: Object.keys(edits).length };
     },
   };
   const issueBranches: SmokeCheck = {

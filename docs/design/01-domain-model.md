@@ -406,7 +406,7 @@ ReviewBrief {
   runId, taskId
   trigger: required | audit
   task?: TaskExcerpt            // absent: a merged-PR audit whose PR names no Linear issue; the PR's text is the requirements (06 §8)
-  feedbackCutoff?               // a merged-PR audit's merge time: only feedback made by then, judged as of merge (06 §8)
+  feedbackCutoff?               // a merged-PR audit's merge time: only feedback made by then, as it read then (06 §8)
   subject: {
     pullRequests: [{ repo, number, url, baseRef, baseSha, headSha }]
     previousReviews: [{ reviewRunId, reviewedSha, findings: Finding[] }]

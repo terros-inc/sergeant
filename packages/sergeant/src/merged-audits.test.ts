@@ -29,6 +29,7 @@ async function harness(over: Partial<MergedAuditOptions> = {}) {
       mergedPullRequests: async (_: string, since: Date) => (listed.push(since), merged),
       readPullRequest: async (_: string, number: number) => facts(number),
       firstParent: async (_: string, mergedSha: string) => mergedSha.replace(/^0/, "f"),
+      reviewEdits: async () => ({}),
     },
     linear: { readConversation: async (id: string) => ({ issue: { identifier: id } }) as Conversation },
     runner: {
@@ -113,4 +114,21 @@ test("the merged-PR draw is salted apart from the skipped-review draw", () => {
   // Unsalted, every head drawn at 0.1 would also be drawn at 0.2; independent, about 80% are not.
   const alsoTask = merged.filter((h) => auditDrawn(0.2, h)).length;
   expect(alsoTask / merged.length).toBeLessThan(0.4);
+});
+
+test("a review edited after it was submitted carries its edit time into the audit, and with no way to read it nothing starts", async () => {
+  const t = await harness();
+  const review = (id: string) => ({ id, kind: "review", author: "ada", state: "APPROVED", body: "LGTM", path: null, line: null, commitId: sha(1), createdAt: "2026-10-20T00:00:00.000Z", updatedAt: "2026-10-20T00:00:00.000Z", url: `https://github.com/o/r/pull/1#${id}` }) as const;
+  const github = t.deps.github as unknown as Record<string, unknown>;
+  github.readPullRequest = async (_: string, number: number) => ({ ...facts(number), humanFeedback: [review("review:1"), review("review:2")], botFeedback: [review("review:3")] });
+  github.reviewEdits = async () => ({ "review:2": "2026-10-21T09:00:00.000Z", "review:3": "2026-10-21T10:00:00.000Z" });
+  await t.pass();
+  // The brief compares each with the merge time (brief-as-of-merge.test.ts); a submission time alone would pass review:2 and review:3 as unedited.
+  expect(t.started[0]?.pullRequests[0]?.humanFeedback.map((f) => f.updatedAt)).toEqual(["2026-10-20T00:00:00.000Z", "2026-10-21T09:00:00.000Z"]);
+  expect(t.started[0]?.pullRequests[0]?.botFeedback?.map((f) => f.updatedAt)).toEqual(["2026-10-21T10:00:00.000Z"]);
+
+  const blind = await harness();
+  delete (blind.deps.github as unknown as Record<string, unknown>).reviewEdits;
+  await blind.pass();
+  expect(blind.started).toEqual([]);
 });
