@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Conversation, isRateLimited, NoModelAccount, type PullRequestFeedback, type RepoSlug, RunId, safeJson, type Sha } from "@terros/sergeant-contracts";
+import { type Conversation, isRateLimited, NoModelAccount, type PullRequestFeedback, RepoSlug, RunId, safeJson, Sha } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import type { Ports } from "./execute-types.ts";
+import { harvestAudits } from "./merged-audit-harvest.ts";
 import { auditDrawn, auditRunId, type PrHead } from "./review-quality.ts";
 import { isTaskStateFile, landings, readTaskState } from "./task-state.ts";
 import { pause } from "./wake.ts";
@@ -14,9 +15,11 @@ import { pause } from "./wake.ts";
 // reviewer of its pre-merge head, judged as of the merge. The run id is `auditRunId` of the PR and head,
 // so a restart or a re-scan of the overlapping window starts nothing new (the runner's start is
 // idempotent on it), and a head a task's own audit already took keeps that audit's id. These audits run
-// outside any task, on `review.auditOwner`'s registered accounts, within a daily cap. The only state is
-// `merged-audits.json`: when the last pass ran and the audits it started, so the cap holds across a
-// restart; losing it means one more pass now and a cap that forgets the last day.
+// outside any task, on `review.auditOwner`'s registered accounts, within a daily cap, and are finished
+// by `harvestAudits` (TECH-6618). The only state is `merged-audits.json`: when the last pass ran and the
+// audits it started, with what was recorded of each, so the cap holds across a restart; losing it means
+// one more pass now, a cap that forgets the last day, and, for an audit whose PR has left the window, no
+// record (`reviews.jsonl` keeps any audit already recorded from being recorded twice).
 
 const WINDOW_MS = 72 * 3_600_000;
 const DAY_MS = 24 * 3_600_000;
@@ -30,9 +33,22 @@ const UNKNOWN_AUDIT_USD = 5;
 
 const Ledger = z.object({
   lastPassAt: z.iso.datetime().optional(),
-  started: z.array(z.object({ runId: RunId, at: z.iso.datetime() })).default([]),
+  started: z
+    .array(
+      z.object({
+        runId: RunId,
+        at: z.iso.datetime(),
+        /** TECH-6618: the merged PR it audits, so it is harvested even after the PR leaves the 72-hour window. */
+        subject: z.object({ repo: RepoSlug, number: z.number().int(), headSha: Sha, mergedSha: Sha, issue: z.string().optional() }).optional(),
+        /** Its `ReviewFacts` line is written, the last step, after its comment settled. */
+        recorded: z.boolean().optional(),
+        /** Its PR comment, once posted. */
+        auditCommentId: z.number().int().optional(),
+      }),
+    )
+    .default([]),
 });
-type Ledger = z.infer<typeof Ledger>;
+export type Ledger = z.infer<typeof Ledger>;
 
 export type MergedAuditOptions = {
   stateDir: string;
@@ -57,26 +73,29 @@ export async function mergedAuditsEvery(opts: MergedAuditOptions, deps: MergedAu
   }
 }
 
-/** One pass, if a day has gone by since the last one. */
+/** Harvests the audits that finished, then draws, if a day has gone by since the last draw. */
 export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAuditDeps): Promise<void> {
   const now = opts.now?.() ?? new Date();
-  const repos = opts.enrolledRepositories.filter((r) => opts.rateOf(r) > 0);
-  if (repos.length === 0) return;
   const file = join(opts.stateDir, "merged-audits.json");
   const ledger = await readLedger(file);
-  if (ledger.lastPassAt && now.getTime() - Date.parse(ledger.lastPassAt) < DAY_MS) return;
   const save = async () => {
     const tmp = `${file}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify(ledger, null, 2));
     await rename(tmp, file);
   };
+  await harvestAudits(ledger, opts, deps, save);
+  const repos = opts.enrolledRepositories.filter((r) => opts.rateOf(r) > 0);
+  if (repos.length === 0) return;
+  if (ledger.lastPassAt && now.getTime() - Date.parse(ledger.lastPassAt) < DAY_MS) return;
   const owner = opts.auditOwner;
   if (!owner) {
     opts.log(`merged-PR audits: review.auditOwner is not set, so no audit outside a task runs in ${repos.join(", ")}`);
     ledger.lastPassAt = now.toISOString();
     return save();
   }
-  ledger.started = ledger.started.filter((s) => now.getTime() - Date.parse(s.at) < WINDOW_MS + DAY_MS);
+  // An audit not recorded yet is kept however long its run takes; a recorded one only while a re-scan
+  // could still meet its PR, so the draw knows it.
+  ledger.started = ledger.started.filter((s) => (s.subject && !s.recorded) || now.getTime() - Date.parse(s.at) < WINDOW_MS + DAY_MS);
   const taskAudit = await taskAudits(opts.stateDir);
   const known = new Set([...ledger.started.map((s) => s.runId), ...taskAudit.values()]);
   const cap = opts.budgetUsdPerDay ?? DEFAULT_QUALITY_BUDGET_USD_PER_DAY;
@@ -90,24 +109,40 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
       if (!auditDrawn(opts.rateOf(repo), head, "merged-audit")) continue;
       // A head a task's audit already took is audited once, under the id that task recorded.
       const runId = taskAudit.get(headKey(head)) ?? auditRunId(repo, m.number, m.headSha);
-      if (known.has(runId)) continue;
+      if (known.has(runId)) {
+        // An entry written before TECH-6618 has no PR head, so the harvest skips it: the re-scan gives it one.
+        const legacy = ledger.started.find((s) => s.runId === runId && !s.subject);
+        if (!legacy) continue;
+        const read = await deps.github.readPullRequest(repo, m.number).then(
+          (pr) => ({ issue: referencedIssue(m.title, pr.body) }),
+          (e: Error) => {
+            if (isRateLimited(e)) throw e;
+            opts.log(`merged-PR audit ${runId} of ${repo}#${m.number}: PR unreadable, retrying next pass: ${e.message}`);
+            return undefined;
+          },
+        );
+        if (!read) continue;
+        legacy.subject = { repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha, ...(read.issue && { issue: read.issue }) };
+        await save();
+        continue;
+      }
       // The audit starts only if its own reservation fits too, so the cap is never overshot.
       if (spent + UNKNOWN_AUDIT_USD > cap) {
         opts.log(`merged-PR audits: another audit would exceed the daily cap of $${cap.toFixed(2)} ($${spent.toFixed(2)} spent); ${repo}#${m.number} and the rest wait for the next day's pass`);
         break scan;
       }
       const started = await startAudit(runId, { ...m, repo }, owner, deps).then(
-        () => true,
+        (issue) => ({ repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha, ...(issue && { issue }) }),
         (e: Error) => {
           if (isRateLimited(e)) throw e;
           opts.log(`merged-PR audit ${runId} of ${repo}#${m.number} not started, retrying next pass: ${e instanceof NoModelAccount ? `the audit owner has no usable model account (${e.message})` : e.message}`);
-          return false;
+          return undefined;
         },
       );
       if (!started) continue;
       opts.log(`merged-PR audit ${runId} started for ${repo}#${m.number} as of its merge (nonblocking)`);
       known.add(runId);
-      ledger.started.push({ runId, at: now.toISOString() });
+      ledger.started.push({ runId, at: now.toISOString(), subject: started });
       spent += UNKNOWN_AUDIT_USD;
       await save();
     }
@@ -118,8 +153,8 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
 
 type MergedPr = PrHead & { title: string; mergedSha: Sha; mergedAt: string };
 
-/** Starts the audit of the PR's pre-merge head, with the brief as of its merge. */
-async function startAudit(runId: RunId, m: MergedPr, owner: string, deps: MergedAuditDeps): Promise<void> {
+/** Starts the audit of the PR's pre-merge head, with the brief as of its merge; resolves the Linear issue the PR names. */
+async function startAudit(runId: RunId, m: MergedPr, owner: string, deps: MergedAuditDeps): Promise<string | undefined> {
   // A review's edit time comes only from its own read, and the brief needs it to withhold a review
   // edited after the merge: without it, start nothing (retried next pass) rather than show hindsight.
   if (!deps.github.reviewEdits) throw new Error("GitHub cannot say when its reviews were last edited");
@@ -145,6 +180,7 @@ random sample of the PRs merged in this repository, whoever wrote them and howev
 measure how often a merged change had an actionable issue nobody raised before its merge. Review this head as
 you would have just before the merge. Nothing you find blocks, reverts, or reopens anything.`,
   });
+  return issue;
 }
 
 /**

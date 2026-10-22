@@ -733,7 +733,9 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   **`review.auditOwner`** (optional, a Linear user id, no default) and **`review.qualityBudgetUsdPerDay`**
   (optional, default 25): the daily merged-PR audit, who pays for it, and its cap
   ([design 06 §8](../docs/design/06-review.md#8-calibration-sampling-unf-641-preserved)). Approvers set
-  a repository's rate with `sgt admin repo audit-rate <owner/name> <0..1>`.
+  a repository's rate with `sgt admin repo audit-rate <owner/name> <0..1>`. Each finished audit gets
+  a `<state dir>/reviews.jsonl` line and one nonblocking comment on its PR, filtered on a public
+  repository (TECH-6618).
 - **`budget`** (optional) is the budget window a task gets when it starts or a human answers one of its
   questions, for `serve` and `canary` alike: `"budget": { "minutes": 45, "usd": 10 }` (positive
   numbers, each optional; unset, 120 minutes and $25; Budget below).
@@ -768,7 +770,11 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   names, one per line, that a worker's push to a public repository must not carry. Add the name to
   `secret_names` too. Each worker gets the list as `PUBLIC_DATA_DENYLIST`, read only by the pre-push
   hook the runner image installs in its clones (`packages/runner/container/check-public-data.mjs`); the
-  hook also refuses Terros IDs, emails, and phone numbers, with or without the list. Keep the same list
+  hook also refuses Terros IDs, emails, and phone numbers, with or without the list. The core reads it
+  too, to filter the model-written text of its own comments on a public repository (the readiness
+  reason, [design 08 §12](../docs/design/08-github-contract.md#12-readiness-and-agreement); audit
+  findings, [design 06 §8](../docs/design/06-review.md#8-calibration-sampling-unf-641-preserved)); without
+  it those comments carry fixed text only. Keep the same list
   as the `PUBLIC_DATA_DENYLIST` Actions secret of each public repository whose CI runs that check,
   written there on one line with commas, so Actions masks it whole in the public log.
 

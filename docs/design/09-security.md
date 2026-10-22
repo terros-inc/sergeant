@@ -180,6 +180,10 @@ carry instructions aimed at Sergeant. A worker with a compromised context could 
   credential shapes) before reaching S3. Operational logs in CloudWatch are redacted the same way.
 - Linear receives only concise summaries Sergeant wrote, also redacted.
 - The ledger holds no secrets: references only, and a hash of each run token.
+- **Public repositories.** Sergeant's own PR comments on a public repository carry only fixed text,
+  record-built lines, and model-written text that passes the public-data check: a readiness reason
+  ([08 §12](08-github-contract.md#12-readiness-and-agreement)) and code-anchored audit findings; the
+  full text stays in Sergeant's records ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved)).
 
 ## 8. Jev as an optional watchdog
 

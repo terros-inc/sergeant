@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { Conversation, PullRequestFacts, RunRecord, RunSpec } from "@terros/sergeant-contracts";
 import { mergedAuditPass, type MergedAuditDeps, type MergedAuditOptions } from "./merged-audits.ts";
-import { auditDrawn, auditRunId } from "./review-quality.ts";
+import { auditDrawn, auditRunId, type ReviewFacts } from "./review-quality.ts";
 
 // TECH-6617: the daily merged-PR audit. What it must never do: start audits in a repository nobody turned
 // on, or with nobody to pay for them; start a second audit of a PR a restart, a re-scan of the overlapping
@@ -131,4 +131,122 @@ test("a review edited after it was submitted carries its edit time into the audi
   delete (blind.deps.github as unknown as Record<string, unknown>).reviewEdits;
   await blind.pass();
   expect(blind.started).toEqual([]);
+});
+
+// TECH-6618: a finished audit outside a task is recorded by this loop, exactly once, after its PR comment settled.
+const report = { reportVersion: "s2-review-report/1", reviewed: [{ repo, number: 1, headSha: sha(1), found: true }], verdict: "changes_requested", summary: "s", unreadableInputs: [], dependencies: [], findings: [{ id: "f1", severity: "blocking", description: "d", location: "a.ts:1" }] };
+const at = (hours: number) => ({ now: () => new Date(now.getTime() + hours * 3_600_000) });
+
+/** One audit a day ($5 cap), each run finishing once `finished` is set, each comment posting unless `failing`. */
+async function auditing() {
+  const t = await harness({ budgetUsdPerDay: 5 });
+  const state = { finished: false, failing: false };
+  t.deps.runner.status = async (runId) => ({ runId, role: "reviewer", provider: "openai/codex", model: "m", costUsd: 1, ...(state.finished ? { status: "succeeded", report } : { status: "running" }) }) as unknown as RunRecord;
+  const comments: unknown[] = [];
+  t.deps.github.postAuditComment = async (req) => {
+    comments.push(req);
+    if (state.failing) throw new Error("GitHub 502");
+    return { id: 9 };
+  };
+  const lines = async () => (await readFile(join(t.stateDir, "reviews.jsonl"), "utf8").catch(() => "")).split("\n").filter(Boolean).map((l) => JSON.parse(l) as ReviewFacts);
+  return { ...t, state, comments, lines };
+}
+
+test("a finished audit gets one ReviewFacts line and one comment, across hourly checks and the next day's re-scan", async () => {
+  const t = await auditing();
+  await t.pass();
+  expect(t.started).toHaveLength(1);
+  // Still running at the next hourly check: nothing recorded yet.
+  await t.pass(at(1));
+  expect(await t.lines()).toEqual([]);
+
+  t.state.finished = true;
+  for (const h of [2, 3, 26, 27]) await t.pass(at(h));
+  // The next day's pass re-scans PR 1 and, under that day's cap, starts PR 2's audit, recorded once too.
+  expect(t.listed).toHaveLength(2);
+  expect(t.started.map((s) => s.subject[0]?.number)).toEqual([1, 2]);
+  // The fake report names PR 1's head in both runs: on PR 2 a report about another head shows nothing.
+  expect(t.comments).toHaveLength(1);
+  expect(t.comments[0]).toEqual({ repo, number: 1, headSha: sha(1), verdict: "changes_requested", found: true, summary: "s", findings: report.findings });
+  const recorded = await t.lines();
+  expect(recorded.map((f) => f.runId)).toEqual([auditRunId(repo, 1, sha(1)), auditRunId(repo, 2, sha(2))]);
+  expect(recorded[0]).toMatchObject({
+    runId: auditRunId(repo, 1, sha(1)),
+    trigger: "audit",
+    issue: "UNF-9",
+    subject: [{ repo, number: 1, headSha: sha(1), found: true, auditCommentId: 9 }],
+    merged: { repo, number: 1, headSha: sha(1), mergedSha: sha(100) },
+    followUp: true,
+  });
+});
+
+test("a comment that fails is retried before the audit is recorded, then recorded once with its id", async () => {
+  const t = await auditing();
+  await t.pass();
+  t.state.finished = t.state.failing = true;
+  await t.pass(at(1));
+  await t.pass(at(2));
+  // Recording before the comment settled would need a second line once it posts.
+  expect(await t.lines()).toEqual([]);
+  t.state.failing = false;
+  for (const h of [3, 4]) await t.pass(at(h));
+  expect(t.comments).toHaveLength(3);
+  expect((await t.lines()).map((f) => [f.runId, f.subject[0]?.auditCommentId])).toEqual([[auditRunId(repo, 1, sha(1)), 9]]);
+});
+
+test("a comment failing for over a week is still retried, and the audit recorded once with its id when it posts", async () => {
+  const t = await auditing();
+  await t.pass();
+  t.state.finished = t.state.failing = true;
+  // Only PR 1 stays in the window, so the daily draws, which prune the ledger, start nothing else.
+  t.deps.github.mergedPullRequests = async () => merged.slice(0, 1);
+  // Hourly checks over eight days of a GitHub outage: giving up would record the audit without its comment for good.
+  for (let h = 1; h <= 192; h++) await t.pass(at(h));
+  expect(t.comments).toHaveLength(192);
+  expect(await t.lines()).toEqual([]);
+  t.state.failing = false;
+  for (const h of [193, 194]) await t.pass(at(h));
+  expect(t.comments).toHaveLength(193);
+  expect((await t.lines()).map((f) => [f.runId, f.subject[0]?.auditCommentId])).toEqual([[auditRunId(repo, 1, sha(1)), 9]]);
+});
+
+test("an audit that finishes after a week is still recorded", async () => {
+  const t = await auditing();
+  await t.pass();
+  // PR 1 leaves the 72-hour window, so no re-scan would find its audit again; the daily draws prune the ledger.
+  t.deps.github.mergedPullRequests = async () => [];
+  for (let day = 1; day <= 8; day++) await t.pass(at(day * 25));
+  t.state.finished = true;
+  await t.pass(at(8 * 25 + 1));
+  expect((await t.lines()).map((f) => f.runId)).toEqual([auditRunId(repo, 1, sha(1))]);
+});
+
+test("losing merged-audits.json after an audit was recorded writes no second line and posts no second comment", async () => {
+  const t = await auditing();
+  await t.pass();
+  t.state.finished = true;
+  await t.pass(at(1));
+  expect(await t.lines()).toHaveLength(1);
+  await rm(join(t.stateDir, "merged-audits.json"));
+  // The re-scan restarts nothing (the runner is idempotent) and re-adds PR 1's audit to the ledger, unrecorded.
+  await t.pass(at(2));
+  await t.pass(at(3));
+  expect(t.comments).toHaveLength(1);
+  expect((await t.lines()).map((f) => f.runId)).toEqual([auditRunId(repo, 1, sha(1))]);
+});
+
+test("an audit started before TECH-6618, with no PR head in the ledger, gets one line and one comment once its run finishes", async () => {
+  const t = await auditing();
+  const runId = auditRunId(repo, 1, sha(1));
+  // The ledger as the TECH-6617 loop wrote it, with a draw due now; only PR 1 is in the window, so nothing else starts.
+  t.deps.github.mergedPullRequests = async () => merged.slice(0, 1);
+  const legacy = { lastPassAt: new Date(now.getTime() - 25 * 3_600_000).toISOString(), started: [{ runId, at: new Date(now.getTime() - 2 * 3_600_000).toISOString() }] };
+  await writeFile(join(t.stateDir, "merged-audits.json"), JSON.stringify(legacy));
+  t.state.finished = true;
+  for (const h of [0, 1, 2, 26, 27]) await t.pass(at(h));
+  expect(t.started).toEqual([]);
+  expect(t.comments).toEqual([{ repo, number: 1, headSha: sha(1), verdict: "changes_requested", found: true, summary: "s", findings: report.findings }]);
+  const recorded = await t.lines();
+  expect(recorded.map((f) => f.runId)).toEqual([runId]);
+  expect(recorded[0]).toMatchObject({ issue: "UNF-9", subject: [{ repo, number: 1, headSha: sha(1), found: true, auditCommentId: 9 }], merged: { mergedSha: sha(100) } });
 });
