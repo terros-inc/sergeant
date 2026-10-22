@@ -137,14 +137,63 @@ export function fingerprintOf(s: SituationReport, unsettled: string[] = [], ownL
       return [p.repo, p.number, p.state, p.draft, p.headSha, p.baseSha, settled ? p.mergeable : null, settled ? p.mergeableState : "unknown", p.checks];
     }),
   };
-  // TECH-6166: a bot's new finding wakes a turn, often after the worker that pushed has finished. The
-  // worker's own replies on its PR do not: they answer findings, and its run's end wakes the turn. Nor
-  // do Sergeant's own comments (its approval, a hand-to-human summary): it posted them in a turn. Left
-  // out while there are none, so a task's earlier fingerprints still match.
-  const own = (author: string, p: PullRequestFacts) => author === p.author || ownLogins.includes(author);
-  const bots = s.pullRequests.flatMap((p) => (p.botFeedback ?? []).filter((f) => !own(f.author, p)).map((f) => [p.repo, p.number, f.id, f.updatedAt]));
+  // Left out while there are none, so a task's earlier fingerprints still match.
+  const bots = botFindings(s, ownLogins);
   return createHash("sha256").update(JSON.stringify(bots.length > 0 ? { ...facts, bots } : facts)).digest("hex");
 }
+
+/**
+ * TECH-6166: a bot's new finding wakes a turn, often after the worker that pushed has finished. The
+ * worker's own replies on its PR do not: they answer findings, and its run's end wakes the turn. Nor
+ * do Sergeant's own comments (its approval, a hand-to-human summary): it posted them in a turn.
+ */
+function botFindings(s: SituationReport, ownLogins: string[]) {
+  const own = (author: string, p: PullRequestFacts) => author === p.author || ownLogins.includes(author);
+  return s.pullRequests.flatMap((p) => (p.botFeedback ?? []).filter((f) => !own(f.author, p)).map((f) => [p.repo, p.number, f.id, f.updatedAt]));
+}
+
+/**
+ * TECH-6669: the facts a task that is waiting wakes on, kept with each committed turn (`state.waitFacts`)
+ * and compared instead of the fingerprint while it is kept. They are the fingerprint's facts and the
+ * issue's state and blockers, less two things that change while nothing a wait is for does: the base
+ * branch moving under a PR in a repository whose merges are a human's (no merge of Sergeant's for it
+ * to let through, TECH-5062; GitHub's mergeability says when the PR falls behind or conflicts), and the
+ * mergeability GitHub is still computing after such a move, which counts as the last one it settled
+ * (`prev`) until it settles again. A busy base branch otherwise woke every waiting task each time the
+ * PRs were reread, often twice: once on the moved base with mergeability unknown, then once it settled.
+ * A PR in `unsettled` (`unsettledMerges`) is recorded with none, so its first settled mergeability wakes
+ * one turn, as in the fingerprint. Nor is the budget window here: what opens a fresh one (a human's
+ * comment, review or answer, a blocker going) is.
+ */
+export function waitFactsOf(
+  s: SituationReport,
+  opts: { unsettled?: string[]; ownLogins?: string[]; humanMerged: (repo: RepoSlug) => boolean },
+  prev?: WaitFacts,
+): WaitFacts {
+  const unsettled = opts.unsettled ?? [];
+  const { issue } = s.conversation;
+  const facts = {
+    conversation: s.conversationRevision,
+    issue: [issue.state, issue.stateType, [...(issue.blockedBy ?? [])].sort()],
+    linked: issue.linkedPullRequests.map((p) => `${p.repo}#${p.number}`).sort(),
+    runs: s.runs.map((r) => [r.runId, r.status]),
+    prs: s.pullRequests.map((p) => [p.repo, p.number, p.state, p.draft, p.headSha, opts.humanMerged(p.repo) ? null : (p.baseSha ?? null), p.checks]),
+    bots: botFindings(s, opts.ownLogins ?? []),
+  };
+  const mergeability: Record<string, string> = {};
+  for (const p of s.pullRequests.filter((p) => p.state === "open")) {
+    const key = `${p.repo}#${p.number}`;
+    if (unsettled.includes(key)) continue;
+    const value = p.mergeable !== null && p.mergeableState !== "unknown" ? `${p.mergeable}:${p.mergeableState}` : prev?.mergeability[key];
+    if (value !== undefined) mergeability[key] = value;
+  }
+  return { facts: createHash("sha256").update(JSON.stringify(facts)).digest("hex"), mergeability };
+}
+
+export type WaitFacts = { facts: string; mergeability: Record<string, string> };
+
+export const sameWaitFacts = (a: WaitFacts, b: WaitFacts) =>
+  a.facts === b.facts && JSON.stringify(Object.entries(a.mergeability).sort()) === JSON.stringify(Object.entries(b.mergeability).sort());
 
 export const describePr = (p: PullRequestFacts) =>
   `${p.repo}#${p.number} ${p.state} @${p.headSha.slice(0, 12)} checks ${p.checks.required.map((c) => `${c.name}=${c.state}`).join(",") || "none"}`;

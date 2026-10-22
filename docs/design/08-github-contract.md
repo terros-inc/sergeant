@@ -186,7 +186,14 @@ a merge for a PR that the turn's poll saw as mergeable, the committed fingerprin
 `mergeable: null` and `mergeableState: unknown`, matching the merge preflight's later read; a PR the
 poll already saw M7 refuse (`behind`, say) is recorded as it was, so the same facts wake no turn. The first poll that reports definite
 mergeability again then differs and wakes exactly one turn. `baseSha` is also part of the fingerprint,
-so a moved base wakes a turn even when the other PR facts are unchanged. A failed `ask_human` or
+so a moved base wakes a turn even when the other PR facts are unchanged. TECH-6669: with each committed
+turn the loop also keeps its wait facts, which then decide instead: the fingerprint's facts and the
+issue's state and blockers, less the base of a PR in a repository whose `mergePolicy` is `human` (no
+merge of Sergeant's for a moved base to let through; GitHub's mergeability says when the PR falls behind
+or conflicts), less the budget window, and with mergeability GitHub is still computing counted as the
+last value it settled. So a task waiting on a human merge or hold takes no turn, spends nothing and asks
+no budget question while a busy base branch moves under its PRs, and one change wakes one turn rather
+than a second as GitHub settles mergeability; `sgt task wake` still takes one. A failed `ask_human` or
 `close_issue` leaves the fingerprint uncommitted, so it can be retried after the next poll or a
 restart. So does a hollow turn (TECH-6490): every turn's `intent` is one choice, act (naming each
 kind of action its summary describes) or wait (naming what on), and a turn whose `act` kinds are not
