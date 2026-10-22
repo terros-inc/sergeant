@@ -30,6 +30,7 @@ import { byRole, containerRunner, fargateRunner, pruneWorkspaces, reasoningFiles
 import { modelAccounts } from "./accounts.ts";
 import { apiCalls } from "./api-calls.ts";
 import { linearCallers } from "./auth.ts";
+import { DEFAULT_BUDGET } from "./budget.ts";
 import { connect, fargateSettings, githubLoginLookup, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
 import { decimalFlag, integerFlag } from "./cli-numbers.ts";
 import { appsReach, configParameter, enrolledIn, enrollment } from "./enrollment.ts";
@@ -129,6 +130,7 @@ const enrolled = enrollment({
   parameter,
   version: started?.version,
   reach: appsReach({ "control-plane": installation.controlPlaneApp, worker: installation.workerApp }),
+  budget: { ...DEFAULT_BUDGET, ...taskBudget(config) },
   retro,
   log,
 });

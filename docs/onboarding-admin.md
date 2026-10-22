@@ -38,6 +38,7 @@ once both GitHub Apps can reach it:
 sgt admin repo add <owner/name> --merge-policy human      # Sergeant hands the ready PR to a human
 sgt admin repo add <owner/name> --merge-policy sergeant   # Sergeant approves and merges
 sgt admin repo remove <owner/name>
+sgt admin repo budget <owner/name> --wall-minutes 60   # its own budget window; --cost-usd too, default clears
 ```
 
 Without `--merge-policy` a repository is `human`, and `--merge-method squash|merge|rebase` defaults to

@@ -17,7 +17,7 @@ import {
   type SituationReport,
 } from "@terros/sergeant-contracts";
 import { z } from "zod";
-import { DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
+import { DEFAULT_BUDGET, type BudgetWindow, type RepositoryBudgets } from "./budget.ts";
 import { costTotal } from "./cost.ts";
 import type { ActionOutcome } from "./execute.ts";
 import { feedbackComment, outcomeComment } from "./outcome.ts";
@@ -109,6 +109,8 @@ const TaskState = z.looseObject({
       activeSince: z.iso.datetime({ offset: true }).optional(),
       /** TECH-6165: which window of the task this is (budget.ts `openWindow`); absent means 0. */
       windowSeq: z.number().int().nonnegative().optional(),
+      /** TECH-6606: every enrolled repository's own budget when the window opened (budget.ts `windowOverride`). */
+      repositoryBudgets: z.record(z.string(), z.looseObject({ wallMinutes: z.number().positive().optional(), costUsd: z.number().positive().optional() })).optional(),
     }),
   /**
    * TECH-6225: the id of a budget question asked before TECH-6165, under its window's start
@@ -255,9 +257,9 @@ export function applyTurn(
   }
 }
 
-/** The task's state, or a new task starting now with `window`; a task's stored window always wins. */
-export async function loadState(file: string, issueId: string, window: BudgetWindow): Promise<State> {
-  const budget = { window, activeMs: 0 };
+/** The task's state, or a new task starting now with `window` and `repositoryBudgets`; a task's stored window always wins. */
+export async function loadState(file: string, issueId: string, window: BudgetWindow, repositoryBudgets: RepositoryBudgets = {}): Promise<State> {
+  const budget = { window, activeMs: 0, repositoryBudgets };
   const state =
     (await readTaskState(file, window)) ??
     TaskState.parse({ issueId, startedAt: new Date().toISOString(), turns: 0, runIds: [], recentTurns: [], budget });

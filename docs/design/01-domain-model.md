@@ -243,6 +243,7 @@ TaskBudget {                    // what the task row keeps
   window: { wallMinutes, costUsd }                 // copied from config when the window opens; fixed for it
   windowStart?                  // absent: the window opened at admission (`admittedAt`)
   priorRunIds: RunId[]          // runs of earlier windows, which this window does not count
+  repositoryBudgets?            // each enrolled repository's own budget when the window opened (TECH-6606)
 }
 
 Usage {

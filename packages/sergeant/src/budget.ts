@@ -21,13 +21,36 @@ export const DEFAULT_BUDGET: BudgetWindow = { wallMinutes: 120, costUsd: 25 };
  * window's, and over several repositories the largest of each field holds. A task with no run in a
  * repository yet has `window` itself.
  */
-export function windowFor(window: BudgetWindow, repositories: readonly string[], override: (repo: string) => Partial<BudgetWindow> | undefined): BudgetWindow {
+export function windowFor(window: BudgetWindow, repositories: readonly string[], override: (repo: string) => OwnBudget | undefined): BudgetWindow {
   const windows = repositories.map((r) => {
     const own = override(r);
     return { wallMinutes: own?.wallMinutes ?? window.wallMinutes, costUsd: own?.costUsd ?? window.costUsd };
   });
   if (windows.length === 0) return window;
   return { wallMinutes: Math.max(...windows.map((w) => w.wallMinutes)), costUsd: Math.max(...windows.map((w) => w.costUsd)) };
+}
+
+/** A repository's own budget: each field set replaces the window's. */
+type OwnBudget = { wallMinutes?: number | undefined; costUsd?: number | undefined };
+/** Each repository's own budget, by its enrolled name. */
+export type RepositoryBudgets = Record<string, OwnBudget>;
+
+/** The own budget of each of `repositories` that has one, as `override` gives it now. */
+export function repositoryBudgets(repositories: readonly string[], override: ((repo: string) => OwnBudget | undefined) | undefined): RepositoryBudgets {
+  return Object.fromEntries(repositories.flatMap((r) => {
+    const own = override?.(r);
+    return own ? [[r, own]] : [];
+  }));
+}
+
+/**
+ * TECH-6606: a window's repository budgets are those it opened with, so an approver's change (`sgt admin
+ * repo budget`) reaches only windows that open after it, as a change to the installation's `budget`
+ * does. A window that opened before windows kept them has each repository's budget now.
+ */
+export function windowOverride(budget: Pick<TaskBudget, "repositoryBudgets">, now: ((repo: string) => OwnBudget | undefined) | undefined): (repo: string) => OwnBudget | undefined {
+  const kept = budget.repositoryBudgets;
+  return kept ? (r) => kept[r] : (r) => now?.(r);
 }
 
 /** What `state.json` keeps of the budget: the window, and when and over which runs it opened. */
@@ -44,19 +67,21 @@ export type TaskBudget = {
   activeSince?: string | undefined;
   /** TECH-6165: which window of the task this is, counting from 0 (`openWindow`); absent before any has opened. */
   windowSeq?: number | undefined;
+  /** TECH-6606: every enrolled repository's own budget when the window opened (`windowOverride`); absent from a window opened before. */
+  repositoryBudgets?: RepositoryBudgets | undefined;
 };
 
 /**
- * The one way a task gets a fresh budget window: from `at`, with zero spend and `window`, the
- * installation's budget now, and none of its active time used; work still running counts from now. Any
- * human direction opens one (TECH-6165, poll-checks.ts): an answer to one of Sergeant's questions
+ * The one way a task gets a fresh budget window: from `at`, with zero spend, `window`, the
+ * installation's budget now, `budgets`, the repositories' own now, and none of its active time used;
+ * work still running counts from now. Any human direction opens one (TECH-6165, poll-checks.ts): an answer to one of Sergeant's questions
  * (TECH-5059), any other human comment or review on the issue or its PRs (TECH-5218, TECH-5913); so does
  * its last blocker going (TECH-5803).
  */
-export function openWindow(state: { turnCostUsd: number; runIds: string[]; budget: TaskBudget }, at: string, window: BudgetWindow): void {
+export function openWindow(state: { turnCostUsd: number; runIds: string[]; budget: TaskBudget }, at: string, window: BudgetWindow, budgets: RepositoryBudgets): void {
   state.turnCostUsd = 0;
   const active = state.budget.activeSince !== undefined ? { activeSince: new Date().toISOString() } : {};
-  state.budget = { window, since: at, priorRuns: [...state.runIds], activeMs: 0, ...active, windowSeq: (state.budget.windowSeq ?? 0) + 1 };
+  state.budget = { window, since: at, priorRuns: [...state.runIds], activeMs: 0, ...active, windowSeq: (state.budget.windowSeq ?? 0) + 1, repositoryBudgets: budgets };
 }
 
 /**

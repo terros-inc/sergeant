@@ -14,3 +14,23 @@ test("repo list is any signed-in user's, and only adding and removing are under 
     ["POST", "/v1/repositories/add", { repo: "terros-inc/two", mergeMethod: "rebase", mergePolicy: "human" }],
   ]);
 });
+
+test("admin repo budget sends each flag given, default as a clear, refuses a malformed number unsent, and says which windows get it", async () => {
+  const { api, seen } = await fakeApi({
+    "GET /v1/repositories": { json: { repositories: [{ repo: "terros-inc/one", mergeMethod: "squash", mergePolicy: "human", budget: { wallMinutes: 60, costUsd: 25 }, ownBudget: { wallMinutes: 60 } }] } },
+    "POST /v1/repositories/budget": { json: { repo: "terros-inc/one", changed: true, ownBudget: { wallMinutes: 60 }, budget: { wallMinutes: 60, costUsd: 25 } } },
+  });
+  const set = await sgt(api, "admin", "repo", "budget", "terros-inc/one", "--wall-minutes", "60");
+  expect(set).toMatchObject({ code: 0, out: expect.stringContaining("set terros-inc/one's budget window: 60 min (own), $25") });
+  expect(set.out).toContain("Only budget windows that open from now on get it");
+  await sgt(api, "admin", "repo", "budget", "terros-inc/one", "--cost-usd", "default", "--wall-minutes", "45.5");
+  // NaN would go as JSON's null, which clears the field: refused before any request.
+  for (const bad of ["abc", "0", "-3", "1e3"]) expect((await sgt(api, "admin", "repo", "budget", "terros-inc/one", "--cost-usd", bad)).code).toBe(2);
+  expect((await sgt(api, "admin", "repo", "budget", "terros-inc/one")).code).toBe(2);
+  expect(await sgt(api, "repo", "list")).toMatchObject({ code: 0, out: "terros-inc/one  squash  merged by human  60 min (own), $25\n" });
+  expect(seen.map((s) => [s.url, s.body && JSON.parse(s.body)])).toEqual([
+    ["/v1/repositories/budget", { repo: "terros-inc/one", wallMinutes: 60 }],
+    ["/v1/repositories/budget", { repo: "terros-inc/one", wallMinutes: 45.5, costUsd: null }],
+    ["/v1/repositories", ""],
+  ]);
+});

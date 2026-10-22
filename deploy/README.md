@@ -51,8 +51,8 @@ How it fits together:
   `/sergeant/v2/installation-config`) and replaces `/etc/sergeant/installation.json` only if it parses
   as an `InstallationConfig`; a config that does not parse stops the update before `serve` restarts.
   Changing the per-task budget or the task slots (`maxTasks`, `waitingGraceMinutes`) is: edit the
-  parameter, then update (or `sgt admin restart`). Enrolling or removing a repository needs neither
-  (Enrolled repositories below).
+  parameter, then update (or `sgt admin restart`). Enrolling or removing a repository, or setting a
+  repository's own budget, needs neither (Enrolled repositories below).
 - **Logs** go to `/var/log/sergeant/serve.log` and `autoupdate.log` on the host and to CloudWatch Logs
   group `/sergeant/v2` (streams `<instance id>/serve`, `<instance id>/autoupdate`, and
   `<instance id>/first-boot`).
@@ -536,8 +536,9 @@ and takes the list in place, without a restart; `serve.log` names the approver t
 the parameter already has writes nothing and only brings the running list up to it. `serve` reads its
 enrolled repositories and its retro target (none once an approver turned retros off) from the
 parameter at every start, so no restart brings back an older list or target (TECH-5940); it does not
-start if it cannot read the parameter. Every other setting but `retro` (`sgt admin retro`) stays AWS-only, applied by an
-update as before, and never appears in an answer or a log. The host's role may write that one
+start if it cannot read the parameter. An approver sets a repository's own budget the same way (`sgt
+admin repo budget`, Change the per-task budget below). Every other setting but `retro` (`sgt admin
+retro`) stays AWS-only, applied by an update as before, and never appears in an answer or a log. The host's role may write that one
 parameter and no other. Editing `repositories` in the parameter by hand still works.
 
 A host gets this from an apply of the instance role's `WriteInstallationConfig` statement and one
@@ -558,10 +559,24 @@ aws ssm put-parameter --name /sergeant/v2/installation-config --type String --ov
 Only tasks that start after the update get the new window. A task already running keeps the one it
 started with (the log says `ignoring the budget options`) until its next fresh window (Budget below).
 
-A repository whose builds, tests, and CI need a longer (or cheaper) window gets its own `budget` in
-its `repositories` entry, for example
+A repository whose builds, tests, and CI need a longer (or cheaper) window gets its own `budget`
+(TECH-6606). An approver sets it with their Linear login, no AWS access and no restart:
+
+```sh
+sgt admin repo budget owner/ios --wall-minutes 180               # only the time; its cost stays as it was
+sgt admin repo budget owner/ios --cost-usd 40                    # only the cost
+sgt admin repo budget owner/ios --wall-minutes 180 --cost-usd 40 # both
+sgt admin repo budget owner/ios --cost-usd default               # clear one: the installation's applies again
+sgt repo list                                                    # each repository's window, its own fields marked (own)
+```
+
+Each flag changes only its field, a positive number or `default`; the repository must be enrolled.
+`serve` writes only that repository's `budget` in the installation-config parameter, the approver named
+in the new version's description as for `sgt admin repo add`, and takes it at once. It applies to a
+task once the task has a run in that repository, from the task's next budget window on (Budget below).
+Editing the entry by hand still works, for example
 `"owner/ios": { "mergeMethod": "squash", "budget": { "wallMinutes": 180, "costUsd": 40 } }`, put and
-updated the same way. It applies to a task once the task has a run in that repository (Budget below).
+updated as above.
 
 ### Change the task slots
 
@@ -690,7 +705,8 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   repository that keeps runs for less than 90 days.
 - **`repositories.<owner/name>.budget`** (optional) replaces the installation's `budget` for tasks
   working in that repository, field by field: `"budget": { "wallMinutes": 180, "costUsd": 40 }`
-  (positive numbers, each optional; a field unset keeps the installation's; Budget below).
+  (positive numbers, each optional; a field unset keeps the installation's; Budget below). Approvers
+  set it with `sgt admin repo budget` (Change the per-task budget above).
 - **`linear.tokenSecret`** must act as `agentUserId` (checked at startup); every Linear read and write
   uses it. It needs permission to create issues, issue relations, and documents, and to edit issue
   labels (follow-ups, feedback, and retros below).
@@ -897,10 +913,13 @@ A repository's own `budget` (`repositories.<owner/name>.budget`, TECH-5219) repl
 window's fields for a task once it has a run in that repository: `state.json` records the
 repositories each worker or reviewer was started in, and every poll measures the window, from its
 start, with those repositories' budgets applied. A field a repository leaves unset keeps the
-installation's; over several repositories the largest of each field holds. Unlike the installation's
-`budget`, serve reads a repository's at each poll, so an Update that changes one also changes the
-window of tasks already working in that repository. `canary` applies its repository's `budget` before
-its own flags.
+installation's; over several repositories the largest of each field holds. TECH-6606: like the
+installation's `budget`, the repositories' budgets are the ones a window opened with: it keeps every
+enrolled repository's own `budget` of that moment in `state.json`, so a change (`sgt admin repo
+budget`, or an edit and Update) reaches only windows that open after it, and a task's current window
+keeps what it has until its next fresh one. A window that opened before TECH-6606 has none kept and
+reads each repository's `budget` at every poll until then. `canary` applies its repository's `budget`
+before its own flags.
 
 Once either is exhausted, no run, message, follow-up, or merge happens (Gate rule B1, checked before
 every effect and again right after its live reads), and running runs are canceled until the runner
