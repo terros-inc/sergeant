@@ -35,7 +35,7 @@ export async function declareReadiness(
   const comments = await readAll((p) => request(p), `/repos/${req.repo}/issues/${req.number}/comments`, issueComment);
   const own = comments.filter((comment) => context.appId !== undefined && comment.user?.type === "Bot" && comment.performed_via_github_app?.id === context.appId);
   const existing = own.find((comment) => comment.body?.split("\n", 1)[0] === lineFor(req.expectedHeadSha));
-  if (existing) return { id: existing.id, url: existing.html_url };
+  if (existing) return { id: existing.id, url: existing.html_url, comment: existing.body ?? req.comment };
 
   let body = req.comment;
   const visibility = z.object({ visibility: z.enum(["public", "private", "internal"]) }).safeParse(await request(`/repos/${req.repo}`));
@@ -58,5 +58,5 @@ export async function declareReadiness(
       }
     }
   }
-  return { id: created.id, url: created.html_url };
+  return { id: created.id, url: created.html_url, comment: body };
 }

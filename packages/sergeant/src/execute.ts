@@ -225,8 +225,8 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
         // does. Keeping the port optional preserves compatibility while deployments use the real id.
         const declaration = ports.github.declareReadiness
           ? await ports.github.declareReadiness({ repo: pr.repo, number: pr.number, expectedHeadSha: pr.headSha, ...readiness })
-          : { id: 1, url: pr.url };
-        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports, protectedFiles, readinessCommentId: declaration.id, readinessComment: readiness.comment });
+          : { id: 1, url: pr.url, comment: readiness.comment };
+        if (policy !== "sergeant") return await handToHuman(action, pr, live.issue, { runs, liveRevision, ports, protectedFiles, readinessCommentId: declaration.id, readinessComment: declaration.comment });
         // Whether the squash commit may close the issue is the worker's report, the one M9 just checked
         // the body against, never a re-reading of the body (TECH-5085).
         const squash = { issueIdentifier: live.issue.identifier, closesIssue: reportedClosing(runs, pr) === true, builtBy: builtByLine(runs) };
@@ -246,7 +246,7 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
                 number: pr.number,
                 expectedHeadSha: pr.headSha,
                 reviewers: [],
-                comment: readiness.comment,
+                comment: declaration.comment,
               }));
             } catch (error) {
               ports.log?.(`${pr.repo}#${pr.number}: could not determine code owners after merge refusal: ${(error as Error).message}`);
