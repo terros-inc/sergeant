@@ -46,3 +46,19 @@ test.each([undefined, "Acme Solar"])("public readiness text fails closed when th
   expect(comments[0]?.body).toContain("Reason: Reason recorded in Sergeant's task record");
   expect(comments[0]?.body).not.toContain("Suggested, not acted on:");
 });
+
+test("public readiness redaction handles many repeated Reason prefixes", async () => {
+  const comments: ReturnType<typeof comment>[] = [];
+  const github = createGitHubPort({ token: async () => "test", appId: 42, repositories: { [repo]: { mergeMethod: "squash" } }, fetch: async (input, init) => {
+    const path = String(input).replace("https://api.github.com", "");
+    const method = init?.method ?? "GET";
+    if (path.endsWith("/pulls/7")) return json({ node_id: "PR", state: "open", draft: false, user: { login: "worker[bot]" }, head: { sha: h1 }, requested_reviewers: [], requested_teams: [] });
+    if (path === `/repos/${repo}`) return json({ visibility: "public" });
+    if (path.includes("/issues/7/comments") && method === "GET") return json([]);
+    if (path.endsWith("/issues/7/comments")) { const made = comment(1, JSON.parse(String(init?.body)).body); comments.push(made); return json(made, 201); }
+    throw new Error(`unexpected ${method} ${path}`);
+  }});
+  const adversarial = "Reason: ".repeat(20_000);
+  await github.declareReadiness?.({ repo, number: 7, expectedHeadSha: h1, comment: `READY TO MERGE | SHA: ${h1}\n\nReason: ${adversarial}\n\nEvidence on this head:\n- recorded`, modelText: adversarial });
+  expect(comments[0]?.body).toBe(`READY TO MERGE | SHA: ${h1}\n\nReason: Reason recorded in Sergeant's task record\n\nEvidence on this head:\n- recorded`);
+});

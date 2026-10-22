@@ -11,6 +11,17 @@ const MINIMIZE = "mutation($id: ID!) { minimizeComment(input: { subjectId: $id, 
 const lineFor = (sha: string) => `READY TO MERGE | SHA: ${sha}`;
 const summaryHead = (body: string) => body.match(/^READY TO MERGE \| SHA: ([0-9a-f]{40}|[0-9a-f]{64})$/m)?.[1];
 const legacySummary = (body: string) => body.startsWith("**Ready for a human to merge**");
+const FALLBACK_REASON = "Reason recorded in Sergeant's task record";
+
+function redactModelText(body: string): string {
+  const reasonStart = body.indexOf("Reason: ");
+  const evidenceMarker = "\n\nEvidence on this head:";
+  const evidenceStart = reasonStart < 0 ? -1 : body.indexOf(evidenceMarker, reasonStart);
+  const redacted = reasonStart < 0 || evidenceStart < 0
+    ? body
+    : `${body.slice(0, reasonStart)}Reason: ${FALLBACK_REASON}${body.slice(evidenceStart)}`;
+  return redacted.split("\n").filter((line) => !line.startsWith("Suggested, not acted on:")).join("\n");
+}
 
 export async function declareReadiness(
   request: Request,
@@ -33,7 +44,7 @@ export async function declareReadiness(
     const checked = context.publicDataDenylist
       ? spawnSync(process.execPath, [script, "text", "readiness text"], { input: req.modelText, env: { ...process.env, PUBLIC_DATA_DENYLIST: context.publicDataDenylist } })
       : undefined;
-    if (!checked || checked.status !== 0) body = body.replace(/Reason: [\s\S]*?(?=\n\nEvidence on this head:)/, "Reason: Reason recorded in Sergeant's task record").replace(/\nSuggested, not acted on:.*$/gm, "");
+    if (!checked || checked.status !== 0) body = redactModelText(body);
   }
   const created = issueComment.parse(await request(`/repos/${req.repo}/issues/${req.number}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }) }));
   const confirmed = context.appId !== undefined && created.user?.type === "Bot" && created.performed_via_github_app?.id === context.appId;
