@@ -112,7 +112,7 @@ InstallationConfig {            // ADR-0042 mechanism; Sergeant 2 keys only
   }
   review: {
     auditSampleRate             // fraction of skipped reviews that get a nonblocking audit review
-    auditOwner?                 // Linear user id whose accounts pay for audits outside a task; absent, none run (06 §8)
+    auditOwner?                 // Linear user id whose accounts pay for an audit outside a task when its PR's person cannot (06 §8)
     qualityBudgetUsdPerDay      // default 25: caps those audits in any 24 hours (06 §8)
   }
   followups: { maxDepth, autoDelegate }
@@ -533,6 +533,7 @@ ReviewFacts {                   // telemetry; enough to compare review modes and
              found?,              // per PR, from the report or its single-PR fallback; absent is unknown (06 §8)
              auditCommentId? }]   // the post-merge audit's PR comment, once posted (06 §8)
   findings: { blocking, nonBlocking, nits }
+  accountsOf?: { id, name, fallback? }   // an audit's: whose registered accounts ran it (06 §8)
   adapterAttested?              // subagent reviews only
   // filled in later, when known:
   resultingMutation?            // a later worker report resolved ≥ 1 of its findings `fixed`

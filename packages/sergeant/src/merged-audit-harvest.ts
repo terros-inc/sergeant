@@ -31,7 +31,7 @@ export async function harvestAudits(ledger: Ledger, opts: MergedAuditOptions, de
       await save();
       continue;
     }
-    const facts = reviewFacts(run, { trigger: "audit", issue: pr.issue ?? `${pr.repo}#${pr.number}`, runs: [run], merged: pr });
+    const facts = reviewFacts(run, { trigger: "audit", issue: pr.issue ?? `${pr.repo}#${pr.number}`, runs: [run], merged: pr, ...(entry.accountsOf && { accountsOf: entry.accountsOf }) });
     const on = facts.subject.find((s) => s.repo === pr.repo && s.number === pr.number && s.headSha === pr.headSha);
     // A run with no report, or one that reviewed some other head, has nothing for this PR to show.
     const report = run.report;

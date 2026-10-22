@@ -12,7 +12,7 @@ export type SmokeResult = { name: string; covers: string[]; status: "PASS" | "FA
 
 type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
-  "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
+  "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "userByProfile" | "fetchUpload" | "readProbes"
 > & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "validateTarget" | "lastRetro" | "feedbackTasks" | "filedIssues"> };
 type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness" | "mergedPullRequests" | "firstParent" | "reviewEdits">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
@@ -42,7 +42,7 @@ export function hostChecks(input: { statusUrl: string; localVersion: string; fet
 
 export function linearChecks(
   linear: LinearReads,
-  input: { agentUserId: string; issue?: string | undefined; retroProjectId?: string | undefined; retroTeamId?: string | undefined; upload?: string | undefined; now?: Date },
+  input: { agentUserId: string; issue?: string | undefined; retroProjectId?: string | undefined; retroTeamId?: string | undefined; upload?: string | undefined; profile?: string | undefined; now?: Date },
 ): SmokeCheck[] {
   const since = new Date((input.now ?? new Date()).getTime() - 14 * DAY_MS).toISOString();
   const { issue, retroProjectId, retroTeamId, upload } = input;
@@ -53,6 +53,17 @@ export function linearChecks(
       name: "linear viewer and user names",
       covers: ["V2 config"],
       run: async () => ({ viewerIsAgent: (await linear.viewer()).id === input.agentUserId, agentName: (await linear.userNames([input.agentUserId]))[0] ?? null }),
+    },
+    {
+      // A configured `linear.reviewerProfiles` URL should resolve; with none, a URL nobody has still pages and parses.
+      name: "linear user by profile URL (who pays for an audit outside a task)",
+      covers: ["TECH-6625"],
+      run: async () => {
+        const profile = input.profile ?? "https://linear.app/sergeant-smoke-check/profiles/nobody";
+        const person = await linear.userByProfile(profile);
+        if (input.profile && !person) throw new Error(`no active Linear user has the configured profile ${profile}`);
+        return { profile, found: person !== undefined };
+      },
     },
     upload
       ? {

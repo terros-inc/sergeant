@@ -46,6 +46,11 @@ export const AuditRow = z.object({
   /** Absent when unknown. */
   found: z.boolean().optional(),
   group: AuditGroup,
+  /**
+   * TECH-6625: whose registered model accounts ran it, `fallback` when `review.auditOwner`'s stood in for
+   * the PR's person. Absent on audits recorded before it.
+   */
+  accountsOf: z.object({ id: z.string(), name: z.string(), fallback: z.boolean().optional() }).optional(),
   summary: z.string().optional(),
   findings: z.array(Finding).optional(),
 });

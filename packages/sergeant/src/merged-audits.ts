@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Conversation, isRateLimited, NoModelAccount, type PullRequestFeedback, RepoSlug, RunId, safeJson, Sha } from "@terros/sergeant-contracts";
+import { type Conversation, isRateLimited, type LinearPerson, NoModelAccount, type PullRequestFeedback, RepoSlug, RunId, safeJson, Sha } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { type AuditPayer, auditOwnerPerson, prOwner } from "./audit-payer.ts";
 import type { Ports } from "./execute-types.ts";
 import { harvestAudits } from "./merged-audit-harvest.ts";
 import { auditDrawn, auditRunId, type PrHead } from "./review-quality.ts";
@@ -15,11 +16,11 @@ import { pause } from "./wake.ts";
 // reviewer of its pre-merge head, judged as of the merge. The run id is `auditRunId` of the PR and head,
 // so a restart or a re-scan of the overlapping window starts nothing new (the runner's start is
 // idempotent on it), and a head a task's own audit already took keeps that audit's id. These audits run
-// outside any task, on `review.auditOwner`'s registered accounts, within a daily cap, and are finished
-// by `harvestAudits` (TECH-6618). The only state is `merged-audits.json`: when the last pass ran and the
-// audits it started, with what was recorded of each, so the cap holds across a restart; losing it means
-// one more pass now, a cap that forgets the last day, and, for an audit whose PR has left the window, no
-// record (`reviews.jsonl` keeps any audit already recorded from being recorded twice).
+// outside any task, on the registered accounts of the person the PR belongs to, else `review.auditOwner`'s
+// (TECH-6625, audit-payer.ts), within one daily cap whoever pays, and are finished by `harvestAudits`
+// (TECH-6618). The only state is `merged-audits.json`: when the last pass ran and the audits it started,
+// with what was recorded of each, so the cap holds across a restart; losing it means one more pass now, a
+// cap that forgets the last day, and, for an audit whose PR has left the window, no record (`reviews.jsonl` keeps any audit already recorded from being recorded twice).
 
 const WINDOW_MS = 72 * 3_600_000;
 const DAY_MS = 24 * 3_600_000;
@@ -44,6 +45,8 @@ const Ledger = z.object({
         recorded: z.boolean().optional(),
         /** Its PR comment, once posted. */
         auditCommentId: z.number().int().optional(),
+        /** TECH-6625: whose registered accounts run it. */
+        accountsOf: z.object({ id: z.string(), name: z.string(), fallback: z.literal(true).optional() }).optional(),
       }),
     )
     .default([]),
@@ -56,14 +59,14 @@ export type MergedAuditOptions = {
   enrolledRepositories: readonly RepoSlug[];
   /** The repository's live `mergedAuditSampleRate`, 0 when absent. */
   rateOf: (repo: RepoSlug) => number;
-  /** `review.auditOwner`: who pays. Absent, no audit runs outside a task. */
+  /** `review.auditOwner`: who pays when the PR's own person cannot. Absent, a PR with no one of its own to pay is not audited. */
   auditOwner?: string | undefined;
   budgetUsdPerDay?: number | undefined;
   log: (line: string) => void;
   signal?: AbortSignal;
   now?: () => Date;
 };
-export type MergedAuditDeps = Pick<Ports, "github" | "linear" | "runner">;
+export type MergedAuditDeps = Pick<Ports, "github" | "linear" | "runner" | "workerLogin" | "linearProfileForGitHubLogin">;
 
 /** Checks hourly whether a pass is due, so a restart neither skips a day nor runs one twice. */
 export async function mergedAuditsEvery(opts: MergedAuditOptions, deps: MergedAuditDeps): Promise<void> {
@@ -87,12 +90,6 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
   const repos = opts.enrolledRepositories.filter((r) => opts.rateOf(r) > 0);
   if (repos.length === 0) return;
   if (ledger.lastPassAt && now.getTime() - Date.parse(ledger.lastPassAt) < DAY_MS) return;
-  const owner = opts.auditOwner;
-  if (!owner) {
-    opts.log(`merged-PR audits: review.auditOwner is not set, so no audit outside a task runs in ${repos.join(", ")}`);
-    ledger.lastPassAt = now.toISOString();
-    return save();
-  }
   // An audit not recorded yet is kept however long its run takes; a recorded one only while a re-scan
   // could still meet its PR, so the draw knows it.
   ledger.started = ledger.started.filter((s) => (s.subject && !s.recorded) || now.getTime() - Date.parse(s.at) < WINDOW_MS + DAY_MS);
@@ -131,18 +128,17 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
         opts.log(`merged-PR audits: another audit would exceed the daily cap of $${cap.toFixed(2)} ($${spent.toFixed(2)} spent); ${repo}#${m.number} and the rest wait for the next day's pass`);
         break scan;
       }
-      const started = await startAudit(runId, { ...m, repo }, owner, deps).then(
-        (issue) => ({ repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha, ...(issue && { issue }) }),
-        (e: Error) => {
-          if (isRateLimited(e)) throw e;
-          opts.log(`merged-PR audit ${runId} of ${repo}#${m.number} not started, retrying next pass: ${e instanceof NoModelAccount ? `the audit owner has no usable model account (${e.message})` : e.message}`);
-          return undefined;
-        },
-      );
+      const started = await startAudit(runId, { ...m, repo }, opts, deps).catch((e: Error) => {
+        if (isRateLimited(e)) throw e;
+        opts.log(`merged-PR audit ${runId} of ${repo}#${m.number} not started, retrying next pass: ${e.message}`);
+        return undefined;
+      });
       if (!started) continue;
-      opts.log(`merged-PR audit ${runId} started for ${repo}#${m.number} as of its merge (nonblocking)`);
+      const { issue, accountsOf } = started;
+      opts.log(`merged-PR audit ${runId} started for ${repo}#${m.number} as of its merge (nonblocking), on ${accountsOf.name}'s accounts${accountsOf.fallback ? " (review.auditOwner, the fallback)" : ""}`);
       known.add(runId);
-      ledger.started.push({ runId, at: now.toISOString(), subject: started });
+      const subject = { repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha, ...(issue && { issue }) };
+      ledger.started.push({ runId, at: now.toISOString(), subject, accountsOf });
       spent += UNKNOWN_AUDIT_USD;
       await save();
     }
@@ -153,8 +149,12 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
 
 type MergedPr = PrHead & { title: string; mergedSha: Sha; mergedAt: string };
 
-/** Starts the audit of the PR's pre-merge head, with the brief as of its merge; resolves the Linear issue the PR names. */
-async function startAudit(runId: RunId, m: MergedPr, owner: string, deps: MergedAuditDeps): Promise<string | undefined> {
+/**
+ * Starts the audit of the PR's pre-merge head, with the brief as of its merge, on the accounts of the
+ * PR's person, else of `review.auditOwner`; resolves the Linear issue the PR names. Throws, having started
+ * nothing, when neither has a usable account, saying why.
+ */
+async function startAudit(runId: RunId, m: MergedPr, opts: MergedAuditOptions, deps: MergedAuditDeps): Promise<{ issue: string | undefined; accountsOf: AuditPayer }> {
   // A review's edit time comes only from its own read, and the brief needs it to withhold a review
   // edited after the merge: without it, start nothing (retried next pass) rather than show hindsight.
   if (!deps.github.reviewEdits) throw new Error("GitHub cannot say when its reviews were last edited");
@@ -165,11 +165,11 @@ async function startAudit(runId: RunId, m: MergedPr, owner: string, deps: Merged
   const issue = referencedIssue(m.title, pr.body);
   // An unreadable reference leaves the PR's own text as the requirements, as with none.
   const conversation: Conversation | undefined = issue ? await deps.linear.readConversation(issue).catch(() => undefined) : undefined;
-  await deps.runner.start({
+  const spec = (owner: LinearPerson) => ({
     runId,
-    // The person id is all the runner needs; it picks among their registered accounts.
-    owner: { id: owner, name: "the audit owner" },
-    role: "reviewer",
+    // The runner picks among this person's registered accounts.
+    owner,
+    role: "reviewer" as const,
     ...(conversation && { conversation }),
     repositories: [m.repo],
     subject: [{ repo: m.repo, number: m.number, headSha: m.headSha, ...(baseSha && { baseSha }) }],
@@ -180,7 +180,27 @@ random sample of the PRs merged in this repository, whoever wrote them and howev
 measure how often a merged change had an actionable issue nobody raised before its merge. Review this head as
 you would have just before the merge. Nothing you find blocks, reverts, or reopens anything.`,
   });
-  return issue;
+  // Why nobody's accounts could run it, if so. The runner refuses with `NoModelAccount` having started nothing.
+  const why: string[] = [];
+  const start = async (owner: LinearPerson): Promise<boolean> => {
+    try {
+      await deps.runner.start(spec(owner));
+      return true;
+    } catch (e) {
+      if (!(e instanceof NoModelAccount)) throw e;
+      why.push(`${owner.name} has no usable model account (${e.message})`);
+      return false;
+    }
+  };
+  const own = await prOwner(read, issue, opts.stateDir, deps);
+  if ("none" in own) why.push(`the PR belongs to no one with accounts here: ${own.none}`);
+  else if (await start(own)) return { issue, accountsOf: own };
+  if (!opts.auditOwner) why.push("review.auditOwner, the fallback, is not set");
+  else if ("none" in own || own.id !== opts.auditOwner) {
+    const fallback = await auditOwnerPerson(opts.auditOwner, deps);
+    if (await start(fallback)) return { issue, accountsOf: fallback };
+  }
+  throw new Error(`no one's accounts can run it: ${why.join("; ")}`);
 }
 
 /**

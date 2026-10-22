@@ -45,6 +45,7 @@ const linearAnswers: Record<string, unknown> = {
   SergeantLinkedIssue: { issue: { identifier: "TECH-8", url: "https://linear.app/terros/issue/TECH-8/earlier-work", title: "Earlier work", state: { name: "Done" } } },
   SergeantViewer: { viewer: { id: "agent", name: "Sergeant", organization: { id: "org" } } },
   SergeantUsers: { users: { nodes: [{ id: "agent", name: "Sergeant" }] } },
+  SergeantUsersPage: { users: { nodes: [{ id: "user-ann", name: "Ann", url: "https://linear.app/terros/profiles/ann" }], pageInfo: { hasNextPage: false, endCursor: null } } },
   SergeantIssueLabels: { issue: { id: "issue-1", team: { id: "team-1" }, labels: { nodes: [{ id: "l1", name: "bug" }] } } },
   SergeantLabelsByName: { issueLabels: { nodes: [{ id: "l2", team: null }] } },
   SergeantInverseRelations: { issue: { inverseRelations: { nodes: [{ type: "blocks", issue: { identifier: "TECH-0", state: { type: "started" } } }], pageInfo: { hasNextPage: false, endCursor: null } } } },
@@ -152,7 +153,7 @@ test("every check passes over the real adapters, and nothing is written", async 
   const f = fakes();
   const results = await runChecks([
     ...hostChecks({ statusUrl: "http://127.0.0.1:8080/status", localVersion: "2.0.90+abc1234", fetch: status("2.0.90+abc1234") }),
-    ...linearChecks(f.linear, { agentUserId: "agent", issue: "TECH-9", retroProjectId: "project", retroTeamId: "team-1", upload: "https://uploads.linear.app/org/a/shot.png" }),
+    ...linearChecks(f.linear, { agentUserId: "agent", issue: "TECH-9", retroProjectId: "project", retroTeamId: "team-1", upload: "https://uploads.linear.app/org/a/shot.png", profile: "https://linear.app/terros/profiles/Ann" }),
     ...githubChecks(f.github, f.probes, { repo, mergePolicy: "sergeant", pr: 7, issue: "TECH-9" }),
   ]);
   expect(f.writes).toEqual([]);
@@ -160,6 +161,7 @@ test("every check passes over the real adapters, and nothing is written", async 
   // The squash message is built as a merge would send it: the human commit author is a co-author, the agent's trailer is not.
   expect(results.find((r) => r.name.includes("squash"))?.detail).toEqual({ title: "Add the thing (#7)", coAuthors: ["Trevor <trevor@terros.com>"] });
   expect(results.find((r) => r.name === "linear task owner from delegation history")?.detail).toMatchObject({ owner: person });
+  expect(results.find((r) => r.name.startsWith("linear user by profile"))?.detail).toEqual({ profile: "https://linear.app/terros/profiles/Ann", found: true });
   expect(results.find((r) => r.name.startsWith("linear upload"))?.detail).toEqual({ status: 200, contentType: "image/png", bytes: 3 });
   expect(results.find((r) => r.name.startsWith("linear blocked-by"))?.detail).toEqual({ blockedBy: 1, pagedRelations: 1, sameIssue: true, relation: "absent" });
   expect(results.find((r) => r.name.startsWith("linear follow-up and retro"))?.detail).toMatchObject({ issue: "TECH-9", teamStates: 1, relation: "absent", document: "absent" });
@@ -193,6 +195,7 @@ test("a failed read, or a host on another version, fails its own line and the re
   expect(results.map((r) => `${r.status} ${r.name}`)).toEqual([
     "FAIL host serves this checkout's version",
     "PASS linear viewer and user names",
+    "PASS linear user by profile URL (who pays for an audit outside a task)",
     "SKIP linear upload download (attachment reading)",
     "PASS linear delegated issues (intake)",
     "FAIL linear completed issues in the feedback lookback",
@@ -216,11 +219,11 @@ test("a failed read, or a host on another version, fails its own line and the re
     `SKIP github ${repo} branch-delete read (head, open PRs on the branch, branch tip)`,
     `SKIP github ${repo} readiness reread (PR outcome, reviews, timeline, declaration comment)`,
   ]);
-  expect(results[4]?.detail).toBe("Linear API error: outage");
+  expect(results[5]?.detail).toBe("Linear API error: outage");
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(1);
   expect(text).toContain("FAIL linear completed issues in the feedback lookback [TECH-5049]");
-  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 6 passed, 2 failed, 16 skipped");
+  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 7 passed, 2 failed, 16 skipped");
 });
 
 test("the API check reads the run list and a run's view with its provider choice and account, as sent", async () => {

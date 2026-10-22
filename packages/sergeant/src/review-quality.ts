@@ -81,6 +81,11 @@ export type ReviewFacts = {
   resultingMutation: boolean | "unknown";
   /** An audit with must-fix findings on merged code: they are logged as follow-up work. */
   followUp: boolean;
+  /**
+   * TECH-6625: whose registered model accounts ran an audit: a task's owner, or for a merged-PR audit
+   * outside a task its PR's person, else `review.auditOwner` (`fallback`). Absent on lines written before it.
+   */
+  accountsOf?: { id: string; name: string; fallback?: true | undefined };
 };
 
 /**
@@ -108,7 +113,7 @@ const foundOn = (report: ReviewReport) => (report.reviewed.length === 1 ? report
 
 export function reviewFacts(
   review: Extract<RunRecord, { role: "reviewer" }>,
-  ctx: { trigger: ReviewFacts["trigger"]; issue: string; runs: RunRecord[]; merged: ReviewFacts["merged"] },
+  ctx: { trigger: ReviewFacts["trigger"]; issue: string; runs: RunRecord[]; merged: ReviewFacts["merged"]; accountsOf?: ReviewFacts["accountsOf"] },
 ): ReviewFacts {
   const report = review.report;
   const subject =
@@ -138,5 +143,6 @@ export function reviewFacts(
     merged: ctx.merged,
     resultingMutation: resultingMutation(review, ctx.runs),
     followUp: ctx.trigger === "audit" && mustFix.length > 0,
+    ...(ctx.accountsOf && { accountsOf: ctx.accountsOf }),
   };
 }

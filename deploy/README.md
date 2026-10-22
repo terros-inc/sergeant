@@ -726,13 +726,17 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   URL in a re-review request so Linear renders a real user mention and sends an Inbox notification; a
   missing mapping or failed lookup leaves the plain `@github-login` text. The same mapping names the
   GitHub account a task's PRs are assigned to ([08 §10](../docs/design/08-github-contract.md#10-humans-on-github))
-  and whose review a human-merge handoff requests; without it neither happens.
+  and whose review a human-merge handoff requests; without it neither happens. It also names whose
+  accounts audit a human's merged PR (`review.auditOwner` below).
 - **`review.auditSampleRate`** (optional, 0 to 1, default 0.2) is the fraction of merged heads that
   skipped fresh review which get an audit review (Review telemetry below).
 - **`repositories.<owner/name>.mergedAuditSampleRate`** (optional, 0 to 1, absent 0),
   **`review.auditOwner`** (optional, a Linear user id, no default) and **`review.qualityBudgetUsdPerDay`**
-  (optional, default 25): the daily merged-PR audit, who pays for it, and its cap
-  ([design 06 §8](../docs/design/06-review.md#8-calibration-sampling-unf-641-preserved)). Approvers set
+  (optional, default 25): the daily merged-PR audit, the fallback payer, and its cap. Each drawn PR is
+  audited on the registered accounts of the person it belongs to (a Sergeant PR's task owner, or a
+  human author `linear.reviewerProfiles` maps to a Linear user), and on `review.auditOwner`'s only when
+  that person has no usable account or the PR maps to no one; the cap is one for the installation,
+  whoever pays ([design 06 §8](../docs/design/06-review.md#8-calibration-sampling-unf-641-preserved)). Approvers set
   a repository's rate with `sgt admin repo audit-rate <owner/name> <0..1>`. Each finished audit gets
   a `<state dir>/reviews.jsonl` line and one nonblocking comment on its PR, filtered on a public
   repository (TECH-6618).

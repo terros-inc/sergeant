@@ -50,16 +50,17 @@ test("with nothing evaluated it prints the counts and no percentage; --json is t
 });
 
 // TECH-6619: audit yield and FAIL rate are printed as fractions, unknown Found beside the yield and never
-// in it, and --found shows every finding behind each Found: YES (a public PR shows only some).
+// in it, and --found shows every finding behind each Found: YES (a public PR shows only some). TECH-6625:
+// whose accounts ran the audits, the audit owner's as the fallback apart.
 const counts = (completed: number, found: number, foundKnown: number, fail: number) => ({ completed, found, foundKnown, foundUnknown: completed - foundKnown, fail });
 const audits = {
   repo: "example-org/example-app", since: "2026-09-22T00:00:00.000Z", ...counts(22, 3, 20, 4), incomplete: 1,
   byRepo: [{ repo: "example-org/example-app", ...counts(22, 3, 20, 4) }],
   bySergeant: { agreed: counts(10, 1, 10, 1), sergeant_merged: counts(4, 0, 4, 0), other: counts(8, 2, 6, 3) },
   audits: [
-    { runId: "run_audit-1", issue: "UNF-1", repo: "example-org/example-app", number: 12, url: "https://github.com/example-org/example-app/pull/12", headSha: sha, at: "2026-10-01T00:00:00.000Z", verdict: "changes_requested", found: true, group: "other",
+    { runId: "run_audit-1", issue: "UNF-1", repo: "example-org/example-app", number: 12, url: "https://github.com/example-org/example-app/pull/12", headSha: sha, at: "2026-10-01T00:00:00.000Z", verdict: "changes_requested", found: true, group: "other", accountsOf: { id: "user-1", name: "Example Owner" },
       summary: "One requirement is unmet.", findings: [{ id: "f1", severity: "blocking", category: "acceptance", location: "src/export.ts:12", description: "Archived rows are skipped." }, { id: "f2", severity: "nit", description: "Rename `tmp`." }] },
-    { runId: "run_audit-2", issue: "UNF-2", repo: "example-org/example-app", number: 13, url: "https://github.com/example-org/example-app/pull/13", headSha: sha, at: "2026-10-02T00:00:00.000Z", verdict: "approve", found: false, group: "agreed" },
+    { runId: "run_audit-2", issue: "UNF-2", repo: "example-org/example-app", number: 13, url: "https://github.com/example-org/example-app/pull/13", headSha: sha, at: "2026-10-02T00:00:00.000Z", verdict: "approve", found: false, group: "agreed", accountsOf: { id: "user-2", name: "Example Approver", fallback: true } },
     { runId: "run_audit-3", issue: "UNF-3", repo: "example-org/example-app", number: 14, url: "https://github.com/example-org/example-app/pull/14", headSha: sha, at: "2026-10-03T00:00:00.000Z", verdict: "changes_requested", found: true, group: "other" },
   ],
   newerField: "kept",
@@ -76,12 +77,13 @@ test("review audits prints yield and FAIL fractions, --by sergeant's split, and 
       "  Found YES 3 / known 20 = 15.0%   (Found unknown 2)",
       "  FAIL 4 / completed 22 = 18.2%",
       "  Not completed 1",
+      "  Accounts: Example Owner 1, Example Approver (audit owner fallback) 1, not recorded 1",
       "",
       "  AGREED heads     Found YES 1 / known 10 = 10.0%  (Found unknown 0)  FAIL 1 / completed 10 = 10.0%",
       "  Sergeant-merged  Found YES 0 / known 4 = 0.0%    (Found unknown 0)  FAIL 0 / completed 4 = 0.0%",
       "  Other PRs        Found YES 2 / known 6 = 33.3%   (Found unknown 2)  FAIL 3 / completed 8 = 37.5%",
       "",
-      `https://github.com/example-org/example-app/pull/12  ${sha}  FAIL  UNF-1  run_audit-1`,
+      `https://github.com/example-org/example-app/pull/12  ${sha}  FAIL  UNF-1  run_audit-1  on Example Owner's accounts`,
       "  One requirement is unmet.",
       "  - [blocking, acceptance] src/export.ts:12: Archived rows are skipped.",
       "  - [nit] Rename `tmp`.",
@@ -97,7 +99,7 @@ test("review audits with nothing completed prints fractions without a percentage
   const none = { ...counts(0, 0, 0, 0), incomplete: 0, byRepo: [], bySergeant: { agreed: counts(0, 0, 0, 0), sergeant_merged: counts(0, 0, 0, 0), other: counts(0, 0, 0, 0) }, audits: [] };
   const { api } = await fakeApi({ "GET /v1/review-audits": { json: none }, "GET /v1/review-audits?repo=example-org%2Fexample-app": { json: audits } });
   const { out } = await sgt(api, "review", "audits");
-  expect(out).toBe("Post-merge audits, all repositories, all time\n  Found YES 0 / known 0   (Found unknown 0)\n  FAIL 0 / completed 0\n");
+  expect(out).toBe("Post-merge audits, all repositories, all time\n  Found YES 0 / known 0   (Found unknown 0)\n  FAIL 0 / completed 0\n  Accounts: none\n");
 
   const json = await sgt(api, "--json", "review", "audits", "--repo", "example-org/example-app");
   expect(JSON.parse(json.out)).toEqual(audits);

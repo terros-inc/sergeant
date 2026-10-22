@@ -163,6 +163,10 @@ export interface LinearPort {
    * no conditional write, so an edit in the instant between that read and the write is an accepted race.
    */
   updateDescription?(issueId: string, change: { from: string; to: string }): Promise<{ updated: boolean }>;
+  /** The names of the users with these ids, in their order; an id Linear does not know is left out. */
+  userNames?(ids: readonly string[]): Promise<string[]>;
+  /** TECH-6625: the active Linear user whose profile URL this is (`linear.reviewerProfiles`), if any. */
+  userByProfile?(profileUrl: string): Promise<LinearPerson | undefined>;
 }
 
 export interface GitHubPort {

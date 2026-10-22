@@ -5,6 +5,7 @@ import { taskOwnerReader } from "./delegation.ts";
 import { blockedByRecorder } from "./blocked-by.ts";
 import { followupFiler, followupFinder } from "./followup.ts";
 import { labeler } from "./label.ts";
+import { profileLookup } from "./profiles.ts";
 import { linearFailure } from "./rate-limit.ts";
 import { linearReadProbes } from "./read-probes.ts";
 import { openBlockers } from "./relations.ts";
@@ -59,6 +60,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
   viewer(): Promise<{ id: string; name: string; organizationId: string }>;
   /** The names of the users with these ids, in their order; an id Linear does not know is left out. */
   userNames(ids: readonly string[]): Promise<string[]>;
+  userByProfile: NonNullable<LinearPort["userByProfile"]>;
   /** The open issues (not completed or canceled) delegated to `agentUserId`. */
   delegatedIssues(agentUserId: string): Promise<DelegatedIssue[]>;
   /**
@@ -174,6 +176,7 @@ export function createLinearPort(options: LinearAdapterOptions): LinearPort & {
     recordBlockedBy: blockedByRecorder({ request, createOnce }),
 
     addLabel: labeler({ request }),
+    userByProfile: profileLookup({ request }),
 
     retro: retroLinear({ request, createOnce, sergeantUsers }),
 

@@ -2,39 +2,48 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import type { Conversation, PullRequestFacts, RunRecord, RunSpec } from "@terros/sergeant-contracts";
+import { type Conversation, NoModelAccount, type PullRequestFacts, type RunRecord, type RunSpec } from "@terros/sergeant-contracts";
 import { mergedAuditPass, type MergedAuditDeps, type MergedAuditOptions } from "./merged-audits.ts";
 import { auditDrawn, auditRunId, type ReviewFacts } from "./review-quality.ts";
 
 // TECH-6617: the daily merged-PR audit. What it must never do: start audits in a repository nobody turned
-// on, or with nobody to pay for them; start a second audit of a PR a restart, a re-scan of the overlapping
+// on, or with nobody to pay for them; spend anyone's accounts but the PR's person's, else the audit owner's (TECH-6625); start a second audit of a PR a restart, a re-scan of the overlapping
 // 72-hour window, or the task's own audit already started; or spend past its daily cap.
 
 const repo = "o/r";
 const now = new Date("2026-10-22T06:00:00.000Z");
 const sha = (n: number) => n.toString(16).padStart(40, "0");
 const merged = Array.from({ length: 6 }, (_, i) => ({ number: i + 1, title: i === 0 ? "UNF-9: speed up the sync" : `PR ${i + 1}`, headSha: sha(i + 1), mergedSha: sha(100 + i), mergedAt: "2026-10-21T00:00:00.000Z" }));
-const facts = (number: number): PullRequestFacts => ({
-  repo, number, url: `https://github.com/o/r/pull/${number}`, author: "ada", state: "merged", draft: false, headSha: sha(number), mergedSha: sha(99 + number),
+const facts = (number: number, author = "ada"): PullRequestFacts => ({
+  repo, number, url: `https://github.com/o/r/pull/${number}`, author, state: "merged", draft: false, headSha: sha(number), mergedSha: sha(99 + number),
   mergedAt: "2026-10-21T00:00:00.000Z", baseRef: "main", body: "", mergeable: null, mergeableState: "unknown", checks: { sha: sha(number), required: [] }, humanFeedback: [],
 });
 
-async function harness(over: Partial<MergedAuditOptions> = {}) {
+/** `registered`: the Linear users with a usable model account; `authors`: each PR's GitHub author, else ada. */
+async function harness(over: Partial<MergedAuditOptions> = {}, people: { registered?: string[]; authors?: Record<number, string> } = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), "sergeant-merged-audits-"));
+  const registered = new Set(people.registered ?? ["owner-1"]);
   const listed: Date[] = [];
   const started: Extract<RunSpec, { role: "reviewer" }>[] = [];
   const runs = new Set<string>();
   const deps = {
     github: {
       mergedPullRequests: async (_: string, since: Date) => (listed.push(since), merged),
-      readPullRequest: async (_: string, number: number) => facts(number),
+      readPullRequest: async (_: string, number: number) => facts(number, people.authors?.[number]),
       firstParent: async (_: string, mergedSha: string) => mergedSha.replace(/^0/, "f"),
       reviewEdits: async () => ({}),
     },
-    linear: { readConversation: async (id: string) => ({ issue: { identifier: id } }) as Conversation },
+    linear: {
+      readConversation: async (id: string) => ({ issue: { identifier: id } }) as Conversation,
+      userNames: async (ids: string[]) => ids.map((id) => `Name of ${id}`),
+      userByProfile: async (url: string) => (url.endsWith("/grace") ? { id: "grace-1", name: "Grace" } : undefined),
+    },
+    workerLogin: "sergeant-worker[bot]",
+    linearProfileForGitHubLogin: (login: string) => (login === "grace" ? "https://linear.app/example/profiles/grace" : undefined),
     runner: {
-      // Idempotent on the run id, as the real runner is.
+      // Idempotent on the run id, as the real runner is; refuses, starting nothing, a person with no usable account.
       start: async (spec: RunSpec) => {
+        if (!registered.has(spec.owner.id)) throw new NoModelAccount(spec.owner, "none_registered", [], `${spec.owner.name} has no model account registered`);
         if (spec.role !== "reviewer" || runs.has(spec.runId)) return;
         runs.add(spec.runId);
         started.push(spec);
@@ -42,11 +51,12 @@ async function harness(over: Partial<MergedAuditOptions> = {}) {
       status: async (runId: string) => ({ runId, status: "succeeded", costUsd: 1 }) as RunRecord,
     },
   } as unknown as MergedAuditDeps;
-  const opts: MergedAuditOptions = { stateDir, enrolledRepositories: [repo], rateOf: () => 1, auditOwner: "owner-1", log: () => {}, now: () => now, ...over };
-  return { stateDir, listed, started, deps, opts, pass: (o: Partial<MergedAuditOptions> = {}) => mergedAuditPass({ ...opts, ...o }, deps) };
+  const logs: string[] = [];
+  const opts: MergedAuditOptions = { stateDir, enrolledRepositories: [repo], rateOf: () => 1, auditOwner: "owner-1", log: (l) => logs.push(l), now: () => now, ...over };
+  return { stateDir, listed, started, logs, deps, opts, pass: (o: Partial<MergedAuditOptions> = {}) => mergedAuditPass({ ...opts, ...o }, deps) };
 }
 
-test("a repository with no rate lists nothing, and with no audit owner nothing outside a task starts", async () => {
+test("a repository with no rate lists nothing, and with no audit owner a PR whose author maps to no one is not audited", async () => {
   const off = await harness({ rateOf: () => 0 });
   await off.pass();
   expect(off.listed).toEqual([]);
@@ -70,7 +80,7 @@ test("each drawn PR's pre-merge head is audited once as of its merge, across re-
   const first = t.started[0];
   expect(first).toMatchObject({
     runId: auditRunId(repo, 1, sha(1)),
-    owner: { id: "owner-1" },
+    owner: { id: "owner-1", name: "Name of owner-1" },
     conversation: { issue: { identifier: "UNF-9" } },
     subject: [{ repo, number: 1, headSha: sha(1), baseSha: sha(100).replace(/^0/, "f") }],
     feedbackCutoff: "2026-10-21T00:00:00.000Z",
@@ -89,6 +99,42 @@ test("each drawn PR's pre-merge head is audited once as of its merge, across re-
   await rm(join(t.stateDir, "merged-audits.json"));
   await t.pass({ now: () => tomorrow });
   expect(t.started).toHaveLength(5);
+});
+
+// TECH-6625: whose accounts pay. Each case would otherwise spend the wrong person's quota, or none, silently.
+const task = (issueId: string, owner: string) => ({ issueId, startedAt: "2026-10-20T00:00:00.000Z", turns: 1, runIds: [], recentTurns: [], owner: { id: owner, name: `Task owner ${owner}`, admittedAt: "2026-10-20T00:00:00.000Z" } });
+const ledger = async (stateDir: string) => JSON.parse(await readFile(join(stateDir, "merged-audits.json"), "utf8")) as { started: { runId: string; accountsOf?: unknown }[] };
+
+test("a drawn PR runs on its own person's accounts: a Sergeant PR's task owner, a mapped author; else on the audit owner's", async () => {
+  // PR 1 is Sergeant's for UNF-9; PR 3 is Grace's (mapped, no account); PR 4 is Sergeant's for UNF-4 (owner with no account); the rest map to no one.
+  const t = await harness({ budgetUsdPerDay: 100 }, { registered: ["owner-1", "ann"], authors: { 1: "sergeant-worker[bot]", 3: "grace", 4: "Sergeant-Worker[bot]" } });
+  for (const [id, owner] of [["UNF-9", "ann"], ["UNF-4", "bob"]] as const) {
+    await mkdir(join(t.stateDir, "tasks", id), { recursive: true });
+    await writeFile(join(t.stateDir, "tasks", id, "state.json"), JSON.stringify(task(id, owner)));
+  }
+  t.deps.github.mergedPullRequests = async () => merged.map((m) => (m.number === 4 ? { ...m, title: "UNF-4: tidy" } : m));
+  await t.pass();
+  const fallback = { id: "owner-1", name: "Name of owner-1", fallback: true };
+  expect(t.started.map((s) => [s.subject[0]?.number, s.owner.id])).toEqual([[1, "ann"], [2, "owner-1"], [3, "owner-1"], [4, "owner-1"], [5, "owner-1"], [6, "owner-1"]]);
+  const recorded = (await ledger(t.stateDir)).started;
+  expect(recorded.map((s) => s.accountsOf)).toEqual([{ id: "ann", name: "Task owner ann" }, fallback, fallback, fallback, fallback, fallback]);
+});
+
+test("with neither the PR's person nor the audit owner able to pay, nothing starts and the log says why", async () => {
+  const t = await harness({}, { registered: [], authors: { 1: "sergeant-worker[bot]", 3: "grace" } });
+  await mkdir(join(t.stateDir, "tasks", "UNF-9"), { recursive: true });
+  await writeFile(join(t.stateDir, "tasks", "UNF-9", "state.json"), JSON.stringify(task("UNF-9", "ann")));
+  await t.pass();
+  expect(t.started).toEqual([]);
+  expect(t.logs.find((l) => l.includes("o/r#1 not started"))).toContain("Task owner ann has no usable model account");
+  expect(t.logs.find((l) => l.includes("o/r#1 not started"))).toContain("Name of owner-1 has no usable model account");
+  expect(t.logs.find((l) => l.includes("o/r#2 not started"))).toContain("linear.reviewerProfiles maps no Linear user to its author ada");
+
+  // A PR whose person can pay still runs with no audit owner set.
+  const unset = await harness({ auditOwner: undefined }, { registered: ["grace-1"], authors: { 3: "grace" } });
+  await unset.pass();
+  expect(unset.started.map((s) => [s.subject[0]?.number, s.owner.id])).toEqual([[3, "grace-1"]]);
+  expect(unset.logs.find((l) => l.includes("o/r#1 not started"))).toContain("review.auditOwner, the fallback, is not set");
 });
 
 test("the daily cap starts an audit only if its reservation fits, counting each audit not finished yet", async () => {
@@ -177,6 +223,7 @@ test("a finished audit gets one ReviewFacts line and one comment, across hourly 
     subject: [{ repo, number: 1, headSha: sha(1), found: true, auditCommentId: 9 }],
     merged: { repo, number: 1, headSha: sha(1), mergedSha: sha(100) },
     followUp: true,
+    accountsOf: { id: "owner-1", name: "Name of owner-1", fallback: true },
   });
 });
 
