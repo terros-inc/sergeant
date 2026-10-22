@@ -131,7 +131,7 @@ function fakes(broken?: string) {
   };
   const linear = createLinearPort({ apiKey: "test", sergeantUserIds: ["agent"], fetch: linearFetch, log: () => {} });
   const token = async () => "test";
-  const port = createGitHubPort({ token, repositories: { [repo]: { mergeMethod: "squash", mergePolicy: "sergeant" } }, fetch: githubFetch });
+  const port = createGitHubPort({ token, appId: 42, repositories: { [repo]: { mergeMethod: "squash", mergePolicy: "sergeant" } }, fetch: githubFetch });
   // Records which port methods the checks call, so the GitHub coverage test below sees a new one.
   const called = new Set<string>();
   const github = new Proxy(port, { get: (target, key: string) => (called.add(key), target[key as keyof typeof target]) });
@@ -166,7 +166,8 @@ test("every check passes over the real adapters, and nothing is written", async 
   const writeOnly = ["assignPullRequest", "declareReadiness"];
   const local = ["mergePolicy", "rateLimit", "forgetFeedback", "actionsRetentionDays"];
   expect(Object.keys(f.githubPort).filter((m) => !f.called.has(m) && !(m in readByProbe) && !writeOnly.includes(m) && !local.includes(m))).toEqual([]);
-  expect([...f.called].sort()).toEqual(["branches", "defaultBranchHead", "issueBranches", "readPullRequest"]);
+  expect([...f.called].sort()).toEqual(["branches", "defaultBranchHead", "issueBranches", "readPullRequest", "readReadiness"]);
+  expect(results.find((r) => r.name.includes("readiness reread"))?.detail).toEqual({ state: "open", headSha: head, reviews: 0, declaration: null });
   expect(results.find((r) => r.name.includes("branch list"))?.detail).toEqual({ branches: 2 });
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(0);
@@ -203,12 +204,13 @@ test("a failed read, or a host on another version, fails its own line and the re
     `SKIP github ${repo} squash message from PR text and commits`,
     `SKIP github ${repo} handoff read (draft, requested reviewers, posted comments)`,
     `SKIP github ${repo} branch-delete read (head, open PRs on the branch, branch tip)`,
+    `SKIP github ${repo} readiness reread (PR outcome, reviews, timeline, declaration comment)`,
   ]);
   expect(results[4]?.detail).toBe("Linear API error: outage");
   const { text, exitCode } = report(results, "header");
   expect(exitCode).toBe(1);
   expect(text).toContain("FAIL linear completed issues in the feedback lookback [TECH-5049]");
-  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 5 passed, 2 failed, 15 skipped");
+  expect(text.split("\n").at(-1)).toBe("SMOKE FAIL: 5 passed, 2 failed, 16 skipped");
 });
 
 test("the API check reads the run list and a run's view with its provider choice and account, as sent", async () => {

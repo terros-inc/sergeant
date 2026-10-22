@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type CloseIssue, type Conversation, type LinearPort, type PullRequestFacts } from "@terros/sergeant-contracts";
 import type { DelegatedIssue } from "@terros/sergeant-linear";
 import type { LoopResult } from "./loop-options.ts";
-import type { TaskState } from "./task-state.ts";
+import { setAsideStateFile, type TaskState } from "./task-state.ts";
 
 // TECH-5118: a task a human accepted as it is stays ended. Its loop sets `state.json` aside, so intake
 // resumes it no more, and leaves `accepted.json` beside it, since the issue stays delegated: in Todo,
@@ -78,7 +78,7 @@ export async function endAccepted(
   if (replyId) await postAccepted(conversation.issue.id, replyId, comment, linear);
   // A closed issue is not in Todo, so it needs no marker: reopened to Todo, it starts afresh at once.
   if (!close) await markAccepted(dir, at);
-  await rename(join(dir, "state.json"), join(dir, `state.accepted-${at.replace(/[:.]/g, "-")}.json`));
+  await rename(join(dir, "state.json"), join(dir, setAsideStateFile("accepted", at)));
   if (!close) return { outcome: "accepted", detail: "a human accepted the work as it is" };
   return { outcome: "accepted", detail: `Sergeant closed the issue as ${close === "done" ? "Done" : "Canceled"}: nothing to change` };
 }

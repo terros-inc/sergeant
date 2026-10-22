@@ -1,6 +1,7 @@
 import type { CreateFollowup } from "./actions.ts";
 import type { Conversation, RepoSlug, Sha } from "./conversation.ts";
 import type { GitHubRateLimit, MergePolicy, PullRequestFacts } from "./github.ts";
+import type { ReadinessDeclaration, ReadinessPullRequestFacts } from "./readiness.ts";
 import type { RunId, RunRecord } from "./runs.ts";
 
 // The seams adapters implement. Adapters validate what they read with the schemas above before
@@ -189,6 +190,11 @@ export interface GitHubPort {
   mergePolicy?(repo: RepoSlug): MergePolicy;
   /** Posts Sergeant's immutable, one-per-head readiness declaration and returns the existing or new comment. */
   declareReadiness?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha; comment: string; fallbackComment: string; modelText: string }): Promise<{ id: number; url: string; comment: string }>;
+  /**
+   * TECH-6613: rereads a declared PR and its declaration comment for `sgt review readiness`, through the
+   * same conditional, rate-limited reads; `declaration` is null when that comment is gone or is not on this PR.
+   */
+  readReadiness?(req: { repo: RepoSlug; number: number; commentId: number }): Promise<{ declaration: ReadinessDeclaration | null; facts: ReadinessPullRequestFacts }>;
   /**
    * A `human` repository's gated head, handed to a human (TECH-5244), never approved or merged: the PR
    * marked ready for review if it is a draft; review requested from `reviewers` only when GitHub shows

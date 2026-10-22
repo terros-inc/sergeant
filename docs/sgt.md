@@ -122,7 +122,8 @@ Approvers also have `sgt admin` (§7).
   The API's JSON is printed as it was sent, so it keeps fields newer than your `sgt`; an answer outside
   the contract your `sgt` knows is an error.
 - `sgt --help` lists every command: `login`, `logout`, `whoami`, `task list | show | wake | cancel`,
-  `run list | show | report | cancel`, `account …`, `repo list`, `stops`, `retro`, `admin …`, and `update`.
+  `run list | show | report | cancel`, `account …`, `repo list`, `stops`, `review readiness`, `retro`,
+  `admin …`, and `update`.
 - Exit codes: 0 ok, 1 the API refused or failed, 2 a usage mistake.
 - MCP: `sgt-mcp` puts the read-only commands in your AI assistant (§9).
 
@@ -139,7 +140,6 @@ are in [design 07 §6](design/07-linear-contract.md#6-budget-asks-and-fresh-wind
 - **`sgt stops`** shows, for each rubric rule and recommendation, how many budget questions were asked,
   how people replied (extend, stop, other), and how often the reply followed the recommendation.
   `--json` adds every stop.
-
 - **`sgt task wake` does not touch the budget** of a task at work. It asks for a turn now, which still
   waits for anything that holds it, an exhausted budget included. A task whose closing PR merged is
   different: while its issue is open and delegated, a wake reopens its work in a fresh window, and
@@ -150,6 +150,14 @@ are in [design 07 §6](design/07-linear-contract.md#6-budget-asks-and-fresh-wind
 - **`sgt task show <ID>`** shows the current window: spend of its limit, when its time would run out if
   the task worked without pause from now, and `EXHAUSTED` with why once it has run out (`--json` adds
   `windowStart`).
+
+### Readiness agreement
+
+`sgt review readiness [--since 90d] [--repo <owner/name>] [--list]` shows how often a human
+merged exactly the head Sergeant declared READY TO MERGE: `AGREED n / evaluated m = p%`, with
+DIFFERENT_HEAD and REJECTED beside it, the UNKNOWN declarations by reason (never in the rate), and
+who merged. `--list` adds each declaration's PR, head, class and reason
+([design 16 §7.1](design/16-evidence-based-review.md#71-stage-1-sgt-review-readiness-computed-by-rereading-github)).
 
 ## 6. Model accounts
 
