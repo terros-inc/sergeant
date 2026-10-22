@@ -531,7 +531,7 @@ ReviewFacts {                   // telemetry; enough to compare review modes and
   implementer: { provider, model }
   subject: [{ repo, number, headSha,
              found?,              // per PR, from the report or its single-PR fallback; absent is unknown (06 §8)
-             auditCommentId? }]   // the audit's PR comment; not posted yet
+             auditCommentId? }]   // the post-merge audit's PR comment, once posted (06 §8)
   findings: { blocking, nonBlocking, nits }
   adapterAttested?              // subagent reviews only
   // filled in later, when known:

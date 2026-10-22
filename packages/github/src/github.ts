@@ -7,6 +7,7 @@ import { rateLimiter } from "./rate-limit.ts";
 import { firstParent, mergedPullRequests, reviewEdits } from "./merged-prs.ts";
 import { retriggerChecks } from "./retrigger.ts";
 import { declareReadiness, readReadiness } from "./readiness.ts";
+import { postAuditComment } from "./audit-comment.ts";
 import { readSquashMessage } from "./squash-message.ts";
 
 type CheckState = "passed" | "failed" | "pending" | "missing";
@@ -418,6 +419,14 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
 
     declareReadiness: (req) => (configFor(req.repo), declareReadiness(request, req, { ...(options.appId !== undefined && { appId: options.appId }), ...(options.publicDataDenylist && { publicDataDenylist: options.publicDataDenylist }), log })),
     readReadiness: (req) => (configFor(req.repo), readReadiness(request, req, options.appId)),
+    postAuditComment: (req) => (
+      configFor(req.repo),
+      postAuditComment(request, req, {
+        ...(options.appId !== undefined && { appId: options.appId }),
+        ...(options.publicDataDenylist && { publicDataDenylist: options.publicDataDenylist }),
+        changedFiles: () => readChangedFiles(req.repo, req.number),
+      })
+    ),
     handToHuman: (req) => (configFor(req.repo), handToHuman(request, req, { ...(options.appId !== undefined && { appId: options.appId }), log })),
 
     async assignPullRequest({ repo, number, assignee }) {

@@ -8,7 +8,7 @@ links PRs to the Linear issue, and merges under the Gate's rules.
 
 | App | Held by | Permissions on enrolled repos | Used for |
 |---|---|---|---|
-| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, handing a gated head to a human with a summary comment and minimizing its own outdated comments (§7), closing a stopped task's PRs and deleting their `sergeant/` branches (§3), assigning the worker's PRs to the task's requestor (§10), nothing else |
+| **control-plane App** | Sergeant's deterministic core only | contents: write (merge), pull_requests: write, checks: read, metadata: read; webhooks | reading facts, approving then merging a gated head, handing a gated head to a human with a summary comment and minimizing its own outdated comments (§7), closing a stopped task's PRs and deleting their `sergeant/` branches (§3), assigning the worker's PRs to the task's requestor (§10), posting post-merge audit comments on enrolled PRs, filtered on public repositories ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved)), nothing else |
 | **worker App** | never held directly; Sergeant mints one-hour installation tokens per run, scoped to the task's repository set (04 §9) | workers: contents: write, pull_requests: write, workflows: write and statuses: read (each only while the installation holds it), checks: read, actions: read, metadata: read. Reviewers: no write token (the host checks out their PRs with a read-only token that never enters the run). Every run, worker and reviewer, also gets `GH_READ_TOKEN`: contents: read, pull_requests: read, metadata: read, for all the enrolled repositories (TECH-6194) | pushing branches (including workflow changes), opening and updating PRs, reading CI logs and statuses (`gh pr checks`); reading another enrolled repository or PR |
 | **rerun App** (optional, TECH-5839) | Sergeant's deterministic core only; each call mints a token for one repository with only `actions` | actions: write, metadata: read | rerunning the failed jobs of a workflow run a worker asked for (§6), nothing else |
 
@@ -219,7 +219,7 @@ merged a production change in a repository whose ruleset its own approval satisf
   minimizable on GitHub and needs no hiding, since the merge follows it at once.
 - Before any handoff, approval, or merge, the App posts the immutable readiness declaration owned by
   §12. Its comment id is stored on the `refusedMerges` or `merged` record, and the Linear handoff links
-  directly to that PR comment. Minimizing applies only to readiness/summary comments for other heads.
+  directly to that PR comment. Minimizing applies only to readiness/summary comments for other heads, never to a post-merge audit comment ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved)).
 - The handoff is recorded like a merge GitHub refused, without the bounded re-check: one
   "Ready for a human to merge" comment on the issue per head, with the summary and who was asked;
   M12 refuses another `merge_pr` at the same facts; the loop waits on the human without spending the
@@ -307,7 +307,7 @@ holds up pauses like any other task loop, not retried and logged at every poll.
 
 ## 11. What Sergeant never does on GitHub
 
-Push code, create branches, delete a branch other than a closed PR's (§3), open PRs, rebase, resolve conflicts, comment on PRs other than a readiness/handoff summary or a stopped task's closing comment, hide any comment but its own outdated ones (§7), approve a PR other
+Push code, create branches, delete a branch other than a closed PR's (§3), open PRs, rebase, resolve conflicts, comment on PRs other than a readiness/handoff summary, a stopped task's closing comment, or Sergeant's post-merge audit comments on enrolled PRs, filtered on public repositories ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved)), hide any comment but its own outdated readiness or handoff summaries (§7; never an audit comment), approve a PR other
 than as the first step of its gated merge (§7), change settings, rulesets, secrets, or workflows, or
 dispatch workflows.
 

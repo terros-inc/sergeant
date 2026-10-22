@@ -2,7 +2,7 @@ import type { CreateFollowup } from "./actions.ts";
 import type { Conversation, RepoSlug, Sha } from "./conversation.ts";
 import type { GitHubRateLimit, MergePolicy, PullRequestFacts } from "./github.ts";
 import type { ReadinessDeclaration, ReadinessPullRequestFacts } from "./readiness.ts";
-import type { RunId, RunRecord } from "./runs.ts";
+import type { Finding, ReviewReport, RunId, RunRecord } from "./runs.ts";
 
 // The seams adapters implement. Adapters validate what they read with the schemas above before
 // returning it; the core never trusts an unvalidated external payload.
@@ -190,6 +190,22 @@ export interface GitHubPort {
   mergePolicy?(repo: RepoSlug): MergePolicy;
   /** Posts Sergeant's immutable, one-per-head readiness declaration and returns the existing or new comment. */
   declareReadiness?(req: { repo: RepoSlug; number: number; expectedHeadSha: Sha; comment: string; fallbackComment: string; modelText: string }): Promise<{ id: number; url: string; comment: string }>;
+  /**
+   * TECH-6618: posts a post-merge audit's nonblocking comment on the merged PR, at most once per PR head,
+   * and returns its id. The adapter composes it (06 §8): a fixed verdict line from `verdict`, `found` and
+   * `headSha`; on a private repository the summary and every finding too; on a public one, or one whose
+   * visibility cannot be read, only code-anchored findings that pass the public-data check. It never
+   * blocks, reverts or reopens anything, and nothing ever minimizes it.
+   */
+  postAuditComment?(req: {
+    repo: RepoSlug;
+    number: number;
+    headSha: Sha;
+    verdict: ReviewReport["verdict"];
+    found: boolean;
+    summary: string;
+    findings: Finding[];
+  }): Promise<{ id: number }>;
   /**
    * TECH-6613: rereads a declared PR and its declaration comment for `sgt review readiness`, through the
    * same conditional, rate-limited reads; `declaration` is null when that comment is gone or is not on this PR.

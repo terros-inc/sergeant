@@ -1,7 +1,6 @@
-import { spawnSync } from "node:child_process";
-import { join } from "node:path";
 import { type GitHubAccount, type GitHubPort, type ReadinessReview, Sha } from "@terros/sergeant-contracts";
 import { z } from "zod";
+import { publicDataCheck } from "./audit-comment.ts";
 import { issueComment, readAll } from "./pr-feedback.ts";
 import { graphqlErrors, pullRequestReviewers } from "./schemas.ts";
 
@@ -28,11 +27,7 @@ export async function declareReadiness(
   let body = req.comment;
   const visibility = z.object({ visibility: z.enum(["public", "private", "internal"]) }).safeParse(await request(`/repos/${req.repo}`));
   if (!visibility.success || visibility.data.visibility === "public") {
-    const script = join(import.meta.dirname, "../../runner/container/check-public-data.mjs");
-    const checked = context.publicDataDenylist
-      ? spawnSync(process.execPath, [script, "text", "readiness text"], { input: req.modelText, env: { ...process.env, PUBLIC_DATA_DENYLIST: context.publicDataDenylist } })
-      : undefined;
-    if (!checked || checked.status !== 0) body = req.fallbackComment;
+    if (publicDataCheck(context.publicDataDenylist, "readiness text")?.(req.modelText) !== "pass") body = req.fallbackComment;
   }
   const created = issueComment.parse(await request(`/repos/${req.repo}/issues/${req.number}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }) }));
   const confirmed = context.appId !== undefined && created.user?.type === "Bot" && created.performed_via_github_app?.id === context.appId;

@@ -232,9 +232,42 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     (the Sergeant project's owner), at most `review.qualityBudgetUsdPerDay` (default $25) in any 24
     hours, an audit whose cost is not known yet counting $5; one starts only if its $5 fits under the cap
     with what is already spent. With no `auditOwner`, none runs.
-  - `merged-audits.json` keeps only when the last pass ran and the audits it started, for the cap.
-    Recording results and posting audit comments are later work; an audit never blocks, reverts or
-    reopens anything.
+  - **Finishing it** (TECH-6618, proposal 16 §6.2; `merged-audit-harvest.ts`). A task's audit keeps its
+    after-merge path above. An audit this loop started has no task, so at every hourly check the loop
+    reads back each audit it started and, once the run has finished, posts the audit comment below and
+    writes the audit's `ReviewFacts` line (01) to `<stateDir>/reviews.jsonl`: `trigger: audit`, `issue`
+    the Linear issue the PR names (else `owner/name#n`), and the PR's `found` and `auditCommentId` on its
+    `subject` entry. Each is done once, however often the window is re-scanned; a comment that could
+    not be posted is retried at each check for a week, and once posted writes the line again with its
+    id (the last line per run id holds). Must-fix findings also go to `<stateDir>/audit-followups.jsonl`
+    and an `AUDIT FOLLOW-UP` log line. An audit never blocks, reverts, reopens, or files anything:
+    humans decide.
+  - **The audit comment** (proposal 16 §6.3–6.4), posted on the merged PR by the control-plane App, at
+    most one per PR head (one this App already posted for the head is reused), and never minimized. The
+    core composes it; the reviewer has no GitHub write access, so nothing it writes reaches the PR
+    except through this composition:
+    - The first line comes from report fields only, never reviewer prose:
+      `Post-merge audit (nonblocking): PASS|FAIL | Found: YES|NO | SHA: <full head SHA>`. `PASS` is
+      verdict `approve`, `FAIL` is `changes_requested` or `needs_human`; `Found` is the PR's `found`. A
+      run with no report, or a report about another head, posts nothing.
+    - **Private repository**: the verdict line, the reviewer's summary, and every finding with its
+      severity and category.
+    - **Public repository**, or one whose visibility cannot be read at posting time: the verdict line
+      and only the findings that are structurally about code: category not `acceptance`; location
+      `<path>` or `<path>:<line>` for one of the PR's changed files (an unreadable file list qualifies
+      none); description on one line, at most 500 characters, with no URL. Each candidate, and then
+      the whole comment, must pass the canonical `check-public-data.mjs text` with the installation's
+      denylist (`publicDataDenylistSecret`); a candidate it rejects is dropped. With no denylist, a
+      check error, or a whole comment it rejects, the comment is the verdict line only. Dropped
+      findings are counted, never quoted: "2 findings are kept in Sergeant's records (`sgt review
+      audits`), not on this public PR." The summary is never shown. What the filter cannot catch is a
+      code-anchored sentence that paraphrases a private detail in ordinary words; the reviewer rule
+      asking for code-only wording narrows it.
+  - `merged-audits.json` keeps when the last pass ran and the audits it started, with each one's PR head
+    and what was recorded of it: the cap holds across a restart, and an audit is found after its PR
+    leaves the 72-hour window. Lost, the next pass re-scans the window, recomputes each drawn PR's
+    `auditRunId` (the runner's start is idempotent on it), and records it again: at worst a repeated
+    `ReviewFacts` line, never a second comment.
 - A task's audit is charged to that task's budget and owner (TECH-5179); a merged-PR audit outside a
   task, to `review.auditOwner` within `review.qualityBudgetUsdPerDay`.
 

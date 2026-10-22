@@ -120,7 +120,7 @@ Each is supervised and reported by `/health/loops` (S1 UNF-555, kept).
 | budget-meter | every 60 s | compute `BudgetStatus`; wake on soft/exhausted; `enforce_budget` (§6) |
 | scheduler | continuous | start due turns within concurrency (03 §2) |
 | review-quality export | daily | write metrics to S3 and CloudWatch (06 §9) |
-| merged-PR audit draw | daily (checked hourly; `merged-audits.json` keeps the last pass) | in each repository with a nonzero `mergedAuditSampleRate`, draw from the PRs merged in the last 72 hours and start each drawn PR's audit as of merge ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved), TECH-6617) |
+| merged-PR audit draw | daily (checked hourly; `merged-audits.json` keeps the last pass) | in each repository with a nonzero `mergedAuditSampleRate`, draw from the PRs merged in the last 72 hours and start each drawn PR's audit as of merge; at every hourly check, record each finished one and post its nonblocking PR comment ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved), TECH-6617, TECH-6618) |
 
 Startup runs the sequence in 02 §8 before the loops start.
 

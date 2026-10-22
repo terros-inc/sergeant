@@ -9,7 +9,8 @@ const comment = (id: number, body: string, app = 42) => ({ id, node_id: `IC_${id
 
 test("one immutable declaration is posted per head, and only other-head summaries are minimized", async () => {
   let head = h1;
-  const comments = [comment(1, "Unrelated status"), comment(2, `READY TO MERGE | SHA: ${h1}\n\nReason: first\n\nEvidence on this head:\n- recorded`)];
+  // TECH-6618: an audit comment this App posted on an earlier head is never minimized.
+  const comments = [comment(1, "Unrelated status"), comment(2, `READY TO MERGE | SHA: ${h1}\n\nReason: first\n\nEvidence on this head:\n- recorded`), comment(4, `Post-merge audit (nonblocking): PASS | Found: NO | SHA: ${h1}`)];
   const minimized: string[] = [];
   const github = createGitHubPort({ token: async () => "test", appId: 42, publicDataDenylist: "Acme Solar", repositories: { [repo]: { mergeMethod: "squash" } }, fetch: async (input, init) => {
     const path = String(input).replace("https://api.github.com", "");
@@ -23,7 +24,7 @@ test("one immutable declaration is posted per head, and only other-head summarie
   }});
   const req = (sha: string, reason: string) => ({ repo, number: 7, expectedHeadSha: sha, comment: `READY TO MERGE | SHA: ${sha}\n\nReason: ${reason}\n\nEvidence on this head:\n- recorded`, fallbackComment: `READY TO MERGE | SHA: ${sha}\n\nReason: Reason recorded in Sergeant's task record\n\nEvidence on this head:\n- recorded`, modelText: reason });
   expect(await github.declareReadiness?.(req(h1, "changed retry reason"))).toMatchObject({ id: 2 });
-  expect(comments).toHaveLength(2);
+  expect(comments).toHaveLength(3);
   head = h2;
   expect(await github.declareReadiness?.(req(h2, "second head"))).toMatchObject({ id: 3 });
   expect(minimized).toEqual(["IC_2"]);
