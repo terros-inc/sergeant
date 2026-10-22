@@ -161,6 +161,11 @@ const service = await startService(
     repositoryBudget: (repo) => repoBudget(installation.repositoryConfigs[repo]),
     auditSampleRate: config.review.auditSampleRate,
     progressComments: config.review.progressComments,
+    mergedAudits: {
+      rateOf: (repo) => installation.repositoryConfigs[repo]?.mergedAuditSampleRate ?? 0,
+      auditOwner: config.review.auditOwner,
+      budgetUsdPerDay: config.review.qualityBudgetUsdPerDay,
+    },
     webhookSecrets: installation.webhookSecrets,
     trustLoopback: values["trust-loopback"],
     accounts: accounts.registry,

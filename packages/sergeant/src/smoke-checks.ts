@@ -14,7 +14,7 @@ type LinearReads = Pick<
   ReturnType<typeof createLinearPort>,
   "delegatedIssues" | "completedIssues" | "findFollowupIssue" | "issueProgress" | "readConversation" | "readTaskOwner" | "viewer" | "userNames" | "fetchUpload" | "readProbes"
 > & { retro: Pick<ReturnType<typeof createLinearPort>["retro"], "validateTarget" | "lastRetro" | "feedbackTasks" | "filedIssues"> };
-type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness">;
+type GitHubReads = Pick<GitHubPort, "readPullRequest" | "defaultBranchHead" | "issueBranches" | "branches" | "readReadiness" | "mergedPullRequests" | "firstParent">;
 type GitHubProbes = ReturnType<typeof githubReadProbes>;
 
 const DAY_MS = 86_400_000;
@@ -173,6 +173,15 @@ export function githubChecks(
       return { branches: (await github.branches(repo)).length };
     },
   };
+  const merged: SmokeCheck = {
+    name: `github ${repo} PRs merged in the last 72 hours, and the newest one's base (merged-PR audit)`,
+    covers: ["TECH-6617"],
+    run: async () => {
+      if (!github.mergedPullRequests || !github.firstParent) throw new Error("the GitHub adapter has no mergedPullRequests or firstParent");
+      const prs = await github.mergedPullRequests(repo, new Date(Date.now() - 72 * 3_600_000));
+      return { merged: prs.length, ...(prs[0] && { newest: prs[0].number, base: await github.firstParent(repo, prs[0].mergedSha) }) };
+    },
+  };
   const issueBranches: SmokeCheck = {
     name: `github ${repo} issue branches (report-only retry)`,
     covers: ["TECH-6106"],
@@ -185,10 +194,11 @@ export function githubChecks(
           },
         }),
   };
-  if (pr === undefined) return [defaultHead, branches, issueBranches, ...[facts, squash, handoff, branch, readiness].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
+  if (pr === undefined) return [defaultHead, branches, merged, issueBranches, ...[facts, squash, handoff, branch, readiness].map((c) => ({ ...c, skip: "needs --pr <a pull request in the repository>" }))];
   return [
     defaultHead,
     branches,
+    merged,
     issueBranches,
     {
       ...facts,

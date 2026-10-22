@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { HumanPullRequestFeedback, PullRequestFacts, RunSpec } from "@terros/sergeant-contracts";
+import type { Conversation, HumanPullRequestFeedback, PullRequestFacts } from "@terros/sergeant-contracts";
 import { reviewerBrief, workerBrief } from "./brief.ts";
 import { HUMAN_FEEDBACK_BOUND, renderHumanFeedback } from "./brief-common.ts";
 
@@ -34,7 +34,7 @@ const comment = (n: number, body: string, number = 7): HumanPullRequestFeedback 
   };
 };
 
-const conversation: RunSpec["conversation"] = {
+const conversation: Conversation = {
   issue: {
     id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/UNF-1", title: "T", description: "D",
     state: "In Progress", stateType: "started", delegate: null, linkedPullRequests: [],

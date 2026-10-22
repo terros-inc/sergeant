@@ -112,7 +112,8 @@ InstallationConfig {            // ADR-0042 mechanism; Sergeant 2 keys only
   }
   review: {
     auditSampleRate             // fraction of skipped reviews that get a nonblocking audit review
-    qualityBudgetUsdPerDay      // pays for audit reviews; not charged to tasks
+    auditOwner?                 // Linear user id whose accounts pay for audits outside a task; absent, none run (06 §8)
+    qualityBudgetUsdPerDay      // default 25: caps those audits in any 24 hours (06 §8)
   }
   followups: { maxDepth, autoDelegate }
   humanWait: { remindAfterHours }
@@ -138,6 +139,7 @@ RepositoryEnrollment {
   mergeMethod: squash | merge | rebase
   budget?: { wallMinutes?, costUsd? } // replaces the installation's window fields for tasks with a run here (TECH-5219)
   alwaysReviewPaths: Glob[]     // optional; a "not required" disposition is refused if the PR touches these
+  mergedAuditSampleRate?        // 0–1, absent 0: the merged-PR audit's draw here (06 §8, TECH-6617)
 }
 ```
 
@@ -403,7 +405,8 @@ ReviewBrief {
   briefVersion: "s2-review-brief/1"
   runId, taskId
   trigger: required | audit
-  task: TaskExcerpt
+  task?: TaskExcerpt            // absent: a merged-PR audit whose PR names no Linear issue; the PR's text is the requirements (06 §8)
+  feedbackCutoff?               // a merged-PR audit's merge time: only feedback made by then, judged as of merge (06 §8)
   subject: {
     pullRequests: [{ repo, number, url, baseRef, baseSha, headSha }]
     previousReviews: [{ reviewRunId, reviewedSha, findings: Finding[] }]

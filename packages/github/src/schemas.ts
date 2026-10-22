@@ -45,6 +45,10 @@ export const pullRequestReviewers = z.object({
   requested_teams: z.array(z.object({ slug: z.string().min(1) })).default([]),
 });
 export const graphqlErrors = z.object({ errors: z.array(z.object({ message: z.string() })).optional() });
+/** A page of closed PRs, for the merged-PR audit's discovery (TECH-6617). */
+export const closedPullRequests = z.array(
+  z.object({ number: z.number().int().positive(), title: z.string(), updated_at: z.string(), merged_at: z.string().nullable(), merge_commit_sha: z.string().nullable(), head: z.object({ sha: z.string() }) }),
+);
 export const pullRequestList = z.array(z.object({ number: z.number().int().positive() }));
 export const pullRequestFiles = z.array(z.object({ filename: z.string().min(1), previous_filename: z.string().min(1).optional() }));
 export const gitRef = z.object({ object: z.object({ sha: z.string() }) });

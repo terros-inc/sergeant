@@ -125,7 +125,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   /** The task owner's account for a launch, from quota read now (accounts.ts). */
   async function chooseAccount(spec: RunSpec, workerAdapter: Adapter | undefined) {
     const accounts = await opts.accounts(spec.owner.id);
-    const codexLabel = hasCodexLabel(spec.conversation.issue.labels);
+    const codexLabel = hasCodexLabel(spec.conversation?.issue.labels);
     return pickAccount({ owner: spec.owner, accounts, read: opts.quota, isSetAside: asides.has, role: spec.role, workerAdapter, codexLabel });
   }
 
@@ -157,11 +157,14 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
 
       // The task's files, for worker and reviewer alike; mounted read-only, never fatal.
       const attachmentsDir = join(p.dir, "attachments");
-      const attachments = await fetchAttachments(spec.conversation, attachmentsDir, {
-        ...(opts.fetchLink && { fetchLink: opts.fetchLink }),
-        ...(opts.fetchUpload && { fetchUpload: opts.fetchUpload }),
-        ...(opts.attachmentLimits && { limits: opts.attachmentLimits }),
-      });
+      // An audit of a PR outside a Sergeant task may have no Linear issue, so no files (TECH-6617).
+      const attachments = spec.conversation
+        ? await fetchAttachments(spec.conversation, attachmentsDir, {
+            ...(opts.fetchLink && { fetchLink: opts.fetchLink }),
+            ...(opts.fetchUpload && { fetchUpload: opts.fetchUpload }),
+            ...(opts.attachmentLimits && { limits: opts.attachmentLimits }),
+          })
+        : { files: [], skipped: [] };
       const files = renderAttachments(attachments);
 
       let brief: string;
@@ -183,6 +186,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           const pr = await readPr(githubToken, s.repo, s.number);
           await tokenGit(githubToken, ["clone", "--quiet", `https://github.com/${s.repo}.git`, dir], p.workspace);
           await tokenGit(githubToken, ["fetch", "--quiet", "origin", s.headSha], dir);
+          // TECH-6617: a merged PR's diff is taken from an explicit base commit, fetched like its head.
+          if (s.baseSha) await tokenGit(githubToken, ["fetch", "--quiet", "origin", s.baseSha], dir);
           await execOk("git", ["checkout", "--quiet", "--detach", s.headSha], { cwd: dir });
           const dependencies = await installDependencies(exec, { image, workspace: p.workspace, rel, container: `sergeant-${spec.runId}-install-${subjects.length}` });
           subjects.push({ ...s, url: pr.html_url, title: pr.title, body: pr.body ?? "", baseRef: pr.base.ref, public: pr.base.repo?.private !== true, path: `/workspace/${rel}`, dependencies });
@@ -209,7 +214,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         repositories: spec.repositories,
         container: `sergeant-${spec.runId}`,
         startedAt: new Date().toISOString(),
-        issueRevision: issueRevision(spec.conversation.issue),
+        ...(spec.conversation && { issueRevision: issueRevision(spec.conversation.issue) }),
         ...(providerChoice && { providerChoice }),
         account: runAccount(account),
         accountReason,

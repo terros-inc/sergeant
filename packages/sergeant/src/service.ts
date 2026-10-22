@@ -7,6 +7,7 @@ import { isLoopbackHost } from "./auth.ts";
 import { driveCancel, pendingCancels, recordCancel, taskDir } from "./cancel.ts";
 import { afterMergeOnly } from "./after-merge.ts";
 import { runLoop, type LoopResult } from "./loop.ts";
+import { mergedAuditsEvery } from "./merged-audits.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { retroEvery } from "./retro.ts";
 import { startFeedbackLoop } from "./service-feedback.ts";
@@ -250,6 +251,10 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   })();
 
   const feedbackLoop = startFeedbackLoop(opts, deps, log, abort.signal);
+  const audits = opts.mergedAudits;
+  const mergedAuditLoop = audits
+    ? withSource("merged-PR audits", () => mergedAuditsEvery({ ...audits, stateDir: opts.stateDir, enrolledRepositories: opts.enrolledRepositories, log, signal: abort.signal }, deps))
+    : Promise.resolve();
   // The retro checks hourly whether one is due, and at once when a human asks (`sgt retro`).
   const retroWake = new Wake();
   const retro = deps.retro;
@@ -321,6 +326,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
       abort.abort();
       await intakeLoop;
       await feedbackLoop;
+      await mergedAuditLoop;
       await retroLoop;
       await Promise.all(active.values());
       await Promise.allSettled(locks.values());

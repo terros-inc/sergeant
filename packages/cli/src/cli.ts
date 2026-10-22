@@ -82,6 +82,9 @@ export const USAGE = `usage: sgt [--api <url>] [--json] <command>
                                      an approver's: set an enrolled repository's own budget window,
                                      each flag alone; default clears it back to the installation's.
                                      serve takes it at once; budget windows opening from now on get it
+  admin repo audit-rate <owner/name> <0..1>
+                                     an approver's: the fraction of its merged PRs the daily merged-PR
+                                     audit draws (0.1 is 1 in 10); 0 turns it off. No restart needed
 
 The API is --api, else SGT_API_URL, else ${DEFAULT_API} (serve on this host); the hosted API
 is the installation's HTTPS endpoint, https://<hostname> (docs/sgt.md). Each API URL has its own

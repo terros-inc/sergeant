@@ -204,7 +204,34 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
   `ReviewFacts` keeps it on that PR's `subject` entry (01). It is per reviewed PR, never per run. An
   entry without it (an older report) falls back only when the report reviewed exactly one PR: yes when
   it has any finding, no otherwise. Otherwise it stays unknown.
-- Audit reviews are charged to the installation's review-quality budget, not the task's.
+- **Merged-PR audit** (TECH-6617, proposal 16 §6.2; `merged-audits.ts`). In each enrolled repository
+  whose `mergedAuditSampleRate` is above 0 (`RepositoryEnrollment`, absent meaning 0; an approver sets
+  it with `sgt admin repo audit-rate <owner/name> <0..1>`, 0 turning it off), every merged PR is in the
+  sample, Sergeant's or not:
+  - **Discovery, daily.** The PRs merged into the default branch in the last 72 hours
+    (`pulls?state=closed&base=<default>&sort=updated&direction=desc`, paged until a PR's `updated_at` is
+    older than the window, keeping those whose `merged_at` is inside it). The overlap tolerates a missed
+    day; a change merged without a PR is not seen.
+  - **The draw** is the same stable hash salted differently, `hash("merged-audit", repo, number,
+    headSha)` against the repository's rate, so it is independent of the skipped-review draw above.
+    The run id is `auditRunId` of the PR and head, and a head a task's audit already took keeps the id its
+    `merged` record stores, so a PR drawn by both, a restart, or a re-scan of the window starts one audit.
+  - **As of merge.** The reviewer checks out the pre-merge `head.sha` and diffs `git diff
+    <merge_commit_sha>^1...<head.sha>` (the start spec's explicit `baseSha`). Its brief is the PR's title
+    and body, the Linear issue the PR names (a closing reference in its body, else an identifier leading
+    its title; with none, or one that cannot be read, the PR's own text is the requirements), and only the
+    PR reviews and comments, and issue comments, made up to the merge (the spec's `feedbackCutoff`). Its
+    rules: judge as of the merge, report only what was actionable then, never infer a defect from a later
+    rewrite or rollback; on a public repository, word findings about the code only. Its focus says it is a
+    random sample of merged PRs, never that review was skipped.
+  - **Who pays.** These audits run outside any task, on the registered accounts of `review.auditOwner`
+    (the Sergeant project's owner), at most `review.qualityBudgetUsdPerDay` (default $25) in any 24
+    hours, an audit whose cost is not known yet counting $5. With no `auditOwner`, none runs.
+  - `merged-audits.json` keeps only when the last pass ran and the audits it started, for the cap.
+    Recording results and posting audit comments are later work; an audit never blocks, reverts or
+    reopens anything.
+- A task's audit is charged to that task's budget and owner (TECH-5179); a merged-PR audit outside a
+  task, to `review.auditOwner` within `review.qualityBudgetUsdPerDay`.
 
 ## 9. Review telemetry and metrics
 

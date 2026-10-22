@@ -59,7 +59,7 @@ export async function serve(opts: { writable?: boolean; write?: () => Write } = 
     },
   };
   const repositories: RepoSlug[] = ["terros-inc/one"];
-  const configs: Record<string, { mergeMethod: "merge" | "squash" | "rebase"; mergePolicy: "sergeant" | "human"; observedChecksFallback: boolean; ciRerunWorkflows: string[]; budget?: { wallMinutes?: number; costUsd?: number } }> = {
+  const configs: Record<string, { mergeMethod: "merge" | "squash" | "rebase"; mergePolicy: "sergeant" | "human"; observedChecksFallback: boolean; ciRerunWorkflows: string[]; budget?: { wallMinutes?: number; costUsd?: number }; mergedAuditSampleRate?: number }> = {
     "terros-inc/one": { mergeMethod: "squash", mergePolicy: "human", observedChecksFallback: false, ciRerunWorkflows: [] },
   };
   const logs: string[] = [];

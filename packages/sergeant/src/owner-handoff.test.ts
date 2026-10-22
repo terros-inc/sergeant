@@ -62,7 +62,7 @@ test("a reassignment hands off: runs stop, PRs stay open, the issue is Todo and 
   t.deps.runner.start = async (spec) => (specs.push(spec), await start(spec), abort.abort());
   await t.loop(abort.signal);
   expect(specs.map((s) => s.owner)).toEqual([bob]);
-  expect(specs[0]?.conversation.issue.linkedPullRequests).toEqual([{ repo, number: 7 }]);
+  expect(specs[0]?.conversation?.issue.linkedPullRequests).toEqual([{ repo, number: 7 }]);
   expect(t.seen.closed).toEqual([]);
 });
 

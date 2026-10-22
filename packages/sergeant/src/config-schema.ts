@@ -96,6 +96,11 @@ export const InstallationConfig = z.strictObject({
        * worker may have Sergeant rerun. Never a deployment or other privileged workflow. Empty, none.
        */
       ciRerunWorkflows: z.array(z.string().regex(/^\.github\/workflows\/[\w.-]+\.ya?ml$/, "expected a workflow file path")).default([]),
+      /**
+       * TECH-6617: the fraction of this repository's merged PRs, whoever wrote them, the daily merged-PR
+       * audit draws (06 §8, merged-audits.ts). Absent is 0: none. Set with `sgt admin repo audit-rate`.
+       */
+      mergedAuditSampleRate: z.number().min(0).max(1).optional(),
     }),
   ),
   /** The Sergeant model token for reasoning; never a worker's or reviewer's (TECH-5179). */
@@ -137,6 +142,13 @@ export const InstallationConfig = z.strictObject({
       auditSampleRate: z.number().min(0).max(1),
       /** TECH-5227: a short progress comment on the issue after each review round (progress.ts). */
       progressComments: z.boolean().default(true),
+      /**
+       * TECH-6617: the Linear user id of the person whose registered model accounts pay for audits outside
+       * a Sergeant task (merged-audits.ts): the Sergeant project's owner. No default: absent, none run.
+       */
+      auditOwner: z.string().min(1).optional(),
+      /** TECH-6617: the most those audits may spend in any 24 hours, in USD; absent, $25 (merged-audits.ts). */
+      qualityBudgetUsdPerDay: z.number().positive().optional(),
     })
     .default({ auditSampleRate: 0.2, progressComments: true }),
   /** The budget window a task gets when it starts (TECH-4964); each one unset keeps its default (120 minutes, $25). */

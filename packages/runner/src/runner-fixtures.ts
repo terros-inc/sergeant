@@ -39,7 +39,7 @@ const annCodex = { id: "person:ann:codex-local", adapter: "codex-local" as const
 const registered = { ann: [annClaude, annCodex], bob: [{ ...annClaude, id: "person:bob:claude-code-local", credential: "sk-ant-oat01-bob" }] } as Record<string, (typeof annClaude | typeof annCodex)[]>;
 /** Runner options under which Ann's only account is her Codex one, so her runs go to Codex. */
 export const ON_CODEX = { accounts: async (ownerId: string) => (ownerId === "ann" ? [annCodex] : []) };
-export const spec: RunSpec = {
+export const spec: Extract<RunSpec, { role: "worker" }> = {
   runId: "run_t1",
   owner: ann,
   role: "worker",

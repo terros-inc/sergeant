@@ -33,3 +33,11 @@ test("admin repo budget sends each flag given, default as a clear, and refuses a
     ["/v1/repositories", ""],
   ]);
 });
+
+// TECH-6617: a rate outside 0..1, or one JSON would send as null, must never reach serve as a rate.
+test("admin repo audit-rate sends a rate from 0 to 1 and refuses anything else unsent", async () => {
+  const { api, seen } = await fakeApi({ "POST /v1/repositories/audit-rate": { json: { repo: "terros-inc/one", changed: true, mergedAuditSampleRate: 0.1 } } });
+  expect(await sgt(api, "admin", "repo", "audit-rate", "terros-inc/one", "0.1")).toMatchObject({ code: 0, out: expect.stringContaining("set terros-inc/one's merged-PR audit rate to 0.1") });
+  for (const bad of ["1.5", "-0.1", "abc", "1e-1", "", "9".repeat(400)]) expect((await sgt(api, "admin", "repo", "audit-rate", "terros-inc/one", bad)).code).toBe(2);
+  expect(seen.map((s) => [s.url, s.body && JSON.parse(s.body)])).toEqual([["/v1/repositories/audit-rate", { repo: "terros-inc/one", mergedAuditSampleRate: 0.1 }]]);
+});
