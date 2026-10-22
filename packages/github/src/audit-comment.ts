@@ -67,12 +67,18 @@ export function auditComment(a: Audit, visibility: { public: boolean; changedFil
 
 /** `check-public-data.mjs text` with the installation's denylist, the same check that guards pushes (TECH-5914). */
 export const publicDataCheck =
-  (denylist: string | undefined, label: string): PublicDataCheck | undefined =>
+  (denylist: string | undefined, label: string, log: (line: string) => void = () => {}): PublicDataCheck | undefined =>
   denylist
     ? (text) => {
         const script = join(import.meta.dirname, "../../runner/container/check-public-data.mjs");
         const run = spawnSync(process.execPath, [script, "text", label], { input: text, env: { ...process.env, PUBLIC_DATA_DENYLIST: denylist } });
-        return run.status === 0 ? "pass" : run.status === 1 ? "fail" : "error";
+        if (run.status === 0) return "pass";
+        if (run.status === 1) {
+          log(`public-data check rejected ${label}`);
+          return "fail";
+        }
+        log(`public-data check could not run for ${label}: ${run.error?.message ?? (run.signal ? `terminated by ${run.signal}` : `exit ${run.status ?? "unknown"}`)}`);
+        return "error";
       }
     : undefined;
 
@@ -84,7 +90,7 @@ export const publicDataCheck =
 export async function postAuditComment(
   request: Request,
   a: Audit,
-  context: { appId?: number; publicDataDenylist?: string; changedFiles: () => Promise<string[]> },
+  context: { appId?: number; publicDataDenylist?: string; changedFiles: () => Promise<string[]>; log: (line: string) => void },
 ): ReturnType<Post> {
   const path = `/repos/${a.repo}/issues/${a.number}/comments`;
   const own = (c: z.infer<typeof issueComment>) => context.appId !== undefined && c.user?.type === "Bot" && c.performed_via_github_app?.id === context.appId;
@@ -93,7 +99,8 @@ export async function postAuditComment(
   const visibility = z.object({ visibility: z.enum(["public", "private", "internal"]) }).safeParse(await request(`/repos/${a.repo}`).catch(() => undefined));
   const isPublic = !visibility.success || visibility.data.visibility === "public";
   const changedFiles = isPublic ? await context.changedFiles().catch(() => []) : [];
-  const body = auditComment(a, { public: isPublic, changedFiles, check: publicDataCheck(context.publicDataDenylist, "audit comment") });
+  if (isPublic && !context.publicDataDenylist) context.log(`${a.repo}#${a.number}: public-data denylist is not configured; posting the fixed audit verdict only`);
+  const body = auditComment(a, { public: isPublic, changedFiles, check: publicDataCheck(context.publicDataDenylist, "audit comment", context.log) });
   const created = issueComment.parse(await request(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }) }));
   return { id: created.id };
 }

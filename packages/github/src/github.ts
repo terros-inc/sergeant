@@ -425,6 +425,7 @@ export function createGitHubPort(options: GitHubAdapterOptions): GitHubPort {
         ...(options.appId !== undefined && { appId: options.appId }),
         ...(options.publicDataDenylist && { publicDataDenylist: options.publicDataDenylist }),
         changedFiles: () => readChangedFiles(req.repo, req.number),
+        log,
       })
     ),
     handToHuman: (req) => (configFor(req.repo), handToHuman(request, req, { ...(options.appId !== undefined && { appId: options.appId }), log })),

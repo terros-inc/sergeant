@@ -15,6 +15,7 @@
     "example-org/example-repo": { "mergeMethod": "squash", "mergePolicy": "sergeant" }
   },
   "modelTokenSecret": "sergeant/example/model-token",
+  "publicDataDenylistSecret": "sergeant/example/public-data-denylist",
   "gitIdentity": { "name": "Example Human", "email": "human@example.com" },
   "humans": {
     "linearClientId": "0123456789abcdef0123456789abcdef",
