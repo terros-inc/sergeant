@@ -219,7 +219,9 @@ async function effect(action: ProposedAction, situation: SituationReport, ports:
           const policyText = protectedFiles.length
             ? `This PR changes protected CI configuration (${protectedFiles.join(", ")}), so it requires human review and human merge; Sergeant never approves it, merges it, or enables auto-merge.`
             : "This repository's merge policy is `human`, so Sergeant does not approve or merge it: a human reviews and merges it.";
-          readiness.comment += `\n\n${policyText}\n\n${reviewSummary(action.reviewStanding, pr, runs)}`;
+          const handoffEvidence = `\n\n${policyText}\n\n${reviewSummary(action.reviewStanding, pr, runs)}`;
+          readiness.comment += handoffEvidence;
+          readiness.fallbackComment += handoffEvidence;
         }
         // Older in-process test/custom ports have no declaration method; the installed adapter always
         // does. Keeping the port optional preserves compatibility while deployments use the real id.

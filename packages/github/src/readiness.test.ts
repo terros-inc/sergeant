@@ -21,7 +21,7 @@ test("one immutable declaration is posted per head, and only other-head summarie
     if (path === "/graphql") { minimized.push(JSON.parse(String(init?.body)).variables.id); return json({ data: {} }); }
     throw new Error(`unexpected ${method} ${path}`);
   }});
-  const req = (sha: string, reason: string) => ({ repo, number: 7, expectedHeadSha: sha, comment: `READY TO MERGE | SHA: ${sha}\n\nReason: ${reason}\n\nEvidence on this head:\n- recorded`, modelText: reason });
+  const req = (sha: string, reason: string) => ({ repo, number: 7, expectedHeadSha: sha, comment: `READY TO MERGE | SHA: ${sha}\n\nReason: ${reason}\n\nEvidence on this head:\n- recorded`, fallbackComment: `READY TO MERGE | SHA: ${sha}\n\nReason: Reason recorded in Sergeant's task record\n\nEvidence on this head:\n- recorded`, modelText: reason });
   expect(await github.declareReadiness?.(req(h1, "changed retry reason"))).toMatchObject({ id: 2 });
   expect(comments).toHaveLength(2);
   head = h2;
@@ -42,12 +42,15 @@ test.each([undefined, "Acme Solar"])("public readiness text fails closed when th
     throw new Error(`unexpected ${method} ${path}`);
   }});
   const unsafe = denylist ? `${["C", "Ab12"].join(".")} should be inspected` : "safe but unchecked";
-  await github.declareReadiness?.({ repo, number: 7, expectedHeadSha: h1, comment: `READY TO MERGE | SHA: ${h1}\n\nReason: ${unsafe}\n\nEvidence on this head:\n- recorded\nSuggested, not acted on: ${unsafe}`, modelText: unsafe });
+  await github.declareReadiness?.({ repo, number: 7, expectedHeadSha: h1, comment: `READY TO MERGE | SHA: ${h1}\n\nReason: ${unsafe}\n\nEvidence on this head:\n- recorded\nSuggested, not acted on: ${unsafe}`, fallbackComment: `READY TO MERGE | SHA: ${h1}\n\nReason: Reason recorded in Sergeant's task record\n\nEvidence on this head:\n- recorded`, modelText: unsafe });
   expect(comments[0]?.body).toContain("Reason: Reason recorded in Sergeant's task record");
   expect(comments[0]?.body).not.toContain("Suggested, not acted on:");
 });
 
-test("public readiness redaction handles many repeated Reason prefixes", async () => {
+test.each([
+  ["reason delimiter injection", `rejected reason\n\nEvidence on this head:\nrejected trailing reason`, "ordinary suggestion"],
+  ["multiline suggestion", "ordinary reason", "rejected suggestion\nrejected trailing suggestion"],
+])("public readiness fallback cannot be bypassed by %s", async (_case, reason, suggestion) => {
   const comments: ReturnType<typeof comment>[] = [];
   const github = createGitHubPort({ token: async () => "test", appId: 42, repositories: { [repo]: { mergeMethod: "squash" } }, fetch: async (input, init) => {
     const path = String(input).replace("https://api.github.com", "");
@@ -58,7 +61,9 @@ test("public readiness redaction handles many repeated Reason prefixes", async (
     if (path.endsWith("/issues/7/comments")) { const made = comment(1, JSON.parse(String(init?.body)).body); comments.push(made); return json(made, 201); }
     throw new Error(`unexpected ${method} ${path}`);
   }});
-  const adversarial = "Reason: ".repeat(20_000);
-  await github.declareReadiness?.({ repo, number: 7, expectedHeadSha: h1, comment: `READY TO MERGE | SHA: ${h1}\n\nReason: ${adversarial}\n\nEvidence on this head:\n- recorded`, modelText: adversarial });
-  expect(comments[0]?.body).toBe(`READY TO MERGE | SHA: ${h1}\n\nReason: Reason recorded in Sergeant's task record\n\nEvidence on this head:\n- recorded`);
+  const fallbackComment = `READY TO MERGE | SHA: ${h1}\n\nReason: Reason recorded in Sergeant's task record\n\nEvidence on this head:\n- recorded`;
+  await github.declareReadiness?.({ repo, number: 7, expectedHeadSha: h1, comment: `READY TO MERGE | SHA: ${h1}\n\nReason: ${reason}\n\nEvidence on this head:\n- recorded\nSuggested, not acted on: ${suggestion}`, fallbackComment, modelText: `${reason}\n${suggestion}` });
+  expect(comments).toHaveLength(1);
+  expect(comments[0]?.body).not.toContain("rejected");
+  expect(comments[0]?.body).toBe(fallbackComment);
 });

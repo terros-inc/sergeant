@@ -2,7 +2,7 @@ import type { MergePr, PullRequestFacts, RunRecord } from "@terros/sergeant-cont
 
 const FALLBACK = "Reason recorded in Sergeant's task record";
 
-export function readinessComment(action: MergePr, pr: PullRequestFacts, runs: RunRecord[]): { comment: string; modelText: string } {
+export function readinessComment(action: MergePr, pr: PullRequestFacts, runs: RunRecord[]): { comment: string; fallbackComment: string; modelText: string } {
   const reason = action.readinessReason?.trim() || FALLBACK;
   const suggestions = action.feedback ?? [];
   const standing = action.reviewStanding;
@@ -16,12 +16,10 @@ export function readinessComment(action: MergePr, pr: PullRequestFacts, runs: Ru
   const evidence = [`- Sergeant ${standing.kind === "reviewed" ? "reviewer" : "worker"} ${runId}: ${verdict}`, ...native, `- Required checks: ${passed} of ${pr.checks.required.length} passed`];
   const suggestionLines = suggestions.map((suggestion) => `Suggested, not acted on: ${suggestion}`);
   const modelText = [reason, ...suggestions].join("\n");
+  const fixed = [`READY TO MERGE | SHA: ${pr.headSha}`, "", `Reason: ${FALLBACK}`, "", "Evidence on this head:", ...evidence].join("\n");
   return {
     modelText,
+    fallbackComment: fixed,
     comment: [`READY TO MERGE | SHA: ${pr.headSha}`, "", `Reason: ${reason}`, "", "Evidence on this head:", ...evidence, ...suggestionLines].join("\n"),
   };
-}
-
-export function redactedReadiness(comment: string): string {
-  return comment.replace(/Reason: [\s\S]*?(?=\n\nEvidence on this head:)/, `Reason: ${FALLBACK}`).replace(/\nSuggested, not acted on:.*$/gm, "");
 }

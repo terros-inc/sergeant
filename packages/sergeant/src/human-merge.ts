@@ -23,20 +23,6 @@ export function reviewSummary(standing: MergePr["reviewStanding"], head: Pick<Pu
   return text.length > MAX_SUMMARY ? `${text.slice(0, MAX_SUMMARY)}…` : text;
 }
 
-/** The comment on the PR itself; GitHub posts it once per head, since the head is in it. */
-export function prHandoffComment(pr: Pick<PullRequestFacts, "headSha">, summary: string, protectedFiles: string[] = []): string {
-  const reason = protectedFiles.length
-    ? `This PR changes protected CI configuration (${protectedFiles.join(", ")}), so it requires human review and human merge; Sergeant never approves it, merges it, or enables auto-merge.`
-    : "This repository's merge policy is `human`, so Sergeant does not approve or merge it: a human reviews and merges it.";
-  return [
-    "**Ready for a human to merge**",
-    "",
-    `Sergeant's merge gate passed on head \`${pr.headSha}\`: its required checks are green and it has review standing. ${reason}`,
-    "",
-    summary,
-  ].join("\n");
-}
-
 /** Hands a gated head in a `human` repository to a human; never an approval or a merge. */
 export async function handToHuman(
   action: MergePr,
