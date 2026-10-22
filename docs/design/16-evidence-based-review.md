@@ -292,8 +292,9 @@ requested changes and then dismissed that request, or let the PR sit for days, a
 **AGREED**. A delayed review of the same head is therefore counted when the merge happens, and the
 declaration counts as `pending` until then.
 
-Human input in CHANGES_REQUIRED is **deliberately broad** (§14, question 3). Any human review or comment in the window,
-followed by a different final head, counts against agreement, even "LGTM, but please rebase". That
+Human input in CHANGES_REQUIRED is **deliberately broad** (§14, question 3). Any human review or
+comment in the window, followed by a changed patch, counts against agreement, even "LGTM, one optional
+nit" when the nit is then fixed. That
 biases the rate down, the safe direction for an autonomy threshold. Telling such comments apart
 would need semantic judgment in code, which the charter avoids, or a person labelling cases.
 
