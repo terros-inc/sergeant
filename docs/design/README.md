@@ -63,7 +63,7 @@ Then the reference contracts as needed.
 | `13-s1-supersession.md` | Every S1 concept classified (keep / simplify / move to reasoning / move to runner / delete); ADRs kept and abandoned; what we give up; the 7-step transition plan; implementation slices |
 | `14-open-questions.md` | The decision register, including the independent review's findings and changes |
 | `15-outbound-notifications.md` | Proposal (TECH-6005, pending approval): signed outbound webhooks to people's agent harnesses when a task needs a human, per-person `sgt` subscriptions, the Slack-reply path |
-| `16-evidence-based-review.md` | Proposal (TECH-6605, pending approval): one SHA-bound readiness declaration per head and its human-agreement rate on existing review evidence (stage 1), repository-wide post-merge audits with a public-repository comment filter (stage 2), earned per-repository merge autonomy under a provisional change-management definition (stage 3), and an on-demand company-wide review line; supersedes the path tier-map approach |
+| `16-evidence-based-review.md` | Proposal (TECH-6605, pending approval): one SHA-bound readiness declaration per head in every repository, success measured as a human merge of exactly that head, and two separate review measures, on existing review evidence (stage 1); 1-in-10 post-merge audits of all merged PRs in the repositories working toward auto-merge, with a public-repository comment filter (stage 2); earned per-repository merge autonomy with a shadow human-review sample, under a provisional change-management definition (stage 3), and an on-demand company-wide review line; supersedes the path tier-map approach |
 
 ## Section 15 — independent review
 
