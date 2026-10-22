@@ -19,6 +19,8 @@ export const RefusedMerge = z.object({
   number: z.number().int().positive(),
   url: z.url(),
   headSha: Sha,
+  /** The immutable READY TO MERGE comment for this head. */
+  readinessCommentId: z.number().int().positive().optional(),
   /** The live revision the refused merge was checked against. */
   conversationRevision: ConversationRevision,
   /** GitHub's own words, or the error of a failed merge call. */

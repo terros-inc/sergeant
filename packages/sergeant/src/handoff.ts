@@ -9,7 +9,8 @@ import type { LinearPort, RefusedMerge } from "@terros/sergeant-contracts";
 export const handoffKey = (issueId: string, r: Pick<RefusedMerge, "repo" | "number" | "headSha">) => `merge-handoff:${issueId}:${r.repo}#${r.number}:${r.headSha}`;
 
 export function handoffComment(r: RefusedMerge): string {
-  const ready = `[${r.repo}#${r.number}](${r.url}) at head \`${r.headSha}\` is reviewed and its required checks are green`;
+  const readinessUrl = r.readinessCommentId ? `${r.url}#issuecomment-${r.readinessCommentId}` : r.url;
+  const ready = `[${r.repo}#${r.number}](${readinessUrl}) at head \`${r.headSha}\` is reviewed and its required checks are green`;
   // TECH-5244: a human-merge repository's head was never approved or merged; it was handed over.
   if (r.human) {
     const asked = r.human.requested.length > 0 ? `Review is requested from ${r.human.requested.join(", ")}.` : "GitHub shows nobody's review requested on it.";

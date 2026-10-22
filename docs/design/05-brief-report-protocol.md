@@ -182,6 +182,10 @@ before identifiers were cached, by looking them up through Linear on a cache mis
 
 ## 5. Review recommendation
 
+When reasoning later proposes `merge_pr`, it adds a non-empty `readinessReason`. The existing
+`refusedMerges` and `merged` records retain the resulting optional `readinessCommentId`; no separate
+readiness store exists (08 §12).
+
 At the end of its work (and whenever it reports a head it considers ready), the worker judges the
 change it actually made, per PR head:
 

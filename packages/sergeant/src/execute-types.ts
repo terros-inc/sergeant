@@ -70,7 +70,7 @@ export type ActionOutcome =
       result: Record<string, unknown>;
       started?: RunRecord;
       /** The live PR facts the merge was allowed on, and its result. */
-      merged?: { pr: PullRequestFacts; mergedSha: string };
+      merged?: { pr: PullRequestFacts; mergedSha: string; readinessCommentId: number };
       /** The follow-up issue filed or already on record under the action's key. */
       followup?: FiledFollowup;
       /** The issue description an `update_description` wrote: later runs in the turn get it (TECH-6166). */

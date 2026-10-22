@@ -37,13 +37,15 @@ export const MergePr = z.object({
   number: z.number().int().positive(),
   expectedHeadSha: Sha,
   reviewStanding: ReviewStanding,
+  /** One or two sentences explaining why this exact head is ready. */
+  readinessReason: z.string().trim().min(1).max(1_000).optional(),
   /**
    * TECH-5186: for the closing PR, up to three short lines worth keeping from the runs' feedback and
    * non-blocking review notes. After the merge they are posted once on the issue as the Sergeant
    * feedback comment, with the `sergeant-feedback` label; absent or empty, neither.
    */
   feedback: z.array(z.string().min(1).max(300)).max(3).optional(),
-});
+}).refine((action) => action.readinessReason !== undefined, { message: "readinessReason is required", path: ["readinessReason"] });
 export type MergePr = z.infer<typeof MergePr>;
 
 /**

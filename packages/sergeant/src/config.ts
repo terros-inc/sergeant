@@ -189,6 +189,7 @@ export async function connect(
       token: controlPlaneToken,
       appId: config.github.controlPlaneApp.appId,
       repositories: repositoryConfigs,
+      ...(publicDataDenylist && { publicDataDenylist }),
       log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
       ...(fetchFor.github && { fetch: fetchFor.github }),
     }),

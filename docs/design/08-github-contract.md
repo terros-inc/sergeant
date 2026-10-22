@@ -139,7 +139,7 @@ head whose checks have not reported, and that Sergeant never saw pass, waits as 
 
 ## 7. Merging
 
-`merge_pr(repo, number, expectedHeadSha)` (carrying the proposing turn's `conversationRevision`, 03 §5) is
+`merge_pr(repo, number, expectedHeadSha, readinessReason)` (carrying the proposing turn's `conversationRevision`, 03 §5) is
 allowed only when every rule holds, checked against
 live GitHub and Linear facts at execution time:
 
@@ -217,6 +217,9 @@ merged a production change in a repository whose ruleset its own approval satisf
   there), nothing is hidden and that is logged. Hiding is best effort: a failure is logged and
   the handoff stands. Sergeant's only formal review, the approval inside a merge (§7), is not
   minimizable on GitHub and needs no hiding, since the merge follows it at once.
+- Before any handoff, approval, or merge, the App posts the immutable readiness declaration owned by
+  §12. Its comment id is stored on the `refusedMerges` or `merged` record, and the Linear handoff links
+  directly to that PR comment. Minimizing applies only to readiness/summary comments for other heads.
 - The handoff is recorded like a merge GitHub refused, without the bounded re-check: one
   "Ready for a human to merge" comment on the issue per head, with the summary and who was asked;
   M12 refuses another `merge_pr` at the same facts; the loop waits on the human without spending the
@@ -304,6 +307,26 @@ holds up pauses like any other task loop, not retried and logged at every poll.
 
 ## 11. What Sergeant never does on GitHub
 
-Push code, create branches, delete a branch other than a closed PR's (§3), open PRs, rebase, resolve conflicts, comment on PRs other than a handoff summary or a stopped task's closing comment, hide any comment but its own outdated ones (§7), approve a PR other
+Push code, create branches, delete a branch other than a closed PR's (§3), open PRs, rebase, resolve conflicts, comment on PRs other than a readiness/handoff summary or a stopped task's closing comment, hide any comment but its own outdated ones (§7), approve a PR other
 than as the first step of its gated merge (§7), change settings, rulesets, secrets, or workflows, or
 dispatch workflows.
+
+## 12. Readiness and agreement
+
+After a `merge_pr` preflight passes, in every merge policy, the control-plane App posts one comment
+whose exact first line is `READY TO MERGE | SHA: <full 40- or 64-hex head SHA>`. A non-empty `Reason:`
+from `readinessReason` follows, then evidence built from records: Sergeant's reviewer/worker standing,
+GitHub reviews on that commit, required-check counts, and any unacted-on suggestions. It is posted
+before a handoff, approval, or merge. Only comments GitHub records as posted through Sergeant's App
+count. Before posting, Sergeant rereads those comments; an existing declaration for the head is reused,
+never edited or deleted. A changed head is declared only after its own preflight passes.
+
+For a public repository, the model-written reason and suggestions must pass the canonical public-data
+check with the installation denylist. A missing denylist, unreadable visibility, or check failure replaces
+them with `Reason recorded in Sergeant's task record`; record-built lines remain. Earlier readiness or
+handoff summaries for other heads may be minimized, but the current declaration and unrelated comments
+must remain. The declaration id is retained on the existing `refusedMerges` or `merged` record.
+
+Agreement is derived later by rereading GitHub, not stored: an exact-head human merge agrees; a different
+merged head disagrees; an unmerged or Sergeant-merged declaration is not evaluable. The evidence is the
+declaration, native reviews and checks on its head, and the recorded Sergeant run standing.

@@ -72,7 +72,12 @@ export async function handToHuman(
   }
   const own = confirmed ? comments.filter((c) => c.user?.type === "Bot" && c.performed_via_github_app?.id === appId) : [];
   // REST does not say whether a comment is already minimized, so an earlier one is asked again.
-  for (const c of own.filter((c) => c.body !== comment && c.node_id)) {
+  const head = /^READY TO MERGE \| SHA: ([0-9a-f]{40}|[0-9a-f]{64})$/m.exec(comment)?.[1];
+  for (const c of own.filter((c) => {
+    if (!c.node_id || c.body === comment) return false;
+    const other = /^READY TO MERGE \| SHA: ([0-9a-f]{40}|[0-9a-f]{64})$/m.exec(c.body ?? "")?.[1];
+    return c.body?.startsWith("**Ready for a human to merge**") || (other !== undefined && other !== head);
+  })) {
     // Best effort: an earlier summary left visible is untidy, while failing here would undo a handoff
     // whose summary is already posted.
     try {

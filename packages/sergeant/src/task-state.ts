@@ -35,6 +35,7 @@ const Merged = z.looseObject({
   number: z.number().int(),
   headSha: Sha,
   mergedSha: Sha,
+  readinessCommentId: z.number().int().positive().optional(),
   at: z.iso.datetime(),
   /** The outcome comment, built from the facts the merge was allowed on; posted once. */
   outcome: z.string().optional(),
@@ -252,7 +253,7 @@ export function applyTurn(
       const cost = costTotal({ runs: situation.runs, unknownRuns: turn.unknownRuns ?? 0, turnCostUsd: turn.taskTurnCostUsd, startedAt: state.startedAt, at });
       const outcome = outcomeComment(o.merged.pr, mergedSha, situation.runs, state.followups, situation.conversation.issue, cost);
       const feedback = feedbackComment(o.action.feedback);
-      state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, at, outcome, ...(feedback && { feedback }) };
+      state.merged = { repo: o.action.repo, number: o.action.number, headSha: o.merged.pr.headSha, mergedSha, readinessCommentId: o.merged.readinessCommentId, at, outcome, ...(feedback && { feedback }) };
     }
   }
 }

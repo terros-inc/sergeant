@@ -42,7 +42,7 @@ export async function handToHuman(
   action: MergePr,
   pr: PullRequestFacts,
   issue: Conversation["issue"],
-  ctx: { runs: RunRecord[]; liveRevision: string; ports: Ports; protectedFiles?: string[] },
+  ctx: { runs: RunRecord[]; liveRevision: string; ports: Ports; protectedFiles?: string[]; readinessCommentId: number; readinessComment: string },
 ): Promise<ActionOutcome> {
   const { ports } = ctx;
   try {
@@ -55,7 +55,7 @@ export async function handToHuman(
       number: pr.number,
       expectedHeadSha: pr.headSha,
       reviewers: assignee ? [assignee] : [],
-      comment: prHandoffComment(pr, summary, ctx.protectedFiles),
+      comment: ctx.readinessComment,
     }));
     ports.log?.(`${pr.repo}#${pr.number}: handed to a human to merge; review requested from ${requested.join(", ") || "nobody"}`);
     const refused: RefusedMerge = {
@@ -63,6 +63,7 @@ export async function handToHuman(
       number: pr.number,
       url: pr.url,
       headSha: pr.headSha,
+      readinessCommentId: ctx.readinessCommentId,
       conversationRevision: ctx.liveRevision,
       reason: ctx.protectedFiles?.length ? `the PR changes protected CI configuration: ${ctx.protectedFiles.join(", ")}` : "the repository's merge policy is human",
       human: { requested, summary, ...(ctx.protectedFiles?.length && { protectedFiles: ctx.protectedFiles }) },
