@@ -139,7 +139,7 @@ export const InstallationConfig = z.strictObject({
   review: z
     .strictObject({
       /** The fraction of merged heads that skipped fresh review which get a nonblocking audit review (06 §8). */
-      auditSampleRate: z.number().min(0).max(1),
+      auditSampleRate: z.number().min(0).max(1).default(0.2),
       /** TECH-5227: a short progress comment on the issue after each review round (progress.ts). */
       progressComments: z.boolean().default(true),
       /**
