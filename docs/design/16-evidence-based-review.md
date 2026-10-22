@@ -38,9 +38,10 @@ not authorize building them.
 - **Agreement is simple** (§5). Only the declaration is measured. If a human merges exactly the head
   SHA Sergeant declared ready, the declaration succeeded (**AGREED**), even after asking for more
   reviews or waiting a week. If a different head is merged after the declaration, it failed
-  (**DIFFERENT_HEAD**). Asking for more reviews and revising before the declaration is ordinary
-  iteration and counts neither way. Everything uninterpretable is **UNKNOWN** and is left out of the
-  rate. Squash and rebase merges compare the PR's frozen pre-merge head, never the merge commit.
+  (**DIFFERENT_HEAD**). An explicit human rejection is **REJECTED**. Asking for more reviews and
+  revising before the declaration is ordinary iteration and counts neither way. Everything
+  uninterpretable is **UNKNOWN** and is left out of the rate. Squash and rebase merges compare the
+  PR's frozen pre-merge head, never the merge commit.
 - **Later measurement vocabulary** (§2.1; not stage 1). *Changes required (blocking)*: a review with at least one
   blocking finding. *Review was valuable (feedback)*: a human review that says anything beyond a plain
   approval. Each report says which one it uses; the agreement rate uses neither.
@@ -223,11 +224,12 @@ Grammar of the first line:
 (`performed_via_github_app`, the same test TECH-6374 uses to minimize its own comments). Nobody
 else's comment can create a Sergeant readiness decision.
 
-In a public repository, the model-written `Reason:` and suggestion lines go through the same
-public-data check as an audit comment, failing closed the same way (§6.4, steps 3 and 4), before
-posting. Text that fails, or cannot be checked, is replaced by the fixed line "Reason recorded in
-Sergeant's task record". The first line, the head SHA, the evidence list and the check counts are
-built from records, not prose, and are always posted.
+In a public repository, before posting, the control plane passes the model-written `Reason:` and
+suggestion lines to the repository's existing `check-public-data.mjs` with its configured denylist.
+It accepts only text that passes; failure to run the check also rejects the text. Rejected text is
+replaced by the fixed line "Reason recorded in Sergeant's task record". This is the stage-1 owning
+rule for readiness text; stage 2 reuses it for audit comments (§6.4). The first line, the head SHA,
+the evidence list and the check counts are built from records, not prose, and are always posted.
 
 ### 4.2 Rules
 
@@ -280,7 +282,7 @@ history without migration. Only closed PRs are evaluated.
 |---|---|---|
 | **AGREED** (success) | The PR was merged by a human account after *T* (`merged_at` > *T*), and its pre-merge head is exactly *H* | numerator and denominator |
 | **DIFFERENT_HEAD** (failure) | The PR was merged by a human account after *T*, and its pre-merge head is not *H*: changes were made after the declaration, typically because a human required them | denominator |
-| **REJECTED** (failure) | The PR was closed unmerged after *T*, and a human submitted a native `CHANGES_REQUESTED` review after *T* against *H*. That existing GitHub event is explicit, attributable rejection of the declared head | denominator |
+| **REJECTED** (failure) | The PR was closed unmerged after *T*, and a human reviewer's latest undismissed native review on *H* at closure is `CHANGES_REQUESTED` and was submitted after *T*. That existing GitHub event is explicit, attributable rejection of the declared head | denominator |
 | **UNKNOWN** | Anything else, with a reason: `pending` (still open), `closed_unmerged` (closed as duplicate, obsolete, superseded, abandoned, or for any reason without the explicit rejection evidence above), `not_human_merge` (merged by Sergeant or another bot, which includes all of stage 3's own merges), `uninterpretable` (merger unknown, merged before *T*, a malformed declaration) | excluded, reported |
 
 **Agreement rate = AGREED / (AGREED + DIFFERENT_HEAD + REJECTED)**, always printed as the fraction,
@@ -293,16 +295,14 @@ carry a failed D1 and an agreed D2. That is the intended reading: D1 said "ready
 Nothing has to judge whether a human "really" required a merged change, so no human-input window,
 comment reading or commit authorship enters DIFFERENT_HEAD. REJECTED is intentionally narrower: a
 close event or closer identity alone proves nothing. Stage 1 recognizes only GitHub's structured,
-SHA-bound `CHANGES_REQUESTED` event from a human after the declaration. A prose comment may be clear
-to a reader, but stage 1 does not add semantic parsing; without the structured review, the result is
-UNKNOWN (`closed_unmerged`). UNKNOWN is preferable to manufacturing disagreement.
+SHA-bound `CHANGES_REQUESTED` state from a human after the declaration, using each reviewer's latest
+undismissed review on that head at closure. A dismissed request, or one superseded by that reviewer's
+later approval, is not rejection. A prose comment may be clear to a reader, but stage 1 does not add
+semantic parsing; without the structured review, the result is UNKNOWN (`closed_unmerged`). UNKNOWN
+is preferable to manufacturing disagreement.
 
-Two sub-counts are printed with DIFFERENT_HEAD, as evidence and never as a reclassification:
-- **Rebase only.** The merged head has the same `git patch-id --stable` (of the diff from the
-  merge-base with the default branch) as *H*: the head changed only because the base moved. It still
-  counts as DIFFERENT_HEAD, because the decision is about one exact SHA (§14, question 1).
-- **Changes required after the declaration.** A changes-required review (§2.1) exists between *T* and
-  the merge.
+Later reporting may split DIFFERENT_HEAD by rebase-only changes (using `git patch-id --stable`) or by
+changes required after the declaration (§2.1). Stage 1 neither computes nor prints those sub-counts.
 
 The human's path does not matter, only where it ends. A human who asked for another bot review,
 requested changes and then dismissed that request, or let the PR sit for days, and then merged *H*,
@@ -332,11 +332,12 @@ declaration counts as `pending` until then.
 |---|---|
 | The worker asks for a second AI review, which finds a bug; the worker fixes it as A. D1 at A. A human merges A | D1 AGREED (the fix came before the declaration and counts neither way) |
 | D1 at A. The owner requests another AI review, waits 3 days, approves A, merges | D1 AGREED |
-| D1 at A. The owner leaves a CHANGES_REQUESTED review. The worker fixes it as B. D2 at B. The owner approves and merges B (squash) | D1 DIFFERENT_HEAD (changes required after the declaration), D2 AGREED (pre-merge head B, not the squash commit) |
+| D1 at A. The owner leaves a CHANGES_REQUESTED review. The worker fixes it as B. D2 at B. The owner approves and merges B (squash) | D1 DIFFERENT_HEAD, D2 AGREED (pre-merge head B, not the squash commit) |
 | D1 at A. A third-party review bot then finds a real bug, and the worker fixes it as B before any human speaks. D2 at B. A human merges B | D1 DIFFERENT_HEAD, D2 AGREED |
-| D1 at A. Main moves, and the worker rebases as B with the same patch. D2 at B. A human merges B | D1 DIFFERENT_HEAD (rebase only), D2 AGREED |
+| D1 at A. Main moves, and the worker rebases as B with the same patch. D2 at B. A human merges B | D1 DIFFERENT_HEAD, D2 AGREED |
 | D1 at A. A human pushes a commit C and merges C | D1 DIFFERENT_HEAD |
 | D1 at A. A human leaves `CHANGES_REQUESTED` on A, then the PR is closed unmerged | D1 REJECTED |
+| D1 at A. A human leaves `CHANGES_REQUESTED` on A, later approves A, then the PR is closed unmerged | D1 UNKNOWN (`closed_unmerged`; the latest undismissed state is not rejection) |
 | D1 at A. A human closes the PR as duplicate, obsolete or abandoned, with no human `CHANGES_REQUESTED` review after D1 | D1 UNKNOWN (`closed_unmerged`) |
 | D1 at A. Sergeant closes its PR after the task stops | D1 UNKNOWN (`closed_unmerged`) |
 | D1 at A in a `sergeant`-policy repository. Sergeant merges A | D1 UNKNOWN (`not_human_merge`). Audits measure these (§6) |
@@ -509,7 +510,6 @@ to evidence a person can read on GitHub. Stage 1 adds no API route. Example
 ```
 Sergeant readiness, example-org/example-app, last 90 days
   AGREED 41 / evaluated 47 = 87.2%   (DIFFERENT_HEAD 5, REJECTED 1)
-  DIFFERENT_HEAD 5: changes required after the declaration 3, rebase only 1
   UNKNOWN 5: pending 3, closed_unmerged 2
   Mergers: example-owner 30, example-dev 11
 ```
@@ -690,7 +690,8 @@ design.
 - **§7 handoff** (stage 1): the PR summary starts with the readiness line (proposal §4), is posted
   once per head before any approval, merge, or handoff call **in every policy**, and is never edited;
   its comment id is kept on the `refusedMerges` and `merged` records. The Linear handoff comment links
-  to it. In a public repository its model-written text goes through the public-text filter of 06 §8.
+  to it. In a public repository its model-written text goes through the fail-closed public-text
+  filter owned by new 08 §12 (proposal §4.1).
 - **§7 handoff, minimizing** (stage 1): narrow TECH-6374's rule to readiness or summary comments for
   other heads (proposal §4.2).
 - **New §12 "Readiness and agreement"** (stage 1): the readiness line and rules (proposal §4), the
@@ -920,10 +921,11 @@ map, enabling auto-merge, and breaking this into implementation issues. Those fo
 
 Open:
 
-1. A pure rebase after a declaration (same patch id, §5.1) counts as DIFFERENT_HEAD, because the
-   decision is about one exact SHA. Proposed: keep it so, print it as a sub-count, and revisit only if
-   rebase-only failures turn out to be a noticeable share. Excluding them would make a moved base
-   drop a declaration out of the denominator.
+1. A pure rebase after a declaration counts as DIFFERENT_HEAD, because the decision is about one
+   exact SHA. Proposed later-stage reporting may use patch id to print rebase-only failures as a
+   sub-count and revisit the classification if they become a noticeable share. Stage 1 does not
+   compute or print that sub-count. Excluding them would make a moved base drop a declaration out of
+   the denominator.
 2. The shadow sample rate at stage 3 (§8): proposed 0.05 (1 in 20 heads in a `sergeant`-policy
    repository go to a human).
 
