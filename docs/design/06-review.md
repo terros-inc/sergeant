@@ -241,7 +241,9 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     nothing to post. A failed post is never given up: it is retried at every hourly check until it
     posts, however long GitHub is unavailable (a rate limit ends the pass early). It is written exactly once per audit run id: an id that already has a line in
     `reviews.jsonl` is done, however often the window is re-scanned, a comment retried, or the ledger
-    lost. An audit not recorded yet stays in the ledger however long its run takes. Must-fix findings
+    lost. An audit not recorded yet stays in the ledger however long its run takes. One the ledger
+    holds without a PR head (started before TECH-6618) gets its head from the next daily re-scan that
+    draws its PR, and is then harvested like the rest. Must-fix findings
     also go to `<stateDir>/audit-followups.jsonl` and an `AUDIT FOLLOW-UP` log line, with the line. An audit never blocks, reverts, reopens, or files anything:
     humans decide.
   - **The audit comment** (proposal 16 §6.3–6.4), posted on the merged PR by the control-plane App, at

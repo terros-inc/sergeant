@@ -234,3 +234,19 @@ test("losing merged-audits.json after an audit was recorded writes no second lin
   expect(t.comments).toHaveLength(1);
   expect((await t.lines()).map((f) => f.runId)).toEqual([auditRunId(repo, 1, sha(1))]);
 });
+
+test("an audit started before TECH-6618, with no PR head in the ledger, gets one line and one comment once its run finishes", async () => {
+  const t = await auditing();
+  const runId = auditRunId(repo, 1, sha(1));
+  // The ledger as the TECH-6617 loop wrote it, with a draw due now; only PR 1 is in the window, so nothing else starts.
+  t.deps.github.mergedPullRequests = async () => merged.slice(0, 1);
+  const legacy = { lastPassAt: new Date(now.getTime() - 25 * 3_600_000).toISOString(), started: [{ runId, at: new Date(now.getTime() - 2 * 3_600_000).toISOString() }] };
+  await writeFile(join(t.stateDir, "merged-audits.json"), JSON.stringify(legacy));
+  t.state.finished = true;
+  for (const h of [0, 1, 2, 26, 27]) await t.pass(at(h));
+  expect(t.started).toEqual([]);
+  expect(t.comments).toEqual([{ repo, number: 1, headSha: sha(1), verdict: "changes_requested", found: true, summary: "s", findings: report.findings }]);
+  const recorded = await t.lines();
+  expect(recorded.map((f) => f.runId)).toEqual([runId]);
+  expect(recorded[0]).toMatchObject({ issue: "UNF-9", subject: [{ repo, number: 1, headSha: sha(1), found: true, auditCommentId: 9 }], merged: { mergedSha: sha(100) } });
+});

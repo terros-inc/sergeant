@@ -109,7 +109,23 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
       if (!auditDrawn(opts.rateOf(repo), head, "merged-audit")) continue;
       // A head a task's audit already took is audited once, under the id that task recorded.
       const runId = taskAudit.get(headKey(head)) ?? auditRunId(repo, m.number, m.headSha);
-      if (known.has(runId)) continue;
+      if (known.has(runId)) {
+        // An entry written before TECH-6618 has no PR head, so the harvest skips it: the re-scan gives it one.
+        const legacy = ledger.started.find((s) => s.runId === runId && !s.subject);
+        if (!legacy) continue;
+        const read = await deps.github.readPullRequest(repo, m.number).then(
+          (pr) => ({ issue: referencedIssue(m.title, pr.body) }),
+          (e: Error) => {
+            if (isRateLimited(e)) throw e;
+            opts.log(`merged-PR audit ${runId} of ${repo}#${m.number}: PR unreadable, retrying next pass: ${e.message}`);
+            return undefined;
+          },
+        );
+        if (!read) continue;
+        legacy.subject = { repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha, ...(read.issue && { issue: read.issue }) };
+        await save();
+        continue;
+      }
       // The audit starts only if its own reservation fits too, so the cap is never overshot.
       if (spent + UNKNOWN_AUDIT_USD > cap) {
         opts.log(`merged-PR audits: another audit would exceed the daily cap of $${cap.toFixed(2)} ($${spent.toFixed(2)} spent); ${repo}#${m.number} and the rest wait for the next day's pass`);

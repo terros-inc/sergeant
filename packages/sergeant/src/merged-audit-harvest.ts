@@ -19,7 +19,7 @@ export async function harvestAudits(ledger: Ledger, opts: MergedAuditOptions, de
   let written: Set<string> | undefined;
   for (const entry of ledger.started) {
     const pr = entry.subject;
-    // Started before TECH-6618, with no head to record against; or done.
+    // Started before TECH-6618, with no head to record against until the daily re-scan gives it one; or done.
     if (!pr || entry.recorded) continue;
     if (opts.signal?.aborted) return;
     const run = await deps.runner.status(entry.runId).catch((e: Error) => (opts.log(`merged-PR audit ${entry.runId}: status unreadable, retrying next pass: ${e.message}`), undefined));
