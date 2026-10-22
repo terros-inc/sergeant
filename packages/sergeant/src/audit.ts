@@ -1,10 +1,10 @@
 import { appendFile } from "node:fs/promises";
-import { checkBudget, checkDelegation, NoModelAccount, RunId, type BudgetStatus, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { checkBudget, checkDelegation, NoModelAccount, type BudgetStatus, type RunId, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
 import { cancelPending, recordStop } from "./cancel.ts";
 import type { Ports } from "./execute.ts";
 import type { LoopOptions } from "./loop-options.ts";
 import { accountRefusal, reassigned } from "./owner.ts";
-import { approvedHead, auditDrawn, implementerOf, type ReviewFacts } from "./review-quality.ts";
+import { approvedHead, auditDrawn, auditRunId, implementerOf, type ReviewFacts } from "./review-quality.ts";
 import type { TaskState } from "./task-state.ts";
 
 // The audit of a merged head that skipped fresh review (06 §8, after-merge.ts): the draw, the
@@ -17,8 +17,9 @@ export const mergedHead = (m: Merged) => ({ repo: m.repo, number: m.number, head
 /**
  * Once per merge, the audit draw (06 §8). A merged head no fresh review approved skipped review; a
  * stable sample of those gets a separate fresh reviewer of exactly that head, started only while the
- * issue is still delegated (A1). Its run id comes from the head, so a restart before the save starts
- * no second audit. False while the draw is not done: an owner's refusal Linear has not accepted yet.
+ * issue is still delegated (A1). Its run id comes from the repository, PR and head (`auditRunId`), so
+ * a restart before the save starts no second audit. False while the draw is not done: an owner's
+ * refusal Linear has not accepted yet.
  */
 export async function drawAudit(
   merged: Merged,
@@ -50,7 +51,9 @@ export async function drawAudit(
       log(`audit of ${head.repo}#${head.number} not started: ${moved}`);
       await recordStop(opts.dir, moved, { handoff: { delegatedAt: owner.delegatedAt, merged: true } });
     } else {
-      const runId = RunId.parse(`run_audit-${head.headSha}`);
+      // An id already recorded, older `run_audit-<headSha>` ones included, is read back, never
+      // recomputed: a restart between recording it and the draw must not start a second audit.
+      const runId = merged.audit?.runId ?? auditRunId(head.repo, head.number, head.headSha);
       const skipped = implementerOf(runs, head)?.reported?.review.reason ?? "no reason on record";
       // A start that fails costs one audit sample, not the task: the merge is already done.
       const pr = await deps.github.readPullRequest(head.repo, head.number).catch((e: Error) => {

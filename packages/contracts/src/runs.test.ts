@@ -55,6 +55,18 @@ test("rejects a review report that does not say which head it reviewed or what i
   expect(parseReport(report({ ...review, verdict: "lgtm" }), ReviewReport).ok).toBe(false);
 });
 
+// TECH-6616: `found` is optional per reviewed PR, so reports written before it still parse, and the
+// Codex schema's null reads as absent (unknown), never as NO.
+test("a review report's found reads per reviewed PR, and absent, null or malformed as unknown", () => {
+  const found = (entry: object) => {
+    const parsed = parseJsonReport(JSON.stringify({ reportVersion: "s2-review-report/1", reviewed: [{ ...pr, ...entry }], verdict: "approve" }), ReviewReport);
+    return parsed.ok ? parsed.report.reviewed[0]?.found : "rejected";
+  };
+  expect(found({ found: true })).toBe(true);
+  expect(found({ found: false })).toBe(false);
+  for (const value of [undefined, null, "yes"]) expect(found({ found: value }), String(value)).toBeUndefined();
+});
+
 test("marks acceptance findings explicitly while ordinary defects omit the category", () => {
   const base = { reportVersion: "s2-review-report/1", reviewed: [pr], verdict: "changes_requested", summary: "s" };
   const findings = [
@@ -101,7 +113,7 @@ test("TECH-5259: a review report's unambiguous slips are read, never toward a me
 test("the Codex reviewer schema is in step with ReviewReport", () => {
   const structured = {
     reportVersion: "s2-review-report/1",
-    reviewed: [{ repo: "o/r", number: 7, headSha: "a".repeat(40) }],
+    reviewed: [{ repo: "o/r", number: 7, headSha: "a".repeat(40), found: null }],
     verdict: "changes_requested",
     findings: [
       { id: "f1", severity: "blocking", category: "acceptance", description: "d", location: "x.ts:1" },

@@ -1128,9 +1128,10 @@ say):
 
 1. Run `canary` through the merge. The worker's report says `review.required: false` with a reason,
    and the merge relies on it (`not_required`).
-2. After the outcome comment, the log shows `audit review run_audit-<head> started`, and the loop
-   waits for it after the issue reaches Done. Its brief
-   (`<dir>/runs/run_audit-<head>/workspace/sergeant-brief.md`) names the merged head and the skip reason.
+2. After the outcome comment, the log shows `audit review run_audit-<hash> started` (one id per
+   repository, PR and head, [06 §8](../docs/design/06-review.md#8-calibration-sampling-unf-641-preserved)),
+   and the loop waits for it after the issue reaches Done. Its brief
+   (`<dir>/runs/run_audit-<hash>/workspace/sergeant-brief.md`) names the merged head and the skip reason.
 3. `<dir>/reviews.jsonl` ends with one `"trigger":"audit"` line for it; any blocking finding is also in
    `<dir>/audit-followups.jsonl` and an `AUDIT FOLLOW-UP` log line. `CANARY RESULT` stays `"done"`.
 4. With `auditSampleRate` 0, or on an issue whose head a fresh review approved, no audit starts, and

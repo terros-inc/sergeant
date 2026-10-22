@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import type { Conversation, MergePr, PullRequestFacts, RunRecord, RunSpec } from "@terros/sergeant-contracts";
 import { runLoop } from "./loop.ts";
-import { auditDrawn, resultingMutation, type ReviewFacts } from "./review-quality.ts";
+import { auditDrawn, auditRunId, resultingMutation, reviewFacts, type ReviewFacts } from "./review-quality.ts";
 
 // UNF-730: a merged head that skipped fresh review is sampled for an audit review that must never
 // hold up the merge, and every review that finishes leaves a telemetry line, merged or not, that can
@@ -151,25 +151,27 @@ async function scenario(opts: {
 }
 
 test("a sampled skipped review is audited only after the merge, and its must-fix findings are logged as follow-up", async () => {
-  const auditRunId = `run_audit-${headA}`;
+  const audit = auditRunId(repo, 7, headA);
   const { result, rerun, events, started, reviews, followups } = await scenario({
     runs: [worker(headA, { required: false, reason: "docs-only change" })],
     head: headA,
     standing: { kind: "not_required", workerRunId: "run_worker" },
     rate: 1,
-    audit: reviewer(auditRunId, headA, "changes_requested", ["f1"]),
-    pollsUntilDone: { [auditRunId]: 2 },
+    audit: reviewer(audit, headA, "changes_requested", ["f1"]),
+    pollsUntilDone: { [audit]: 2 },
   });
 
   // The merge and its outcome come first; the audit starts after them and is waited for only then.
-  expect(events).toEqual(["merge", "outcome comment", `start ${auditRunId}`]);
+  expect(events).toEqual(["merge", "outcome comment", `start ${audit}`]);
   expect(started[0]).toMatchObject({ role: "reviewer", subject: [{ repo, number: 7, headSha: headA }] });
   expect(started[0]?.role === "reviewer" && started[0].focus).toContain("docs-only change");
   expect(result).toMatchObject({ outcome: "done", detail: expect.stringContaining("follow-up logged") });
 
   expect(await reviews()).toEqual([
     expect.objectContaining({
-      runId: auditRunId,
+      runId: audit,
+      // An older single-PR report without `found`: its finding makes it YES.
+      subject: [{ repo, number: 7, headSha: headA, found: true }],
       trigger: "audit",
       vendor: "same",
       implementer: { provider: "anthropic/claude-code", model: "opus" },
@@ -180,7 +182,7 @@ test("a sampled skipped review is audited only after the merge, and its must-fix
       followUp: true,
     }),
   ]);
-  expect(await followups()).toEqual([expect.objectContaining({ auditRunId, mustFix: [expect.objectContaining({ id: "f1" })] })]);
+  expect(await followups()).toEqual([expect.objectContaining({ auditRunId: audit, mustFix: [expect.objectContaining({ id: "f1" })] })]);
 
   // Running the command again starts no second audit and records nothing twice.
   expect((await rerun()).outcome).toBe("done");
@@ -274,4 +276,34 @@ test("the audit draw is stable per head and tracks the configured rate", () => {
   expect(heads.filter((h) => auditDrawn(0.2, h)).length).toBe(sampled);
   expect(heads.some((h) => auditDrawn(0, h))).toBe(false);
   expect(heads.every((h) => auditDrawn(1, h))).toBe(true);
+});
+
+// TECH-6616: a SHA-only audit id joined two PRs that share a head commit (a reopened or stacked PR, a
+// mirror in another repository): the second PR's audit was skipped as already started.
+test("the audit run id is stable per repository, PR and head, and a valid run id", () => {
+  const id = auditRunId(repo, 7, headA);
+  expect(auditRunId(repo, 7, headA)).toBe(id);
+  expect(auditRunId(repo, 8, headA)).not.toBe(id);
+  expect(auditRunId("o/mirror.of-canary", 7, headA)).not.toBe(id);
+  expect(auditRunId(repo, 7, headB)).not.toBe(id);
+  expect(id).toMatch(/^run_audit-[0-9a-f]{40}$/);
+  expect(auditRunId("my-org/my.repo_2", 7, headA)).toMatch(/^[A-Za-z0-9_-]+$/);
+});
+
+// TECH-6616: `found` is per reviewed PR. An older report without it counts only when it reviewed one
+// PR; a multi-PR report's findings cannot be pinned on either PR, so each stays unknown rather than
+// skewing the found rate.
+test("a review's found is the reviewer's own per PR, or falls back only for a single-PR report", () => {
+  const facts = (reviewed: { headSha: string; number?: number; found?: boolean }[], blocking: string[] = []) => {
+    const run = reviewer("run_r1", headA, blocking.length ? "changes_requested" : "approve", blocking);
+    if (run.role !== "reviewer" || !run.report) throw new Error("reviewer fixture");
+    run.report.reviewed = reviewed.map((h) => ({ repo, number: 7, ...h }));
+    return reviewFacts(run, { trigger: "required", issue: "UNF-1", runs: [], merged: null }).subject.map((h) => h.found);
+  };
+  expect(facts([{ headSha: headA }], ["f1"])).toEqual([true]);
+  expect(facts([{ headSha: headA }])).toEqual([false]);
+  // The reviewer's own answer wins: its finding may repeat one already raised on the PR.
+  expect(facts([{ headSha: headA, found: false }], ["f1"])).toEqual([false]);
+  expect(facts([{ headSha: headA }, { headSha: headB, number: 8 }], ["f1"])).toEqual([undefined, undefined]);
+  expect(facts([{ headSha: headA, found: true }, { headSha: headB, number: 8 }], ["f1"])).toEqual([true, undefined]);
 });

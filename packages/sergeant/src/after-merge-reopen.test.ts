@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { conversationRevision, issueRevision, type RunRecord } from "@terros/sergeant-contracts";
 import { call } from "./api-fixtures.ts";
+import { auditRunId } from "./review-quality.ts";
 import { startService, type Service } from "./service.ts";
 import { fakes, issue, pr, repo } from "./stop-fixtures.ts";
 import type { TaskState } from "./task-state.ts";
@@ -103,7 +104,7 @@ test.each([
 test("a task reopened after two closing merges tracks and cancels both merges' audits", async () => {
   const auditA = `run_audit-${"a".repeat(40)}`;
   const headB = "d".repeat(40);
-  const auditB = `run_audit-${headB}`;
+  const auditB = auditRunId(repo, 8, headB);
   const t = await mergedTask({ stateType: "started", state: "In Progress", audit: auditA, auditSampleRate: 1 });
   const runs = new Map<string, RunRecord>([[auditA, { runId: auditA, role: "reviewer", status: "running", provider: "p", model: "m", report: null }]]);
   const workers: string[] = [];

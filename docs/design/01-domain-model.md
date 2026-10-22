@@ -461,7 +461,8 @@ SubagentReview { pr: { repo, number }, reviewedSha, promptRef: ArtifactRef, repo
 ```
 ReviewReport {
   reportVersion: "s2-review-report/1"
-  reviewed: [{ repo, number, headSha }]
+  reviewed: [{ repo, number, headSha,
+              found? }]           // per PR: an actionable finding not already raised on it (06 §8); optional
   conversationRevision: ConversationRevision  // echoed from the brief
   verdict: approve | changes_requested | needs_human
   acceptance: [{ criterion, verdict: met | not_met | contradicted | needs_live_validation, evidence }]
@@ -525,7 +526,9 @@ ReviewFacts {                   // telemetry; enough to compare review modes and
   trigger: required | audit | subagent
   reviewer: { provider, model }
   implementer: { provider, model }
-  subject: [{ repo, number, headSha }]
+  subject: [{ repo, number, headSha,
+             found?,              // per PR, from the report or its single-PR fallback; absent is unknown (06 §8)
+             auditCommentId? }]   // the audit's PR comment; not posted yet
   findings: { blocking, nonBlocking, nits }
   adapterAttested?              // subagent reviews only
   // filled in later, when known:
@@ -728,7 +731,9 @@ GateVerdict = { allowed: true, checkedAt } | { allowed: false, rule: RuleId, rea
 
 `MergePr.readinessReason` is the model's non-empty explanation for declaring the exact head ready.
 The existing `RefusedMerge` and closing `merged` records each carry an optional
-`readinessCommentId`, the GitHub comment that records that declaration (08 §12).
+`readinessCommentId`, the GitHub comment that records that declaration (08 §12). A closing `merged`
+record's `audit.runId` names the audit review drawn for it: new draws use `auditRunId` (06 §8), and a
+stored id, an older `run_audit-<headSha>` included, is read back unchanged.
 
 - **One action name per effect**: `cancel_run` is the same kind whether reasoning proposes it or a
   team member runs `sgt run cancel`; the actor differs.

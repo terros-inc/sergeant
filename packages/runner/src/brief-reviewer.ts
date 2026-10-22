@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/18";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/19";
 
 /**
  * Each subject PR's human feedback (TECH-4990), or its bot feedback (TECH-6166), for the reviewer to
@@ -150,7 +150,9 @@ ${renderReadAccess(enrolled)}
    style preferences), a bot's or an earlier review's: a reasoned decline of one is acceptable and is
    never a blocking finding.
 9. Do not modify the repository and do not contact anyone.
-10. Verdict: \`approve\`, \`changes_requested\`, or \`needs_human\`.
+10. Verdict: \`approve\`, \`changes_requested\`, or \`needs_human\`. For each PR in \`reviewed\`, set
+    \`found\` to whether on this PR head you raised at least one actionable finding not already raised
+    on this PR.
 11. Code, a file, a PR, a branch, or the current source of an enrolled repository is readable with
     \`GH_READ_TOKEN\` (Environment): when the review needs it, read it, and never report it as not
     provided. An input the issue depends on that you still cannot read (an auth-gated link, a missing
@@ -212,7 +214,7 @@ with evidence), ending with exactly one fenced block tagged \`sergeant-report\` 
 
 \`\`\`
 { "reportVersion": "s2-review-report/1",
-  "reviewed": [${subjects.map((s) => `{ "repo": "${s.repo}", "number": ${s.number}, "headSha": "${s.headSha}" }`).join(", ")}],
+  "reviewed": [${subjects.map((s) => `{ "repo": "${s.repo}", "number": ${s.number}, "headSha": "${s.headSha}", "found": true | false }`).join(", ")}],
   "verdict": "approve" | "changes_requested" | "needs_human",
   "findings": [{ "id": "f1", "severity": "blocking" | "non_blocking" | "nit",
                  "category": "acceptance" (omit unless this is an unmet or contradicted requirement),
@@ -226,7 +228,8 @@ This is the reviewer report, \`s2-review-report/1\`. Every field below is requir
 
 - \`reportVersion\`: exactly \`"s2-review-report/1"\`.
 - \`reviewed\`: a non-empty array naming each head you reviewed as \`{ "repo", "number", "headSha" }\`
-  (\`owner/name\`, the positive PR number, and the full 40-character SHA), as listed above.
+  (\`owner/name\`, the positive PR number, and the full 40-character SHA), as listed above, each
+  with \`found\` (rule 10).
 - \`verdict\`: exactly one of \`"approve"\`, \`"changes_requested"\`, \`"needs_human"\`.
 - \`findings\`: an array, \`[]\` when there are none; each finding has a non-empty \`id\`, a
   \`severity\`, and a \`description\`, with \`category\` and \`location\` as above.
@@ -238,7 +241,7 @@ A minimal correct report with nothing to change:
 
 \`\`\`
 { "reportVersion": "s2-review-report/1",
-  "reviewed": [${subjects.map((s) => `{ "repo": "${s.repo}", "number": ${s.number}, "headSha": "${s.headSha}" }`).join(", ")}],
+  "reviewed": [${subjects.map((s) => `{ "repo": "${s.repo}", "number": ${s.number}, "headSha": "${s.headSha}", "found": false }`).join(", ")}],
   "verdict": "approve", "findings": [], "unreadableInputs": [], "dependencies": [], "summary": "Approve, no findings." }
 \`\`\`
 

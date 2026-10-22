@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Finding, RepoSlug, RunRecord, Sha } from "@terros/sergeant-contracts";
+import { type Finding, type RepoSlug, type ReviewReport, RunId, type RunRecord, type Sha } from "@terros/sergeant-contracts";
 
 // Review quality as telemetry (06 §8–9, UNF-641 carried over by UNF-730): a stable random sample of
 // merged heads that skipped fresh review gets a nonblocking audit review, and every review that
@@ -24,6 +24,18 @@ export function approvedHead(runs: RunRecord[], head: PrHead): boolean {
 export function auditDrawn(rate: number, head: PrHead): boolean {
   const hash = createHash("sha256").update(JSON.stringify(["audit", head.repo, head.number, head.headSha])).digest();
   return hash.readUInt32BE(0) / 2 ** 32 < rate;
+}
+
+/**
+ * The audit run's id (06 §8): one per repository, PR and head, so two PRs that share a head commit
+ * (a reopened or stacked PR, a mirror) get two audits, and a restart or a second draw of the same PR
+ * head starts none (the runner's start is idempotent on the id). Hashed because a run id allows only
+ * `[A-Za-z0-9_-]` and a repository name holds `/` and `.`. Only new draws use it: an audit already on
+ * a `merged` record keeps the id stored there, older `run_audit-<headSha>` ones included.
+ */
+export function auditRunId(repo: RepoSlug, number: number, headSha: string): RunId {
+  const hash = createHash("sha256").update(JSON.stringify(["audit-run", repo, number, headSha])).digest("hex");
+  return RunId.parse(`run_audit-${hash.slice(0, 40)}`);
 }
 
 /** The worker run whose final report last named this exact head: its implementer and its review call. */
@@ -51,7 +63,12 @@ export type ReviewFacts = {
   implementer: { provider: string; model: string } | null;
   /** Reviewer and implementer vendors, compared by the provider's prefix (`anthropic/…`). */
   vendor: "same" | "different" | "unknown";
-  subject: PrHead[];
+  /**
+   * Each reviewed PR head, with `found` (06 §8): whether the review raised an actionable finding on it
+   * not already raised on that PR, unknown when absent. `auditCommentId`: the PR comment an audit
+   * posted, not posted yet.
+   */
+  subject: (PrHead & { found?: boolean; auditCommentId?: number })[];
   verdict: "approve" | "changes_requested" | "needs_human" | null;
   findings: { blocking: number; nonBlocking: number; nits: number };
   /** The blocking findings, verbatim. */
@@ -80,12 +97,23 @@ export function resultingMutation(review: Extract<RunRecord, { role: "reviewer" 
   return answered.length > 0 ? false : "unknown";
 }
 
+/**
+ * `found` for a reviewed PR whose entry lacks it (an older report): only a report that reviewed exactly
+ * one PR falls back, to whether it has any finding. With several PRs, a run-wide finding count would
+ * credit or blame each alike, so it stays unknown.
+ */
+const foundOn = (report: ReviewReport) => (report.reviewed.length === 1 ? report.findings.length > 0 : undefined);
+
 export function reviewFacts(
   review: Extract<RunRecord, { role: "reviewer" }>,
   ctx: { trigger: ReviewFacts["trigger"]; issue: string; runs: RunRecord[]; merged: ReviewFacts["merged"] },
 ): ReviewFacts {
   const report = review.report;
-  const subject = report?.reviewed ?? (ctx.trigger === "audit" && ctx.merged ? [ctx.merged] : []);
+  const subject =
+    report?.reviewed.map(({ repo, number, headSha, ...h }) => {
+      const found = h.found ?? foundOn(report);
+      return { repo, number, headSha, ...(found !== undefined && { found }) };
+    }) ?? (ctx.trigger === "audit" && ctx.merged ? [ctx.merged] : []);
   const implementer = subject.map((h) => implementerOf(ctx.runs, h)?.run).find((r) => r !== undefined);
   const vendorOf = (provider: string) => provider.split("/")[0];
   const count = (severity: Finding["severity"]) => report?.findings.filter((f) => f.severity === severity).length ?? 0;

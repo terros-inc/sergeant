@@ -152,7 +152,20 @@ export type Finding = z.infer<typeof Finding>;
 
 export const ReviewReport = z.object({
   reportVersion: z.literal("s2-review-report/1").catch("s2-review-report/1"),
-  reviewed: z.array(z.object({ ...ReportedPr, number: z.coerce.number().int().positive() })).min(1),
+  reviewed: z
+    .array(
+      z.object({
+        ...ReportedPr,
+        number: z.coerce.number().int().positive(),
+        /**
+         * On this PR head the reviewer raised at least one actionable finding not already raised on this
+         * PR (06 §8). Per reviewed PR, never per run. Absent in older reports, and a malformed value reads
+         * as absent: only telemetry reads it (`ReviewFacts.subject[].found`).
+         */
+        found: z.boolean().optional().catch(undefined),
+      }),
+    )
+    .min(1),
   verdict: z.preprocess((v) => VERDICTS[token(v) as string] ?? token(v), z.enum(["approve", "changes_requested", "needs_human"])),
   /** A finding without an id gets its place in the list (`f1`, `f2`, …), or the next one no other finding has. */
   findings: z
@@ -200,11 +213,12 @@ export const REVIEW_REPORT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["repo", "number", "headSha"],
+        required: ["repo", "number", "headSha", "found"],
         properties: {
           repo: { type: "string", pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
           number: { type: "integer", minimum: 1 },
           headSha: { type: "string" },
+          found: { type: ["boolean", "null"] },
         },
       },
       minItems: 1,

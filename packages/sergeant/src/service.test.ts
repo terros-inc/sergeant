@@ -7,6 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Conversation, PullRequestFacts } from "@terros/sergeant-contracts";
 import { startService, type ServiceDeps } from "./service.ts";
+import { auditRunId } from "./review-quality.ts";
 
 // The service must make progress with nobody waking a task: every delegated issue gets its turns
 // without exceeding the task limit, a failed poll is retried rather than ending the service, and a
@@ -210,10 +211,10 @@ test("each task loop audits merged heads at the service's audit sample rate, or 
   };
   const [drawnAtDefault, notDrawnAtDefault] = ["5".repeat(40), "a".repeat(40)];
 
-  expect(await audited(drawnAtDefault)).toEqual([`run_audit-${drawnAtDefault}`]);
+  expect(await audited(drawnAtDefault)).toEqual([auditRunId("o/r", 7, drawnAtDefault)]);
   expect(await audited(drawnAtDefault, 0)).toEqual([]);
   expect(await audited(notDrawnAtDefault)).toEqual([]);
-  expect(await audited(notDrawnAtDefault, 1)).toEqual([`run_audit-${notDrawnAtDefault}`]);
+  expect(await audited(notDrawnAtDefault, 1)).toEqual([auditRunId("o/r", 7, notDrawnAtDefault)]);
 });
 
 // Separate processes started together, each holding the service if it gets it: exactly one does,

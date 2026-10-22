@@ -192,6 +192,18 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
 - If it finishes after the merge, a guardrail posts one concise comment on the Linear issue listing the
   blocking findings and a link to the report. Humans decide whether to reopen or file a fix.
 - The draw is a stable hash: random across heads, identical across restarts, no stored state.
+- **The audit's run id** is one per repository, PR and head (TECH-6616):
+  `auditRunId(repo, number, headSha) = "run_audit-" + hex(sha256(JSON.stringify(["audit-run", repo, number, headSha])))[0..40]`
+  (`review-quality.ts`). A head commit shared by two PRs (a reopened or stacked PR, a mirror in another
+  repository) gets two audits, and a restart starts none twice, since the runner's start is idempotent
+  on the id. It is hashed because a run id allows only `[A-Za-z0-9_-]` (01 `RunId`). The id a `merged`
+  record stores is always read back, never recomputed, so audits recorded under the older
+  `run_audit-<headSha>` keep it and nothing migrates.
+- **Found** (TECH-6616): each `reviewed` entry of a reviewer report carries `found`, whether on that PR
+  head the reviewer raised at least one actionable finding not already raised on that PR, and
+  `ReviewFacts` keeps it on that PR's `subject` entry (01). It is per reviewed PR, never per run. An
+  entry without it (an older report) falls back only when the report reviewed exactly one PR: yes when
+  it has any finding, no otherwise. Otherwise it stays unknown.
 - Audit reviews are charged to the installation's review-quality budget, not the task's.
 
 ## 9. Review telemetry and metrics
