@@ -285,6 +285,16 @@ export async function readTaskState(file: string, window: BudgetWindow = DEFAULT
 }
 
 /**
+ * The name a task's `state.json` is set aside under when an episode ends: `completed` (seen through
+ * after its merge), `accepted` or `stopped`. Every writer names it here, so `isTaskStateFile` finds
+ * each kind: a scan of the task records (review-readiness.ts) misses none.
+ */
+export const setAsideStateFile = (kind: "completed" | "accepted" | "stopped", at: string) => `state.${kind}-${at.replace(/[:.]/g, "-")}.json`;
+
+/** True for every task state a task directory keeps: `state.json` and each `setAsideStateFile`, not a save's `.tmp`. */
+export const isTaskStateFile = (name: string) => /^state(\.[a-z]+-.+)?\.json$/.test(name);
+
+/**
  * Sets aside the `state.json` in `dir` of a task seen through after its merge, which intake never
  * resumes: its issue delegated in Todo again was reopened, a new episode (07 §9) whose owner is
  * admitted afresh (TECH-5179). True when it did.
@@ -292,7 +302,7 @@ export async function readTaskState(file: string, window: BudgetWindow = DEFAULT
 export async function setAsideCompleted(dir: string): Promise<boolean> {
   const completedAt = (await readTaskState(join(dir, "state.json")).catch(() => undefined))?.merged?.completedAt;
   if (!completedAt) return false;
-  await rename(join(dir, "state.json"), join(dir, `state.completed-${completedAt.replace(/[:.]/g, "-")}.json`));
+  await rename(join(dir, "state.json"), join(dir, setAsideStateFile("completed", completedAt)));
   return true;
 }
 

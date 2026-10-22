@@ -9,7 +9,7 @@ import { costTotal, taskTurnCost } from "./cost.ts";
 import type { Ports } from "./execute.ts";
 import { feedbackComment, workerFeedback } from "./outcome.ts";
 import { readTaskState, type TaskState } from "./loop.ts";
-import { auditRunIds } from "./task-state.ts";
+import { auditRunIds, setAsideStateFile } from "./task-state.ts";
 import type { ServiceDeps } from "./service.ts";
 
 // A task's stop (11 §2, TECH-4989), as commands the API, the loop, and intake only call. A task either
@@ -211,7 +211,7 @@ export async function driveCancel(dir: string, ref: string, deps: Ports, enrolle
   // `state.json` is set aside and the intent removed, so the next drive retries it.
   const feedback = issue.stateType === "completed" && checkDelegation(issue, deps.agentUserId).allowed ? feedbackComment(workerFeedback(runs)) : undefined;
   if (feedback) await postFeedbackComment(issue, feedback, `feedback:${issue.id}:stop:${intent.requestId}`, deps, log);
-  await rename(join(dir, "state.json"), join(dir, `state.stopped-${intent.at.replace(/[:.]/g, "-")}.json`)).catch((e: NodeJS.ErrnoException) => {
+  await rename(join(dir, "state.json"), join(dir, setAsideStateFile("stopped", intent.at))).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "ENOENT") throw e;
   });
   // TECH-5006: the PRs it closed outlive the intent, for `sgt task show`; rewritten whole, so a repeat is harmless.

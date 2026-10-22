@@ -490,7 +490,8 @@ code-anchored sentence that paraphrases a private detail in ordinary words (§11
 ### 7.1 Stage 1: `sgt review readiness`, computed by rereading GitHub
 
 Stage 1 keeps no index. Sergeant's declarations are already listed in its task records: every
-`refusedMerges` and `merged` record with a `readinessCommentId` (§4.2). For each, the command rereads
+`refusedMerges` and `merged` record with a `readinessCommentId` (§4.2), in each task's `state.json`
+and every episode set aside beside it (completed, accepted or stopped), each comment once. For each, the command rereads
 the PR from GitHub (the PR, its reviews, issue and review comments, timeline and commits), joins
 Sergeant's reviewer runs from `reviews.jsonl` by run id, and classifies the declaration (§5.1). The
 reads are the conditional, rate-limited reads every GitHub read already uses (08 §9), a handful per

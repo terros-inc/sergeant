@@ -5,6 +5,7 @@ import { afterEach, expect, test } from "vitest";
 import type { GitHubPort, ReadinessPullRequestFacts } from "@terros/sergeant-contracts";
 import { call, fakes } from "./api-fixtures.ts";
 import { startService, type Service } from "./service.ts";
+import { setAsideStateFile } from "./task-state.ts";
 
 // TECH-6613: the agreement rate is the evidence a later stage uses to consider earned auto-merge, so a
 // declaration must be found only through its `readinessCommentId`, counted once, classified from what
@@ -88,4 +89,23 @@ test("declarations are found only by readinessCommentId, counted once, and UNKNO
   expect(gh.asked.toSorted()).toEqual([101, 102, 103, 104]);
 
   expect(await call(port, "GET", "/v1/review-readiness?since=ninety")).toMatchObject({ status: 400, json: { error: { code: "bad_request" } } });
+}, 30_000);
+
+test("declarations in accepted and stopped episodes count too, each comment once", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-readiness-"));
+  const a = join(dir, "tasks", "UNF-12");
+  await mkdir(a, { recursive: true });
+  const at = ago(1);
+  // Named by the same helper accept and stop use, so a new or renamed set-aside kind cannot hide from the scan.
+  await writeFile(join(a, "state.json"), state({ refusedMerges: [refused(7, at, 107)] }));
+  await writeFile(join(a, setAsideStateFile("accepted", ago(3))), state({ refusedMerges: [refused(8, at, 108)], merged: merged(8, at, 108) }));
+  await writeFile(join(a, setAsideStateFile("stopped", ago(2))), state({ refusedMerges: [refused(9, at, 109), refused(7, at, 107)] }));
+
+  const gh = github({ 107: { at, facts: {} }, 108: { at, facts: {} }, 109: { at, facts: { state: "closed", mergedAt: null, mergedBy: null } } });
+  const f = fakes();
+  service = await startService({ enrolledRepositories: [app], stateDir: dir, intakeSeconds: 3600, pollSeconds: 3600, port: 0, log: () => {}, trustLoopback: true }, { ...f.deps, github: { ...f.deps.github, ...gh.port } });
+
+  const all = await call(service.port ?? 0, "GET", "/v1/review-readiness");
+  expect(all.json).toMatchObject({ agreed: 2, evaluated: 2, unknown: { closed_unmerged: 1 } });
+  expect(gh.asked.toSorted()).toEqual([107, 108, 109]);
 }, 30_000);

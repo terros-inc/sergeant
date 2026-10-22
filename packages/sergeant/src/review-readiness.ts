@@ -1,13 +1,13 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { classifyReadiness, type GitHubPort, type ReadinessRow, type ReviewReadiness } from "@terros/sergeant-contracts";
-import { readTaskState } from "./task-state.ts";
+import { isTaskStateFile, readTaskState } from "./task-state.ts";
 
 // TECH-6613: `GET /v1/review-readiness` (design 16 §7.1). Sergeant's declarations are the `refusedMerges`
 // and `merged` records that carry a `readinessCommentId` (TECH-6610), in every task's `state.json` and
-// the episodes set aside after it (task-state.ts). Each is classified on every call by rereading GitHub
-// (contracts' classifyReadiness), so there is no index, cache or stored judgment: lose nothing, and a
-// corrected rule reclassifies history.
+// every episode set aside after it: completed, accepted or stopped (task-state.ts `isTaskStateFile`).
+// Each is classified on every call by rereading GitHub (contracts' classifyReadiness), so there is no
+// index, cache or stored judgment: lose nothing, and a corrected rule reclassifies history.
 
 type Declared = { task: string; repo: string; number: number; headSha: string; commentId: number; at: string };
 
@@ -70,7 +70,7 @@ export async function reviewReadiness(
 async function declarations(tasksDir: string): Promise<Declared[]> {
   const found = new Map<string, Declared>();
   for (const task of (await readdir(tasksDir).catch(() => [])).sort()) {
-    const files = (await readdir(join(tasksDir, task)).catch(() => [])).filter((f) => f === "state.json" || /^state\.completed-.+\.json$/.test(f));
+    const files = (await readdir(join(tasksDir, task)).catch(() => [])).filter(isTaskStateFile);
     for (const file of files) {
       const state = await readTaskState(join(tasksDir, task, file)).catch(() => undefined);
       if (!state) continue;
