@@ -230,15 +230,19 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     random sample of merged PRs, never that review was skipped.
   - **Who pays** (TECH-6625, `audit-payer.ts`). These audits run outside any task, on the registered
     accounts of the person the PR belongs to. For a PR Sergeant's worker App opened, that is the owner of
-    the task for the issue it names, the person whose accounts ran the task (the episode whose merge or
-    checks record the PR, else the current one). For a human's PR, it is its author, when
+    the task for the issue it names, the person whose accounts ran the task: of the issue's episodes, the
+    one whose merge records the PR, else one whose passed checks do, the latest among equals, else the
+    current one. For a human's PR, it is its author, when
     `linear.reviewerProfiles` maps their GitHub login to an active Linear user. If that person has no
     usable registered account (the runner refuses with `NoModelAccount`, starting nothing), or the PR
     maps to no one, the audit runs on `review.auditOwner`'s (the Sergeant project's owner), the
     fallback. If neither can pay, or there is no `auditOwner` to fall back on, the audit does not
     start and the log says why for each person; the next daily pass draws it again while its PR is in
     the window. The ledger entry and the audit's `ReviewFacts` line record whose accounts ran it
-    (`accountsOf`, with `fallback` for the audit owner's), and `sgt review audits` shows it. Whoever
+    (`accountsOf`, with `fallback` for the audit owner's), read back from the run's `ownerId`: a pass
+    that lost the ledger gets the already-running audit back from the runner's idempotent start, still on
+    its first payer's accounts, and a run that names no owner is recorded with none. `sgt review audits`
+    shows it. Whoever
     pays, the audits share one installation-wide cap: at most `review.qualityBudgetUsdPerDay` (default
     $25) in any 24 hours, an audit whose cost is not known yet counting $5; one starts only if its $5
     fits under the cap with what is already spent.

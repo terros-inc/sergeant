@@ -135,10 +135,11 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
       });
       if (!started) continue;
       const { issue, accountsOf } = started;
-      opts.log(`merged-PR audit ${runId} started for ${repo}#${m.number} as of its merge (nonblocking), on ${accountsOf.name}'s accounts${accountsOf.fallback ? " (review.auditOwner, the fallback)" : ""}`);
+      const on = accountsOf ? `${accountsOf.name}'s accounts${accountsOf.fallback ? " (review.auditOwner, the fallback)" : ""}` : "accounts its run does not name";
+      opts.log(`merged-PR audit ${runId} started for ${repo}#${m.number} as of its merge (nonblocking), on ${on}`);
       known.add(runId);
       const subject = { repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha, ...(issue && { issue }) };
-      ledger.started.push({ runId, at: now.toISOString(), subject, accountsOf });
+      ledger.started.push({ runId, at: now.toISOString(), subject, ...(accountsOf && { accountsOf }) });
       spent += UNKNOWN_AUDIT_USD;
       await save();
     }
@@ -151,10 +152,11 @@ type MergedPr = PrHead & { title: string; mergedSha: Sha; mergedAt: string };
 
 /**
  * Starts the audit of the PR's pre-merge head, with the brief as of its merge, on the accounts of the
- * PR's person, else of `review.auditOwner`; resolves the Linear issue the PR names. Throws, having started
- * nothing, when neither has a usable account, saying why.
+ * PR's person, else of `review.auditOwner`; resolves the Linear issue the PR names, and whose accounts the
+ * run is on, absent when the run does not say. Throws, having started nothing, when neither has a usable
+ * account, saying why.
  */
-async function startAudit(runId: RunId, m: MergedPr, opts: MergedAuditOptions, deps: MergedAuditDeps): Promise<{ issue: string | undefined; accountsOf: AuditPayer }> {
+async function startAudit(runId: RunId, m: MergedPr, opts: MergedAuditOptions, deps: MergedAuditDeps): Promise<{ issue: string | undefined; accountsOf: AuditPayer | undefined }> {
   // A review's edit time comes only from its own read, and the brief needs it to withhold a review
   // edited after the merge: without it, start nothing (retried next pass) rather than show hindsight.
   if (!deps.github.reviewEdits) throw new Error("GitHub cannot say when its reviews were last edited");
@@ -193,12 +195,22 @@ you would have just before the merge. Nothing you find blocks, reverts, or reope
     }
   };
   const own = await prOwner(read, issue, opts.stateDir, deps);
+  // The runner's start is idempotent on the run id: when a lost ledger let this pass start an audit
+  // already running, it returns that run as it is, on whoever's accounts it was started. So the payer is
+  // read back from the run, never assumed to be the person just asked; a run that does not say is not named.
+  const ranOn = async (): Promise<AuditPayer | undefined> => {
+    const run = await deps.runner.status(runId).catch(() => undefined);
+    if (!run?.ownerId) return undefined;
+    if (!("none" in own) && run.ownerId === own.id) return own;
+    if (run.ownerId === opts.auditOwner) return auditOwnerPerson(run.ownerId, deps);
+    const name = (await deps.linear.userNames?.([run.ownerId]).catch(() => undefined))?.[0];
+    return { id: run.ownerId, name: name ?? run.account?.holder ?? run.ownerId };
+  };
   if ("none" in own) why.push(`the PR belongs to no one with accounts here: ${own.none}`);
-  else if (await start(own)) return { issue, accountsOf: own };
+  else if (await start(own)) return { issue, accountsOf: await ranOn() };
   if (!opts.auditOwner) why.push("review.auditOwner, the fallback, is not set");
   else if ("none" in own || own.id !== opts.auditOwner) {
-    const fallback = await auditOwnerPerson(opts.auditOwner, deps);
-    if (await start(fallback)) return { issue, accountsOf: fallback };
+    if (await start(await auditOwnerPerson(opts.auditOwner, deps))) return { issue, accountsOf: await ranOn() };
   }
   throw new Error(`no one's accounts can run it: ${why.join("; ")}`);
 }

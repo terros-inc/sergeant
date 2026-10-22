@@ -36,14 +36,28 @@ export async function auditOwnerPerson(id: string, deps: Pick<Ports, "linear">):
 }
 
 /**
- * The owner of the task episode that merged or worked on this PR; with none naming it, the current
- * episode's. Every state file of the issue is read, an episode set aside included.
+ * The owner of the task episode that merged this PR, else of one whose PR passed its checks, else the
+ * current episode's. Every state file of the issue is read, an episode set aside included. A reopened
+ * issue keeps one file per episode, each with its own owner, and `readdir` order is the filesystem's: so
+ * a merge outranks a passed check, and among equals the latest wins, whatever order the files come in.
  */
 async function taskOwner(dir: string, pr: Pick<PullRequestFacts, "repo" | "number">): Promise<TaskState["owner"]> {
   const files = (await readdir(dir).catch(() => [])).filter(isTaskStateFile);
   const states = await Promise.all(files.map(async (f) => ({ f, state: await readTaskState(join(dir, f)).catch(() => undefined) })));
   const isPr = (h: { repo: string; number: number }) => h.repo.toLowerCase() === pr.repo.toLowerCase() && h.number === pr.number;
-  const names = (s: TaskState) => landings(s).some(isPr) || s.passedChecks.some(isPr);
-  const owned = states.filter((s) => s.state?.owner);
-  return (owned.find((s) => names(s.state!)) ?? owned.find((s) => s.f === "state.json"))?.state?.owner;
+  // [rank, when]: 2 for a merge naming the PR, 1 for a passed check on it; ISO times compare as strings.
+  const match = (s: TaskState): [number, string] | undefined => {
+    const latest = (ts: string[]) => ts.reduce((a, b) => (b > a ? b : a));
+    const merges = landings(s).filter(isPr).map((m) => m.at);
+    if (merges.length) return [2, latest(merges)];
+    const passed = s.passedChecks.filter(isPr).map((c) => c.since);
+    return passed.length ? [1, latest(passed)] : undefined;
+  };
+  let best: { rank: [number, string]; owner: NonNullable<TaskState["owner"]> } | undefined;
+  for (const { state } of states) {
+    const rank = state?.owner && match(state);
+    if (!rank || !state?.owner) continue;
+    if (!best || rank[0] > best.rank[0] || (rank[0] === best.rank[0] && rank[1] > best.rank[1])) best = { rank, owner: state.owner };
+  }
+  return best?.owner ?? states.find((s) => s.f === "state.json")?.state?.owner;
 }

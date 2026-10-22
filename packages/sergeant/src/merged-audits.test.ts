@@ -25,7 +25,8 @@ async function harness(over: Partial<MergedAuditOptions> = {}, people: { registe
   const registered = new Set(people.registered ?? ["owner-1"]);
   const listed: Date[] = [];
   const started: Extract<RunSpec, { role: "reviewer" }>[] = [];
-  const runs = new Set<string>();
+  /** Each run started, by id, with whose accounts it runs on. */
+  const runs = new Map<string, string>();
   const deps = {
     github: {
       mergedPullRequests: async (_: string, since: Date) => (listed.push(since), merged),
@@ -45,15 +46,15 @@ async function harness(over: Partial<MergedAuditOptions> = {}, people: { registe
       start: async (spec: RunSpec) => {
         if (!registered.has(spec.owner.id)) throw new NoModelAccount(spec.owner, "none_registered", [], `${spec.owner.name} has no model account registered`);
         if (spec.role !== "reviewer" || runs.has(spec.runId)) return;
-        runs.add(spec.runId);
+        runs.set(spec.runId, spec.owner.id);
         started.push(spec);
       },
-      status: async (runId: string) => ({ runId, status: "succeeded", costUsd: 1 }) as RunRecord,
+      status: async (runId: string) => ({ runId, status: "succeeded", costUsd: 1, ownerId: runs.get(runId) }) as RunRecord,
     },
   } as unknown as MergedAuditDeps;
   const logs: string[] = [];
   const opts: MergedAuditOptions = { stateDir, enrolledRepositories: [repo], rateOf: () => 1, auditOwner: "owner-1", log: (l) => logs.push(l), now: () => now, ...over };
-  return { stateDir, listed, started, logs, deps, opts, pass: (o: Partial<MergedAuditOptions> = {}) => mergedAuditPass({ ...opts, ...o }, deps) };
+  return { stateDir, listed, started, runs, registered, logs, deps, opts, pass: (o: Partial<MergedAuditOptions> = {}) => mergedAuditPass({ ...opts, ...o }, deps) };
 }
 
 test("a repository with no rate lists nothing, and with no audit owner a PR whose author maps to no one is not audited", async () => {
@@ -137,6 +138,29 @@ test("with neither the PR's person nor the audit owner able to pay, nothing star
   expect(unset.logs.find((l) => l.includes("o/r#1 not started"))).toContain("review.auditOwner, the fallback, is not set");
 });
 
+test("an audit a lost ledger starts again is recorded on the accounts its run is really on, or on none named", async () => {
+  // PR 1 is Sergeant's for UNF-9, whose owner ann has no account at first: it runs on the audit owner's.
+  const t = await harness({ budgetUsdPerDay: 5 }, { registered: ["owner-1"], authors: { 1: "sergeant-worker[bot]" } });
+  await mkdir(join(t.stateDir, "tasks", "UNF-9"), { recursive: true });
+  await writeFile(join(t.stateDir, "tasks", "UNF-9", "state.json"), JSON.stringify(task("UNF-9", "ann")));
+  await t.pass();
+  const fallback = { id: "owner-1", name: "Name of owner-1", fallback: true };
+  expect((await ledger(t.stateDir)).started.map((s) => s.accountsOf)).toEqual([fallback]);
+
+  // ann registers an account, then the ledger is lost: the runner returns the run already on owner-1's.
+  t.registered.add("ann");
+  await rm(join(t.stateDir, "merged-audits.json"));
+  await t.pass();
+  expect(t.started).toHaveLength(1);
+  expect((await ledger(t.stateDir)).started.map((s) => s.accountsOf)).toEqual([fallback]);
+
+  // A run that does not say whose accounts it is on is not credited to anyone.
+  await rm(join(t.stateDir, "merged-audits.json"));
+  t.deps.runner.status = async (runId) => ({ runId, status: "running" }) as RunRecord;
+  await t.pass();
+  expect((await ledger(t.stateDir)).started.map((s) => s.accountsOf)).toEqual([undefined]);
+});
+
 test("the daily cap starts an audit only if its reservation fits, counting each audit not finished yet", async () => {
   const t = await harness({ budgetUsdPerDay: 9 });
   await t.pass();
@@ -187,7 +211,7 @@ const at = (hours: number) => ({ now: () => new Date(now.getTime() + hours * 3_6
 async function auditing() {
   const t = await harness({ budgetUsdPerDay: 5 });
   const state = { finished: false, failing: false };
-  t.deps.runner.status = async (runId) => ({ runId, role: "reviewer", provider: "openai/codex", model: "m", costUsd: 1, ...(state.finished ? { status: "succeeded", report } : { status: "running" }) }) as unknown as RunRecord;
+  t.deps.runner.status = async (runId) => ({ runId, role: "reviewer", provider: "openai/codex", model: "m", costUsd: 1, ownerId: t.runs.get(runId), ...(state.finished ? { status: "succeeded", report } : { status: "running" }) }) as unknown as RunRecord;
   const comments: unknown[] = [];
   t.deps.github.postAuditComment = async (req) => {
     comments.push(req);

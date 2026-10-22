@@ -30,10 +30,11 @@ export const RunMeta = z.object({
   ownerId: z.string().optional(),
 });
 export type RunMeta = z.infer<typeof RunMeta>;
-export const recorded = ({ issueRevision, providerChoice, account, accountReason }: RunMeta) => ({
+export const recorded = ({ issueRevision, providerChoice, account, accountReason, ownerId }: RunMeta) => ({
   ...(issueRevision !== undefined && { issueRevision }),
   ...(providerChoice && { providerChoice }),
   ...(account && { account, ...(accountReason && { accountReason }) }),
+  ...(ownerId && { ownerId }),
 });
 
 /** The run directories under `root`, and the records and launch facts read back from them. */
