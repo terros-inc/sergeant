@@ -228,7 +228,7 @@ export function enrollment(opts: {
     },
 
     /**
-     * TECH-6606: sets or clears (null) each field the request gives of an enrolled repository's own
+     * TECH-6606: sets or clears (`"default"`) each field the request gives of an enrolled repository's own
      * budget; a field left out stays as it is. Only that repository's `budget` changes, and with no
      * field left it goes. The live settings, which task loops read when a window opens, take it at once.
      */
@@ -243,7 +243,7 @@ export function enrollment(opts: {
         const after: RepositoryBudget = { ...before };
         for (const field of ["wallMinutes", "costUsd"] as const) {
           const value = fields[field];
-          if (value === null) delete after[field];
+          if (value === "default") delete after[field];
           else if (value !== undefined) after[field] = value;
         }
         if (isDeepStrictEqual(before, after)) return undefined;

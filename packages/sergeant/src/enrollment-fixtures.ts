@@ -93,6 +93,7 @@ export async function serve(opts: { writable?: boolean; write?: () => Write } = 
   server = createServer(apiHandler(ctl));
   await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
+  /** `body` as a string is sent as is, for JSON that JSON.stringify cannot write (a number like 1e999). */
   const call = (method: string, path: string, as: string, body?: unknown) =>
     new Promise<{ status: number; json: any; text: string }>((resolve, reject) => {
       const headers = { [CLI_VERSION_HEADER]: MIN_CLI_VERSION, Authorization: `Bearer ${as}`, ...(body !== undefined && { "Content-Type": "application/json" }) };
@@ -102,7 +103,7 @@ export async function serve(opts: { writable?: boolean; write?: () => Write } = 
         res.on("end", () => resolve({ status: res.statusCode ?? 0, json: text ? JSON.parse(text) : undefined, text }));
       });
       req.on("error", reject);
-      req.end(body === undefined ? undefined : JSON.stringify(body));
+      req.end(body === undefined || typeof body === "string" ? body : JSON.stringify(body));
     });
   return { call, parameter, repositories, configs, logs, enrolled, clock, retro };
 }

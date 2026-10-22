@@ -39,12 +39,12 @@ test("each field is set and cleared on its own, the other kept, and only that re
   expect(await call("GET", "/v1/repositories", "ada")).toMatchObject({ status: 200, json: { repositories: [{ repo, budget: { wallMinutes: 90, costUsd: 30 }, ownBudget: { wallMinutes: 90, costUsd: 30 } }] } });
 
   // Clearing one keeps the other; clearing the last removes the override, leaving the parameter as it began.
-  expect(await call("POST", "/v1/repositories/budget", "grace", { repo, wallMinutes: null })).toMatchObject({ status: 200, json: { changed: true, ownBudget: { costUsd: 30 }, budget: { wallMinutes: 120, costUsd: 30 } } });
+  expect(await call("POST", "/v1/repositories/budget", "grace", { repo, wallMinutes: "default" })).toMatchObject({ status: 200, json: { changed: true, ownBudget: { costUsd: 30 }, budget: { wallMinutes: 120, costUsd: 30 } } });
   expect(ownIn(parameter.value)).toEqual({ costUsd: 30 });
-  expect(await call("POST", "/v1/repositories/budget", "grace", { repo, costUsd: null })).toMatchObject({ status: 200, json: { changed: true, ownBudget: {}, budget: { wallMinutes: 120, costUsd: 10 } } });
+  expect(await call("POST", "/v1/repositories/budget", "grace", { repo, costUsd: "default" })).toMatchObject({ status: 200, json: { changed: true, ownBudget: {}, budget: { wallMinutes: 120, costUsd: 10 } } });
   expect(JSON.parse(parameter.value)).toEqual(CONFIG);
   expect(configs[repo]?.budget).toBeUndefined();
-  expect(await call("POST", "/v1/repositories/budget", "grace", { repo, costUsd: null })).toMatchObject({ status: 200, json: { changed: false } });
+  expect(await call("POST", "/v1/repositories/budget", "grace", { repo, costUsd: "default" })).toMatchObject({ status: 200, json: { changed: false } });
 });
 
 test("a non-approver, an unenrolled repository, and an invalid value are refused, and nothing is written", async () => {
@@ -57,6 +57,9 @@ test("a non-approver, an unenrolled repository, and an invalid value are refused
     [400, "grace", { repo, costUsd: -5 }],
     [400, "grace", { repo, wallMinutes: "60" }],
     [400, "grace", { repo }],
+    // A client's NaN or Infinity reaches serve as null, or as a literal too big for a double: neither clears.
+    [400, "grace", { repo, wallMinutes: null }],
+    [400, "grace", `{"repo":"${repo}","costUsd":1e999}`],
     [400, "grace", { repo, wallMinutes: 60, mergePolicy: "sergeant" }],
   ] as const;
   for (const [status, as, body] of refused) expect(await call("POST", "/v1/repositories/budget", as, body)).toMatchObject({ status });

@@ -48,14 +48,14 @@ export const repoCommands: Record<string, Command> = {
 };
 
 /**
- * A budget flag as the request's field: a positive number sets it, `default` clears it (null), absent
- * leaves it. Checked here, since a malformed number would go as JSON's null and clear the field.
+ * A budget flag as the request's field: a positive number sets it, `default` clears it, absent leaves
+ * it. A run of digits too long for a double is Infinity, which JSON sends as null: refused here, and
+ * by serve too.
  */
-function budgetFlag(value: string | undefined, flag: string): number | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === "default") return null;
+function budgetFlag(value: string | undefined, flag: string): number | "default" | undefined {
+  if (value === undefined || value === "default") return value;
   const n = Number(value);
-  if (!/^\d+(\.\d+)?$/.test(value) || !(n > 0)) throw new Usage(`${flag} must be a positive number, or default`);
+  if (!/^\d+(\.\d+)?$/.test(value) || !Number.isFinite(n) || !(n > 0)) throw new Usage(`${flag} must be a positive number, or default`);
   return n;
 }
 

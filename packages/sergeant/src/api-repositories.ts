@@ -10,7 +10,7 @@ import { EnrollmentRefused, type Enrollment } from "./enrollment.ts";
 //   GET  /v1/repositories
 //   POST /v1/repositories/add      { "repo": "owner/name", "mergeMethod"?: "squash" | "merge" | "rebase", "mergePolicy"?: "sergeant" | "human" }
 //   POST /v1/repositories/remove   { "repo": "owner/name" }
-//   POST /v1/repositories/budget   { "repo": "owner/name", "wallMinutes"?: number | null, "costUsd"?: number | null }   TECH-6606
+//   POST /v1/repositories/budget   { "repo": "owner/name", "wallMinutes"?: number | "default", "costUsd"?: number | "default" }   TECH-6606
 
 export async function repositoriesRoute(
   enrollment: Enrollment | undefined,

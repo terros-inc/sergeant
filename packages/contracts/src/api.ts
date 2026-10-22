@@ -273,11 +273,13 @@ export type RepositoryChange = z.infer<typeof RepositoryChange>;
 
 /**
  * TECH-6606: an approver's change to an enrolled repository's own budget. A field given as a positive
- * number sets it, given as null clears it (the installation's applies again), and left out stays as it
- * is; at least one is given.
+ * number sets it, given as `"default"` clears it (the installation's applies again), and left out stays
+ * as it is; at least one is given. Clearing takes a word, never null: JSON.stringify turns NaN and
+ * Infinity into null, so a client's overflowed or malformed number must be refused, not read as a clear.
  */
+const RepositoryBudgetField = z.union([z.number().positive(), z.literal("default")]).optional();
 export const RepositoryBudgetRequest = z
-  .strictObject({ repo: RepoSlug, wallMinutes: z.number().positive().nullable().optional(), costUsd: z.number().positive().nullable().optional() })
+  .strictObject({ repo: RepoSlug, wallMinutes: RepositoryBudgetField, costUsd: RepositoryBudgetField })
   .refine((r) => r.wallMinutes !== undefined || r.costUsd !== undefined, "expected wallMinutes, costUsd, or both");
 export type RepositoryBudgetRequest = z.infer<typeof RepositoryBudgetRequest>;
 /** The repository's own budget after the change, the window it gives a task working only there, and whether this call wrote it. */
