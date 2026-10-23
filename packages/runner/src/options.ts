@@ -1,4 +1,4 @@
-import type { RepoSlug, RunGitHubTokens, RunSpec } from "@terros/sergeant-contracts";
+import type { RepoSlug, RunGitHubTokens, RunSpec, WorkerProfile } from "@terros/sergeant-contracts";
 import type { AttachmentLimits, FetchUpload } from "./attachments.ts";
 import type { Adapter } from "./agents.ts";
 import type { CodexPrice } from "./codex-prices.ts";
@@ -20,6 +20,10 @@ export type ContainerRunnerOptions = {
   rootDir: string;
   /** Built from `container/Dockerfile`. */
   image?: string;
+  /** Local image for Android workers. Reviewers always use `image`. */
+  androidImage?: string;
+  /** Live enrollment lookup. Android wins when any repository in a worker run requests it. */
+  workerProfile?: (repositories: RepoSlug[]) => WorkerProfile;
   /** The model each role runs on each adapter; each run is a new agent session in a new container. */
   models: Record<Role, Record<Adapter, string>>;
   /**

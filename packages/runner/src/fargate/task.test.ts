@@ -80,7 +80,8 @@ describe("awaitingLogs", () => {
 describe("taskDefinition", () => {
   const input = {
     family: "f", image: "i", adapter: "codex-local" as const, secretArn: "arn:aws:secretsmanager:r:1:secret:s-AbC", executionRoleArn: "arn:role",
-    logGroup: "g", region: "r", cpu: "2048", memory: "8192", gitIdentity: { name: "N", email: "e@x" }, reportNonce: "n", command: ["sh"], denylist: false,
+    logGroup: "g", region: "r", cpu: "2048", memory: "8192", architecture: "ARM64" as const, ephemeralStorageGiB: 21,
+    gitIdentity: { name: "N", email: "e@x" }, reportNonce: "n", command: ["sh"], denylist: false,
   };
 
   it("carries credentials only as secret references, never values, and has no task role", () => {
@@ -99,5 +100,11 @@ describe("taskDefinition", () => {
   it("references the public-data denylist only when the installation has one, for the same reason", () => {
     const [worker] = taskDefinition({ ...input, attachments: false, denylist: true }).containerDefinitions;
     expect(worker?.secrets.map((s) => s.name)).toEqual(["SERGEANT_BRIEF_GZ", "PUBLIC_DATA_DENYLIST", "GH_TOKEN", "GH_READ_TOKEN", "CODEX_CREDENTIAL"]);
+  });
+
+  it("binds each profile's architecture and disk size into its task definition", () => {
+    expect(taskDefinition({ ...input, attachments: false, architecture: "X86_64", ephemeralStorageGiB: 50 })).toMatchObject({
+      runtimePlatform: { cpuArchitecture: "X86_64" }, ephemeralStorage: { sizeInGiB: 50 },
+    });
   });
 });

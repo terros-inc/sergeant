@@ -9,9 +9,28 @@
 # (sergeant-runner, sergeant-fargate-spike, /sergeant/fargate-spike), which are deleted by hand after cutover.
 
 locals {
-  runs_name       = "sergeant-v2-runs"
-  run_task_family = "sergeant-v2-run"
-  run_secrets     = "arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:sergeant/runs/*"
+  runs_name = "sergeant-v2-runs"
+  run_task_families = {
+    base    = "sergeant-v2-run-base"
+    android = "sergeant-v2-run-android"
+  }
+  run_profiles = {
+    base = {
+      taskFamily          = local.run_task_families.base
+      cpu                 = "2048"
+      memory              = "8192"
+      architecture        = "ARM64"
+      ephemeralStorageGiB = 21
+    }
+    android = {
+      taskFamily          = local.run_task_families.android
+      cpu                 = "4096"
+      memory              = "16384"
+      architecture        = "X86_64"
+      ephemeralStorageGiB = 50
+    }
+  }
+  run_secrets = "arn:aws:secretsmanager:${var.region}:${var.account_id}:secret:sergeant/runs/*"
   # install.sh reads it by this name.
   fargate_runner_parameter = "/sergeant/v2/fargate-runner"
   fargate_settings         = "arn:aws:ssm:${var.region}:${var.account_id}:parameter${local.fargate_runner_parameter}"
@@ -140,7 +159,7 @@ data "aws_iam_policy_document" "host_runs" {
   statement {
     sid       = "RunWorkerTasks"
     actions   = ["ecs:RunTask"]
-    resources = ["arn:aws:ecs:${var.region}:${var.account_id}:task-definition/${local.run_task_family}:*"]
+    resources = [for family in values(local.run_task_families) : "arn:aws:ecs:${var.region}:${var.account_id}:task-definition/${family}:*"]
     condition {
       test     = "ArnEquals"
       variable = "ecs:cluster"
@@ -240,7 +259,7 @@ resource "aws_ssm_parameter" "fargate_runner" {
     securityGroup    = aws_security_group.runs.id
     executionRoleArn = aws_iam_role.run_execution.arn
     logGroup         = aws_cloudwatch_log_group.runs.name
-    taskFamily       = local.run_task_family
     repositoryUrl    = aws_ecr_repository.runner.repository_url
+    profiles         = local.run_profiles
   })
 }

@@ -8,7 +8,7 @@ import { EnrollmentRefused, type Enrollment } from "./enrollment.ts";
 // approver's change to them (enrollment.ts), with no AWS session.
 //
 //   GET  /v1/repositories
-//   POST /v1/repositories/add      { "repo": "owner/name", "mergeMethod"?: "squash" | "merge" | "rebase", "mergePolicy"?: "sergeant" | "human" }
+//   POST /v1/repositories/add      { "repo": "owner/name", "mergeMethod"?, "mergePolicy"?, "workerProfile"?: "base" | "android" }
 //   POST /v1/repositories/remove   { "repo": "owner/name" }
 //   POST /v1/repositories/budget   { "repo": "owner/name", "wallMinutes"?: number | "default", "costUsd"?: number | "default" }   TECH-6606
 //   POST /v1/repositories/audit-rate   { "repo": "owner/name", "mergedAuditSampleRate": 0..1 }   TECH-6617
@@ -31,8 +31,8 @@ export async function repositoriesRoute(
   } else if (at.id === "budget") {
     change = enrollment.setBudget(parse(RepositoryBudgetRequest, request), by);
   } else if (at.id === "add") {
-    const { repo, mergeMethod, mergePolicy } = parse(AddRepositoryRequest, request);
-    change = enrollment.add(repo, mergeMethod, mergePolicy, by);
+    const { repo, mergeMethod, mergePolicy, workerProfile } = parse(AddRepositoryRequest, request);
+    change = enrollment.add(repo, mergeMethod, mergePolicy, workerProfile, by);
   } else {
     change = enrollment.remove(parse(RemoveRepositoryRequest, request).repo, by);
   }

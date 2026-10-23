@@ -4,12 +4,27 @@
 # enrolled repositories (GH_READ_TOKEN) and, for a worker, its scoped worker-App GitHub token, passed by name.
 FROM node:24-bookworm-slim
 
+ARG TERRAFORM_VERSION=1.16.5
+
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep jq python3 make g++ \
+  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep jq python3 make g++ unzip shellcheck \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
   && apt-get update && apt-get install -y --no-install-recommends gh \
+  && case "$(dpkg --print-architecture)" in \
+    amd64) terraform_arch=amd64; terraform_sha256=2bc2fcfff033265c9e02ca0351f01794eb122f62a9b2a49a3294b9e49eaab5e4 ;; \
+    arm64) terraform_arch=arm64; terraform_sha256=61a50b00485ee4810cf20581ef080fc54d34d666e175c58d9a10501c65c1ccde ;; \
+    *) echo "unsupported architecture: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+  esac \
+  && curl -fsSLo /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${terraform_arch}.zip" \
+  && echo "${terraform_sha256}  /tmp/terraform.zip" | sha256sum -c - \
+  && unzip -q /tmp/terraform.zip terraform -d /usr/local/bin \
+  && rm -f /tmp/terraform.zip \
   && rm -rf /var/lib/apt/lists/*
+
+# Fail the image build if either requested tool is absent or cannot start.
+RUN terraform version \
+  && shellcheck --version
 
 # Both agent CLIs, always: a run takes whichever provider its owner's registered accounts and quota
 # choose, with no installation setting (TECH-5390).

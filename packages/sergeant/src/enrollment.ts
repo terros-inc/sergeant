@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { RepoSlug, safeJson, type MergePolicy, type RepositoryAuditRateChange, type RepositoryAuditRateRequest, type RepositoryBudget, type RepositoryBudgetChange, type RepositoryBudgetRequest, type RepositoryChange, type RetroTarget, type RetroTargetChange } from "@terros/sergeant-contracts";
+import { RepoSlug, safeJson, type MergePolicy, type RepositoryAuditRateChange, type RepositoryAuditRateRequest, type RepositoryBudget, type RepositoryBudgetChange, type RepositoryBudgetRequest, type RepositoryChange, type RetroTarget, type RetroTargetChange, type WorkerProfile } from "@terros/sergeant-contracts";
 import type { GitHubApp } from "@terros/sergeant-github";
 import { z } from "zod";
 import { DEFAULT_BUDGET, type BudgetWindow } from "./budget.ts";
@@ -187,6 +187,7 @@ export function enrollment(opts: {
         repo,
         mergeMethod: c.mergeMethod,
         mergePolicy: c.mergePolicy,
+        workerProfile: c.workerProfile,
         ...budgets(c),
         ...(c.mergedAuditSampleRate && { mergedAuditSampleRate: c.mergedAuditSampleRate }),
       })),
@@ -217,19 +218,22 @@ export function enrollment(opts: {
      * Enrolls `repo` once both GitHub Apps reach it, `human`-merged unless `mergePolicy` says otherwise
      * (TECH-5244). One already enrolled stays as it is, except that a `mergePolicy` given sets its policy.
      */
-    async add(repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy | undefined, by: string): Promise<RepositoryChange> {
+    async add(repo: RepoSlug, mergeMethod: MergeMethod, mergePolicy: MergePolicy | undefined, workerProfile: WorkerProfile | undefined, by: string): Promise<RepositoryChange> {
       let own = await opts.reach(repo);
       const changed = await change(({ repositories: current }) => {
         const enrolled = keyOf(current, own);
         if (enrolled) {
           own = enrolled;
-          const settings = current[enrolled] as { mergePolicy?: MergePolicy };
-          if (!mergePolicy || mergePolicy === (settings.mergePolicy ?? "human")) return undefined;
-          settings.mergePolicy = mergePolicy;
-          return `${by} set ${own}'s merge policy to ${mergePolicy}`;
+          const settings = current[enrolled] as { mergePolicy?: MergePolicy; workerProfile?: WorkerProfile };
+          const policyChanged = mergePolicy !== undefined && mergePolicy !== (settings.mergePolicy ?? "human");
+          const profileChanged = workerProfile !== undefined && workerProfile !== (settings.workerProfile ?? "base");
+          if (!policyChanged && !profileChanged) return undefined;
+          if (mergePolicy !== undefined) settings.mergePolicy = mergePolicy;
+          if (workerProfile !== undefined) settings.workerProfile = workerProfile;
+          return `${by} updated ${own}'s enrollment settings`;
         }
-        current[own] = { mergeMethod, mergePolicy: mergePolicy ?? "human" };
-        return `${by} enrolled ${own} (${mergeMethod}, merged by ${mergePolicy ?? "human"})`;
+        current[own] = { mergeMethod, mergePolicy: mergePolicy ?? "human", workerProfile: workerProfile ?? "base" };
+        return `${by} enrolled ${own} (${mergeMethod}, merged by ${mergePolicy ?? "human"}, ${workerProfile ?? "base"} worker)`;
       });
       return { repo: own, changed, repositories: [...opts.repositories] };
     },

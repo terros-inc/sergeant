@@ -10,14 +10,14 @@ export const repoCommands: Record<string, Command> = {
     args: 0,
     run: async (ctx) => {
       const { value: { repositories }, answer } = await callAnswer(ctx, "GET", "/v1/repositories", RepositoryList);
-      print(ctx, answer, () => (repositories.length ? table(repositories.map((r) => [r.repo, r.mergeMethod, `merged by ${r.mergePolicy}`, budgetText(r), r.mergedAuditSampleRate ? `audits ${r.mergedAuditSampleRate} of merged PRs` : ""])) : "no enrolled repositories"));
+      print(ctx, answer, () => (repositories.length ? table(repositories.map((r) => [r.repo, r.mergeMethod, `merged by ${r.mergePolicy}`, `${r.workerProfile} worker`, budgetText(r), r.mergedAuditSampleRate ? `audits ${r.mergedAuditSampleRate} of merged PRs` : ""])) : "no enrolled repositories"));
     },
   },
   "admin repo add": {
     args: 1,
-    flags: ["merge-method", "merge-policy"],
+    flags: ["merge-method", "merge-policy", "worker-profile"],
     run: async (ctx, [repo]) => {
-      const body = { repo, mergeMethod: ctx.flags["merge-method"], mergePolicy: ctx.flags["merge-policy"] };
+      const body = { repo, mergeMethod: ctx.flags["merge-method"], mergePolicy: ctx.flags["merge-policy"], workerProfile: ctx.flags["worker-profile"] };
       const { value: res, answer } = await callAnswer(ctx, "POST", "/v1/repositories/add", RepositoryChange, body);
       print(ctx, answer, () => `${res.changed ? "enrolled" : "already enrolled:"} ${res.repo}; enrolled now: ${res.repositories.join(", ")}`);
     },

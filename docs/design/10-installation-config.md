@@ -67,6 +67,9 @@ Jev's authoritative flag. None of those concepts exist.
   (TECH-6606, [deploy/README.md, Budget](../../deploy/README.md#budget)).
 - **Repository build/test/topology**: not Sergeant's concern. Workers read each repository's own
   `AGENTS.md` and README. S1's `sergeant.toml` is not carried over (13).
+- **Worker toolchain selection** is the one topology fact enrollment does own: `workerProfile` is
+  `base` by default or `android`. A run spanning repositories takes `android` if any repository does,
+  and records the selected profile when it starts. The profile chooses an image, not build commands.
 
 ## 4. Setting up an installation
 
@@ -74,7 +77,7 @@ Jev's authoritative flag. None of those concepts exist.
 sgt init <name> --bootstrap                       # identity, state bucket (unchanged)
 sgt config set <name> --file sergeant2.json       # Linear, GitHub Apps, profiles, defaults, approvers
 sgt config claude-profile <name> <profile>        # worker model tokens, stdin only
-sgt config repo add <name> <slug> --purpose "..." --merge-policy sergeant|human
+sgt config repo add <name> <slug> --purpose "..." --merge-policy sergeant|human --worker-profile base|android
 sgt doctor repo <name> <slug>                     # enrollment checklist (08 §2)
 terraform via the existing wrapper                # host, roles (control plane, runner dev role), bucket, log group
 sergeant-update <ref>, then the release setting   # first install; afterwards the host follows main (§6)

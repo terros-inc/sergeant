@@ -31,7 +31,7 @@ import { modelAccounts } from "./accounts.ts";
 import { apiCalls } from "./api-calls.ts";
 import { linearCallers } from "./auth.ts";
 import { DEFAULT_BUDGET } from "./budget.ts";
-import { connect, fargateSettings, githubLoginLookup, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget } from "./config.ts";
+import { connect, fargateSettings, githubLoginLookup, loadConfig, repoBudget, reviewerProfileLookup, runnerRoles, taskBudget, workerProfileFor } from "./config.ts";
 import { decimalFlag, integerFlag } from "./cli-numbers.ts";
 import { appsReach, configParameter, enrolledIn, enrollment } from "./enrollment.ts";
 import { startService } from "./service.ts";
@@ -97,6 +97,7 @@ const runnerOptions = {
   githubTokens: installation.githubTokens,
   // Read at each launch: enrollment.ts changes `repositories` in place (TECH-6194).
   enrolledRepositories: () => [...repositories],
+  workerProfile: (repos: RepoSlug[]) => workerProfileFor(installation.repositoryConfigs, repos),
   fetchUpload: installation.linear.fetchUpload,
   ...(installation.publicDataDenylist && { publicDataDenylist: installation.publicDataDenylist }),
   asides: setAside(),
@@ -106,7 +107,7 @@ const runner = byRole(runsDir, {
   fargate: fargate && fargateRunner({ ...runnerOptions, settings: fargate }),
   workerBackend: config.runners?.workerBackend ?? "local",
 });
-if (fargate) log(`workers run ${config.runners?.workerBackend === "fargate" ? "on Fargate" : "on this host"}; Fargate image ${fargate.image}`);
+if (fargate) log(`workers run ${config.runners?.workerBackend === "fargate" ? "on Fargate" : "on this host"}; Fargate base image ${fargate.profiles.base.image}; Android image ${fargate.profiles.android.image}`);
 // The reasoning CLI inherits this process's environment: with the token set it authenticates as
 // Sergeant's model profile rather than the operator's own Claude login.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = installation.modelToken;

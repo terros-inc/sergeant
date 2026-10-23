@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { FargateSettings } from "@terros/sergeant-runner";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 // deploy/host/install-config.sh against stub `aws` and `docker` (TECH-5273): the new config is
@@ -12,7 +13,7 @@ const script = join(import.meta.dirname, "../../../deploy/host/install-config.sh
 const example = join(import.meta.dirname, "../../../deploy/host/installation.example.json");
 
 // `aws ssm get-parameter` answers the config parameter with $STUB_CONFIG (version 8), and the Fargate
-// one with $STUB_FARGATE when it is set; `docker push` fails when $STUB_PUSH is `fail`.
+// one with $STUB_FARGATE when it is set; `docker buildx` fails when $STUB_PUSH is `fail`.
 const aws = `#!/usr/bin/env bash
 name=; while [ $# -gt 0 ]; do [ "$1" = --name ] && name=$2; shift; done
 case "$name" in
@@ -23,10 +24,29 @@ esac
 `;
 const docker = `#!/usr/bin/env bash
 [ "$1" = login ] && cat >/dev/null
-[ "$1" = push ] && [ "\${STUB_PUSH:-}" = fail ] && exit 1
+[ "$1" = buildx ] && [ "\${STUB_PUSH:-}" = fail ] && exit 1
 exit 0
 `;
-const fargate = JSON.stringify({ repositoryUrl: "123.dkr.ecr.us-west-2.amazonaws.com/sergeant-v2-runner", cluster: "sergeant-v2-runs" });
+const commonFargate = {
+  region: "us-west-2", cluster: "sergeant-v2-runs", subnets: ["subnet-1"], securityGroup: "sg-1",
+  executionRoleArn: "arn:aws:iam::123:role/run", logGroup: "/sergeant/v2/runs",
+};
+const profiles = {
+  base: { taskFamily: "sergeant-v2-run-base", cpu: "2048", memory: "8192", architecture: "ARM64", ephemeralStorageGiB: 21 },
+  android: { taskFamily: "sergeant-v2-run-android", cpu: "4096", memory: "16384", architecture: "X86_64", ephemeralStorageGiB: 50 },
+} as const;
+const fargate = JSON.stringify({ ...commonFargate, repositoryUrl: "123.dkr.ecr.us-west-2.amazonaws.com/sergeant-v2-runner", profiles });
+const currentFargate = JSON.stringify({
+  ...commonFargate,
+  profiles: {
+    base: { ...profiles.base, image: "runner.example.test/sergeant:base" },
+    android: { ...profiles.android, image: "runner.example.test/sergeant:android" },
+  },
+});
+const legacyFargate = JSON.stringify({
+  ...commonFargate,
+  taskFamily: "sergeant-v2-run", image: "runner.example.test/sergeant:old", cpu: "2048", memory: "8192",
+});
 
 let dir: string;
 beforeEach(async () => {
@@ -40,7 +60,7 @@ beforeEach(async () => {
   // The previous installation: local workers, version 7, and the last image pushed.
   await writeFile(join(dir, "etc/installation.json"), "previous\n");
   await writeFile(join(dir, "etc/installation.json.version"), "7\n");
-  await writeFile(join(dir, "etc/fargate-runner.json"), "previous image\n");
+  await writeFile(join(dir, "etc/fargate-runner.json"), legacyFargate);
 });
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
@@ -57,7 +77,7 @@ async function install(workerBackend: "local" | "fargate", stub: { fargate?: str
 }
 
 test("a failed push with a Fargate config fails the install and leaves the previous installation", { timeout: 20_000 }, async () => {
-  expect(await install("fargate", { fargate, push: "fail" })).toEqual({ exit: 1, config: "previous\n", version: "7\n", fargate: "previous image\n" });
+  expect(await install("fargate", { fargate, push: "fail" })).toEqual({ exit: 1, config: "previous\n", version: "7\n", fargate: legacyFargate });
   // No Fargate resources at all is the same: the image it needs is not there.
   expect(await install("fargate", { push: "ok" })).toMatchObject({ exit: 1, config: "previous\n", version: "7\n" });
 });
@@ -66,8 +86,26 @@ test("a Fargate config is installed once its image is pushed; a local one whethe
   const pushed = await install("fargate", { fargate, push: "ok" });
   expect(pushed).toMatchObject({ exit: 0, version: "8\n" });
   expect(JSON.parse(pushed.config).runners).toEqual({ workerBackend: "fargate" });
-  expect(JSON.parse(pushed.fargate)).toEqual({ cluster: "sergeant-v2-runs", image: expect.stringMatching(/^123\.dkr\.ecr\.us-west-2\.amazonaws\.com\/sergeant-v2-runner:[0-9a-f]{40}$/) });
+  expect(JSON.parse(pushed.fargate)).toMatchObject({
+    cluster: "sergeant-v2-runs",
+    profiles: {
+      base: { architecture: "ARM64", image: expect.stringMatching(/:[0-9a-f]{40}-base$/) },
+      android: { architecture: "X86_64", ephemeralStorageGiB: 50, image: expect.stringMatching(/:[0-9a-f]{40}-android$/) },
+    },
+  });
 
-  await writeFile(join(dir, "etc/fargate-runner.json"), "previous image\n");
-  expect(await install("local", { fargate, push: "fail" })).toMatchObject({ exit: 0, version: "8\n", fargate: "previous image\n" });
+  await writeFile(join(dir, "etc/fargate-runner.json"), currentFargate);
+  expect(await install("local", { fargate, push: "fail" })).toMatchObject({ exit: 0, version: "8\n", fargate: currentFargate });
+});
+
+test("a local install migrates legacy Fargate settings when the two-image push fails", { timeout: 20_000 }, async () => {
+  const installed = await install("local", { fargate, push: "fail" });
+  expect(installed).toMatchObject({ exit: 0, version: "8\n" });
+  expect(FargateSettings.parse(JSON.parse(installed.fargate))).toMatchObject({
+    cluster: "sergeant-v2-runs",
+    profiles: {
+      base: { taskFamily: "sergeant-v2-run", image: "runner.example.test/sergeant:old", architecture: "ARM64" },
+      android: { taskFamily: "sergeant-v2-run", image: "runner.example.test/sergeant:old", architecture: "X86_64" },
+    },
+  });
 });

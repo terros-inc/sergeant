@@ -38,6 +38,14 @@ test("only the model token, the run's scoped worker-App tokens, and the human gi
   expect(clone?.opts.env?.SERGEANT_RUN_GITHUB_TOKEN).toBe(GH);
 });
 
+test("an Android-profile local worker uses the separate x86 image and records that choice", async () => {
+  const { host, runner } = await started({ workerProfile: () => "android", androidImage: "runner:android" });
+  const run = host.calls.find((c) => c.cmd === "docker" && c.args[0] === "run");
+  expect(run?.args).toContain("linux/amd64");
+  expect(run?.args).toContain("runner:android");
+  expect(await runner.status("run_t1")).toMatchObject({ workerProfile: "android" });
+});
+
 // TECH-6194: a reviewer could read only its PR's checkout, so an issue naming a file in another
 // enrolled repository, or another PR, stopped for a human. It now gets the same read-only token for
 // the repositories enrolled at its launch, and still no write token: a reviewer must never push.

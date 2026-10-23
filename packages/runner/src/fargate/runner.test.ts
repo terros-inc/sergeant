@@ -18,10 +18,10 @@ const settings = {
   securityGroup: "sg-1",
   executionRoleArn: "arn:aws:iam::1:role/sergeant-v2-run-execution",
   logGroup: "/sergeant/v2/runs",
-  taskFamily: "sergeant-v2-run",
-  image: "1.dkr.ecr.us-west-2.amazonaws.com/sergeant-v2-runner:abc123",
-  cpu: "2048",
-  memory: "8192",
+  profiles: {
+    base: { taskFamily: "sergeant-v2-run-base", image: "runner:base", cpu: "2048", memory: "8192", architecture: "ARM64" as const, ephemeralStorageGiB: 21 },
+    android: { taskFamily: "sergeant-v2-run-android", image: "runner:android", cpu: "4096", memory: "16384", architecture: "X86_64" as const, ephemeralStorageGiB: 50 },
+  },
 };
 
 async function setUp(over: { spec?: RunSpec; now?: () => Date; accounts?: (typeof annClaude & { person?: { name: string; email: string } })[] } = {}) {
@@ -70,10 +70,24 @@ describe("fargateRunner", () => {
     expect(ecs.map((c) => c.name)).toEqual(["RegisterTaskDefinitionCommand", "RunTaskCommand"]);
     expect(JSON.stringify(ecs)).not.toMatch(new RegExp(`${TOKEN}|${GH}`));
     const [def] = aws.defs.values();
-    expect(def).toMatchObject({ family: "sergeant-v2-run", executionRoleArn: settings.executionRoleArn, containerDefinitions: [{ image: settings.image }] });
+    expect(def).toMatchObject({ family: "sergeant-v2-run-base", executionRoleArn: settings.executionRoleArn, containerDefinitions: [{ image: "runner:base" }] });
     expect(def).not.toHaveProperty("taskRoleArn");
     expect(aws.tasks).toHaveLength(1);
-    expect(JSON.parse(await readFile(join(rootDir, "run_t1", "run.json"), "utf8"))).toMatchObject({ backend: "fargate", adapter: "claude-code-local" });
+    expect(JSON.parse(await readFile(join(rootDir, "run_t1", "run.json"), "utf8"))).toMatchObject({ backend: "fargate", workerProfile: "base", adapter: "claude-code-local" });
+  });
+
+  it("uses the Android image, x86 task family, and larger task when any repository needs Android", async () => {
+    const made = await setUp();
+    const runner = fargateRunner({
+      rootDir: made.rootDir, settings, clients: made.aws.clients, exec: async () => ({ code: 0, stdout: "", stderr: "" }),
+      models: { worker: { "claude-code-local": "sonnet", "codex-local": "gpt-5" }, reviewer: { "claude-code-local": "opus", "codex-local": "gpt-5" } },
+      accounts: async () => [annClaude], gitIdentity: { name: "Ada Example", email: "ada@example.com" },
+      githubTokens: async (req) => req.access === "read" ? READ : GH, enrolledRepositories: () => ["o/canary"],
+      workerProfile: () => "android",
+    });
+    await runner.start({ ...spec, runId: "run_android" });
+    const def = [...made.aws.defs.values()].at(-1);
+    expect(def).toMatchObject({ family: "sergeant-v2-run-android", cpu: "4096", memory: "16384", runtimePlatform: { cpuArchitecture: "X86_64" }, ephemeralStorage: { sizeInGiB: 50 }, containerDefinitions: [{ image: "runner:android" }] });
   });
 
   // TECH-5593: the task's git identity is the requester's, the person whose registered account the run

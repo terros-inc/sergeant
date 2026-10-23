@@ -168,6 +168,14 @@ start by role and every later call by where the run started (`run.json`'s `backe
 setting leaves running runs where they are. Account choice, the brief, the agent scripts, parsing, and
 the report are the same as the local runner's; only where the run happens differs.
 
+Each enrolled repository has `workerProfile: "base" | "android"` (default `base`). Android wins for
+a multi-repository run. `run.json` records that decision, so later config changes cannot move status or
+cancel to another backend. Fargate maps `base` to the ARM64 2-vCPU/8-GiB task and small Node image,
+and `android` to the x86-64 4-vCPU/16-GiB/50-GiB task and Android image. Native x86-64 is binding:
+AGP's Linux AAPT2 does not run on ARM64. The local backend uses `sergeant-runner:local` for base and
+`sergeant-runner-android:local` with Docker's `--platform linux/amd64` for Android; an ARM64 local host
+therefore needs Docker's x86-64 emulation configured or should use Fargate.
+
 - **Start.** On the host: choose the account, mint the worker token, list the repositories'
   branches naming the issue (`issueBranches`) with `git ls-remote`, fetch the issue's files, render
   the brief. Then one Secrets Manager secret per run, `sergeant/runs/<runId>`, holds the brief (gzipped), the files, `GH_TOKEN`, `GH_READ_TOKEN`, and

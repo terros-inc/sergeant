@@ -139,3 +139,29 @@ run "the_host_passes_only_the_execution_role" {
     error_message = "The host must be able to read its Fargate settings past the deny on other parameters."
   }
 }
+
+run "worker_profiles_have_distinct_native_task_shapes" {
+  command = plan
+
+  assert {
+    condition = local.run_profiles.base == {
+      taskFamily          = "sergeant-v2-run-base"
+      cpu                 = "2048"
+      memory              = "8192"
+      architecture        = "ARM64"
+      ephemeralStorageGiB = 21
+    }
+    error_message = "The base profile should remain the small ARM64 worker."
+  }
+
+  assert {
+    condition = local.run_profiles.android == {
+      taskFamily          = "sergeant-v2-run-android"
+      cpu                 = "4096"
+      memory              = "16384"
+      architecture        = "X86_64"
+      ephemeralStorageGiB = 50
+    }
+    error_message = "The Android profile should use the larger native x86-64 worker."
+  }
+}

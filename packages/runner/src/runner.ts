@@ -47,6 +47,7 @@ const GIT_TEMPLATE = fileURLToPath(new URL("../container/git-template", import.m
 export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
   const root = resolve(opts.rootDir);
   const image = opts.image ?? "sergeant-runner:local";
+  const androidImage = opts.androidImage ?? "sergeant-runner-android:local";
   const asides = opts.asides ?? setAside();
   const codexPrices = { ...CODEX_PRICES, ...opts.codexPrices };
   const exec = opts.exec ?? hostExec;
@@ -206,6 +207,8 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         await mkdir(join(p.workspace, ".sergeant"), { recursive: true });
         await writeWorkspaceFile(join(p.workspace, ".sergeant", "review-schema.json"), JSON.stringify(REVIEW_REPORT_SCHEMA));
       }
+      const workerProfile = spec.role === "worker" ? (opts.workerProfile?.(spec.repositories) ?? "base") : undefined;
+      const runImage = workerProfile === "android" ? androidImage : image;
       const meta: RunMeta = {
         runId: spec.runId,
         role: spec.role,
@@ -213,6 +216,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         model: opts.models[spec.role][adapter],
         repositories: spec.repositories,
         container: `sergeant-${spec.runId}`,
+        ...(workerProfile && { workerProfile }),
         startedAt: new Date().toISOString(),
         ...(spec.conversation && { issueRevision: issueRevision(spec.conversation.issue) }),
         ...(providerChoice && { providerChoice }),
@@ -232,6 +236,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
         "docker",
         [
           "run", "--detach", "--name", meta.container, "--label", `sergeant.run=${spec.runId}`,
+          ...(workerProfile === "android" ? ["--platform", "linux/amd64"] : []),
           "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
           "--volume", `${p.workspace}:/workspace`,
           ...(attachments.files.length ? ["--volume", `${attachmentsDir}:${ATTACHMENTS_PATH}:ro`] : []),
@@ -240,7 +245,7 @@ export function containerRunner(opts: ContainerRunnerOptions): RunnerPort {
           "--env", "GH_READ_TOKEN",
           ...(denylist ? ["--env", "PUBLIC_DATA_DENYLIST"] : []),
           ...gitIdentityEnv(commitIdentity(account, opts.gitIdentity)),
-          image, "sh", "-c", agent.script, "sh",
+          runImage, "sh", "-c", agent.script, "sh",
           String(limits.maxWallSeconds), meta.model, String(limits.maxCostUsd),
           ...(reviewSchema ? [CODEX_REVIEW_SCHEMA_PATH] : []),
         ],

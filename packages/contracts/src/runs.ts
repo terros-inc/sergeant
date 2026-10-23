@@ -5,6 +5,9 @@ import { RepoSlug } from "./conversation.ts";
 export const RunId = z.string().regex(/^run_[\w-]+$/);
 export type RunId = z.infer<typeof RunId>;
 
+export const WorkerProfile = z.enum(["base", "android"]);
+export type WorkerProfile = z.infer<typeof WorkerProfile>;
+
 /** The only reasons a follow-up issue may be filed (07 §11, TECH-5186). */
 export const FollowupCategory = z.enum(["concrete_bug", "required_unfinished_work", "real_blocker", "operational_or_security"]);
 export type FollowupCategory = z.infer<typeof FollowupCategory>;
@@ -319,6 +322,8 @@ const RunBase = {
   status: z.enum(["running", "succeeded", "failed", "canceled"]),
   provider: z.string(),
   model: z.string(),
+  /** The image/toolchain selected for a worker; absent on reviewers and runs from before TECH-5840. */
+  workerProfile: WorkerProfile.optional(),
   /**
    * The run's model cost when it ended, in USD: the agent CLI's own figure, or Sergeant's estimate (see
    * `costBasis`). Absent while running, or when neither exists; the budget then counts it as unknown.

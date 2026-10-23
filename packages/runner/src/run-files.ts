@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ProviderChoice, ReviewReport, RunAccount, RunRecord, type RunId } from "@terros/sergeant-contracts";
+import { ProviderChoice, ReviewReport, RunAccount, RunRecord, WorkerProfile, type RunId } from "@terros/sergeant-contracts";
 import { z } from "zod";
 import { ADAPTERS } from "./agents.ts";
 
@@ -18,6 +18,8 @@ export const RunMeta = z.object({
   container: z.string(),
   /** Set for a run on ECS Fargate (TECH-5237), whose task and secret are in its `launch.json`. */
   backend: z.literal("fargate").optional(),
+  /** Selected before launch and persisted so status/cancel never have to recalculate it from live config. */
+  workerProfile: WorkerProfile.optional(),
   startedAt: z.string(),
   /** The issue text the run started from; every record of the run carries it (M13). */
   issueRevision: z.string().optional(),
@@ -30,11 +32,12 @@ export const RunMeta = z.object({
   ownerId: z.string().optional(),
 });
 export type RunMeta = z.infer<typeof RunMeta>;
-export const recorded = ({ issueRevision, providerChoice, account, accountReason, ownerId }: RunMeta) => ({
+export const recorded = ({ issueRevision, providerChoice, account, accountReason, ownerId, workerProfile }: RunMeta) => ({
   ...(issueRevision !== undefined && { issueRevision }),
   ...(providerChoice && { providerChoice }),
   ...(account && { account, ...(accountReason && { accountReason }) }),
   ...(ownerId && { ownerId }),
+  ...(workerProfile && { workerProfile }),
 });
 
 /** The run directories under `root`, and the records and launch facts read back from them. */

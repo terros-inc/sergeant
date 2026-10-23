@@ -11,6 +11,11 @@ import { type GitHubAppRef, InstallationConfig } from "./config-schema.ts";
 
 export { InstallationConfig } from "./config-schema.ts";
 
+/** Android is the stronger toolchain: one Android repository upgrades the whole worker run. */
+export function workerProfileFor(configs: InstallationConfig["repositories"], repositories: RepoSlug[]) {
+  return repositories.some((repo) => configs[repo]?.workerProfile === "android") ? "android" as const : "base" as const;
+}
+
 // What serve and canary do with the installation config (config-schema.ts): load it, resolve its
 // secret references, and build the effectors it names.
 

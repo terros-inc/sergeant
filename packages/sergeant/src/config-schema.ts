@@ -1,4 +1,4 @@
-import { MergePolicy, RepoSlug } from "@terros/sergeant-contracts";
+import { MergePolicy, RepoSlug, WorkerProfile } from "@terros/sergeant-contracts";
 import { ADAPTERS } from "@terros/sergeant-runner";
 import { z } from "zod";
 
@@ -82,6 +82,8 @@ export const InstallationConfig = z.strictObject({
        * `human`, so a repository enrolled without a deliberate choice fails safe.
        */
       mergePolicy: MergePolicy.default("human"),
+      /** The worker toolchain this repository needs. A multi-repository run takes the strongest profile. */
+      workerProfile: WorkerProfile.default("base"),
       /** See `GitHubRepositoryConfig.observedChecksFallback`. Off unless set. */
       observedChecksFallback: z.boolean().default(false),
       /** See `GitHubRepositoryConfig.actionsRetentionDays`. Unset is GitHub's default, 90 days. */

@@ -255,8 +255,9 @@ To stop a person's runs using Codex, they remove their Codex account (`sgt accou
 
 ### Workers on Fargate (TECH-5237)
 
-Workers can run as one ECS Fargate task each, with their own 2 vCPU and 8 GiB, so they stop
-competing with the host for CPU and memory. Reviewers stay on the host. How a run works is in
+Workers can run as one ECS Fargate task each, so they stop competing with the host for CPU and
+memory. Base-profile tasks use ARM64, 2 vCPU and 8 GiB. Android-profile tasks use native x86-64,
+4 vCPU, 16 GiB and 50 GiB of ephemeral storage so Android's AAPT2 can execute. Reviewers stay on the host. How a run works is in
 `packages/runner/README.md`, under Fargate. A new installation and an existing one take the same
 steps, in this order; each one needs the one before it.
 
@@ -266,9 +267,16 @@ steps, in this order; each one needs the one before it.
    (ECR `sergeant-runner`, cluster `sergeant-fargate-spike`, log group `/sergeant/fargate-spike`, role
    `sergeant-fargate-spike-exec`, security group `sergeant-fargate-spike`) have other names and are
    deleted by hand once workers run here.
-2. **Update** the host (Update below). The install now pushes the runner image it built to
-   `sergeant-v2-runner`, tagged by the installed commit, and writes `/etc/sergeant/fargate-runner.json`
-   (`pushed the runner image to …` in its output). Workers still run on the host. On an installation
+2. **Update** the host (Update below). The install builds the native local base and x86-64 local
+   Android images, then pushes a multi-architecture base image and an
+   x86-64 Android image (built `FROM` the base) to `sergeant-v2-runner`, tagged by the installed
+   commit and profile, and writes `/etc/sergeant/fargate-runner.json`. Gradle's cache directory is
+   created with the right ownership, but dependencies are not preloaded: repository source is not
+   present while this shared image is built, and baking repository-specific caches would make it
+   large and stale. Workers still run on the host. When an upgrade still uses local workers and image
+   publication fails, the install migrates an existing single-image Fargate file to the two-profile
+   shape so `serve` can continue collecting older Fargate runs; it does not enable new Fargate launches.
+   On an installation
    whose config has no `humans` yet, `sgt admin update` cannot sign in: run this update over SSM
    (`sergeant-update main`, the operator's command under Update).
 3. **Turn it on.** Add `"workerBackend": "fargate"` to the installation config's `runners`, put the
@@ -761,6 +769,9 @@ credential is ever printed, and no ambient `gh`, Linear, or Claude login is used
   comes from its task owner's registered accounts (A Codex reviewer above, TECH-5390). `"worker"` and
   `"reviewer"` are deprecated and ignored: an older config that sets them still loads, and serve logs a
   warning for each until it is removed.
+- Each **`repositories`** entry may set `"workerProfile": "android"`; absent means `"base"`.
+  A run touching several repositories uses Android if any one requests it. `sgt admin repo add
+  <owner/name> --worker-profile android` also changes the profile of an already-enrolled repository.
 - **`codex`** (optional): `"model"` overrides the model Codex runs, `gpt-5.6-sol` by default. A Codex
   run's cost is estimated from its tokens at OpenAI's list price for its model; optional
   `codex.prices`, `{ "<model>": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }` in USD per
