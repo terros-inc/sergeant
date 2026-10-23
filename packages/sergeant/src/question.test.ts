@@ -11,6 +11,7 @@ import {
   type RunRecord,
   type SituationReport,
 } from "@terros/sergeant-contracts";
+import { claudeCliReasoner, type Reasoner } from "@terros/sergeant-reasoning";
 import { takeTurn } from "./index.ts";
 import { runLoop } from "./loop.ts";
 
@@ -132,7 +133,7 @@ test("a question is posted once, holds every effect until a human replies, and s
   expect(seen).toHaveLength(1);
   expect(merged).toEqual([]);
   expect(posted).toHaveLength(1);
-  expect(posted[0]?.body).toMatch(/^\*\*Question for you\*\*\n\nPurge .*\n\nOptions:\n1\. At once\n2\. After 30 days\n/);
+  expect(posted[0]?.body).toMatch(/^\*\*Question for you\*\*\n\nPurge .*\n\nSergeant did not merge o\/canary#7, .*\n\nOptions:\n1\. At once\n2\. After 30 days\n/);
   const saved = JSON.parse(await readFile(stateFile, "utf8")) as { recentTurns: { outcomes: string[] }[] };
   expect(saved.recentTurns[0]?.outcomes[1]).toMatch(/^merge_pr .*denied by Q1/);
 
@@ -154,40 +155,54 @@ const issue = { id: "i1", identifier: "UNF-1", url: "https://linear.app/x/issue/
 const start: ProposedAction = { kind: "start_worker", objective: "o", repositories: [repo] };
 const followup: ProposedAction = { kind: "create_followup", key: "k", title: "T", category: "concrete_bug", why: "W", description: "D", relation: "related" };
 
+const situation: SituationReport = {
+  taskId: "t",
+  generatedAt: "2026-10-02T06:00:00.000Z",
+  conversationRevision: "r",
+  conversation: { issue, humanComments: [], agentComments: [] },
+  enrolledRepositories: [repo],
+  pullRequests: [pr],
+  runs: [review],
+  budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2999-01-01T00:00:00.000Z", spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 0, taskStart: "2026-10-02T10:00:00.000Z", windowStart: "2026-10-02T10:00:00.000Z" },
+  recentTurns: [],
+  followups: [],
+  uploads: [],
+  refusedMerges: [],
+  ciReruns: [],
+};
+/** Ports that record each effect a turn makes, with `reasoner` proposing its turn. */
+const recording = (effects: string[], reasoner: Reasoner) => ({
+  agentUserId: agent.id,
+  workerLogin: "sergeant-worker[bot]",
+  linear: {
+    readConversation: async () => situation.conversation,
+    readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
+    moveIssueToStarted: async () => ({ moved: false as const }),
+    postComment: async () => void effects.push("ask"),
+    createFollowupIssue: async () => (effects.push("followup"), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
+  },
+  github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant" as const, mergePullRequest: async () => (effects.push("merge"), { mergedSha: head }) },
+  runner: { start: async () => void effects.push("start"), status: async (id: string) => (id === worker.runId ? worker : review), cancel: async () => {} },
+  reasoner,
+});
+
 test("a turn that asks does nothing else, whatever order reasoning proposed", async () => {
   for (const actions of [[start, ask], [merge, ask], [followup, ask]]) {
     const effects: string[] = [];
-    const situation: SituationReport = {
-      taskId: "t",
-      generatedAt: "2026-10-02T06:00:00.000Z",
-      conversationRevision: "r",
-      conversation: { issue, humanComments: [], agentComments: [] },
-      enrolledRepositories: [repo],
-      pullRequests: [pr],
-      runs: [review],
-      budget: { window: { wallMinutes: 120, costUsd: 25 }, wallDeadline: "2999-01-01T00:00:00.000Z", spentUsd: 0, costLimitUsd: 25, unknownCostRuns: 0, taskStart: "2026-10-02T10:00:00.000Z", windowStart: "2026-10-02T10:00:00.000Z" },
-      recentTurns: [],
-      followups: [],
-      uploads: [],
-      refusedMerges: [],
-      ciReruns: [],
-    };
-    const { outcomes } = await takeTurn(situation, {
-      agentUserId: agent.id,
-      workerLogin: "sergeant-worker[bot]",
-      linear: {
-        readConversation: async () => situation.conversation,
-      readTaskOwner: async () => ({ owner: { id: "user-ann", name: "Ann" } }),
-      moveIssueToStarted: async () => ({ moved: false as const }),
-        postComment: async () => void effects.push("ask"),
-        createFollowupIssue: async () => (effects.push("followup"), { identifier: "UNF-2", url: "https://linear.app/x/issue/UNF-2" }),
-      },
-      github: { readPullRequest: async () => pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async () => (effects.push("merge"), { mergedSha: head }) },
-      runner: { start: async () => void effects.push("start"), status: async (id) => (id === worker.runId ? worker : review), cancel: async () => {} },
-      reasoner: { turn: async () => ({ output: { summary: "s", actions, intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" }) },
-    });
+    const { outcomes } = await takeTurn(situation, recording(effects, { turn: async () => ({ output: { summary: "s", actions, intent: { kind: "wait", on: "the next change" } as const }, model: "m", promptVersion: "p" }) }));
     expect(effects).toEqual(["ask"]);
     expect(outcomes.map((o) => o.status)).toEqual(["denied", "done"]);
+  }
+});
+
+test("a turn whose question has no content posts nothing and does nothing else (TECH-6711)", async () => {
+  for (const question of ["", " \n\t", "placeholder"]) {
+    const effects: string[] = [];
+    const structured_output = { summary: "Starting the fix worker.", actions: [start, { kind: "ask_human", question }], intent: { kind: "act", kinds: ["start_worker", "ask_human"] } };
+    const reasoner = claudeCliReasoner({ runCli: async () => JSON.stringify({ is_error: false, structured_output }) });
+    // A failed turn: its loop fails and a later intake takes the turn again, from the same facts.
+    await expect(takeTurn(situation, recording(effects, reasoner))).rejects.toThrow();
+    expect(effects).toEqual([]);
   }
 });
 

@@ -40,6 +40,31 @@ export function questionComment(ask: Extract<ProposedAction, { kind: "ask_human"
   ].join("\n");
 }
 
+/**
+ * TECH-6711: the line a question ends with when Q1 held back the rest of its turn, so the question never
+ * reads as if they happened and the human knows what their reply unblocks.
+ */
+export function heldBackLine(held: ProposedAction[]): string {
+  const what = [...new Set(held.map(heldBack))];
+  const list = what.length > 1 ? `${what.slice(0, -1).join(", ")} or ${what.at(-1)}` : what[0];
+  return `Sergeant did not ${list}, because this turn asks you this question first; after your reply it decides again.`;
+}
+
+function heldBack(action: ProposedAction): string {
+  switch (action.kind) {
+    case "start_worker": return "start a worker";
+    case "start_reviewer": return `start a review of ${action.subject.map((s) => `${s.repo}#${s.number}`).join(", ")}`;
+    case "send_run": return `message the run ${action.runId}`;
+    case "merge_pr": return `merge ${action.repo}#${action.number}`;
+    case "ask_human": return "ask a second question";
+    case "accept_as_is": return "end the task as it is";
+    case "close_issue": return `close this issue as ${action.state}`;
+    case "create_followup": return `file the follow-up "${action.title}"`;
+    case "record_blocked_by": return `record that ${action.blocked} is blocked by ${action.blockedBy}`;
+    case "update_description": return "update this issue's description";
+  }
+}
+
 /** The Linear conversation the last turn saw: its revision, which keys a question it asked, and its issue text. */
 export type Seen = { revision: ConversationRevision; issue: string };
 

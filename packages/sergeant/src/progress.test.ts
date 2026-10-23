@@ -168,10 +168,14 @@ test("blocking and non-blocking findings are counted, the first two named, and f
 
 test("a round whose turn asks a question still gets its own comment, and the question carries no summary", async () => {
   const ask: ProposedAction = { kind: "ask_human", question: "Retry 429s as well?" };
-  const { run, reply, posted } = await round("approve", [], [ask]);
+  // TECH-6711: Q1 holds back the turn's start; the question says so, and nothing posted says it started.
+  const start: ProposedAction = { kind: "start_worker", objective: "Fix the finding.", repositories: [repo] };
+  const { run, reply, posted } = await round("approve", [], [start, ask]);
   await run();
   expect(posted.map((c) => c.key)).toEqual([expect.stringMatching(/^question:/), "progress:i1:run_review"]);
   expect(posted[0]?.body).not.toContain("Reviewed");
+  expect(posted[0]?.body).toContain("Retry 429s as well?\n\nSergeant did not start a worker, because this turn asks you this question first");
+  expect(posted.map((c) => c.body).join("\n")).not.toMatch(/started|a worker (fixes|continues)/i);
   expect(posted[1]?.body).toBe([changed, `${reviewed}: approved.`, "Next: merging once the PR is ready.", soFar].join("\n"));
   // The human answers and the next turn moves on: the round is not told again.
   reply();
