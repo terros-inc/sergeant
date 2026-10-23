@@ -1,6 +1,7 @@
 import type { SituationReport } from "@terros/sergeant-contracts";
 import type { Reasoner, TurnResult } from "@terros/sergeant-reasoning";
 import { execute, type ActionOutcome, type Ports } from "./execute.ts";
+import { heldBackLine } from "./question.ts";
 
 export { describeOutcome, execute, type ActionOutcome, type Ports } from "./execute.ts";
 
@@ -8,10 +9,11 @@ export { describeOutcome, execute, type ActionOutcome, type Ports } from "./exec
  * One turn: fresh reasoning over the snapshot, then each proposal through the Gate, in order. A run
  * started earlier in the turn is visible to the Gate for later proposals (R1, R2), and a follow-up
  * filed earlier is visible too, so a repeated key files no second issue. A turn that asks a human does
- * nothing else, before or after the question and whether or not it posts (Q1). The turn's own reported
- * cost counts against the budget before any proposal runs (B1). Once a start reaches the runner, no
- * other start runs in the turn, whether it succeeded or failed: a start whose response was lost may be
- * running, and the next poll reconciles its id before another start (R4).
+ * nothing else, before or after the question and whether or not it posts (Q1), and the question names
+ * what it held back (TECH-6711). The turn's own reported cost counts against the budget before any
+ * proposal runs (B1). Once a start reaches the runner, no other start runs in the turn, whether it
+ * succeeded or failed: a start whose response was lost may be running, and the next poll reconciles its
+ * id before another start (R4).
  */
 export async function takeTurn(
   situation: SituationReport,
@@ -34,6 +36,8 @@ export async function takeTurn(
   };
   // Q1: nothing else happens on the task until a human answers the question (UNF-727).
   const ask = turn.output.actions.find((a) => a.kind === "ask_human");
+  const held = ask ? turn.output.actions.filter((a) => a !== ask) : [];
+  const asked = ask && held.length > 0 ? { ...ask, question: `${ask.question.trim()}\n\n${heldBackLine(held)}` } : ask;
   // Q2: a turn that ends the task, on the human's word (TECH-5118) or by closing the issue (TECH-5232),
   // does nothing else either.
   const accept = ask ? undefined : turn.output.actions.find((a) => a.kind === "accept_as_is" || a.kind === "close_issue");
@@ -56,7 +60,7 @@ export async function takeTurn(
       outcomes.push({ action, status: "denied", rule: "R4", reason: "this turn already asked the runner to start a run" });
       continue;
     }
-    const outcome = await execute(action, current, ports);
+    const outcome = await execute(action === ask && asked ? asked : action, current, ports);
     outcomes.push(outcome);
     if (outcome.status === "done" && outcome.merged) merged = true;
     if (outcome.status === "done" && outcome.started) current = { ...current, runs: [...current.runs, outcome.started] };

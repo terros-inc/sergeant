@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RepoSlug, Sha } from "./conversation.ts";
+import { claimsHeldBack } from "./held-back-claim.ts";
 import { FollowupCategory, RunId } from "./runs.ts";
 
 const PrHead = z.object({ repo: RepoSlug, number: z.number().int().positive(), headSha: Sha });
@@ -48,6 +49,38 @@ export const MergePr = z.object({
 }).refine((action) => action.readinessReason !== undefined, { message: "readinessReason is required", path: ["readinessReason"] });
 export type MergePr = z.infer<typeof MergePr>;
 
+// TECH-6711: words a stand-in for a question is made of ("placeholder", "Please insert question here",
+// "[Your question goes here]"). A body of nothing else is contentless; a real question has other words.
+const FILLER = new Set(
+  ("placeholder placeholders todo tbd tbc fixme xxx n a an the your my our this please insert enter add write put type ask fill in " +
+    "question questions here text goes go body content sample example none null undefined nil empty blank").split(" "),
+);
+
+/**
+ * TECH-6711: whether a question says anything a human can answer: not empty, and not only template
+ * tokens (`<question>`, `{{question}}`, `${question}`) or a stand-in made of filler words. A question
+ * holds the whole task until a human replies (Q1), so a contentless one stalls it on nothing.
+ */
+function hasContent(question: string): boolean {
+  const words = question
+    .replace(/\{\{[^}]*\}\}|\$\{[^}]*\}|<[^<>]*>/g, " ")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w !== "");
+  return words.some((w) => !FILLER.has(w)) && !words.join(" ").startsWith("lorem ipsum");
+}
+
+/**
+ * TECH-6711: whether a turn's question claims something happened that Q1 does not let happen: a turn
+ * that asks does nothing else, so with any other action in it, a question saying "the worker has
+ * started" would be false. Such a turn is malformed and taken again, never posted.
+ */
+function claimsHeldBackIn(turn: { actions: ProposedAction[] }): boolean {
+  const ask = turn.actions.find((a) => a.kind === "ask_human");
+  const held = turn.actions.filter((a) => a !== ask).map((a) => a.kind);
+  return ask !== undefined && held.length > 0 && claimsHeldBack(ask.question, held);
+}
+
 /**
  * A question only a human can settle. Once it is posted, Sergeant takes no turn and makes no effect on
  * the task until a human changes the conversation (comments or edits the issue).
@@ -55,7 +88,7 @@ export type MergePr = z.infer<typeof MergePr>;
 export const AskHuman = z.object({
   kind: z.literal("ask_human"),
   /** Concise: the question and why only a human can decide it. */
-  question: z.string().min(1).max(4_000),
+  question: z.string().min(1).max(4_000).refine(hasContent, { message: "the question has no content: it is empty, a placeholder, or only a template" }),
   options: z.array(z.string().min(1).max(500)).min(2).max(6).optional(),
   /**
    * TECH-5052: the id of Sergeant's earlier question whose reply did not settle it. This one is posted
@@ -175,5 +208,8 @@ export const TurnOutput = z.object({
    */
   intent: TurnIntent.optional(),
   nextWakeSeconds: z.number().int().min(60).max(14_400).optional(),
+}).refine((turn) => !claimsHeldBackIn(turn), {
+  message: "the question says an action started or was done, but a turn that asks does nothing else (Q1): propose ask_human alone",
+  path: ["actions"],
 });
 export type TurnOutput = z.infer<typeof TurnOutput>;
