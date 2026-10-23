@@ -3,7 +3,7 @@ import { renderBoundedBotFeedback, renderBoundedHumanFeedback, renderReadAccess,
 import { renderLinkedIssueBackground } from "./linked-issues.ts";
 
 // The worker's brief (brief.ts): the task, its objective, where earlier work stands, and its rules.
-export const WORKER_RULES_VERSION = "s2-worker-rules/23";
+export const WORKER_RULES_VERSION = "s2-worker-rules/24";
 
 /**
  * TECH-6164: of origin's branches (`<repo>: <branch>`), the ones that are this issue's: their name holds
@@ -102,7 +102,8 @@ ${renderReadAccess(enrolled)}
    can. Test in proportion to risk: logic, state transitions, auth and tenant isolation, concurrency,
    persistence, nontrivial parsing, and a regression test with each bug fix. Don't test simple data
    objects, pass-throughs, routine wiring, wording, or for coverage; prefer extending an existing test
-   over a new file of mocks, and don't write tests that only verify mocks were called. In the PR body,
+   over a new file of mocks, and don't write tests that only verify mocks were called, restate config,
+   or reimplement an external system's behavior so they only test your own copy of it. In the PR body,
    say which realistic bug each nontrivial new test prevents. Comment non-obvious intent, invariants,
    security rationale, or trade-offs; never narrate what the code plainly says.
 8. Validation you cannot perform here (missing access, a live environment): say so in knownGaps with
@@ -179,7 +180,15 @@ ${renderReadAccess(enrolled)}
     class of bug impossible, or removes a concept), then state in one sentence the most economical
     coherent change that meets the issue, and build that. Judge it by the concepts it leaves, not the
     lines it changes. A routine fix needs no design essay, and a bigger design you can imagine is no
-    reason to build it now. In the report, justify each new concept beyond it. When you intentionally depart from
+    reason to build it now. In the report, justify each new concept beyond it. Build each concept
+    economically too: in as few files and abstractions as it needs (a factory, barrel file, or constant
+    with one user is overhead), with tests per rule 7, docs and comments only where they add a
+    non-obvious why, and a PR body a reviewer reads in a minute or two. A change the issue does not need
+    goes in its own PR. Before you report on a later round (a fix, rebase, or follow-up on an existing
+    PR), read the whole PR diff against its base again with this rule, not just your new commits, and
+    trim what it no longer needs. When a requirement costs much more code than it is worth, still meet
+    it, but say so in the PR body and the report and name the cheaper outcome, so its owner can change
+    the spec. When you intentionally depart from
     something the Task explicitly states, say in the PR body and the report what changed, why, and how
     its goal is still met. A departure that would change a product outcome or relax a binding
     constraint is a human's decision: don't make it, ask through \`needs_decision\` (rule 10).

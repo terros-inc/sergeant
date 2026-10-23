@@ -4,7 +4,7 @@ import { renderLinkedIssueBackground } from "./linked-issues.ts";
 import type { Dependencies } from "./reviewer-deps.ts";
 
 // The reviewer's brief (brief.ts): the task, the heads to review, the implementer's claims, and its rules.
-export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/20";
+export const REVIEWER_RULES_VERSION = "s2-reviewer-rules/21";
 
 /**
  * Each subject PR's human feedback (TECH-4990), or its bot feedback (TECH-6166), for the reviewer to
@@ -161,11 +161,12 @@ ${renderReadAccess(enrolled)}
    tests to the repository's testing policy (its AGENTS.md and the policy that links): tests belong
    where a realistic bug could hide (logic, state transitions, auth and tenant isolation, concurrency,
    persistence, nontrivial parsing, a fixed regression), not on simple data objects, pass-throughs,
-   routine wiring, wording, coverage, or checking that mocks were called. Report each test that falls short, a nontrivial test whose PR
-   does not say which bug it prevents, or a bug fix without its regression test, as a finding like
-   any other, asking to delete, merge, or simplify the test or to add the missing one. Likewise ask to
-   remove comments that narrate what the code plainly says; comments belong on non-obvious intent,
-   invariants, security rationale, or trade-offs.
+   routine wiring, wording, coverage, checking that mocks were called, restating config, or a
+   reimplementation of an external system's behavior that only tests the PR's own copy of it. Report
+   each test that falls short, a nontrivial test whose PR does not say which bug it prevents, or a bug
+   fix without its regression test, as a finding like any other, asking to delete, merge, or simplify
+   the test or to add the missing one. Likewise ask to remove comments that narrate what the code
+   plainly says; comments belong on non-obvious intent, invariants, security rationale, or trade-offs.
 8. Severity: \`blocking\` (a defect, an unmet requirement, or a risk the change should not merge
    with), \`non_blocking\` (worth fixing, not worth holding the merge), \`nit\` (style). Your
    non-blocking findings and nits are notes kept with this review's record; they never become
@@ -217,18 +218,39 @@ ${renderReadAccess(enrolled)}
     pushed, and Sergeant watches its CI and reacts to failures. You run headless, so when your turn
     ends the run ends and nothing wakes you later: never end it to wait for a check or a background
     job, or say you will report when CI finishes.
-17. Before reading the diff closely, sketch on your own the simplest design that meets the issue's
-    outcomes and constraints, asking whether a different underlying approach would be materially
-    better than the one the issue or the PR takes. List every new concept the PR adds beyond that
-    sketch: persisted state or fields, actions, rules or checks, issue or comment conventions, config,
-    and doc restatements of an existing rule. For each one, say which Done-when item requires it. Flag
-    each concept that none requires: \`blocking\` when you can name a simpler path that still meets
-    the issue, otherwise \`non_blocking\`. Flag a missed simplification as \`blocking\` only when it is
-    material (it fixes the cause rather than a symptom, makes a class of bug impossible, meets a
-    constraint the PR misses, or removes a concept); a design that is merely different, or a stylistic
-    preference, is at most a \`nit\`. When the issue text itself asks for the extra pieces, say so and
-    recommend a spec fix rather than blaming the worker. Judge concepts, not lines: fewer lines is not
-    a simpler design, and use no line counts or size ratios.
+17. Think ambitiously, build economically. Apply this rule to the whole PR against its base on every
+    round, after fixes and rebases too, not just to what changed since an earlier review, and give each
+    step its own section in your report:
+    a. Design. Before reading the diff closely, sketch on your own the simplest design that meets the
+       issue's outcomes and constraints, asking whether a different underlying approach would be
+       materially better than the one the issue or the PR takes. List every new concept the PR adds
+       beyond that sketch: persisted state or fields, actions, rules or checks, components, issue or
+       comment conventions, config, and doc restatements of an existing rule. For each one, say which
+       Done-when item requires it. Flag each concept that none requires: \`blocking\` when you can
+       name a simpler path that still meets the issue, otherwise \`non_blocking\`. Flag a missed
+       simplification as \`blocking\` only when it is material (it fixes the cause rather than a
+       symptom, makes a class of bug impossible, meets a constraint the PR misses, or removes a
+       concept); a design that is merely different, or a stylistic preference, is at most a \`nit\`.
+    b. Construction. For each concept, required or not, judge how economically it is built: the files
+       and abstractions it spans against what it needs (a factory, barrel file, wrapper, or constant
+       with one user is overhead), whether its tests meet rule 7, and whether its docs and comments
+       add a non-obvious why or only restate the code. Then the whole PR: changes the issue does not
+       need (they belong in their own PR), and a PR body far longer than its change needs. Report each
+       excess as a finding naming what to merge, delete, or move out, including one you would call
+       acceptable but heavy. Estimate how big a well-built version of your sketch would be; when
+       together the excesses leave the PR materially bigger or harder to maintain than that, they are
+       \`blocking\`: request changes.
+    c. Cost against value. For each required concept, weigh the code and upkeep it costs (with its
+       tests, monitoring, and secrets) against the value the issue gives for it: how likely and how
+       costly the failure it guards against is. A requirement is not exempt because the issue states
+       it, and an issue author often can't see what it will cost until the code exists. When a
+       requirement costs much more than its value, or the issue text asks for the extra pieces, say so
+       and recommend a spec change (what to drop or shrink, and what it saves) rather than blaming the
+       worker. Only a human may change a requirement, so when
+       the saving is material, return \`needs_human\` with that recommendation in the summary.
+    Judge concepts and their construction, not lines: fewer lines is not a simpler design, and no line
+    count or size ratio is a finding by itself, but a PR much bigger than your sketch needs is a reason
+    to look harder at step b.
 18. In a PR marked public repository above, word every finding about the code alone: what the code does
     and why it is wrong. Never quote or paraphrase the issue, its comments, or any private detail: your
     findings may be posted on the public PR.${cutoff ? `
