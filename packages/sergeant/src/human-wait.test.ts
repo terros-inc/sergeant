@@ -15,6 +15,7 @@ import { Wake } from "./wake.ts";
 afterEach(cleanup);
 
 const sha = (n: number) => n.toString(16).padStart(40, "0");
+const hold = human("hold", new Date(Date.now() - 120_000).toISOString(), "Please hold until UNF-2 and UNF-3 move.");
 const handoff = { id: commentIdFor(handoffKey(issue.id, pr)), createdAt: new Date(Date.now() - 60_000).toISOString(), body: "Ready for a human to merge" };
 
 /**
@@ -30,14 +31,15 @@ const busyBase = (poll: number, patch: Partial<PullRequestFacts>, offset = 0): P
  * A task waiting on a human merge, polled `polls` times under a busy base; `change` applies at
  * `changeAt`. Returns the turns taken and what was posted. With `keepDir`, it continues the last one.
  */
-async function waiting(opts: { polls: number; costUsd?: number; change?: { at: number; pr?: Partial<PullRequestFacts>; issue?: (live: Conversation) => Conversation }; wake?: Wake; keepDir?: boolean; baseOffset?: number }) {
+async function waiting(opts: { polls: number; costUsd?: number; change?: { at: number; pr?: Partial<PullRequestFacts>; issue?: (live: Conversation) => Conversation }; wake?: Wake; keepDir?: boolean; baseOffset?: number; hold?: boolean }) {
   let turns = 0;
   let poll = 0;
   let patch: Partial<PullRequestFacts> = {};
   if (opts.keepDir) await rm(join(dir, "STOP"), { force: true });
   const result = await scenario({
     ...(!opts.keepDir && { state: { startedAt: new Date().toISOString(), turns: 0, runIds: [] } }),
-    conversation: { agentComments: [handoff] },
+    // A hold a human asked for is a comment on the issue, with no handoff to a human merge.
+    conversation: opts.hold ? { humanComments: [hold] } : { agentComments: [handoff] },
     runner: { start: async () => {}, status: async () => { throw new Error("no runs"); }, cancel: async () => {} },
     reasoner: async () => (turns++, turnOf([], opts.costUsd ?? 0.25)),
     pullRequest: () => busyBase(poll, patch, opts.baseOffset),
@@ -121,4 +123,26 @@ test.each([
   expect(turns).toBe(0);
   expect(posted).toEqual([]);
   expect(await spent()).toBe(25);
+});
+
+test("a task holding at a human's request with an exhausted window asks nothing, takes no turn and spends nothing while nothing changes", async () => {
+  // The turn that reads the hold and waits spends the rest of the window.
+  const first = await waiting({ polls: 3, costUsd: 25, hold: true });
+  expect(first.turns).toBe(1);
+  expect(first.posted).toEqual([]);
+
+  const { turns, posted } = await waiting({ polls: 20, keepDir: true, hold: true });
+
+  expect(turns).toBe(0);
+  expect(posted).toEqual([]);
+  expect(await spent()).toBe(25);
+});
+
+test("a human's comment on a task holding with an exhausted window wakes exactly one turn", async () => {
+  await waiting({ polls: 3, costUsd: 25, hold: true });
+
+  const { turns, posted } = await waiting({ polls: 20, keepDir: true, hold: true, change: { at: 7, issue: (live) => ({ ...live, humanComments: [...live.humanComments, human("c3", new Date().toISOString(), "Go ahead.")] }) } });
+
+  expect(turns).toBe(1);
+  expect(posted).toEqual([]);
 });

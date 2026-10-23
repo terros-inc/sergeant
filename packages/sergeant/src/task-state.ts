@@ -75,7 +75,7 @@ const TaskState = z.looseObject({
    * kept, an unchanged set gets no new turn whatever else the fingerprint saw move. Absent on a task saved
    * before it, which the fingerprint alone governs until a quiet poll or its next turn records them.
    */
-  waitFacts: z.looseObject({ facts: z.string(), mergeability: z.record(z.string(), z.string()) }).optional(),
+  waitFacts: z.looseObject({ facts: z.string(), mergeability: z.record(z.string(), z.string()), on: z.string().optional() }).optional(),
   /**
    * TECH-6490: the hollow turns taken in a row on the same facts (`fingerprint`), with what to commit
    * and the latest summary once the bound is reached (hollow-turn.ts). Persisted so a restart cannot

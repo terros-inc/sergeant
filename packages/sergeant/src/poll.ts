@@ -190,7 +190,8 @@ export function waitFactsOf(
   return { facts: createHash("sha256").update(JSON.stringify(facts)).digest("hex"), mergeability };
 }
 
-export type WaitFacts = { facts: string; mergeability: Record<string, string> };
+/** `on`: what the turn that committed them chose to wait on (loop.ts), absent unless it chose to wait. */
+export type WaitFacts = { facts: string; mergeability: Record<string, string>; on?: string | undefined };
 
 export const sameWaitFacts = (a: WaitFacts, b: WaitFacts) =>
   a.facts === b.facts && JSON.stringify(Object.entries(a.mergeability).sort()) === JSON.stringify(Object.entries(b.mergeability).sort());

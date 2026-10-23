@@ -190,7 +190,9 @@ thresholds as written there, applied in order, the first match deciding:
 - **Rule 0, park.** A task only waiting on a human posts nothing. This is the existing human wait, not
   a separate check: an open question holds the task before the budget is read, and a merge handed to a
   human or a re-review Sergeant asked for (TECH-5218), including the TECH-5913 escalation of a green PR
-  blocked on a required human review, parks quietly below. A wait uses none of the window (below), so
+  blocked on a required human review, parks quietly below. So does a wait the last turn chose, with no
+  proposal, in a window it had left, such as a hold a human asked for, while nothing it wakes on has
+  changed (08 §7, TECH-6669); the first change that would take a turn asks. A wait uses none of the window (below), so
   only a window the work before the wait used up gets here, and it neither asks nor logs it.
 - **Rule 1, recommend stop.** Three or more fix cycles in the window (a worker run after a review that
   requested changes); the same blocking finding back after two fix cycles (the same `location`); two or

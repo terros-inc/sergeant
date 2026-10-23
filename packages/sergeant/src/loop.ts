@@ -327,8 +327,12 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const unchanged = state.waitFacts ? sameWaitFacts(state.waitFacts, waitFacts) : fingerprint === state.lastFingerprint;
     const stable = state.lastFingerprint === undefined || unchanged;
     const currentWindowCanceledWork = runs.some((r) => r.status === "canceled" && !state.budget.priorRuns.includes(r.runId));
-    const humanWait = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable ? awaitedHumanPrAction(situation) : undefined;
-    if (await holdForBudget(situation, conversation, holds, ctx, humanWait, unchanged ? undefined : reconcileDue(situation, fingerprint, state))) {
+    const quiet = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable;
+    const humanWait = quiet ? awaitedHumanPrAction(situation) : undefined;
+    // A wait the last turn chose in a window it had left (`waitFacts.on`) asks no budget question either
+    // while nothing it waits on changed: a hold a human asked for has no handoff for `awaitedHumanPrAction`.
+    const chosenWait = quiet && unchanged ? state.waitFacts?.on : undefined;
+    if (await holdForBudget(situation, conversation, holds, ctx, humanWait ?? chosenWait, unchanged ? undefined : reconcileDue(situation, fingerprint, state))) {
       await wait(waitMs(opts, pollMs, live.length > 0));
       continue;
     }
@@ -413,8 +417,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const committed = state.hollow ? undefined : settled;
     const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
-    // TECH-6669: committed with the fingerprint, from the same facts, a merge M7 found unsettled included.
-    state.waitFacts = committed ? waitFactsOf(situation, { unsettled, ownLogins: own, humanMerged }, state.waitFacts) : undefined;
+    // TECH-6669: committed with the fingerprint, from the same facts, a merge M7 found unsettled included,
+    // with what the turn chose to wait on if it proposed nothing. Not from a turn on an exhausted window
+    // (`reconcileDue`): one that waits there leaves the budget question to be asked.
+    const on = holds.exhausted.allowed && outcomes.length === 0 && turn.output.intent?.kind === "wait" ? turn.output.intent.on : undefined;
+    state.waitFacts = committed ? { ...waitFactsOf(situation, { unsettled, ownLogins: own, humanMerged }, state.waitFacts), ...(on && { on }) } : undefined;
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above). A
     // close's effects were made in the turn itself (execute.ts), so its ending only sets the task aside.
     const reply = accepted ? latestAnswer(conversation) : undefined;
