@@ -36,6 +36,7 @@ export const reviewCommands: Record<string, Command> = {
         const scope = `${value.repo ?? "all repositories"}, ${since ? `last ${since.slice(0, -1)} days` : "all time"}`;
         const lines = [`Post-merge audits, ${scope}`, `  ${auditYield(value)}`, `  ${failRate(value)}`];
         if (value.incomplete) lines.push(`  Not completed ${value.incomplete}`);
+        lines.push(`  Accounts: ${accounts(value.audits)}`);
         const split =
           by === "repo"
             ? value.byRepo.map((r) => [r.repo, r] as const)
@@ -57,13 +58,26 @@ const foundYes = (c: AuditCounts) => `Found YES ${fraction(c.found, c.foundKnown
 const auditYield = (c: AuditCounts) => `${foundYes(c)}   (Found unknown ${c.foundUnknown})`;
 const failRate = (c: AuditCounts) => `FAIL ${fraction(c.fail, c.completed, "completed")}`;
 
+/** TECH-6625: whose accounts ran the audits listed, with how many each; the audit owner standing in for a PR's person apart. */
+function accounts(audits: AuditRow[]): string {
+  const counts = new Map<string, number>();
+  for (const a of audits) {
+    const who = a.accountsOf ? payer(a.accountsOf) : "not recorded";
+    counts.set(who, (counts.get(who) ?? 0) + 1);
+  }
+  return [...counts].map(([who, n]) => `${who} ${n}`).join(", ") || "none";
+}
+
+const payer = (p: NonNullable<AuditRow["accountsOf"]>) => `${p.name}${p.fallback ? " (audit owner fallback)" : ""}`;
+
 /** One Found: YES: the PR, head, verdict and run, then the reviewer's summary and every finding in full. */
 function foundRows(a: AuditRow): string[] {
   const indent = (text: string) => text.trim().replace(/\r?\n/g, "\n    ");
   const verdict = a.verdict === "approve" ? "PASS" : "FAIL";
-  if (a.findings === undefined) return [`${a.url}  ${a.headSha}  ${verdict}  ${a.issue}  ${a.runId}`, "  findings unavailable"];
+  const head = `${a.url}  ${a.headSha}  ${verdict}  ${a.issue}  ${a.runId}${a.accountsOf ? `  on ${payer(a.accountsOf)}'s accounts` : ""}`;
+  if (a.findings === undefined) return [head, "  findings unavailable"];
   const findings = (a.findings ?? []).map((f) => `  - [${f.severity}${f.category ? `, ${f.category}` : ""}] ${f.location ? `${f.location}: ` : ""}${indent(f.description)}`);
-  return [`${a.url}  ${a.headSha}  ${verdict}  ${a.issue}  ${a.runId}`, ...(a.summary?.trim() ? [`  ${indent(a.summary)}`] : []), ...(findings.length ? findings : ["  (no findings in the run's record)"])];
+  return [head, ...(a.summary?.trim() ? [`  ${indent(a.summary)}`] : []), ...(findings.length ? findings : ["  (no findings in the run's record)"])];
 }
 
 /** Always the fraction; the percentage only when something was evaluated. */

@@ -1,6 +1,7 @@
 import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isRateLimited, safeJson } from "@terros/sergeant-contracts";
+import { payerOf } from "./audit-payer.ts";
 import { logFollowUp } from "./audit.ts";
 import type { Ledger, MergedAuditDeps, MergedAuditOptions } from "./merged-audits.ts";
 import { reviewFacts } from "./review-quality.ts";
@@ -23,7 +24,15 @@ export async function harvestAudits(ledger: Ledger, opts: MergedAuditOptions, de
     if (!pr || entry.recorded) continue;
     if (opts.signal?.aborted) return;
     const run = await deps.runner.status(entry.runId).catch((e: Error) => (opts.log(`merged-PR audit ${entry.runId}: status unreadable, retrying next pass: ${e.message}`), undefined));
-    if (!run || run.status === "running") continue;
+    if (!run) continue;
+    // The run was unreadable just after it started: whose accounts it is on is read now, before anything records it.
+    if (entry.payerPending) {
+      const accountsOf = await payerOf(run, entry.payerPending.prOwner, opts.auditOwner, deps);
+      if (accountsOf) entry.accountsOf = accountsOf;
+      delete entry.payerPending;
+      await save();
+    }
+    if (run.status === "running") continue;
     // Read once per pass, only when some audit has finished.
     written ??= await recordedRunIds(reviews);
     if (run.role !== "reviewer" || written.has(entry.runId)) {
@@ -31,7 +40,7 @@ export async function harvestAudits(ledger: Ledger, opts: MergedAuditOptions, de
       await save();
       continue;
     }
-    const facts = reviewFacts(run, { trigger: "audit", issue: pr.issue ?? `${pr.repo}#${pr.number}`, runs: [run], merged: pr });
+    const facts = reviewFacts(run, { trigger: "audit", issue: pr.issue ?? `${pr.repo}#${pr.number}`, runs: [run], merged: pr, ...(entry.accountsOf && { accountsOf: entry.accountsOf }) });
     const on = facts.subject.find((s) => s.repo === pr.repo && s.number === pr.number && s.headSha === pr.headSha);
     // A run with no report, or one that reviewed some other head, has nothing for this PR to show.
     const report = run.report;

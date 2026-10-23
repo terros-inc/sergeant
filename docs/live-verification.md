@@ -51,6 +51,7 @@ secret.
 | --- | --- | --- |
 | host serves this checkout's version | deployed version | `/status` answers `ok` with the version of the checkout `sergeant-update` installed |
 | linear viewer and user names | V2 config | `SergeantViewer` and `SergeantUsers`: the token's user is the configured agent, and its name |
+| linear user by profile URL (who pays for an audit outside a task) | TECH-6625 | `SergeantUsersPage`: the first `linear.reviewerProfiles` URL resolves to an active Linear user (`FAIL` if none does); with none configured, a URL nobody has answers not found |
 | linear upload download | TECH-4994, TECH-5042 | `fetchUpload`: a GET of the `--upload` URL with the agent token, redirects followed as attachment reading does. Shows status, content type, and size. `SKIP` without `--upload` |
 | linear delegated issues (intake) | V2 intake | `SergeantDelegated`: open issues delegated to the agent, with blocking relations |
 | linear completed issues in the feedback lookback | TECH-5049 | `SergeantCompleted` over the feedback sweep's 14-day lookback |

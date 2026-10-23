@@ -35,7 +35,7 @@ The runtime configuration document holds Sergeant 2's `InstallationConfig` (01).
 | Limits | max open tasks, max concurrent runs, max concurrent turns | |
 | Runners | reconcile interval (60 s), idle/unreachable wake (20 min) | 04 §6 |
 | Reasoning | model, max turn cost and seconds, max sleep, session mode, compaction threshold | |
-| Review | audit sample rate (default 0.2), progress comment after each review round (`progressComments`, default on, TECH-5227), audit owner (`auditOwner`, a Linear user id, no default: who pays for audits outside a task), review-quality budget per day (`qualityBudgetUsdPerDay`, default $25) | 06 §8; subagent reviews never count until the captain decides (06 §5) |
+| Review | audit sample rate (default 0.2), progress comment after each review round (`progressComments`, default on, TECH-5227), audit owner (`auditOwner`, a Linear user id, no default: who pays for an audit outside a task when its PR's own person cannot), review-quality budget per day (`qualityBudgetUsdPerDay`, default $25) | 06 §8; subagent reviews never count until the captain decides (06 §5) |
 | Follow-ups | max depth, auto-delegate | |
 | Retro | the Sergeant project and team its documents and issues go to; absent, no retro | approvers use `sgt admin retro set <projectId> <teamId>` or `off` (TECH-5838); serve takes it from the installation-config parameter at every start, so a restart keeps their change (TECH-5940) |
 | Human waits | remind after hours | |

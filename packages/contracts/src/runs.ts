@@ -363,6 +363,8 @@ const RunBase = {
   account: RunAccount.optional(),
   /** Why the account was chosen among the task owner's, by quota (TECH-5179). */
   accountReason: z.string().optional(),
+  /** TECH-6625: the Linear user whose registered accounts the run's is among. Absent on runs started before TECH-5213. */
+  ownerId: z.string().optional(),
 };
 
 /** One worker or reviewer run as the runner reports it. A reviewer is always its own fresh run. */

@@ -25,7 +25,7 @@ export async function reviewAudits(
   const rows: AuditRow[] = [];
   for (const { line, head } of wanted) {
     const url = `https://github.com/${head.repo}/pull/${head.number}`;
-    const row: AuditRow = { runId: line.runId, issue: line.issue, repo: head.repo, number: head.number, url, headSha: head.headSha, at: line.at, verdict: line.verdict, ...(head.found !== undefined && { found: head.found }), group: groups.get(headKey(head)) ?? "other" };
+    const row: AuditRow = { runId: line.runId, issue: line.issue, repo: head.repo, number: head.number, url, headSha: head.headSha, at: line.at, verdict: line.verdict, ...(head.found !== undefined && { found: head.found }), group: groups.get(headKey(head)) ?? "other", ...(line.accountsOf && { accountsOf: line.accountsOf }) };
     // A public PR shows only filtered findings (§6.4); the full ones are in the run's record. If that
     // record is unavailable, leave both fields absent so the CLI can say so without losing the row.
     if (line.verdict !== null && head.found === true) {

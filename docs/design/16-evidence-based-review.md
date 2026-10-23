@@ -415,7 +415,8 @@ PRs)** wherever it is turned on. Unsalted,
   to the **project owner's** budget: the installation sets `review.auditOwner` to the person who owns
   the Sergeant project, and those audits run on that person's registered model accounts. A daily cap
   (`review.qualityBudgetUsdPerDay`, already designed in 06 §8) bounds the cost. With no owner
-  configured, audits outside a task do not run.
+  configured, audits outside a task do not run. *Built differently* (TECH-6625): such an audit runs on
+  the PR's own person's accounts first, `review.auditOwner` being the fallback ([06 §8](06-review.md#8-calibration-sampling-unf-641-preserved)).
 
 ### 6.3 The finding
 
