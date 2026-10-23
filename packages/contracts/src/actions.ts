@@ -48,21 +48,40 @@ export const MergePr = z.object({
 }).refine((action) => action.readinessReason !== undefined, { message: "readinessReason is required", path: ["readinessReason"] });
 export type MergePr = z.infer<typeof MergePr>;
 
-// TECH-6711: stand-ins a planner may leave for a question it never wrote, compared once markup is gone.
-const STAND_INS = new Set(["placeholder", "todo", "tbd", "tbc", "fixme", "xxx", "question", "your question", "your question here", "insert question", "insert question here", "n a", "none", "null", "undefined"]);
+// TECH-6711: words a stand-in for a question is made of ("placeholder", "Please insert question here",
+// "[Your question goes here]"). A body of nothing else is contentless; a real question has other words.
+const FILLER = new Set(
+  ("placeholder placeholders todo tbd tbc fixme xxx n a an the your my our this please insert enter add write put type ask fill in " +
+    "question questions here text goes go body content sample example none null undefined nil empty blank").split(" "),
+);
 
 /**
  * TECH-6711: whether a question says anything a human can answer: not empty, and not only template
- * tokens (`<question>`, `{{question}}`, `${question}`) or a stand-in such as "placeholder". A question
+ * tokens (`<question>`, `{{question}}`, `${question}`) or a stand-in made of filler words. A question
  * holds the whole task until a human replies (Q1), so a contentless one stalls it on nothing.
  */
 function hasContent(question: string): boolean {
   const words = question
     .replace(/\{\{[^}]*\}\}|\$\{[^}]*\}|<[^<>]*>/g, " ")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
-  return words !== "" && !STAND_INS.has(words) && !words.startsWith("lorem ipsum");
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w !== "");
+  return words.some((w) => !FILLER.has(w)) && !words.join(" ").startsWith("lorem ipsum");
+}
+
+// TECH-6711: a claim that Sergeant started or did something ("I've started a worker", "I'm merging it",
+// "a fix worker is now running"). Only checked when Q1 holds back the rest of a question's turn.
+const CLAIM =
+  /\b(?:i|we|sergeant)(?:'ve|'m|'s|\s+(?:have|has|am|is|just|already|now))*\s+(?:started|starting|launched|launching|kicked off|kicking off|spun up|spinning up|begun|merged|merging|filed|filing|closed|closing|sent|sending|messaged|recorded|updated|ended)\b|\b(?:worker|reviewer|review|run|fix)\s+(?:is|has been|was)\s+(?:now\s+)?(?:started|launched|running|underway|under way|kicked off|in progress)\b/i;
+
+/**
+ * TECH-6711: whether a turn's question claims something happened that Q1 does not let happen: a turn
+ * that asks does nothing else, so with any other action in it, a question saying "I've started a worker"
+ * would be false. Such a turn is malformed and taken again, never posted.
+ */
+function claimsHeldBack(turn: { actions: ProposedAction[] }): boolean {
+  const ask = turn.actions.find((a) => a.kind === "ask_human");
+  return ask !== undefined && turn.actions.length > 1 && CLAIM.test(ask.question.replace(/[\u2018\u2019]/g, "'"));
 }
 
 /**
@@ -192,5 +211,8 @@ export const TurnOutput = z.object({
    */
   intent: TurnIntent.optional(),
   nextWakeSeconds: z.number().int().min(60).max(14_400).optional(),
+}).refine((turn) => !claimsHeldBack(turn), {
+  message: "the question says an action started or was done, but a turn that asks does nothing else (Q1): propose ask_human alone",
+  path: ["actions"],
 });
 export type TurnOutput = z.infer<typeof TurnOutput>;

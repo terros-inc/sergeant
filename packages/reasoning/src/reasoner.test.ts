@@ -46,7 +46,7 @@ test("rejects model output that invents an action or merges without an exact hea
   // TECH-6490: a turn that says neither whether it acts nor what it waits on is malformed, never a quiet turn.
   const noIntent = { summary: "s", actions: [] };
   // TECH-6711: a question with nothing in it would hold the task (Q1) on nothing a human can answer.
-  const contentless = ["", "  \n ", "placeholder", "**Placeholder.**", "<question>", "{{question}}", "TODO"].map((question) => ({
+  const contentless = ["", "  \n ", "placeholder", "**Placeholder.**", "<question>", "{{question}}", "TODO", "Please insert question here", "[Your question goes here]"].map((question) => ({
     summary: "s", actions: [{ kind: "ask_human", question }], intent: { kind: "act", kinds: ["ask_human"] },
   }));
   for (const out of [shell, noHead, shortHead, { actions: [] }, noIntent, ...contentless]) {
@@ -54,8 +54,10 @@ test("rejects model output that invents an action or merges without an exact hea
   }
   const ok = await answering({ summary: "Start the worker.", actions: [{ kind: "start_worker", objective: "Do UNF-1.", repositories: ["trevorallred/canary"] }], intent: { kind: "act", kinds: ["start_worker"] } }).turn(situation);
   expect(ok.output.actions[0]?.kind).toBe("start_worker");
-  const asks = await answering({ summary: "Ask.", actions: [{ kind: "ask_human", question: "Is a <TODO> marker in a log line a placeholder?" }], intent: { kind: "act", kinds: ["ask_human"] } }).turn(situation);
-  expect(asks.output.actions[0]?.kind).toBe("ask_human");
+  for (const question of ["Is a <TODO> marker in a log line a placeholder?", "Should the form say \"Please insert your question here\" when it is empty?"]) {
+    const asks = await answering({ summary: "Ask.", actions: [{ kind: "ask_human", question }], intent: { kind: "act", kinds: ["ask_human"] } }).turn(situation);
+    expect(asks.output.actions[0]?.kind).toBe("ask_human");
+  }
 });
 // Acceptance (TECH-4994): a pasted screenshot and an attached log are visible to reasoning as an
 // image and readable text, marked as untrusted data; that needs the CLI's stream-json input.

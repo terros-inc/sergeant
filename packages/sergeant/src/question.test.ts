@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import {
   commentIdFor,
+  conversationRevision,
   type Conversation,
   type MergePr,
   type ProposedAction,
@@ -158,7 +159,7 @@ const followup: ProposedAction = { kind: "create_followup", key: "k", title: "T"
 const situation: SituationReport = {
   taskId: "t",
   generatedAt: "2026-10-02T06:00:00.000Z",
-  conversationRevision: "r",
+  conversationRevision: conversationRevision({ issue, humanComments: [], agentComments: [] }, [pr]),
   conversation: { issue, humanComments: [], agentComments: [] },
   enrolledRepositories: [repo],
   pullRequests: [pr],
@@ -201,9 +202,23 @@ test("a turn whose question has no content posts nothing and does nothing else (
     const structured_output = { summary: "Starting the fix worker.", actions: [start, { kind: "ask_human", question }], intent: { kind: "act", kinds: ["start_worker", "ask_human"] } };
     const reasoner = claudeCliReasoner({ runCli: async () => JSON.stringify({ is_error: false, structured_output }) });
     // A failed turn: its loop fails and a later intake takes the turn again, from the same facts.
-    await expect(takeTurn(situation, recording(effects, reasoner))).rejects.toThrow();
+    await expect(takeTurn(situation, recording(effects, reasoner))).rejects.toThrow(/no content/);
     expect(effects).toEqual([]);
   }
+});
+
+test("a question that claims a start Q1 holds back posts nothing and starts nothing (TECH-6711)", async () => {
+  const claims = "That's a clear bug, so I\u2019ve started a worker to fix it. Should the second finding be fixed too?";
+  const effects: string[] = [];
+  const structured_output = { summary: "Start the fix and ask about the second finding.", actions: [start, { kind: "ask_human", question: claims }], intent: { kind: "act", kinds: ["start_worker", "ask_human"] } };
+  const reasoner = claudeCliReasoner({ runCli: async () => JSON.stringify({ is_error: false, structured_output }) });
+  await expect(takeTurn(situation, recording(effects, reasoner))).rejects.toThrow(/Q1/);
+  expect(effects).toEqual([]);
+  // The same question with nothing held back is true of an earlier turn's worker, so it is posted.
+  const alone = { ...structured_output, actions: [{ kind: "ask_human", question: claims }], intent: { kind: "act", kinds: ["ask_human"] } };
+  const posts = claudeCliReasoner({ runCli: async () => JSON.stringify({ is_error: false, structured_output: alone }) });
+  await takeTurn(situation, recording(effects, posts));
+  expect(effects).toEqual(["ask"]);
 });
 
 test("a question whose post failed or went unconfirmed is posted again until Linear shows it", async () => {
