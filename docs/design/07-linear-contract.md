@@ -76,8 +76,9 @@ A question with no content (empty, whitespace, a stand-in such as "placeholder" 
 question here", or only template tokens) is malformed reasoning output: the turn fails and is taken
 again, and nothing is posted. A turn that asks does nothing else (Q1); when it proposed other actions,
 a question that says one of them is started, running or done ("the worker has started", "I'm
-merging it") is malformed the same way, and otherwise the question ends by naming each action Sergeant did not do, so it never reads
-as if they happened and the human knows what the reply unblocks (TECH-6711).
+merging it") is malformed the same way, and otherwise the question ends by naming each action
+Sergeant did not do, so it never reads as if they happened and the human knows what the reply
+unblocks (TECH-6711).
 
 **Answering.** Humans answer however they like: a top-level comment or a thread reply, a number, a
 label, a paragraph with the choice on the last line, requested changes plus a choice. Every new or
