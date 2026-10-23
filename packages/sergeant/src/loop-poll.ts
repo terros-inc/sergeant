@@ -1,4 +1,5 @@
 import {
+  checkBudget,
   conversationRevision,
   linearUploads,
   issueRevision,
@@ -7,6 +8,7 @@ import {
   type Conversation,
   type PullRequestFacts,
   type RunRecord,
+  type TurnOutput,
 } from "@terros/sergeant-contracts";
 import { readFile } from "node:fs/promises";
 import type { ActionOutcome, Ports } from "./execute.ts";
@@ -68,14 +70,20 @@ export function situationOf(
 /**
  * TECH-6669: the wait facts of the task's last turn, read back from its line in `turns.jsonl`, for a task
  * saved before they were kept, so a base that moved since then does not wake one more turn (or, on an
- * exhausted window, ask the budget question). Undefined when it cannot be read: the fingerprint then
- * decides until a quiet poll or the next turn records them.
+ * exhausted window, ask the budget question). With them what that turn chose to wait on, by the rule
+ * loop.ts keeps it for a new turn: it chose to wait, proposed nothing, and its window was not yet
+ * exhausted, so a hold a human asked for stays as quiet after a deploy as it is before one. Undefined when
+ * it cannot be read: the fingerprint then decides until a quiet poll or the next turn records them.
  */
 export async function lastTurnWaitFacts(file: string, opts: Omit<Parameters<typeof waitFactsOf>[1], "unsettled">): Promise<WaitFacts | undefined> {
   const line = (await readFile(file, "utf8").catch(() => "")).trimEnd().split("\n").at(-1);
   try {
-    const { situation, outcomes } = JSON.parse(line ?? "") as { situation: SituationReport; outcomes: ActionOutcome[] };
-    return waitFactsOf(situation, { ...opts, unsettled: unsettledMerges(outcomes, situation) });
+    const { at, situation, turn, outcomes } = JSON.parse(line ?? "") as { at: string; situation: SituationReport; turn?: { output?: Partial<TurnOutput> }; outcomes: ActionOutcome[] };
+    const facts = waitFactsOf(situation, { ...opts, unsettled: unsettledMerges(outcomes, situation) });
+    const { intent, actions = [] } = turn?.output ?? {};
+    // A line that does not show its window had budget left keeps no wait: the budget question is asked as before.
+    const open = situation.budget !== undefined && checkBudget(situation.budget, new Date(at)).allowed;
+    return open && actions.length === 0 && outcomes.length === 0 && intent?.kind === "wait" ? { ...facts, on: intent.on } : facts;
   } catch {
     return undefined;
   }

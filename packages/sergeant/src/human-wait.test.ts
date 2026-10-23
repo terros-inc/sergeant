@@ -146,3 +146,21 @@ test("a human's comment on a task holding with an exhausted window wakes exactly
   expect(turns).toBe(1);
   expect(posted).toEqual([]);
 });
+
+test("after a deploy, a task saved before wait facts holding at a human's request with an exhausted window stays quiet until a human comments", async () => {
+  // The turn that reads the hold and waits spends the rest of the window, under code that kept no wait facts.
+  await waiting({ polls: 3, costUsd: 25, hold: true });
+  const file = join(dir, "state.json");
+  const { waitFacts: _, ...saved } = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+  await writeFile(file, JSON.stringify(saved));
+
+  // Restarted on the new code, the base having moved since that turn.
+  const quiet = await waiting({ polls: 20, keepDir: true, hold: true, baseOffset: 100 });
+  expect(quiet.turns).toBe(0);
+  expect(quiet.posted).toEqual([]);
+  expect(await spent()).toBe(25);
+
+  const woken = await waiting({ polls: 20, keepDir: true, hold: true, baseOffset: 100, change: { at: 7, issue: (live) => ({ ...live, humanComments: [...live.humanComments, human("c3", new Date().toISOString(), "Go ahead.")] }) } });
+  expect(woken.turns).toBe(1);
+  expect(woken.posted).toEqual([]);
+});
