@@ -241,9 +241,9 @@ onNotRequiredRecorded(task, pr, headSha):                // owner: guardrail
     the window. The ledger entry and the audit's `ReviewFacts` line record whose accounts ran it
     (`accountsOf`, with `fallback` for the audit owner's), read back from the run's `ownerId`: a pass
     that lost the ledger gets the already-running audit back from the runner's idempotent start, still on
-    its first payer's accounts, and a run that names no owner is recorded with none. `sgt review audits`
-    shows it. Whoever
-    pays, the audits share one installation-wide cap: at most `review.qualityBudgetUsdPerDay` (default
+    its first payer's accounts, and a run that names no owner is recorded with none. A run unreadable
+    just after its start is read back at the next hourly check, before anything records it, never
+    recorded as no one's. `sgt review audits` shows it. Whoever pays, the audits share one installation-wide cap: at most `review.qualityBudgetUsdPerDay` (default
     $25) in any 24 hours, an audit whose cost is not known yet counting $5; one starts only if its $5
     fits under the cap with what is already spent.
   - **Finishing it** (TECH-6618, proposal 16 §6.2; `merged-audit-harvest.ts`). A task's audit keeps its

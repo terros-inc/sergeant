@@ -3,7 +3,7 @@ import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Conversation, isRateLimited, type LinearPerson, NoModelAccount, type PullRequestFeedback, RepoSlug, RunId, safeJson, Sha } from "@terros/sergeant-contracts";
 import { z } from "zod";
-import { type AuditPayer, auditOwnerPerson, prOwner } from "./audit-payer.ts";
+import { type AuditPayer, auditOwnerPerson, payerOf, prOwner } from "./audit-payer.ts";
 import type { Ports } from "./execute-types.ts";
 import { harvestAudits } from "./merged-audit-harvest.ts";
 import { auditDrawn, auditRunId, type PrHead } from "./review-quality.ts";
@@ -47,6 +47,12 @@ const Ledger = z.object({
         auditCommentId: z.number().int().optional(),
         /** TECH-6625: whose registered accounts run it. */
         accountsOf: z.object({ id: z.string(), name: z.string(), fallback: z.literal(true).optional() }).optional(),
+        /**
+         * Set when the run could not be read just after it started, so whose accounts it is on is not known
+         * yet: the harvest reads it back at its next read of the run, with the PR's own person, if any, to
+         * tell them from the fallback. Never recorded as no one's for want of a read.
+         */
+        payerPending: z.object({ prOwner: z.object({ id: z.string(), name: z.string() }).optional() }).optional(),
       }),
     )
     .default([]),
@@ -134,12 +140,16 @@ export async function mergedAuditPass(opts: MergedAuditOptions, deps: MergedAudi
         return undefined;
       });
       if (!started) continue;
-      const { issue, accountsOf } = started;
-      const on = accountsOf ? `${accountsOf.name}'s accounts${accountsOf.fallback ? " (review.auditOwner, the fallback)" : ""}` : "accounts its run does not name";
+      const { issue, accountsOf, payerPending } = started;
+      const on = accountsOf
+        ? `${accountsOf.name}'s accounts${accountsOf.fallback ? " (review.auditOwner, the fallback)" : ""}`
+        : payerPending
+          ? "accounts not read yet (its run was unreadable; read back at the next check)"
+          : "accounts its run does not name";
       opts.log(`merged-PR audit ${runId} started for ${repo}#${m.number} as of its merge (nonblocking), on ${on}`);
       known.add(runId);
       const subject = { repo, number: m.number, headSha: m.headSha, mergedSha: m.mergedSha, ...(issue && { issue }) };
-      ledger.started.push({ runId, at: now.toISOString(), subject, ...(accountsOf && { accountsOf }) });
+      ledger.started.push({ runId, at: now.toISOString(), subject, ...(accountsOf && { accountsOf }), ...(payerPending && { payerPending }) });
       spent += UNKNOWN_AUDIT_USD;
       await save();
     }
@@ -153,10 +163,10 @@ type MergedPr = PrHead & { title: string; mergedSha: Sha; mergedAt: string };
 /**
  * Starts the audit of the PR's pre-merge head, with the brief as of its merge, on the accounts of the
  * PR's person, else of `review.auditOwner`; resolves the Linear issue the PR names, and whose accounts the
- * run is on, absent when the run does not say. Throws, having started nothing, when neither has a usable
+ * run is on, absent when the run does not say, or pending when the run could not be read back. Throws, having started nothing, when neither has a usable
  * account, saying why.
  */
-async function startAudit(runId: RunId, m: MergedPr, opts: MergedAuditOptions, deps: MergedAuditDeps): Promise<{ issue: string | undefined; accountsOf: AuditPayer | undefined }> {
+async function startAudit(runId: RunId, m: MergedPr, opts: MergedAuditOptions, deps: MergedAuditDeps): Promise<{ issue: string | undefined; accountsOf?: AuditPayer; payerPending?: Ledger["started"][number]["payerPending"] }> {
   // A review's edit time comes only from its own read, and the brief needs it to withhold a review
   // edited after the merge: without it, start nothing (retried next pass) rather than show hindsight.
   if (!deps.github.reviewEdits) throw new Error("GitHub cannot say when its reviews were last edited");
@@ -197,20 +207,20 @@ you would have just before the merge. Nothing you find blocks, reverts, or reope
   const own = await prOwner(read, issue, opts.stateDir, deps);
   // The runner's start is idempotent on the run id: when a lost ledger let this pass start an audit
   // already running, it returns that run as it is, on whoever's accounts it was started. So the payer is
-  // read back from the run, never assumed to be the person just asked; a run that does not say is not named.
-  const ranOn = async (): Promise<AuditPayer | undefined> => {
+  // read back from the run, never assumed to be the person just asked; a run that does not say is not named,
+  // and one that cannot be read now is read back by the harvest rather than recorded as no one's.
+  const ranOn = async () => {
+    const person = "none" in own ? undefined : own;
     const run = await deps.runner.status(runId).catch(() => undefined);
-    if (!run?.ownerId) return undefined;
-    if (!("none" in own) && run.ownerId === own.id) return own;
-    if (run.ownerId === opts.auditOwner) return auditOwnerPerson(run.ownerId, deps);
-    const name = (await deps.linear.userNames?.([run.ownerId]).catch(() => undefined))?.[0];
-    return { id: run.ownerId, name: name ?? run.account?.holder ?? run.ownerId };
+    if (!run) return { issue, payerPending: { ...(person && { prOwner: { id: person.id, name: person.name } }) } };
+    const accountsOf = await payerOf(run, person, opts.auditOwner, deps);
+    return { issue, ...(accountsOf && { accountsOf }) };
   };
   if ("none" in own) why.push(`the PR belongs to no one with accounts here: ${own.none}`);
-  else if (await start(own)) return { issue, accountsOf: await ranOn() };
+  else if (await start(own)) return ranOn();
   if (!opts.auditOwner) why.push("review.auditOwner, the fallback, is not set");
   else if ("none" in own || own.id !== opts.auditOwner) {
-    if (await start(await auditOwnerPerson(opts.auditOwner, deps))) return { issue, accountsOf: await ranOn() };
+    if (await start(await auditOwnerPerson(opts.auditOwner, deps))) return ranOn();
   }
   throw new Error(`no one's accounts can run it: ${why.join("; ")}`);
 }

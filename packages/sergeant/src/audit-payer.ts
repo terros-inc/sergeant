@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { LinearPerson, PullRequestFacts } from "@terros/sergeant-contracts";
+import type { LinearPerson, PullRequestFacts, RunRecord } from "@terros/sergeant-contracts";
 import type { Ports } from "./execute-types.ts";
 import { isTaskStateFile, landings, readTaskState, type TaskState } from "./task-state.ts";
 
@@ -33,6 +33,19 @@ export async function prOwner(pr: PullRequestFacts, issue: string | undefined, s
 export async function auditOwnerPerson(id: string, deps: Pick<Ports, "linear">): Promise<AuditPayer> {
   const name = (await deps.linear.userNames?.([id]).catch(() => undefined))?.[0];
   return { id, name: name ?? "the audit owner", fallback: true };
+}
+
+/**
+ * Whose accounts a started audit's run is on, read back from the run rather than assumed to be whoever was
+ * asked (an idempotent start may return a run started earlier on someone else's): the PR's own person, else
+ * `review.auditOwner`, the fallback, else whoever the run names. Absent when the run names no owner.
+ */
+export async function payerOf(run: Pick<RunRecord, "ownerId" | "account">, own: LinearPerson | undefined, auditOwner: string | undefined, deps: Pick<Ports, "linear">): Promise<AuditPayer | undefined> {
+  if (!run.ownerId) return undefined;
+  if (own && run.ownerId === own.id) return own;
+  if (run.ownerId === auditOwner) return auditOwnerPerson(run.ownerId, deps);
+  const name = (await deps.linear.userNames?.([run.ownerId]).catch(() => undefined))?.[0];
+  return { id: run.ownerId, name: name ?? run.account?.holder ?? run.ownerId };
 }
 
 /**

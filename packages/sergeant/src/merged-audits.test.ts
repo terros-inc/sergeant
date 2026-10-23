@@ -207,11 +207,14 @@ test("a review edited after it was submitted carries its edit time into the audi
 const report = { reportVersion: "s2-review-report/1", reviewed: [{ repo, number: 1, headSha: sha(1), found: true }], verdict: "changes_requested", summary: "s", unreadableInputs: [], dependencies: [], findings: [{ id: "f1", severity: "blocking", description: "d", location: "a.ts:1" }] };
 const at = (hours: number) => ({ now: () => new Date(now.getTime() + hours * 3_600_000) });
 
-/** One audit a day ($5 cap), each run finishing once `finished` is set, each comment posting unless `failing`. */
-async function auditing() {
-  const t = await harness({ budgetUsdPerDay: 5 });
-  const state = { finished: false, failing: false };
-  t.deps.runner.status = async (runId) => ({ runId, role: "reviewer", provider: "openai/codex", model: "m", costUsd: 1, ownerId: t.runs.get(runId), ...(state.finished ? { status: "succeeded", report } : { status: "running" }) }) as unknown as RunRecord;
+/** One audit a day ($5 cap), each run finishing once `finished` is set, each comment posting unless `failing`, each run unreadable while `unreadable`. */
+async function auditing(people?: Parameters<typeof harness>[1]) {
+  const t = await harness({ budgetUsdPerDay: 5 }, people);
+  const state = { finished: false, failing: false, unreadable: false };
+  t.deps.runner.status = async (runId) => {
+    if (state.unreadable) throw new Error("runner 503");
+    return { runId, role: "reviewer", provider: "openai/codex", model: "m", costUsd: 1, ownerId: t.runs.get(runId), ...(state.finished ? { status: "succeeded", report } : { status: "running" }) } as unknown as RunRecord;
+  };
   const comments: unknown[] = [];
   t.deps.github.postAuditComment = async (req) => {
     comments.push(req);
@@ -249,6 +252,27 @@ test("a finished audit gets one ReviewFacts line and one comment, across hourly 
     followUp: true,
     accountsOf: { id: "owner-1", name: "Name of owner-1", fallback: true },
   });
+});
+
+test("an audit whose run is unreadable just after it starts is credited to its payer once the run reads, never to no one", async () => {
+  // PR 1 is Sergeant's for UNF-9, whose owner ann pays; the runner's status is down when the audit starts.
+  const t = await auditing({ registered: ["owner-1", "ann"], authors: { 1: "sergeant-worker[bot]" } });
+  await mkdir(join(t.stateDir, "tasks", "UNF-9"), { recursive: true });
+  await writeFile(join(t.stateDir, "tasks", "UNF-9", "state.json"), JSON.stringify(task("UNF-9", "ann")));
+  t.state.unreadable = true;
+  await t.pass();
+  await t.pass(at(1));
+  expect(t.started.map((s) => s.owner.id)).toEqual(["ann"]);
+  expect((await ledger(t.stateDir)).started.map((s) => s.accountsOf)).toEqual([undefined]);
+
+  // The next check that reads the run credits it, as the PR's own person rather than whoever the id names.
+  t.state.unreadable = false;
+  await t.pass(at(2));
+  const ann = { id: "ann", name: "Task owner ann" };
+  expect((await ledger(t.stateDir)).started.map((s) => s.accountsOf)).toEqual([ann]);
+  t.state.finished = true;
+  await t.pass(at(3));
+  expect((await t.lines()).map((f) => f.accountsOf)).toEqual([ann]);
 });
 
 test("a comment that fails is retried before the audit is recorded, then recorded once with its id", async () => {
