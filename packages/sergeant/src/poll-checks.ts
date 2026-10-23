@@ -274,6 +274,7 @@ export function reconcileDue(situation: SituationReport, fingerprint: string, st
 /**
  * Whether the loop holds for the budget question: asking it, or waiting for a human's reply. Not while
  * Sergeant waits on a human PR action (`humanWait`, pr-wait.ts): that is a human wait, like a question.
+ * Nor, TECH-6669, while it waits on what its last turn chose, nothing having changed (loop.ts `chosenWait`).
  */
 export async function holdForBudget(
   situation: SituationReport,

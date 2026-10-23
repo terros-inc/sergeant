@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { conversationRevision, SituationReport, type Conversation, type ProposedAction, type PullRequestFacts, type RunRecord } from "@terros/sergeant-contracts";
+import { conversationRevision, SituationReport, type Conversation, type ProposedAction, type PullRequestFacts, type RepoSlug, type RunRecord } from "@terros/sergeant-contracts";
 import type { Reasoner } from "@terros/sergeant-reasoning";
 import { driveMerged, exists, mergedOf, reopenReason } from "./after-merge.ts";
 import { acceptedComment, closedComment, endAccepted } from "./accepted.ts";
@@ -16,11 +16,11 @@ import { postHandoffs } from "./handoff.ts";
 import { countHollow, flagDue, flagHollowTurn, HOLLOW_TURN_NOTE, isHollow } from "./hollow-turn.ts";
 import { takeTurn } from "./index.ts";
 import type { LoopOptions, LoopResult } from "./loop-options.ts";
-import { confirmStarts, readRuns, situationOf } from "./loop-poll.ts";
+import { confirmStarts, lastTurnWaitFacts, readRuns, situationOf } from "./loop-poll.ts";
 import { driveStop } from "./loop-stop.ts";
 import { dueMergeRetries, reconcileMergeRetries, recordMergeRetries } from "./merge-retry.ts";
 import { checkHolds, checkStop, holdForBudget, openDirectionWindow, ownBudgets, reconcileDue, type PollContext } from "./poll-checks.ts";
-import { cancelRuns, describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, unsettledMerges, waitMs } from "./poll.ts";
+import { cancelRuns, describePr, fingerprintOf, landedOf, mergeabilityKnown, pullRequestPollMs, pullRequestPolls, sameWaitFacts, unsettledMerges, waitFactsOf, waitMs } from "./poll.ts";
 import { awaitedHumanPrAction } from "./pr-wait.ts";
 import { costSoFar, costTotal, taskTurnCost } from "./cost.ts";
 import { postProgress } from "./progress.ts";
@@ -66,6 +66,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
   const configured = { ...DEFAULT_BUDGET, ...opts.budget };
   // TECH-6166: Sergeant's own PR comments wake no turn (fingerprintOf).
   const own = deps.controlPlaneLogin ? [deps.controlPlaneLogin] : [];
+  // TECH-6669 (poll.ts `waitFactsOf`): a repository's merge policy, absent meaning human (TECH-5244).
+  const humanMerged = (repo: RepoSlug) => deps.github.mergePolicy?.(repo) !== "sergeant";
   // Whether this resumes a task under way: read first, so a stop that sets it aside meanwhile is seen.
   const resumed = await exists(files.state);
   const state = await loadState(files.state, opts.issueId, configured, ownBudgets(opts));
@@ -111,6 +113,8 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     log(`ignoring the budget options: this task keeps its window of ${JSON.stringify(state.budget.window)} until a human answers one of its questions`);
   }
   const ctx: PollContext = { opts, deps, state, log, save };
+  // TECH-6669: saved with the task's next save; lost before it, they are read back again.
+  if (!state.waitFacts && state.lastFingerprint !== undefined && !state.hollow) state.waitFacts = await lastTurnWaitFacts(files.turns, { ownLogins: own, humanMerged });
   // A run's id is saved before the runner is asked to start it (UNF-728).
   const ports: Ports & { reasoner: Reasoner } = {
     ...deps,
@@ -311,10 +315,24 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     // issue edit, takes a turn even once that window is exhausted (`reconcileDue`).
     // The wait is only a stable one with no active or unreadable run. A changed PR (red, behind,
     // conflicted, or pushed) and work still in flight remain ordinary active work.
-    const stable = state.lastFingerprint === undefined || fingerprint === state.lastFingerprint;
+    // TECH-6669: with the last turn's wait facts kept, they decide whether anything changed since it
+    // (poll.ts `waitFactsOf`): a moved base or GitHub recomputing mergeability alone wakes no turn, nor
+    // asks the budget question below. A task saved before them took them from its last turn (above), or
+    // records them on its first quiet poll.
+    const waitFacts = waitFactsOf(situation, { ownLogins: own, humanMerged }, state.waitFacts);
+    if (!state.waitFacts && state.lastFingerprint !== undefined && fingerprint === state.lastFingerprint && !state.hollow) {
+      state.waitFacts = waitFacts;
+      await save();
+    }
+    const unchanged = state.waitFacts ? sameWaitFacts(state.waitFacts, waitFacts) : fingerprint === state.lastFingerprint;
+    const stable = state.lastFingerprint === undefined || unchanged;
     const currentWindowCanceledWork = runs.some((r) => r.status === "canceled" && !state.budget.priorRuns.includes(r.runId));
-    const humanWait = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable ? awaitedHumanPrAction(situation) : undefined;
-    if (await holdForBudget(situation, conversation, holds, ctx, humanWait, reconcileDue(situation, fingerprint, state))) {
+    const quiet = retryDue.length === 0 && live.length === 0 && !currentWindowCanceledWork && stable;
+    const humanWait = quiet ? awaitedHumanPrAction(situation) : undefined;
+    // A wait the last turn chose in a window it had left (`waitFacts.on`) asks no budget question either
+    // while nothing it waits on changed: a hold a human asked for has no handoff for `awaitedHumanPrAction`.
+    const chosenWait = quiet && unchanged ? state.waitFacts?.on : undefined;
+    if (await holdForBudget(situation, conversation, holds, ctx, humanWait ?? chosenWait, unchanged ? undefined : reconcileDue(situation, fingerprint, state))) {
       await wait(waitMs(opts, pollMs, live.length > 0));
       continue;
     }
@@ -343,8 +361,9 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
       await wait(pollMs);
       continue;
     }
-    const unchangedHumanWait = fingerprint === state.lastFingerprint ? humanWait : undefined;
-    if (running.length > 0 || unchangedHumanWait || (fingerprint === state.lastFingerprint && retryDue.length === 0 && !opts.wake?.pending)) {
+    // A human wait is a wait on unchanged facts like any other, so `sgt task wake` still takes a turn.
+    const unchangedHumanWait = unchanged ? humanWait : undefined;
+    if (running.length > 0 || (unchanged && retryDue.length === 0 && !opts.wake?.pending)) {
       const quietMinutes = (Date.now() - Date.parse(state.lastTurnAt ?? state.startedAt)) / 60_000;
       if (running.length === 0 && quietMinutes > (opts.idleMinutes ?? 60)) {
         return { outcome: "idle", detail: `nothing changed for ${Math.round(quietMinutes)} minutes` };
@@ -398,6 +417,11 @@ export async function runLoop(opts: LoopOptions, deps: Ports & { reasoner: Reaso
     const committed = state.hollow ? undefined : settled;
     const taskTurnCostUsd = earlierTurns + (turn.costUsd ?? 0);
     applyTurn(state, { at, situation, summary: turn.output.summary, costUsd: turn.costUsd ?? 0, taskTurnCostUsd, outcomes, described, fingerprint: committed, unknownRuns: unknown.length }, log);
+    // TECH-6669: committed with the fingerprint, from the same facts, a merge M7 found unsettled included,
+    // with what the turn chose to wait on if it proposed nothing. Not from a turn on an exhausted window
+    // (`reconcileDue`): one that waits there leaves the budget question to be asked.
+    const on = holds.exhausted.allowed && outcomes.length === 0 && turn.output.intent?.kind === "wait" ? turn.output.intent.on : undefined;
+    state.waitFacts = committed ? { ...waitFactsOf(situation, { unsettled, ownLogins: own, humanMerged }, state.waitFacts), ...(on && { on }) } : undefined;
     // Saved with the turn, before any of the ending's effects, so the next pass ends the task (above). A
     // close's effects were made in the turn itself (execute.ts), so its ending only sets the task aside.
     const reply = accepted ? latestAnswer(conversation) : undefined;

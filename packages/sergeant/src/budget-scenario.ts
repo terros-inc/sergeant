@@ -6,6 +6,7 @@ import {
   commentIdFor,
   type Conversation,
   type HumanComment,
+  type MergePolicy,
   type MergePr,
   type ProposedAction,
   type PullRequestFacts,
@@ -86,6 +87,8 @@ export async function scenario(opts: {
   beforePost?: (req: { key: string; parentId?: string }) => void;
   /** The PR GitHub shows now; `pr` when omitted. */
   pullRequest?: () => PullRequestFacts;
+  /** The repository's merge policy; `sergeant` when omitted. */
+  mergePolicy?: MergePolicy;
 }) {
   dir ||= await mkdtemp(join(tmpdir(), "sergeant-budget-test-"));
   if (opts.state) await writeFile(join(dir, "state.json"), JSON.stringify({ issueId: "UNF-1", turns: 1, recentTurns: [], ...opts.state }));
@@ -122,7 +125,7 @@ export async function scenario(opts: {
           return { moved: true as const, from: "In Progress", to: to.state };
         },
       },
-      github: { readPullRequest: async () => opts.pullRequest?.() ?? pr, closePullRequest: async () => {}, mergePolicy: () => "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
+      github: { readPullRequest: async () => opts.pullRequest?.() ?? pr, closePullRequest: async () => {}, mergePolicy: () => opts.mergePolicy ?? "sergeant", mergePullRequest: async (req) => (merged.push(req), { mergedSha: "c".repeat(40) }) },
       runner: opts.runner,
       reasoner: { turn: opts.reasoner },
     },

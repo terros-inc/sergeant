@@ -190,7 +190,9 @@ thresholds as written there, applied in order, the first match deciding:
 - **Rule 0, park.** A task only waiting on a human posts nothing. This is the existing human wait, not
   a separate check: an open question holds the task before the budget is read, and a merge handed to a
   human or a re-review Sergeant asked for (TECH-5218), including the TECH-5913 escalation of a green PR
-  blocked on a required human review, parks quietly below. A wait uses none of the window (below), so
+  blocked on a required human review, parks quietly below. So does a wait the last turn chose, with no
+  proposal, in a window it had left, such as a hold a human asked for, while nothing it wakes on has
+  changed (08 §7, TECH-6669); the first change that would take a turn asks. A wait uses none of the window (below), so
   only a window the work before the wait used up gets here, and it neither asks nor logs it.
 - **Rule 1, recommend stop.** Three or more fix cycles in the window (a worker run after a review that
   requested changes); the same blocking finding back after two fix cycles (the same `location`); two or
@@ -256,7 +258,7 @@ App's too, drops that PR's remembered feedback (08), so the poll it wakes reread
 (TECH-5803). Waiting on a human PR action is a human wait like a question: while the only thing left is
 a human's merge of a PR Sergeant said is ready for a human to merge (a required review it cannot give,
 such as a code owner's) or a human's re-review it asked for, the task takes no turn and posts nothing,
-whatever its window. An extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
+whatever its window, and a base branch moving under the PR is no change to it (08 §7, TECH-6669). An extension is therefore just an answer; there is no separate grant (this supersedes `grant_budget`,
 K1–K4, and `sgt task grant` in 03 §7 and 11). A reply that accepts the work as it is ends the task instead (TECH-5118): reasoning
 proposes `accept_as_is`, allowed only after a human replied to the budget question in the current budget window
 (TECH-5137: a reply from before a re-trigger never ends the fresh task), and Sergeant asks
