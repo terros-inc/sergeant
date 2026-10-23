@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RepoSlug, Sha } from "./conversation.ts";
+import { claimsHeldBack } from "./held-back-claim.ts";
 import { FollowupCategory, RunId } from "./runs.ts";
 
 const PrHead = z.object({ repo: RepoSlug, number: z.number().int().positive(), headSha: Sha });
@@ -69,19 +70,15 @@ function hasContent(question: string): boolean {
   return words.some((w) => !FILLER.has(w)) && !words.join(" ").startsWith("lorem ipsum");
 }
 
-// TECH-6711: a claim that Sergeant started or did something ("I've started a worker", "I'm merging it",
-// "a fix worker is now running"). Only checked when Q1 holds back the rest of a question's turn.
-const CLAIM =
-  /\b(?:i|we|sergeant)(?:'ve|'m|'s|\s+(?:have|has|am|is|just|already|now))*\s+(?:started|starting|launched|launching|kicked off|kicking off|spun up|spinning up|begun|merged|merging|filed|filing|closed|closing|sent|sending|messaged|recorded|updated|ended)\b|\b(?:worker|reviewer|review|run|fix)\s+(?:is|has been|was)\s+(?:now\s+)?(?:started|launched|running|underway|under way|kicked off|in progress)\b/i;
-
 /**
  * TECH-6711: whether a turn's question claims something happened that Q1 does not let happen: a turn
- * that asks does nothing else, so with any other action in it, a question saying "I've started a worker"
- * would be false. Such a turn is malformed and taken again, never posted.
+ * that asks does nothing else, so with any other action in it, a question saying "the worker has
+ * started" would be false. Such a turn is malformed and taken again, never posted.
  */
-function claimsHeldBack(turn: { actions: ProposedAction[] }): boolean {
+function claimsHeldBackIn(turn: { actions: ProposedAction[] }): boolean {
   const ask = turn.actions.find((a) => a.kind === "ask_human");
-  return ask !== undefined && turn.actions.length > 1 && CLAIM.test(ask.question.replace(/[\u2018\u2019]/g, "'"));
+  const held = turn.actions.filter((a) => a !== ask).map((a) => a.kind);
+  return ask !== undefined && held.length > 0 && claimsHeldBack(ask.question, held);
 }
 
 /**
@@ -211,7 +208,7 @@ export const TurnOutput = z.object({
    */
   intent: TurnIntent.optional(),
   nextWakeSeconds: z.number().int().min(60).max(14_400).optional(),
-}).refine((turn) => !claimsHeldBack(turn), {
+}).refine((turn) => !claimsHeldBackIn(turn), {
   message: "the question says an action started or was done, but a turn that asks does nothing else (Q1): propose ask_human alone",
   path: ["actions"],
 });

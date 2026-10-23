@@ -75,8 +75,8 @@ asked the same way but create no wait.
 A question with no content (empty, whitespace, a stand-in such as "placeholder" or "Please insert
 question here", or only template tokens) is malformed reasoning output: the turn fails and is taken
 again, and nothing is posted. A turn that asks does nothing else (Q1); when it proposed other actions,
-a question that claims Sergeant started or did something ("I've started a worker") is malformed the
-same way, and otherwise the question ends by naming each action Sergeant did not do, so it never reads
+a question that says one of them is started, running or done ("the worker has started", "I'm
+merging it") is malformed the same way, and otherwise the question ends by naming each action Sergeant did not do, so it never reads
 as if they happened and the human knows what the reply unblocks (TECH-6711).
 
 **Answering.** Humans answer however they like: a top-level comment or a thread reply, a number, a
