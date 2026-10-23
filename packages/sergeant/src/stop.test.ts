@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Conversation, RunRecord } from "@terros/sergeant-contracts";
-import { driveCancel, taskDir } from "./cancel.ts";
+import { driveCancel, recordStop, taskDir } from "./cancel.ts";
 import { runLoop } from "./loop.ts";
 import { startService, type ServiceDeps } from "./service.ts";
 import { fakes, head, issue, pr, repo, state } from "./stop-fixtures.ts";
@@ -227,7 +227,7 @@ test("a task whose stop the runner has not confirmed frees its slot: with maxTas
   let todo = false;
   deps.delegatedIssues = async () => [
     ...(await delegated()),
-    ...(todo ? [{ identifier: "UNF-2", priority: 0, createdAt: "2026-10-02T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] }] : []),
+    ...(todo ? [{ identifier: "UNF-2", priority: 0, createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z", state: { name: "Todo", type: "unstarted" }, blockedBy: [] }] : []),
   ];
   const service = await startService({ enrolledRepositories: [repo], stateDir: dir, intakeSeconds: 0.05, pollSeconds: 0.02, maxTasks: 1, log: () => {} }, deps);
   try {
@@ -242,4 +242,33 @@ test("a task whose stop the runner has not confirmed frees its slot: with maxTas
   } finally {
     await service.stop();
   }
+});
+
+// TECH-6470: a stop whose Linear step Linear refuses with `Entity not found` failed the same way at every
+// intake and never finished. Linear gives that answer for good, so the step is skipped and the stop ends.
+test("a stop whose Linear read fails with Entity not found finishes, logging it once, while any other failure retries", async () => {
+  dir = await mkdtemp(join(tmpdir(), "sergeant-stop-test-"));
+  const task = taskDir(dir, "UNF-1");
+  await mkdir(task, { recursive: true });
+  await writeFile(join(task, "state.json"), state(["run_w1"]));
+  const live = { conversation: issue("started", "In Progress") };
+  const { deps, seen, wrote } = fakes(live);
+  wrote.set("run_w1", { reportVersion: "s2-worker-report/1", outcome: "partial", summary: "", pullRequests: [{ repo, number: 9, headSha: head, url: pr(9).url, closesIssue: true, review: { required: true, reason: "" } }], knownGaps: [], followups: [] });
+  await recordStop(task, "the Linear issue is no longer delegated to Sergeant");
+  let failure = "Linear API request failed (503)";
+  deps.linear.readConversation = async () => Promise.reject(new Error(failure));
+  const logs: string[] = [];
+  const drive = () => driveCancel(task, "UNF-1", deps, [repo], (l) => logs.push(l));
+
+  await expect(drive()).rejects.toThrow("(503)");
+  expect(await readdir(task)).toContain("cancel.json");
+
+  failure = "Linear API error: INPUT_ERROR: Entity not found: Issue";
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [{ repo, number: 9, url: pr(9).url }] });
+  expect(await drive()).toEqual({ stopping: [], closedPullRequests: [] });
+  expect(await readdir(task)).not.toContain("cancel.json");
+  expect(await readdir(task)).not.toContain("state.json");
+  expect(seen.closed.map((c) => c.number)).toEqual([9]);
+  expect(seen.comments).toEqual([]);
+  expect(logs.filter((l) => l.includes("Entity not found"))).toEqual([`UNF-1: stopping: reading the issue skipped, Linear refuses it for good: ${failure}`]);
 });

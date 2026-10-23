@@ -42,7 +42,7 @@ export function fakes(live: { conversation: Conversation }) {
   const deps: ServiceDeps = {
     agentUserId: agent.id,
     workerLogin: "sergeant-worker[bot]",
-    delegatedIssues: async () => [{ identifier: "UNF-1", priority: 0, createdAt: "2026-10-01T00:00:00.000Z", state: { name: live.conversation.issue.state, type: live.conversation.issue.stateType }, blockedBy: [] }],
+    delegatedIssues: async () => [{ identifier: "UNF-1", priority: 0, createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z", state: { name: live.conversation.issue.state, type: live.conversation.issue.stateType }, blockedBy: [] }],
     undelegate: async () => void (live.conversation.issue.delegate = null),
     linear: {
       readConversation: async () => structuredClone(live.conversation),

@@ -115,7 +115,7 @@ export const delegatedQuery = `
   query SergeantDelegated($agent: ID!, $after: String) {
     issues(first: 50, after: $after, filter: { delegate: { id: { eq: $agent } }, state: { type: { nin: ["completed", "canceled"] } } }) {
       nodes {
-        identifier priority createdAt state { name type }
+        identifier priority createdAt updatedAt state { name type }
         inverseRelations(first: 20) { nodes { type issue { identifier state { type } } } pageInfo { hasNextPage endCursor } }
       }
       pageInfo { hasNextPage endCursor }
@@ -132,6 +132,8 @@ export type DelegatedIssue = {
   /** Linear's priority: 1 Urgent, 2 High, 3 Medium, 4 Low, 0 none. */
   priority: number;
   createdAt: string;
+  /** When the issue last changed, a delegation included: intake rereads a started issue's delegation only once it moves (TECH-6470). */
+  updatedAt: string;
   state: { name: string; type: string };
   blockedBy: string[];
 };
@@ -139,6 +141,7 @@ const delegatedNode = z.object({
   identifier: z.string().min(1),
   priority: z.number(),
   createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
   state: z.object({ name: z.string(), type: z.string() }),
   inverseRelations,
 });

@@ -62,8 +62,10 @@ the credential is used inside run containers, and how to remove and revoke it.
    pick your installation's Sergeant agent. Linear records an agent as the issue's **delegate** and
    keeps you as its assignee. Creating the issue already delegated counts too, when you are its creator.
 5. **Move it to your team's unstarted state** (normally Todo). Sergeant starts work only from a state
-   of Linear's type *unstarted*; Triage- and Backlog-type states never start. An unstarted issue with
-   an unfinished Linear "blocked by" issue waits until that one is done or canceled.
+   of Linear's type *unstarted*; Triage- and Backlog-type states never start. An issue delegated while
+   already started (In Progress, say) gets one comment asking you to move it to Todo, once per
+   delegation. An unstarted issue with an unfinished Linear "blocked by" issue waits until that one is
+   done or canceled.
 
 **What happens next.** Within a couple of minutes (or at once, when webhooks are set up) Sergeant picks
 the issue up. When its first worker starts, Sergeant moves the issue to In Progress; if it asks first

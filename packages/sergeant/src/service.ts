@@ -11,7 +11,7 @@ import { mergedAuditsEvery } from "./merged-audits.ts";
 import { admissionOrder, Slot } from "./slots.ts";
 import { retroEvery } from "./retro.ts";
 import { startFeedbackLoop } from "./service-feedback.ts";
-import { newWork, resumableTasks } from "./service-intake.ts";
+import { newWork, noteStarted, resumableTasks } from "./service-intake.ts";
 import { lockStateDir } from "./service-lock.ts";
 import { createServiceServer } from "./service-http.ts";
 import type { Service, ServiceDeps, ServiceOptions } from "./service-options.ts";
@@ -65,6 +65,8 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
   let rank = new Map<string, number>();
   // Each Todo issue a blocker held up at the last intake, and the line logged for it: logged again only when it changes.
   const blocked = new Map<string, string>();
+  // TECH-6470: the started issues with no task told why they do not start (service-intake.ts `noteStarted`).
+  const noted = new Map<string, { delegatedAt: string; updatedAt: string }>();
   const byRank = (a: string, b: string) => (rank.get(a) ?? rank.size) - (rank.get(b) ?? rank.size);
   const wakes = new Map<string, Wake>();
   // TECH-5974: one pacer for all loops, so rechecks due on the same poll tick reread Linear spread out.
@@ -229,6 +231,7 @@ export async function startService(opts: ServiceOptions, deps: ServiceDeps): Pro
     // local tasks reclaim every slot on each periodic intake.
     for (const ref of resumable.sort(byRank)) if (!rateLimited(ref) && !resting(ref)) admit(ref, ended.has(ref) || freeSlots() <= 0);
     if (failed) throw failed;
+    await noteStarted(opts.stateDir, listed ?? [], { noted, active }, deps, log);
     ordered = await newWork(opts.stateDir, listed, { blocked, active, woken: (ref) => wakes.get(ref)?.pending === true }, log);
     delegated = ordered.map((issue) => issue.identifier);
     intakeStartedAt = startedAt;

@@ -253,6 +253,7 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
                 identifier: "UNF-5",
                 priority: 2,
                 createdAt: at(0),
+                updatedAt: at(1),
                 state: { name: "Todo", type: "unstarted" },
                 inverseRelations: {
                   nodes: [
@@ -272,7 +273,7 @@ test("delegatedIssues lists each issue's unfinished blockers", async () => {
       }),
   });
   expect(await linear.delegatedIssues("agent")).toEqual([
-    { identifier: "UNF-5", priority: 2, createdAt: at(0), state: { name: "Todo", type: "unstarted" }, blockedBy: ["UNF-1", "UNF-2"] },
+    { identifier: "UNF-5", priority: 2, createdAt: at(0), updatedAt: at(1), state: { name: "Todo", type: "unstarted" }, blockedBy: ["UNF-1", "UNF-2"] },
   ]);
 });
 
